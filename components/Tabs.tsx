@@ -12,21 +12,20 @@ export function Tabs({
   const [active, setActive] = useState(initial);
   return (
     <div>
-      <div className="flex gap-2 border-b mb-4">
+      <div className="tabs mb-4">
         {tabs.map((t, i) => (
           <button
             key={t.label}
-            className={clsx(
-              'px-3 py-2 text-sm border-b-2 -mb-px',
-              active === i ? 'border-black' : 'border-transparent text-gray-500'
-            )}
+            className={clsx('tab', { 'tab-active': active === i })}
             onClick={() => setActive(i)}
           >
             {t.label}
           </button>
         ))}
       </div>
-      <div>{tabs[active]?.content}</div>
+      <div className="card">
+        <div className="card-body">{tabs[active]?.content}</div>
+      </div>
     </div>
   );
 }

@@ -27,7 +27,7 @@ export default function VoiceAgentButton() {
   }
 
   return (
-    <button className={`px-3 py-2 rounded ${connected ? 'bg-red-600 text-white' : 'border'}`} onClick={toggle}>
+    <button className={`btn ${connected ? 'text-white' : 'btn-outline'}`} style={connected ? { background: '#dc2626' } : {}} onClick={toggle}>
       {connected ? 'Agent stoppen' : 'Agent starten'}
     </button>
   );

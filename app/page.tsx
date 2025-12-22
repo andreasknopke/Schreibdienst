@@ -97,20 +97,23 @@ export default function HomePage() {
 
   const Aufnahme = (
     <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <span className="badge">{recording ? 'Aufnahme läuft' : 'Bereit'}</span>
+      </div>
       <div className="flex gap-2">
         {!recording ? (
-          <button className="px-4 py-2 bg-black text-white rounded" onClick={startRecording}>Aufnahme starten</button>
+          <button className="btn btn-primary" onClick={startRecording}>Aufnahme starten</button>
         ) : (
-          <button className="px-4 py-2 bg-red-600 text-white rounded" onClick={stopRecording}>Aufnahme stoppen</button>
+          <button className="btn text-white" style={{ background: '#dc2626' }} onClick={stopRecording}>Aufnahme stoppen</button>
         )}
-        <button className="px-4 py-2 border rounded" onClick={handleTranscribeFromRecording} disabled={busy}>Transkribieren</button>
+        <button className="btn btn-outline" onClick={handleTranscribeFromRecording} disabled={busy}>Transkribieren</button>
       </div>
     </div>
   );
 
   const DateiUpload = (
     <div className="space-y-4">
-      <input type="file" accept="audio/*" onChange={(e) => {
+      <input className="input" type="file" accept="audio/*" onChange={(e) => {
         const f = e.target.files?.[0];
         if (f) handleFile(f);
       }} />
@@ -119,12 +122,14 @@ export default function HomePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <label className="text-sm">Format:</label>
-        <select className="border rounded px-2 py-1" value={mode} onChange={(e) => setMode(e.target.value as any)}>
-          <option value="arztbrief">Arztbrief</option>
-          <option value="befund">Befund</option>
-        </select>
+      <div className="card">
+        <div className="card-body flex items-center gap-3">
+          <label className="text-sm text-gray-600">Format:</label>
+          <select className="select max-w-xs" value={mode} onChange={(e) => setMode(e.target.value as any)}>
+            <option value="arztbrief">Arztbrief</option>
+            <option value="befund">Befund</option>
+          </select>
+        </div>
       </div>
 
       <Tabs
@@ -134,20 +139,25 @@ export default function HomePage() {
         ]}
       />
 
-      {error && <div className="text-red-600 text-sm">{error}</div>}
+      {error && <div className="text-sm text-red-600">{error}</div>}
 
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Ergebnis</label>
-        <textarea
-          className="w-full h-64 border rounded p-2 font-mono text-sm"
-          value={transcript}
-          onChange={(e) => setTranscript(e.target.value)}
-          placeholder="Transkribierter Text erscheint hier..."
-        />
-        <div className="flex flex-wrap gap-2">
-          <button className="px-4 py-2 border rounded" onClick={handleFormat} disabled={busy || !transcript}>Korrigieren & Formatieren</button>
-          <button className="px-4 py-2 border rounded" onClick={handleCopy} disabled={!transcript}>Kopieren</button>
-          <button className="px-4 py-2 border rounded" onClick={handleExportDocx} disabled={!transcript}>Als .docx exportieren</button>
+      <div className="card">
+        <div className="card-body space-y-3">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium">Ergebnis</label>
+            <span className="text-xs text-gray-500">{transcript ? `${transcript.length} Zeichen` : ''}</span>
+          </div>
+          <textarea
+            className="textarea font-mono text-sm"
+            value={transcript}
+            onChange={(e) => setTranscript(e.target.value)}
+            placeholder="Transkribierter Text erscheint hier..."
+          />
+          <div className="flex flex-wrap gap-2">
+            <button className="btn btn-primary" onClick={handleFormat} disabled={busy || !transcript}>Korrigieren & Formatieren</button>
+            <button className="btn btn-outline" onClick={handleCopy} disabled={!transcript}>Kopieren</button>
+            <button className="btn btn-outline" onClick={handleExportDocx} disabled={!transcript}>Als .docx exportieren</button>
+          </div>
         </div>
       </div>
     </div>

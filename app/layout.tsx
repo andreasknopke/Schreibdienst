@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Inter } from 'next/font/google';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const inter = Inter({ subsets: ['latin'], display: 'swap' });
 
@@ -19,7 +20,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <div className="h-8 w-8 rounded-lg bg-[rgb(var(--primary-600))]"></div>
               <h1 className="text-xl font-semibold">Schreibdienst</h1>
             </div>
-            <nav className="text-sm text-gray-600">Audio zu Text für Medizin</nav>
+            <nav className="flex items-center gap-3 text-sm text-gray-600">
+              <span className="hidden sm:inline">Audio zu Text für Medizin</span>
+              <ThemeToggle />
+            </nav>
           </div>
         </header>
         <main className="container py-6">{children}</main>

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Tabs } from '@/components/Tabs';
 import { exportDocx } from '@/lib/formatMedical';
+import Spinner from '@/components/Spinner';
 
 export default function HomePage() {
   const [recording, setRecording] = useState(false);
@@ -106,7 +107,9 @@ export default function HomePage() {
         ) : (
           <button className="btn text-white" style={{ background: '#dc2626' }} onClick={stopRecording}>Aufnahme stoppen</button>
         )}
-        <button className="btn btn-outline" onClick={handleTranscribeFromRecording} disabled={busy}>Transkribieren</button>
+        <button className="btn btn-outline" onClick={handleTranscribeFromRecording} disabled={busy}>
+          {busy && <Spinner className="mr-2" size={14} />} Transkribieren
+        </button>
       </div>
     </div>
   );
@@ -154,7 +157,9 @@ export default function HomePage() {
             placeholder="Transkribierter Text erscheint hier..."
           />
           <div className="flex flex-wrap gap-2">
-            <button className="btn btn-primary" onClick={handleFormat} disabled={busy || !transcript}>Korrigieren & Formatieren</button>
+            <button className="btn btn-primary" onClick={handleFormat} disabled={busy || !transcript}>
+              {busy && <Spinner className="mr-2" size={14} />} Korrigieren & Formatieren
+            </button>
             <button className="btn btn-outline" onClick={handleCopy} disabled={!transcript}>Kopieren</button>
             <button className="btn btn-outline" onClick={handleExportDocx} disabled={!transcript}>Als .docx exportieren</button>
           </div>

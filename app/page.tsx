@@ -99,7 +99,11 @@ export default function HomePage() {
   const Aufnahme = (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <span className="badge">{recording ? 'Aufnahme läuft' : 'Bereit'}</span>
+        {recording ? (
+          <span className="badge inline-flex items-center gap-2"><span className="pulse-dot" /> Aufnahme läuft</span>
+        ) : (
+          <span className="badge">Bereit</span>
+        )}
       </div>
       <div className="flex gap-2">
         {!recording ? (
@@ -142,7 +146,7 @@ export default function HomePage() {
         ]}
       />
 
-      {error && <div className="text-sm text-red-600">{error}</div>}
+      {error && <div className="alert alert-error">{error}</div>}
 
       <div className="card">
         <div className="card-body space-y-3">

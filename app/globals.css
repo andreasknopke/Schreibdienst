@@ -87,6 +87,24 @@ body {
     @apply bg-[rgb(var(--primary-600))] text-white hover:bg-[rgb(var(--primary-600))];
   }
   .badge { @apply inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-gray-600; }
+  .dark .badge { @apply bg-zinc-800 text-gray-300; }
+
+  .alert { @apply rounded-lg border px-3 py-2 text-sm; background: rgb(254 242 242 / 0); }
+  .alert-error { @apply border-red-300 text-red-700; background: #FEF2F2; }
+  .dark .alert-error { @apply border-red-800 text-red-300; background: #2a0000; }
+
+  .pulse-dot {
+    width: 10px; height: 10px; border-radius: 9999px; background: #ef4444; position: relative; display: inline-block;
+  }
+  .pulse-dot::after {
+    content: ""; position: absolute; inset: -6px; border-radius: 9999px; border: 2px solid #ef4444; opacity: .6;
+    animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  @keyframes pulse {
+    0% { transform: scale(0.8); opacity: .6; }
+    70% { transform: scale(1.4); opacity: 0; }
+    100% { opacity: 0; }
+  }
 }
 
 /* Scrollbar (webkit) */

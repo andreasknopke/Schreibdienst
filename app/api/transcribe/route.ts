@@ -17,7 +17,8 @@ export async function POST(request: Request) {
 
     const upstream = new FormData();
     // Forward original file
-    upstream.append('file', file, 'audio');
+    const filename = (file as File).name || 'audio.webm';
+    upstream.append('file', file, filename);
     upstream.append('model_id', 'scribe_v1');
     upstream.append('language_code', 'de');
 

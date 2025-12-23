@@ -8,7 +8,10 @@ type Params = {
   onDisconnect?: () => void;
   onError?: (e: any) => void;
   onMessage?: (msg: any) => void;
+  onUserTranscript?: (text: string) => void;
+  onAgentResponse?: (text: string) => void;
   dynamicVariables?: Record<string, string>;
+  clientTools?: Record<string, (params: any) => Promise<string>>;
 };
 
 export function useElevenLabsConversation() {
@@ -16,7 +19,7 @@ export function useElevenLabsConversation() {
   let status: 'disconnected' | 'connecting' | 'connected' = 'disconnected';
   let isSpeaking = false;
 
-  function start({ agentId, dynamicVariables, onConnect, onMessage, onError }: Params) {
+  function start({ agentId, dynamicVariables, onConnect, onMessage, onError, clientTools, onUserTranscript, onAgentResponse }: Params) {
     if (!agentId) throw new Error('agentId missing');
     const url = `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${encodeURIComponent(agentId)}`;
     ws = new WebSocket(url);
@@ -43,6 +46,38 @@ export function useElevenLabsConversation() {
         if (data.type === 'audio') {
           // audio handling could be added here
           isSpeaking = true;
+        }
+        if (data.type === 'user_transcription') {
+          onUserTranscript?.(data.user_transcription_event?.user_transcription);
+        }
+        if (data.type === 'agent_response') {
+          onAgentResponse?.(data.agent_response_event?.agent_response);
+        }
+        if (data.type === 'client_tool_call') {
+          const { tool_name, tool_call_id, parameters } = data.client_tool_call;
+          if (clientTools && clientTools[tool_name]) {
+            clientTools[tool_name](parameters)
+              .then((result) => {
+                ws?.send(
+                  JSON.stringify({
+                    type: 'client_tool_result',
+                    tool_call_id,
+                    result,
+                    is_error: false,
+                  })
+                );
+              })
+              .catch((err) => {
+                ws?.send(
+                  JSON.stringify({
+                    type: 'client_tool_result',
+                    tool_call_id,
+                    result: JSON.stringify({ error: err.message }),
+                    is_error: true,
+                  })
+                );
+              });
+          }
         }
         onMessage?.(data);
       } catch {

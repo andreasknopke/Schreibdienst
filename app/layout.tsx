@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { Inter } from 'next/font/google';
 import ThemeToggle from '@/components/ThemeToggle';
+import VoiceAgentButton from '@/components/VoiceAgentButton';
 
 const inter = Inter({ subsets: ['latin'], display: 'swap' });
 
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
             <nav className="flex items-center gap-3 text-sm text-gray-600">
               <span className="hidden sm:inline">Audio zu Text für Medizin</span>
+              <VoiceAgentButton />
               <ThemeToggle />
             </nav>
           </div>

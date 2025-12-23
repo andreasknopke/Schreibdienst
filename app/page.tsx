@@ -581,6 +581,15 @@ export default function HomePage() {
   // Ref für den Mikrofon-Button
   const recordButtonRef = useRef<HTMLButtonElement>(null);
 
+  // Funktion zum Zurücksetzen aller Felder (New-Button)
+  const handleReset = useCallback(() => {
+    setTranscript('');
+    setMethodik('');
+    setBeurteilung('');
+    setActiveField('befund');
+    setError(null);
+  }, []);
+
   // Globaler Click-Handler: Klick auf nicht-interaktive Bereiche → Mikrofon-Button
   const handleGlobalClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
@@ -602,6 +611,25 @@ export default function HomePage() {
       }
     }
   }, [recording, startRecording, stopRecording]);
+
+  // Rechtsklick-Handler: Löst "Neu" aus (alle Felder löschen) - nur auf nicht-interaktiven Elementen
+  const handleContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    
+    // Prüfe ob das Ziel oder ein Elternelement ein interaktives Element ist
+    const interactiveSelectors = 'button, a, input, textarea, select, [role="button"], [tabindex]:not([tabindex="-1"])';
+    const isInteractive = target.closest(interactiveSelectors);
+    
+    // Prüfe ob ein Textfeld fokussiert ist (blinkender Cursor)
+    const activeElement = document.activeElement;
+    const isEditing = activeElement?.tagName === 'TEXTAREA' || activeElement?.tagName === 'INPUT';
+    
+    // Nur wenn nicht interaktiv und nicht am Editieren
+    if (!isInteractive && !isEditing) {
+      e.preventDefault(); // Verhindere das Standard-Kontextmenü
+      handleReset();
+    }
+  }, [handleReset]);
 
   // Kompakter Aufnahme-Button für Header-Bereich
   const RecordButton = (
@@ -650,7 +678,7 @@ export default function HomePage() {
   );
 
   return (
-    <div className="space-y-3 min-h-[calc(100vh-120px)] cursor-pointer" onClick={handleGlobalClick}>
+    <div className="space-y-3 min-h-[calc(100vh-120px)] cursor-pointer" onClick={handleGlobalClick} onContextMenu={handleContextMenu}>
       {/* Kompakte Steuerleiste */}
       <div className="card">
         <div className="card-body py-3 flex items-center justify-between gap-3">
@@ -658,14 +686,8 @@ export default function HomePage() {
           <div className="flex items-center gap-2">
             <button 
               className="btn btn-outline text-sm py-1.5 px-3" 
-              onClick={() => {
-                setTranscript('');
-                setMethodik('');
-                setBeurteilung('');
-                setActiveField('befund');
-                setError(null);
-              }}
-              title="Alle Felder löschen"
+              onClick={handleReset}
+              title="Alle Felder löschen (oder Rechtsklick)"
             >
               ✨ Neu
             </button>

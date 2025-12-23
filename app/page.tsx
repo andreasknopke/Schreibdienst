@@ -578,11 +578,37 @@ export default function HomePage() {
     </div>
   );
 
+  // Ref für den Mikrofon-Button
+  const recordButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Globaler Click-Handler: Klick auf nicht-interaktive Bereiche → Mikrofon-Button
+  const handleGlobalClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    
+    // Prüfe ob das Ziel oder ein Elternelement ein interaktives Element ist
+    const interactiveSelectors = 'button, a, input, textarea, select, [role="button"], [tabindex]:not([tabindex="-1"])';
+    const isInteractive = target.closest(interactiveSelectors);
+    
+    // Prüfe ob ein Textfeld fokussiert ist (blinkender Cursor)
+    const activeElement = document.activeElement;
+    const isEditing = activeElement?.tagName === 'TEXTAREA' || activeElement?.tagName === 'INPUT';
+    
+    // Wenn nicht interaktiv und nicht am Editieren, toggle Aufnahme
+    if (!isInteractive && !isEditing) {
+      if (recording) {
+        stopRecording();
+      } else {
+        startRecording();
+      }
+    }
+  }, [recording, startRecording, stopRecording]);
+
   // Kompakter Aufnahme-Button für Header-Bereich
   const RecordButton = (
     <div className="flex items-center gap-3">
       {!recording ? (
         <button 
+          ref={recordButtonRef}
           className="w-12 h-12 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-md transition-all hover:scale-105" 
           onClick={startRecording}
           title="Aufnahme starten"
@@ -594,6 +620,7 @@ export default function HomePage() {
         </button>
       ) : (
         <button 
+          ref={recordButtonRef}
           className="w-12 h-12 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-md transition-all hover:scale-105 animate-pulse" 
           onClick={stopRecording} 
           disabled={busy}
@@ -623,7 +650,7 @@ export default function HomePage() {
   );
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 min-h-[calc(100vh-120px)] cursor-pointer" onClick={handleGlobalClick}>
       {/* Kompakte Steuerleiste */}
       <div className="card">
         <div className="card-body py-3 flex items-center justify-between gap-3">

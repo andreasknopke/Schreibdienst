@@ -4,13 +4,12 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 interface AuthContextType {
   isLoggedIn: boolean;
   username: string | null;
-  login: (username: string, password: string) => boolean;
+  login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-const CORRECT_PASSWORD = "Suedstadt2020";
 const AUTH_STORAGE_KEY = "schreibdienst_auth";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -35,14 +34,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
-  const login = (user: string, password: string): boolean => {
-    if (password === CORRECT_PASSWORD && user.trim()) {
-      setUsername(user.trim());
-      setIsLoggedIn(true);
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ username: user.trim() }));
-      return true;
+  const login = async (user: string, password: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const response = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: user, password }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setUsername(data.username);
+        setIsLoggedIn(true);
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ username: data.username }));
+        return { success: true };
+      }
+      
+      return { success: false, error: data.error || "Anmeldung fehlgeschlagen" };
+    } catch {
+      return { success: false, error: "Verbindungsfehler" };
     }
-    return false;
   };
 
   const logout = () => {

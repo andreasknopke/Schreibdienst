@@ -6,9 +6,10 @@ export default function LoginForm() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
@@ -22,9 +23,12 @@ export default function LoginForm() {
       return;
     }
 
-    const success = login(username, password);
-    if (!success) {
-      setError('Falsches Passwort');
+    setIsLoading(true);
+    const result = await login(username, password);
+    setIsLoading(false);
+    
+    if (!result.success) {
+      setError(result.error || 'Anmeldung fehlgeschlagen');
     }
   };
 
@@ -75,8 +79,8 @@ export default function LoginForm() {
               </div>
             )}
 
-            <button type="submit" className="btn btn-primary w-full">
-              Anmelden
+            <button type="submit" className="btn btn-primary w-full" disabled={isLoading}>
+              {isLoading ? 'Wird geprüft...' : 'Anmelden'}
             </button>
           </form>
         </div>

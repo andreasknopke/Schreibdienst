@@ -5,9 +5,7 @@ import { exportDocx } from '@/lib/formatMedical';
 import Spinner from '@/components/Spinner';
 
 // Intervall für kontinuierliche Transkription (in ms)
-const TRANSCRIPTION_INTERVAL = 5000;
-// Intervall für LLM-Korrektur (in ms) - etwas länger um API-Kosten zu sparen
-const CORRECTION_INTERVAL = 7000;
+const TRANSCRIPTION_INTERVAL = 3000;
 
 export default function HomePage() {
   const [recording, setRecording] = useState(false);
@@ -15,15 +13,11 @@ export default function HomePage() {
   const [correcting, setCorrecting] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
   const allChunksRef = useRef<BlobPart[]>([]);
   const transcriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const correctionIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const lastCorrectedTextRef = useRef<string>("");
-  const lastRawTextRef = useRef<string>("");
+  const lastTranscribedTextRef = useRef<string>("");
+  const correctionQueueRef = useRef<boolean>(false);
   const [transcript, setTranscript] = useState("");
-  const [liveTranscript, setLiveTranscript] = useState("");
-  const [liveCorrectedText, setLiveCorrectedText] = useState("");
   const [mode, setMode] = useState<'arztbrief' | 'befund'>('arztbrief');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,43 +39,34 @@ export default function HomePage() {
     }
   }, []);
 
-  // Funktion zur LLM-Korrektur
-  const correctText = useCallback(async (text: string, previousCorrectedText?: string): Promise<string> => {
+  // Funktion zur LLM-Korrektur (läuft parallel im Hintergrund)
+  const correctTextInBackground = useCallback(async (rawText: string) => {
+    if (correctionQueueRef.current) return; // Bereits eine Korrektur am Laufen
+    if (!rawText || rawText.trim().length === 0) return;
+    
+    correctionQueueRef.current = true;
+    setCorrecting(true);
+    
     try {
       const res = await fetch('/api/correct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, previousCorrectedText }),
+        body: JSON.stringify({ text: rawText }),
       });
-      if (!res.ok) {
-        console.error('Korrektur fehlgeschlagen:', res.status);
-        return text;
+      
+      if (res.ok) {
+        const data = await res.json();
+        if (data.correctedText) {
+          setTranscript(data.correctedText);
+        }
       }
-      const data = await res.json();
-      return data.correctedText || text;
     } catch (err: any) {
       console.error('Korrektur-Fehler:', err);
-      return text;
-    }
-  }, []);
-
-  // Kontinuierliche Korrektur während der Aufnahme
-  const processLiveCorrection = useCallback(async () => {
-    const currentText = liveTranscript;
-    if (!currentText || currentText === lastRawTextRef.current) return;
-    
-    setCorrecting(true);
-    try {
-      const corrected = await correctText(currentText);
-      if (corrected) {
-        setLiveCorrectedText(corrected);
-        lastCorrectedTextRef.current = corrected;
-        lastRawTextRef.current = currentText;
-      }
     } finally {
       setCorrecting(false);
+      correctionQueueRef.current = false;
     }
-  }, [liveTranscript, correctText]);
+  }, []);
 
   // Kontinuierliche Transkription während der Aufnahme
   const processLiveTranscription = useCallback(async () => {
@@ -89,16 +74,20 @@ export default function HomePage() {
     
     setTranscribing(true);
     try {
-      // Transkribiere alle bisher gesammelten Chunks
       const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
       const text = await transcribeChunk(blob, true);
-      if (text) {
-        setLiveTranscript(text);
+      
+      if (text && text !== lastTranscribedTextRef.current) {
+        lastTranscribedTextRef.current = text;
+        // Sofort den rohen Text in die Textbox schreiben
+        setTranscript(text);
+        // Parallel die Korrektur starten (non-blocking)
+        correctTextInBackground(text);
       }
     } finally {
       setTranscribing(false);
     }
-  }, [transcribeChunk]);
+  }, [transcribeChunk, correctTextInBackground]);
 
   useEffect(() => {
     return () => {
@@ -108,34 +97,13 @@ export default function HomePage() {
       if (transcriptionIntervalRef.current) {
         clearInterval(transcriptionIntervalRef.current);
       }
-      if (correctionIntervalRef.current) {
-        clearInterval(correctionIntervalRef.current);
-      }
     };
   }, []);
 
-  // Effect für kontinuierliche Korrektur
-  useEffect(() => {
-    if (recording && liveTranscript) {
-      // Starte Korrektur-Intervall wenn noch nicht aktiv
-      if (!correctionIntervalRef.current) {
-        correctionIntervalRef.current = setInterval(() => {
-          processLiveCorrection();
-        }, CORRECTION_INTERVAL);
-      }
-    }
-    return () => {
-      // Cleanup wird im Haupt-Effect gemacht
-    };
-  }, [recording, liveTranscript, processLiveCorrection]);
-
   async function startRecording() {
     setError(null);
-    setLiveTranscript("");
-    setLiveCorrectedText("");
-    lastCorrectedTextRef.current = "";
-    lastRawTextRef.current = "";
-    chunksRef.current = [];
+    setTranscript("");
+    lastTranscribedTextRef.current = "";
     allChunksRef.current = [];
     
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -145,7 +113,6 @@ export default function HomePage() {
     
     mr.ondataavailable = (e) => {
       if (e.data.size > 0) {
-        chunksRef.current.push(e.data);
         allChunksRef.current.push(e.data);
       }
     };
@@ -171,10 +138,6 @@ export default function HomePage() {
       clearInterval(transcriptionIntervalRef.current);
       transcriptionIntervalRef.current = null;
     }
-    if (correctionIntervalRef.current) {
-      clearInterval(correctionIntervalRef.current);
-      correctionIntervalRef.current = null;
-    }
     
     mediaRecorderRef.current?.stop();
     setRecording(false);
@@ -186,11 +149,25 @@ export default function HomePage() {
         const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
         const text = await transcribeChunk(blob, false);
         if (text) {
-          // Finale Korrektur
-          const corrected = await correctText(text);
-          setTranscript(corrected || text);
-          setLiveTranscript("");
-          setLiveCorrectedText("");
+          // Zeige erst den rohen Text
+          setTranscript(text);
+          // Dann korrigiere
+          setCorrecting(true);
+          try {
+            const res = await fetch('/api/correct', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.correctedText) {
+                setTranscript(data.correctedText);
+              }
+            }
+          } finally {
+            setCorrecting(false);
+          }
         }
       } finally {
         setBusy(false);
@@ -198,25 +175,34 @@ export default function HomePage() {
     }
   }
 
-  async function transcribeBlob(blob: Blob) {
+  async function handleFile(file: File) {
     setBusy(true);
     setError(null);
     try {
-      const text = await transcribeChunk(blob, false);
+      const text = await transcribeChunk(file, false);
       setTranscript(text);
+      // Korrektur nach Upload
+      if (text) {
+        setCorrecting(true);
+        try {
+          const res = await fetch('/api/correct', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.correctedText) {
+              setTranscript(data.correctedText);
+            }
+          }
+        } finally {
+          setCorrecting(false);
+        }
+      }
     } finally {
       setBusy(false);
     }
-  }
-
-  async function handleTranscribeFromRecording() {
-    if (allChunksRef.current.length === 0) return;
-    const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
-    await transcribeBlob(blob);
-  }
-
-  async function handleFile(file: File) {
-    await transcribeBlob(file);
   }
 
   async function handleFormat() {
@@ -260,34 +246,6 @@ export default function HomePage() {
           <span className="badge">Bereit</span>
         )}
       </div>
-      
-      {/* Live-korrigierter Text während Aufnahme */}
-      {recording && (liveCorrectedText || liveTranscript) && (
-        <div className="space-y-3">
-          {/* Korrigierter Text (Hauptanzeige) */}
-          <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-medium text-green-600 dark:text-green-400">
-                ✨ Live-Korrektur
-              </span>
-              {correcting && <Spinner size={12} />}
-            </div>
-            <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap leading-relaxed">
-              {liveCorrectedText || <span className="italic text-gray-400">Warte auf erste Korrektur...</span>}
-            </p>
-          </div>
-          
-          {/* Roh-Transkript (kleiner, ausgeklappt) */}
-          <details className="text-xs">
-            <summary className="cursor-pointer text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
-              Roh-Transkript anzeigen
-            </summary>
-            <div className="mt-2 p-3 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg">
-              <p className="text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{liveTranscript}</p>
-            </div>
-          </details>
-        </div>
-      )}
       
       {/* Hinweis zu Sprachbefehlen */}
       {recording && (

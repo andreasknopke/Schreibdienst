@@ -161,9 +161,10 @@ export default function HomePage() {
 
   async function startRecording() {
     setError(null);
-    setTranscript("");
+    // Bestehenden Text behalten und als korrigierten Text setzen
+    const existingText = transcript.trim();
     lastFullTranscriptRef.current = "";
-    correctedTextRef.current = "";
+    correctedTextRef.current = existingText;
     pendingRawTextRef.current = "";
     allChunksRef.current = [];
     

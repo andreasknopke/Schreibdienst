@@ -77,36 +77,37 @@ export default function HomePage() {
     let cleanedText = text;
     
     // Suche nach dem letzten Vorkommen eines Steuerbefehls
-    const methodikMatch = [...text.matchAll(methodikPattern)].pop();
-    const beurteilungMatch = [...text.matchAll(beurteilungPattern)].pop();
-    const befundMatch = [...text.matchAll(befundPattern)].pop();
+    const methodikMatches = [...text.matchAll(methodikPattern)];
+    const beurteilungMatches = [...text.matchAll(beurteilungPattern)];
+    const befundMatches = [...text.matchAll(befundPattern)];
+    
+    const methodikMatch = methodikMatches.length > 0 ? methodikMatches[methodikMatches.length - 1] : null;
+    const beurteilungMatch = beurteilungMatches.length > 0 ? beurteilungMatches[beurteilungMatches.length - 1] : null;
+    const befundMatch = befundMatches.length > 0 ? befundMatches[befundMatches.length - 1] : null;
     
     // Finde den letzten Steuerbefehl
-    let lastMatch: { match: RegExpMatchArray; field: BefundField } | null = null;
+    let lastMatchIndex = -1;
+    let lastMatchText = '';
     
-    if (methodikMatch) {
-      const index = methodikMatch.index ?? 0;
-      if (!lastMatch || index > (lastMatch.match.index ?? 0)) {
-        lastMatch = { match: methodikMatch, field: 'methodik' };
-      }
+    if (methodikMatch && (methodikMatch.index ?? 0) > lastMatchIndex) {
+      lastMatchIndex = methodikMatch.index ?? 0;
+      lastMatchText = methodikMatch[0];
+      field = 'methodik';
     }
-    if (beurteilungMatch) {
-      const index = beurteilungMatch.index ?? 0;
-      if (!lastMatch || index > (lastMatch.match.index ?? 0)) {
-        lastMatch = { match: beurteilungMatch, field: 'beurteilung' };
-      }
+    if (beurteilungMatch && (beurteilungMatch.index ?? 0) > lastMatchIndex) {
+      lastMatchIndex = beurteilungMatch.index ?? 0;
+      lastMatchText = beurteilungMatch[0];
+      field = 'beurteilung';
     }
-    if (befundMatch) {
-      const index = befundMatch.index ?? 0;
-      if (!lastMatch || index > (lastMatch.match.index ?? 0)) {
-        lastMatch = { match: befundMatch, field: 'befund' };
-      }
+    if (befundMatch && (befundMatch.index ?? 0) > lastMatchIndex) {
+      lastMatchIndex = befundMatch.index ?? 0;
+      lastMatchText = befundMatch[0];
+      field = 'befund';
     }
     
-    if (lastMatch) {
-      field = lastMatch.field;
+    if (field && lastMatchText) {
       // Entferne den Steuerbefehl aus dem Text
-      cleanedText = text.replace(lastMatch.match[0], '').trim();
+      cleanedText = text.replace(lastMatchText, '').trim();
     }
     
     return { field, cleanedText };

@@ -1,67 +1,144 @@
 "use client";
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Tabs } from '@/components/Tabs';
 import { exportDocx } from '@/lib/formatMedical';
 import Spinner from '@/components/Spinner';
 
+// Intervall für kontinuierliche Transkription (in ms)
+const TRANSCRIPTION_INTERVAL = 5000;
+
 export default function HomePage() {
   const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  const allChunksRef = useRef<BlobPart[]>([]);
+  const transcriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [transcript, setTranscript] = useState("");
+  const [liveTranscript, setLiveTranscript] = useState("");
   const [mode, setMode] = useState<'arztbrief' | 'befund'>('arztbrief');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    return () => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
-      }
-    };
-  }, []);
-
-  async function startRecording() {
-    setError(null);
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-    chunksRef.current = [];
-    mr.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
-    };
-    mr.onstop = () => {
-      stream.getTracks().forEach((t) => t.stop());
-    };
-    mediaRecorderRef.current = mr;
-    mr.start();
-    setRecording(true);
-  }
-
-  function stopRecording() {
-    mediaRecorderRef.current?.stop();
-    setRecording(false);
-  }
-
-  async function transcribeBlob(blob: Blob) {
-    setBusy(true);
-    setError(null);
+  // Funktion zum Transkribieren eines Blobs
+  const transcribeChunk = useCallback(async (blob: Blob, isLive: boolean = false): Promise<string> => {
     try {
       const fd = new FormData();
       fd.append('file', blob, 'audio.webm');
       const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
       if (!res.ok) throw new Error(`Transkription fehlgeschlagen (${res.status})`);
       const data = await res.json();
-      setTranscript(data.text || '');
+      return data.text || '';
     } catch (err: any) {
-      setError(err.message || 'Unbekannter Fehler');
+      if (!isLive) {
+        setError(err.message || 'Unbekannter Fehler');
+      }
+      return '';
+    }
+  }, []);
+
+  // Kontinuierliche Transkription während der Aufnahme
+  const processLiveTranscription = useCallback(async () => {
+    if (allChunksRef.current.length === 0) return;
+    
+    setTranscribing(true);
+    try {
+      // Transkribiere alle bisher gesammelten Chunks
+      const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
+      const text = await transcribeChunk(blob, true);
+      if (text) {
+        setLiveTranscript(text);
+      }
+    } finally {
+      setTranscribing(false);
+    }
+  }, [transcribeChunk]);
+
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (transcriptionIntervalRef.current) {
+        clearInterval(transcriptionIntervalRef.current);
+      }
+    };
+  }, []);
+
+  async function startRecording() {
+    setError(null);
+    setLiveTranscript("");
+    chunksRef.current = [];
+    allChunksRef.current = [];
+    
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    streamRef.current = stream;
+    
+    const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    
+    mr.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        chunksRef.current.push(e.data);
+        allChunksRef.current.push(e.data);
+      }
+    };
+    
+    mr.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop());
+    };
+    
+    mediaRecorderRef.current = mr;
+    // Request data every second for more granular chunks
+    mr.start(1000);
+    setRecording(true);
+    
+    // Starte kontinuierliche Transkription
+    transcriptionIntervalRef.current = setInterval(() => {
+      processLiveTranscription();
+    }, TRANSCRIPTION_INTERVAL);
+  }
+
+  async function stopRecording() {
+    // Stoppe das Intervall
+    if (transcriptionIntervalRef.current) {
+      clearInterval(transcriptionIntervalRef.current);
+      transcriptionIntervalRef.current = null;
+    }
+    
+    mediaRecorderRef.current?.stop();
+    setRecording(false);
+    
+    // Finale Transkription mit allen Chunks
+    if (allChunksRef.current.length > 0) {
+      setBusy(true);
+      try {
+        const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
+        const text = await transcribeChunk(blob, false);
+        if (text) {
+          setTranscript(text);
+          setLiveTranscript("");
+        }
+      } finally {
+        setBusy(false);
+      }
+    }
+  }
+
+  async function transcribeBlob(blob: Blob) {
+    setBusy(true);
+    setError(null);
+    try {
+      const text = await transcribeChunk(blob, false);
+      setTranscript(text);
     } finally {
       setBusy(false);
     }
   }
 
   async function handleTranscribeFromRecording() {
-    if (chunksRef.current.length === 0) return;
-    const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+    if (allChunksRef.current.length === 0) return;
+    const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
     await transcribeBlob(blob);
   }
 
@@ -100,20 +177,35 @@ export default function HomePage() {
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         {recording ? (
-          <span className="badge inline-flex items-center gap-2"><span className="pulse-dot" /> Aufnahme läuft</span>
+          <span className="badge inline-flex items-center gap-2">
+            <span className="pulse-dot" /> 
+            Aufnahme läuft
+            {transcribing && <span className="ml-2 text-xs opacity-70">(transkribiert...)</span>}
+          </span>
         ) : (
           <span className="badge">Bereit</span>
         )}
       </div>
+      
+      {/* Live-Transkription während Aufnahme */}
+      {recording && liveTranscript && (
+        <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs font-medium text-blue-600 dark:text-blue-400">Live-Vorschau</span>
+            {transcribing && <Spinner size={12} />}
+          </div>
+          <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{liveTranscript}</p>
+        </div>
+      )}
+      
       <div className="flex gap-2">
         {!recording ? (
           <button className="btn btn-primary" onClick={startRecording}>Aufnahme starten</button>
         ) : (
-          <button className="btn text-white" style={{ background: '#dc2626' }} onClick={stopRecording}>Aufnahme stoppen</button>
+          <button className="btn text-white" style={{ background: '#dc2626' }} onClick={stopRecording} disabled={busy}>
+            {busy ? <Spinner className="mr-2" size={14} /> : null} Aufnahme stoppen
+          </button>
         )}
-        <button className="btn btn-outline" onClick={handleTranscribeFromRecording} disabled={busy}>
-          {busy && <Spinner className="mr-2" size={14} />} Transkribieren
-        </button>
       </div>
     </div>
   );

@@ -16,11 +16,10 @@ export default function HomePage() {
   const allChunksRef = useRef<BlobPart[]>([]);
   const transcriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Tracking für inkrementelle Korrektur
-  const lastFullTranscriptRef = useRef<string>("");  // Letzter vollständiger Transkript
-  const correctedTextRef = useRef<string>("");        // Bereits korrigierter Text
-  const pendingRawTextRef = useRef<string>("");       // Noch nicht korrigierter Text
-  const correctionInProgressRef = useRef<boolean>(false);
+  // Text der VOR dieser Aufnahme-Session existierte
+  const existingTextRef = useRef<string>("");
+  // Letzter transkribierter Text dieser Session
+  const lastTranscriptRef = useRef<string>("");
   
   const [transcript, setTranscript] = useState("");
   const [mode, setMode] = useState<'arztbrief' | 'befund'>('arztbrief');
@@ -44,75 +43,14 @@ export default function HomePage() {
     }
   }, []);
 
-  // Hilfsfunktion: Findet den neuen Teil eines Textes
-  const findNewText = useCallback((oldText: string, newText: string): string => {
-    if (!oldText) return newText;
-    if (!newText) return '';
-    
-    // Finde den längsten gemeinsamen Präfix
-    let i = 0;
-    const minLen = Math.min(oldText.length, newText.length);
-    while (i < minLen && oldText[i] === newText[i]) {
-      i++;
-    }
-    
-    // Gehe zurück zum letzten Wortende um saubere Grenzen zu haben
-    while (i > 0 && newText[i - 1] !== ' ' && newText[i - 1] !== '.' && newText[i - 1] !== ',') {
-      i--;
-    }
-    
-    return newText.slice(i).trim();
+  // Kombiniert existierenden Text mit neuem Transkript
+  const combineTexts = useCallback((existing: string, newText: string): string => {
+    if (!existing) return newText;
+    if (!newText) return existing;
+    // Füge Leerzeichen oder Zeilenumbruch hinzu wenn nötig
+    const separator = existing.endsWith('\n') || existing.endsWith(' ') ? '' : ' ';
+    return existing + separator + newText;
   }, []);
-
-  // Aktualisiert die Anzeige: korrigierter Text + pending Text
-  const updateDisplayedTranscript = useCallback(() => {
-    const corrected = correctedTextRef.current;
-    const pending = pendingRawTextRef.current;
-    
-    if (pending) {
-      // Zeige korrigierten Teil + neuen unkorrigierten Teil
-      const separator = corrected && !corrected.endsWith(' ') && !pending.startsWith(' ') ? ' ' : '';
-      setTranscript(corrected + separator + pending);
-    } else {
-      setTranscript(corrected);
-    }
-  }, []);
-
-  // Funktion zur LLM-Korrektur des pending Texts
-  const correctPendingText = useCallback(async () => {
-    if (correctionInProgressRef.current) return;
-    const textToCorrect = pendingRawTextRef.current;
-    if (!textToCorrect || textToCorrect.trim().length === 0) return;
-    
-    correctionInProgressRef.current = true;
-    setCorrecting(true);
-    
-    try {
-      // Korrigiere den gesamten bisherigen Text (korrigiert + pending)
-      const fullText = correctedTextRef.current + (correctedTextRef.current ? ' ' : '') + textToCorrect;
-      
-      const res = await fetch('/api/correct', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: fullText }),
-      });
-      
-      if (res.ok) {
-        const data = await res.json();
-        if (data.correctedText) {
-          // Der korrigierte Text wird der neue "corrected" Teil
-          correctedTextRef.current = data.correctedText;
-          pendingRawTextRef.current = '';
-          updateDisplayedTranscript();
-        }
-      }
-    } catch (err: any) {
-      console.error('Korrektur-Fehler:', err);
-    } finally {
-      setCorrecting(false);
-      correctionInProgressRef.current = false;
-    }
-  }, [updateDisplayedTranscript]);
 
   // Kontinuierliche Transkription während der Aufnahme
   const processLiveTranscription = useCallback(async () => {
@@ -121,32 +59,19 @@ export default function HomePage() {
     setTranscribing(true);
     try {
       const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
-      const fullTranscript = await transcribeChunk(blob, true);
+      const currentTranscript = await transcribeChunk(blob, true);
       
-      if (fullTranscript && fullTranscript !== lastFullTranscriptRef.current) {
-        // Finde den neuen Teil seit der letzten Transkription
-        const newPart = findNewText(lastFullTranscriptRef.current, fullTranscript);
-        lastFullTranscriptRef.current = fullTranscript;
-        
-        if (newPart) {
-          // Hänge neuen Text an pending an
-          if (pendingRawTextRef.current) {
-            pendingRawTextRef.current += ' ' + newPart;
-          } else {
-            pendingRawTextRef.current = newPart;
-          }
-          
-          // Aktualisiere sofort die Anzeige
-          updateDisplayedTranscript();
-          
-          // Starte Korrektur im Hintergrund (wenn nicht bereits am Laufen)
-          correctPendingText();
-        }
+      // Nur aktualisieren wenn sich etwas geändert hat
+      if (currentTranscript && currentTranscript !== lastTranscriptRef.current) {
+        lastTranscriptRef.current = currentTranscript;
+        // Kombiniere existierenden Text mit aktuellem Transkript dieser Session
+        const fullText = combineTexts(existingTextRef.current, currentTranscript);
+        setTranscript(fullText);
       }
     } finally {
       setTranscribing(false);
     }
-  }, [transcribeChunk, findNewText, updateDisplayedTranscript, correctPendingText]);
+  }, [transcribeChunk, combineTexts]);
 
   useEffect(() => {
     return () => {
@@ -161,11 +86,9 @@ export default function HomePage() {
 
   async function startRecording() {
     setError(null);
-    // Bestehenden Text behalten und als korrigierten Text setzen
-    const existingText = transcript.trim();
-    lastFullTranscriptRef.current = "";
-    correctedTextRef.current = existingText;
-    pendingRawTextRef.current = "";
+    // Bestehenden Text behalten
+    existingTextRef.current = transcript.trim();
+    lastTranscriptRef.current = "";
     allChunksRef.current = [];
     
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -209,26 +132,27 @@ export default function HomePage() {
       setBusy(true);
       try {
         const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
-        const text = await transcribeChunk(blob, false);
-        if (text) {
+        const sessionTranscript = await transcribeChunk(blob, false);
+        if (sessionTranscript) {
+          // Kombiniere mit existierendem Text
+          const fullText = combineTexts(existingTextRef.current, sessionTranscript);
+          
           // Finale Korrektur des gesamten Textes
           setCorrecting(true);
           try {
             const res = await fetch('/api/correct', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ text }),
+              body: JSON.stringify({ text: fullText }),
             });
             if (res.ok) {
               const data = await res.json();
-              setTranscript(data.correctedText || text);
-              correctedTextRef.current = data.correctedText || text;
-              pendingRawTextRef.current = '';
+              setTranscript(data.correctedText || fullText);
             } else {
-              setTranscript(text);
+              setTranscript(fullText);
             }
           } catch {
-            setTranscript(text);
+            setTranscript(fullText);
           } finally {
             setCorrecting(false);
           }

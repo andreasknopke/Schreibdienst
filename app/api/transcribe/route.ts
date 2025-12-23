@@ -27,6 +27,8 @@ export async function POST(request: Request) {
     upstream.append('file', file, filename);
     upstream.append('model_id', 'scribe_v1');
     upstream.append('language_code', 'de');
+    // Deaktiviere Audio-Event-Tags wie (Blubbern), (Lachen), etc.
+    upstream.append('tag_audio_events', 'false');
 
     const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
       method: 'POST',

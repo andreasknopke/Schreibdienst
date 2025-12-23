@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Tabs } from '@/components/Tabs';
 import { exportDocx } from '@/lib/formatMedical';
 import Spinner from '@/components/Spinner';
+import { useAuth } from '@/components/AuthProvider';
 
 // Intervall für kontinuierliche Transkription (in ms)
 const TRANSCRIPTION_INTERVAL = 3000;
@@ -11,6 +12,7 @@ const TRANSCRIPTION_INTERVAL = 3000;
 type BefundField = 'methodik' | 'befund' | 'beurteilung';
 
 export default function HomePage() {
+  const { username } = useAuth();
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [correcting, setCorrecting] = useState(false);
@@ -304,7 +306,8 @@ export default function HomePage() {
                     methodik: currentMethodik,
                     befund: currentBefund,
                     beurteilung: currentBeurteilung
-                  }
+                  },
+                  username
                 }),
               });
               if (res.ok) {
@@ -326,7 +329,7 @@ export default function HomePage() {
               const res = await fetch('/api/correct', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: fullText }),
+                body: JSON.stringify({ text: fullText, username }),
               });
               if (res.ok) {
                 const data = await res.json();
@@ -376,7 +379,7 @@ export default function HomePage() {
           const res = await fetch('/api/correct', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text }),
+            body: JSON.stringify({ text, username }),
           });
           if (res.ok) {
             const data = await res.json();
@@ -426,7 +429,8 @@ export default function HomePage() {
             methodik: methodik,
             befund: transcript,
             beurteilung: beurteilung
-          }
+          },
+          username
         }),
       });
       if (res.ok) {
@@ -480,7 +484,8 @@ export default function HomePage() {
         body: JSON.stringify({ 
           suggestBeurteilung: true,
           methodik: methodik,
-          befund: transcript
+          befund: transcript,
+          username
         }),
       });
       if (res.ok) {

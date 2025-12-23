@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { formatDictionaryForPrompt, applyDictionary } from '@/lib/dictionary';
 
 export const runtime = 'nodejs';
 
@@ -96,14 +97,27 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { text, previousCorrectedText, befundFields, suggestBeurteilung, methodik, befund } = body as { 
+    const { text, previousCorrectedText, befundFields, suggestBeurteilung, methodik, befund, username } = body as { 
       text?: string; 
       previousCorrectedText?: string;
       befundFields?: BefundFields;
       suggestBeurteilung?: boolean;
       methodik?: string;
       befund?: string;
+      username?: string;
     };
+    
+    // Get user's dictionary for personalized corrections
+    const dictionaryPrompt = username ? formatDictionaryForPrompt(username) : '';
+    
+    // Combine system prompt with dictionary
+    const enhancedSystemPrompt = dictionaryPrompt 
+      ? `${SYSTEM_PROMPT}\n${dictionaryPrompt}`
+      : SYSTEM_PROMPT;
+    
+    const enhancedBefundPrompt = dictionaryPrompt 
+      ? `${BEFUND_SYSTEM_PROMPT}\n${dictionaryPrompt}`
+      : BEFUND_SYSTEM_PROMPT;
     
     // Beurteilung vorschlagen basierend auf Befund
     if (suggestBeurteilung && befund) {
@@ -169,7 +183,7 @@ Antworte NUR mit dem JSON-Objekt.`;
         body: JSON.stringify({
           model: 'gpt-4o-mini',
           messages: [
-            { role: 'system', content: BEFUND_SYSTEM_PROMPT },
+            { role: 'system', content: enhancedBefundPrompt },
             { role: 'user', content: userMessage }
           ],
           temperature: 0.3,
@@ -221,7 +235,7 @@ Antworte NUR mit dem JSON-Objekt.`;
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: enhancedSystemPrompt },
           { role: 'user', content: userMessage }
         ],
         temperature: 0.3,

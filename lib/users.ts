@@ -44,22 +44,29 @@ function saveUsers(data: UsersData): void {
   fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2), 'utf-8');
 }
 
-// Get root password from environment
+// Get root password from environment - read fresh each time
 function getRootPassword(): string {
-  return process.env.AUTH_PASSWORD || '';
+  const password = process.env.AUTH_PASSWORD;
+  console.log('[Auth] AUTH_PASSWORD configured:', !!password);
+  return password || '';
 }
 
 // Authenticate user - returns user info if successful
 export function authenticateUser(username: string, password: string): { success: boolean; user?: { username: string; isAdmin: boolean }; error?: string } {
+  console.log('[Auth] Attempting login for user:', username);
+  
   // Check for root user first
   if (username.toLowerCase() === 'root') {
     const rootPassword = getRootPassword();
     if (!rootPassword) {
-      return { success: false, error: 'Root-Passwort nicht konfiguriert' };
+      console.log('[Auth] ERROR: AUTH_PASSWORD environment variable is not set');
+      return { success: false, error: 'Root-Passwort nicht konfiguriert - AUTH_PASSWORD fehlt in Umgebungsvariablen' };
     }
     if (password === rootPassword) {
+      console.log('[Auth] Root login successful');
       return { success: true, user: { username: 'root', isAdmin: true } };
     }
+    console.log('[Auth] Root login failed - wrong password');
     return { success: false, error: 'Falsches Passwort' };
   }
 

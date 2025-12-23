@@ -25,7 +25,7 @@ export default function HomePage() {
   const lastTranscriptRef = useRef<string>("");
   
   const [transcript, setTranscript] = useState("");
-  const [mode, setMode] = useState<'arztbrief' | 'befund'>('arztbrief');
+  const [mode, setMode] = useState<'arztbrief' | 'befund'>('befund');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -629,9 +629,22 @@ export default function HomePage() {
         <div className="card-body py-3 flex items-center justify-between gap-3">
           {RecordButton}
           <div className="flex items-center gap-2">
+            <button 
+              className="btn btn-outline text-sm py-1.5 px-3" 
+              onClick={() => {
+                setTranscript('');
+                setMethodik('');
+                setBeurteilung('');
+                setActiveField('befund');
+                setError(null);
+              }}
+              title="Alle Felder löschen"
+            >
+              ✨ Neu
+            </button>
             <select className="select text-sm py-1.5 w-auto" value={mode} onChange={(e) => setMode(e.target.value as any)}>
-              <option value="arztbrief">Arztbrief</option>
               <option value="befund">Befund</option>
+              <option value="arztbrief">Arztbrief</option>
             </select>
           </div>
         </div>

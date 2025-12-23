@@ -7,7 +7,8 @@ const SYSTEM_PROMPT = `Du bist ein medizinischer Diktat-Assistent. Deine Aufgabe
 REGELN:
 1. Korrigiere Grammatik, Rechtschreibung und Zeichensetzung
 2. Behalte den medizinischen Fachinhalt exakt bei
-3. Führe Diktat-Sprachbefehle aus und entferne sie aus dem Text:
+3. Konvertiere alle Datumsangaben in das Format DD.MM.YYYY (z.B. "23. Dezember 2025" → "23.12.2025", "2025-12-23" → "23.12.2025")
+4. Führe Diktat-Sprachbefehle aus und entferne sie aus dem Text:
    - "Punkt" → Füge einen Punkt ein
    - "Komma" → Füge ein Komma ein
    - "neuer Absatz" / "nächster Absatz" / "Absatz" → Füge einen Absatzumbruch ein
@@ -35,10 +36,11 @@ const BEFUND_SYSTEM_PROMPT = `Du bist ein medizinischer Diktat-Assistent für ra
 REGELN:
 1. Korrigiere Grammatik, Rechtschreibung und Zeichensetzung in allen drei Feldern
 2. Behalte den medizinischen Fachinhalt exakt bei
-3. Führe Diktat-Sprachbefehle aus (wie "Punkt", "Komma", "neuer Absatz", etc.) und entferne sie
-4. Entferne Füllwörter wie "ähm", "äh" wenn sie keinen Sinn ergeben
-5. Entferne Feld-Steuerbefehle wie "Methodik:", "Befund:", "Beurteilung:", "Zusammenfassung:" aus dem Text
-6. Gib die korrigierten Texte im JSON-Format zurück
+3. Konvertiere alle Datumsangaben in das Format DD.MM.YYYY (z.B. "23. Dezember 2025" → "23.12.2025")
+4. Führe Diktat-Sprachbefehle aus (wie "Punkt", "Komma", "neuer Absatz", etc.) und entferne sie
+5. Entferne Füllwörter wie "ähm", "äh" wenn sie keinen Sinn ergeben
+6. Entferne Feld-Steuerbefehle wie "Methodik:", "Befund:", "Beurteilung:", "Zusammenfassung:" aus dem Text
+7. Gib die korrigierten Texte im JSON-Format zurück
 
 Du erhältst drei Felder:
 - methodik: Beschreibung der Untersuchungsmethodik

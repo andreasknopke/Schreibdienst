@@ -4,8 +4,10 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 interface AuthContextType {
   isLoggedIn: boolean;
   username: string | null;
+  isAdmin: boolean;
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
+  getAuthHeader: () => string;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -15,6 +17,8 @@ const AUTH_STORAGE_KEY = "schreibdienst_auth";
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [password, setPassword] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Beim Laden: Prüfe ob bereits eingeloggt
@@ -25,6 +29,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const data = JSON.parse(stored);
         if (data.username) {
           setUsername(data.username);
+          setIsAdmin(data.isAdmin || false);
+          setPassword(data.password || null);
           setIsLoggedIn(true);
         }
       } catch {
@@ -34,20 +40,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
-  const login = async (user: string, password: string): Promise<{ success: boolean; error?: string }> => {
+  const login = async (user: string, pass: string): Promise<{ success: boolean; error?: string }> => {
     try {
       const response = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: user, password }),
+        body: JSON.stringify({ username: user, password: pass }),
       });
       
       const data = await response.json();
       
       if (data.success) {
         setUsername(data.username);
+        setIsAdmin(data.isAdmin || false);
+        setPassword(pass);
         setIsLoggedIn(true);
-        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ username: data.username }));
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ 
+          username: data.username, 
+          isAdmin: data.isAdmin || false,
+          password: pass
+        }));
         return { success: true };
       }
       
@@ -59,8 +71,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     setUsername(null);
+    setIsAdmin(false);
+    setPassword(null);
     setIsLoggedIn(false);
     localStorage.removeItem(AUTH_STORAGE_KEY);
+  };
+
+  const getAuthHeader = (): string => {
+    if (username && password) {
+      return 'Basic ' + btoa(`${username}:${password}`);
+    }
+    return '';
   };
 
   if (isLoading) {
@@ -72,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ isLoggedIn, username, login, logout }}>
+    <AuthContext.Provider value={{ isLoggedIn, username, isAdmin, login, logout, getAuthHeader }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const CORRECT_PASSWORD = process.env.AUTH_PASSWORD || "";
+import { authenticateUser } from '@/lib/users';
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,11 +13,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Passwort erforderlich" }, { status: 400 });
     }
 
-    if (password === CORRECT_PASSWORD) {
-      return NextResponse.json({ success: true, username: username.trim() });
+    const result = authenticateUser(username.trim(), password);
+    
+    if (result.success && result.user) {
+      return NextResponse.json({ 
+        success: true, 
+        username: result.user.username,
+        isAdmin: result.user.isAdmin
+      });
     }
 
-    return NextResponse.json({ success: false, error: "Falsches Passwort" }, { status: 401 });
+    return NextResponse.json({ success: false, error: result.error || "Falsches Passwort" }, { status: 401 });
   } catch {
     return NextResponse.json({ success: false, error: "Ungültige Anfrage" }, { status: 400 });
   }

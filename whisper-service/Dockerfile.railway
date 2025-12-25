@@ -1,0 +1,37 @@
+FROM python:3.10-slim
+
+# Nur essenzielle System-Dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# CPU-optimierte PyTorch-Version für Railway
+COPY requirements.txt .
+RUN pip install --no-cache-dir \
+    torch==2.1.0+cpu \
+    torchaudio==2.1.0+cpu \
+    -f https://download.pytorch.org/whl/torch_stable.html
+
+RUN pip install --no-cache-dir \
+    flask==3.0.0 \
+    flask-cors==4.0.0 \
+    whisperx==3.1.1
+
+# App-Code kopieren
+COPY app.py .
+
+# Tiny-Modell beim Build downloaden (spart Startup-Zeit und Kosten)
+ENV WHISPER_MODEL=tiny
+RUN python -c "import whisperx; whisperx.load_model('tiny', 'cpu', compute_type='int8', language='de')"
+
+# Port
+EXPOSE 5000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"
+
+# App starten
+CMD ["python", "app.py"]

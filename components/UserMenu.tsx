@@ -45,9 +45,9 @@ export default function UserMenu() {
 
       {/* Dictionary Modal */}
       {showDictionary && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-lg w-full my-8 flex flex-col max-h-[calc(100vh-4rem)]">
+            <div className="flex items-center justify-between p-4 border-b dark:border-gray-700 flex-shrink-0">
               <h2 className="font-semibold flex items-center gap-2">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
@@ -57,6 +57,7 @@ export default function UserMenu() {
               <button
                 onClick={() => setShowDictionary(false)}
                 className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                title="Schließen"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 6L6 18"/>
@@ -64,7 +65,7 @@ export default function UserMenu() {
                 </svg>
               </button>
             </div>
-            <div className="p-4">
+            <div className="p-4 overflow-y-auto flex-1">
               <DictionaryManager />
             </div>
           </div>
@@ -73,13 +74,14 @@ export default function UserMenu() {
       
       {/* User Management Modal */}
       {showUserManagement && isAdmin && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+        <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-lg w-full my-8 flex flex-col max-h-[calc(100vh-4rem)]">
+            <div className="flex items-center justify-between p-4 border-b dark:border-gray-700 flex-shrink-0">
               <h2 className="font-semibold">Benutzerverwaltung</h2>
               <button
                 onClick={() => setShowUserManagement(false)}
                 className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                title="Schließen"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 6L6 18"/>
@@ -87,7 +89,9 @@ export default function UserMenu() {
                 </svg>
               </button>
             </div>
-            <UserManagement />
+            <div className="overflow-y-auto flex-1">
+              <UserManagement />
+            </div>
           </div>
         </div>
       )}

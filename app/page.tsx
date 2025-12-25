@@ -21,6 +21,12 @@ export default function HomePage() {
   const allChunksRef = useRef<BlobPart[]>([]);
   const transcriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
+  // Mikrofonpegel-Visualisierung
+  const [audioLevel, setAudioLevel] = useState(0);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  
   // Text der VOR dieser Aufnahme-Session existierte
   const existingTextRef = useRef<string>("");
   // Letzter transkribierter Text dieser Session
@@ -210,6 +216,12 @@ export default function HomePage() {
       if (transcriptionIntervalRef.current) {
         clearInterval(transcriptionIntervalRef.current);
       }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
     };
   }, []);
 
@@ -231,6 +243,27 @@ export default function HomePage() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     streamRef.current = stream;
     
+    // Setup Audio Level Monitor
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const analyser = audioContext.createAnalyser();
+    const microphone = audioContext.createMediaStreamSource(stream);
+    analyser.fftSize = 256;
+    microphone.connect(analyser);
+    
+    audioContextRef.current = audioContext;
+    analyserRef.current = analyser;
+    
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    
+    const updateLevel = () => {
+      if (!analyserRef.current) return;
+      analyserRef.current.getByteFrequencyData(dataArray);
+      const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+      setAudioLevel(Math.min(100, (average / 128) * 100));
+      animationFrameRef.current = requestAnimationFrame(updateLevel);
+    };
+    updateLevel();
+    
     const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' });
     
     mr.ondataavailable = (e) => {
@@ -241,6 +274,13 @@ export default function HomePage() {
     
     mr.onstop = () => {
       stream.getTracks().forEach((t) => t.stop());
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
+      setAudioLevel(0);
     };
     
     mediaRecorderRef.current = mr;
@@ -515,12 +555,28 @@ export default function HomePage() {
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         {recording ? (
-          <span className="badge inline-flex items-center gap-2">
-            <span className="pulse-dot" /> 
-            Aufnahme läuft
-            {transcribing && <span className="ml-2 text-xs opacity-70">(transkribiert...)</span>}
-            {correcting && <span className="ml-2 text-xs opacity-70">(korrigiert...)</span>}
-          </span>
+          <div className="flex items-center gap-3 flex-1">
+            <span className="badge inline-flex items-center gap-2">
+              <span className="pulse-dot" /> 
+              Aufnahme läuft
+              {transcribing && <span className="ml-2 text-xs opacity-70">(transkribiert...)</span>}
+              {correcting && <span className="ml-2 text-xs opacity-70">(korrigiert...)</span>}
+            </span>
+            {/* Mikrofonpegel-Anzeige */}
+            <div className="flex items-center gap-2 flex-1">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-400">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              </svg>
+              <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-green-400 via-yellow-400 to-red-500 transition-all duration-100"
+                  style={{ width: `${audioLevel}%` }}
+                />
+              </div>
+              <span className="text-xs text-gray-500 w-8">{Math.round(audioLevel)}%</span>
+            </div>
+          </div>
         ) : (
           <span className="badge">Bereit</span>
         )}

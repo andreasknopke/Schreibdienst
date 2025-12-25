@@ -75,6 +75,7 @@ export async function POST(request: Request) {
 
     // Provider-Auswahl: whisperx (Standard) oder elevenlabs
     const provider = (process.env.TRANSCRIPTION_PROVIDER || 'whisperx') as TranscriptionProvider;
+    console.log(`Selected transcription provider: ${provider} (from env: ${process.env.TRANSCRIPTION_PROVIDER || 'not set - using default'})`);
     
     const form = await request.formData();
     const file = form.get('file');
@@ -91,9 +92,11 @@ export async function POST(request: Request) {
     let result;
     
     if (provider === 'elevenlabs') {
+      console.log('Using ElevenLabs as primary provider');
       result = await transcribeWithElevenLabs(file, filename);
     } else {
       // WhisperX ist Standard, mit Fallback zu ElevenLabs
+      console.log('Using WhisperX as primary provider');
       try {
         result = await transcribeWithWhisperX(file, filename);
       } catch (whisperError: any) {
@@ -104,6 +107,7 @@ export async function POST(request: Request) {
           console.log('Falling back to ElevenLabs...');
           result = await transcribeWithElevenLabs(file, filename);
         } else {
+          console.error('No fallback available - ElevenLabs API key not configured');
           throw whisperError;
         }
       }

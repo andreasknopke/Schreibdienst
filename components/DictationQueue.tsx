@@ -25,28 +25,49 @@ interface Dictation {
 interface DictationQueueProps {
   username: string;
   canViewAll?: boolean;
+  isSecretariat?: boolean;
   onRefreshNeeded?: () => void;
 }
 
-export default function DictationQueue({ username, canViewAll = false, onRefreshNeeded }: DictationQueueProps) {
+export default function DictationQueue({ username, canViewAll = false, isSecretariat = false, onRefreshNeeded }: DictationQueueProps) {
   const [dictations, setDictations] = useState<Dictation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<number | null>(null);
   const [workerStatus, setWorkerStatus] = useState<{ isProcessing: boolean } | null>(null);
-  const [viewMode, setViewMode] = useState<'mine' | 'all'>('mine');
+  // Sekretariat always views all, regular users start with 'mine'
+  const [viewMode, setViewMode] = useState<'mine' | 'all'>(isSecretariat ? 'all' : 'mine');
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [userFilter, setUserFilter] = useState<string>('');
+  const [availableUsers, setAvailableUsers] = useState<string[]>([]);
+
+  // Load available users for filter
+  const loadUsers = useCallback(async () => {
+    if (!canViewAll && !isSecretariat) return;
+    try {
+      const res = await fetch('/api/offline-dictations?listUsers=true');
+      if (res.ok) {
+        const users = await res.json();
+        setAvailableUsers(users);
+      }
+    } catch {
+      // Ignore errors
+    }
+  }, [canViewAll, isSecretariat]);
 
   // Load dictations
   const loadDictations = useCallback(async () => {
     try {
       let url = `/api/offline-dictations`;
       
-      if (viewMode === 'all' && canViewAll) {
+      if ((viewMode === 'all' && canViewAll) || isSecretariat) {
         url += `?all=true`;
         if (statusFilter) {
           url += `&status=${statusFilter}`;
+        }
+        if (userFilter) {
+          url += `&user=${encodeURIComponent(userFilter)}`;
         }
       } else {
         url += `?username=${encodeURIComponent(username)}`;
@@ -62,7 +83,7 @@ export default function DictationQueue({ username, canViewAll = false, onRefresh
     } finally {
       setLoading(false);
     }
-  }, [username, viewMode, canViewAll, statusFilter]);
+  }, [username, viewMode, canViewAll, isSecretariat, statusFilter, userFilter]);
 
   // Check worker status
   const checkWorkerStatus = useCallback(async () => {
@@ -92,6 +113,7 @@ export default function DictationQueue({ username, canViewAll = false, onRefresh
   useEffect(() => {
     loadDictations();
     checkWorkerStatus();
+    loadUsers();
     
     // Poll every 5 seconds for updates
     const interval = setInterval(() => {
@@ -100,7 +122,7 @@ export default function DictationQueue({ username, canViewAll = false, onRefresh
     }, 5000);
     
     return () => clearInterval(interval);
-  }, [loadDictations, checkWorkerStatus]);
+  }, [loadDictations, checkWorkerStatus, loadUsers]);
 
   // Delete dictation
   const handleDelete = async (id: number, audioOnly: boolean = false) => {
@@ -266,49 +288,68 @@ export default function DictationQueue({ username, canViewAll = false, onRefresh
           </div>
           
           {/* View mode toggle and filters */}
-          {canViewAll && (
-            <div className="flex items-center gap-4 pt-2 border-t border-gray-200 dark:border-gray-700">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600 dark:text-gray-400">Ansicht:</span>
-                <div className="flex rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600">
-                  <button
-                    className={`px-3 py-1 text-sm transition-colors ${
-                      viewMode === 'mine'
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setViewMode('mine')}
-                  >
-                    Meine
-                  </button>
-                  <button
-                    className={`px-3 py-1 text-sm transition-colors ${
-                      viewMode === 'all'
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setViewMode('all')}
-                  >
-                    Alle
-                  </button>
-                </div>
-              </div>
-              
-              {viewMode === 'all' && (
+          {(canViewAll || isSecretariat) && (
+            <div className="flex items-center gap-4 flex-wrap pt-2 border-t border-gray-200 dark:border-gray-700">
+              {/* Only show Meine/Alle toggle for non-secretariat users with canViewAll */}
+              {canViewAll && !isSecretariat && (
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-600 dark:text-gray-400">Status:</span>
-                  <select
-                    className="input py-1 text-sm"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                  >
-                    <option value="">Alle</option>
-                    <option value="completed">Fertig</option>
-                    <option value="pending">Wartend</option>
-                    <option value="processing">In Bearbeitung</option>
-                    <option value="error">Fehler</option>
-                  </select>
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Ansicht:</span>
+                  <div className="flex rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600">
+                    <button
+                      className={`px-3 py-1 text-sm transition-colors ${
+                        viewMode === 'mine'
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                      onClick={() => setViewMode('mine')}
+                    >
+                      Meine
+                    </button>
+                    <button
+                      className={`px-3 py-1 text-sm transition-colors ${
+                        viewMode === 'all'
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      }`}
+                      onClick={() => setViewMode('all')}
+                    >
+                      Alle
+                    </button>
+                  </div>
                 </div>
+              )}
+              
+              {/* Filters - show for secretariat always, for others only in 'all' mode */}
+              {(isSecretariat || viewMode === 'all') && (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Benutzer:</span>
+                    <select
+                      className="input py-1 text-sm"
+                      value={userFilter}
+                      onChange={(e) => setUserFilter(e.target.value)}
+                    >
+                      <option value="">Alle</option>
+                      {availableUsers.map(user => (
+                        <option key={user} value={user}>{user}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Status:</span>
+                    <select
+                      className="input py-1 text-sm"
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                    >
+                      <option value="">Alle</option>
+                      <option value="completed">Fertig</option>
+                      <option value="pending">Wartend</option>
+                      <option value="processing">In Bearbeitung</option>
+                      <option value="error">Fehler</option>
+                    </select>
+                  </div>
+                </>
               )}
             </div>
           )}

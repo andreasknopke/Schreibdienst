@@ -9,6 +9,7 @@ import {
   retryDictation,
   initOfflineDictationTable,
   getQueueStats,
+  getDictationUsers,
   DictationPriority,
   DictationStatus,
 } from '@/lib/offlineDictationDb';
@@ -36,6 +37,14 @@ export async function GET(req: NextRequest) {
     const stats = searchParams.get('stats');
     const all = searchParams.get('all');
     const statusFilter = searchParams.get('status') as DictationStatus | null;
+    const userFilter = searchParams.get('user');
+    const listUsers = searchParams.get('listUsers');
+    
+    // Get list of users with dictations
+    if (listUsers === 'true') {
+      const users = await getDictationUsers();
+      return NextResponse.json(users);
+    }
     
     // Get queue statistics
     if (stats === 'true') {
@@ -54,7 +63,7 @@ export async function GET(req: NextRequest) {
     
     // Get all dictations (for users with permission)
     if (all === 'true') {
-      const dictations = await getAllDictations(statusFilter || undefined);
+      const dictations = await getAllDictations(statusFilter || undefined, userFilter || undefined);
       return NextResponse.json(dictations);
     }
     

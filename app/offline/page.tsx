@@ -1,13 +1,23 @@
 "use client";
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import OfflineRecorder from '@/components/OfflineRecorder';
 import DictationQueue from '@/components/DictationQueue';
 
 export default function OfflineDictationPage() {
   const { username, canViewAllDictations } = useAuth();
-  const [activeTab, setActiveTab] = useState<'record' | 'queue'>('record');
+  
+  // Sekretariat users only see the queue, not recording
+  const isSecretariat = canViewAllDictations;
+  const [activeTab, setActiveTab] = useState<'record' | 'queue'>(isSecretariat ? 'queue' : 'record');
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Update tab when role changes
+  useEffect(() => {
+    if (isSecretariat) {
+      setActiveTab('queue');
+    }
+  }, [isSecretariat]);
 
   // Submit a new dictation
   const handleSubmit = useCallback(async (data: {
@@ -57,6 +67,26 @@ export default function OfflineDictationPage() {
     );
   }
 
+  // Sekretariat view - only queue, no recording
+  if (isSecretariat) {
+    return (
+      <div className="space-y-4">
+        <div className="card">
+          <div className="card-body py-3">
+            <h2 className="font-medium text-lg">📋 Sekretariat - Diktat-Übersicht</h2>
+          </div>
+        </div>
+        <DictationQueue
+          key={refreshKey}
+          username={username}
+          canViewAll={true}
+          isSecretariat={true}
+        />
+      </div>
+    );
+  }
+
+  // Regular user view - recording and own queue
   return (
     <div className="space-y-4">
       {/* Tab Navigation */}
@@ -81,7 +111,7 @@ export default function OfflineDictationPage() {
               }`}
               onClick={() => setActiveTab('queue')}
             >
-              📋 Warteschlange
+              📋 Meine Diktate
             </button>
           </div>
         </div>
@@ -97,7 +127,7 @@ export default function OfflineDictationPage() {
         <DictationQueue
           key={refreshKey}
           username={username}
-          canViewAll={canViewAllDictations}
+          canViewAll={false}
         />
       )}
     </div>

@@ -120,9 +120,20 @@ export async function getUserDictations(username: string): Promise<Omit<OfflineD
 }
 
 // Get all dictations (for users with view all permission)
-export async function getAllDictations(statusFilter?: DictationStatus): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
-  const whereClause = statusFilter ? `WHERE status = ?` : '';
-  const params = statusFilter ? [statusFilter] : [];
+export async function getAllDictations(statusFilter?: DictationStatus, userFilter?: string): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
+  const conditions: string[] = [];
+  const params: (string)[] = [];
+  
+  if (statusFilter) {
+    conditions.push('status = ?');
+    params.push(statusFilter);
+  }
+  if (userFilter) {
+    conditions.push('username = ?');
+    params.push(userFilter);
+  }
+  
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   
   return query(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
@@ -139,6 +150,15 @@ export async function getAllDictations(statusFilter?: DictationStatus): Promise<
        created_at DESC`,
     params
   );
+}
+
+// Get list of unique usernames with dictations
+export async function getDictationUsers(): Promise<string[]> {
+  const result = await query<{ username: string }>(
+    `SELECT DISTINCT username FROM offline_dictations ORDER BY username`,
+    []
+  );
+  return result.map(r => r.username);
 }
 
 // Get all pending dictations for processing (worker)

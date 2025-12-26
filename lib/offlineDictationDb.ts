@@ -121,6 +121,8 @@ export async function getUserDictations(username: string): Promise<Omit<OfflineD
 
 // Get all pending dictations for processing (worker)
 export async function getPendingDictations(limit: number = 10): Promise<OfflineDictation[]> {
+  // Note: LIMIT must be embedded directly as mysql2 has issues with parameterized LIMIT
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
   return query(
     `SELECT * FROM offline_dictations 
      WHERE status = 'pending'
@@ -131,8 +133,8 @@ export async function getPendingDictations(limit: number = 10): Promise<OfflineD
          ELSE 3 
        END,
        created_at ASC
-     LIMIT ?`,
-    [limit]
+     LIMIT ${safeLimit}`,
+    []
   );
 }
 

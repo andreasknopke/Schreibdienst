@@ -23,17 +23,22 @@ async function transcribeWithWhisperX(file: Blob, filename: string) {
     const authPass = process.env.WHISPER_AUTH_PASSWORD;
     
     // Step 1: Login to get session cookie
-    console.log(`[WhisperX Gradio] Step 1: Logging in...`);
+    console.log(`[WhisperX Gradio] Step 1: Logging in with user: ${authUser}`);
+    const loginBody = `username=${encodeURIComponent(authUser || '')}&password=${encodeURIComponent(authPass || '')}`;
+    console.log(`[WhisperX Gradio] Login URL: ${whisperUrl}/login`);
+    
     const loginRes = await fetch(`${whisperUrl}/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: `username=${encodeURIComponent(authUser || '')}&password=${encodeURIComponent(authPass || '')}`,
+      body: loginBody,
     });
     
     if (!loginRes.ok) {
-      throw new Error(`Gradio login failed (${loginRes.status})`);
+      const errorText = await loginRes.text();
+      console.log(`[WhisperX Gradio] Login failed - Status: ${loginRes.status}, Response: ${errorText}`);
+      throw new Error(`Gradio login failed (${loginRes.status}): ${errorText}`);
     }
     
     // Get session cookie from response

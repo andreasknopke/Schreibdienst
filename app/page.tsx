@@ -61,6 +61,15 @@ export default function HomePage() {
   const lastMethodikRef = useRef<string>("");
   const lastBeurteilungRef = useRef<string>("");
 
+  // Revert-Funktion: Speichert den Text VOR der letzten Korrektur
+  const [preCorrectionState, setPreCorrectionState] = useState<{
+    methodik: string;
+    befund: string;
+    beurteilung: string;
+    transcript: string; // Für Arztbrief-Modus
+  } | null>(null);
+  const [canRevert, setCanRevert] = useState(false);
+
   // Funktion zum Transkribieren eines Blobs
   const transcribeChunk = useCallback(async (blob: Blob, isLive: boolean = false): Promise<string> => {
     try {
@@ -297,7 +306,74 @@ export default function HomePage() {
     setBeurteilung('');
     setActiveField('befund');
     setError(null);
+    setPreCorrectionState(null);
+    setCanRevert(false);
   }, []);
+
+  // Revert-Funktion: Stellt den Text vor der letzten Korrektur wieder her
+  const handleRevert = useCallback(() => {
+    if (!preCorrectionState) return;
+    
+    if (mode === 'befund') {
+      setMethodik(preCorrectionState.methodik);
+      setTranscript(preCorrectionState.befund);
+      setBeurteilung(preCorrectionState.beurteilung);
+    } else {
+      setTranscript(preCorrectionState.transcript);
+    }
+    setCanRevert(false);
+  }, [preCorrectionState, mode]);
+
+  // Re-Correct-Funktion: Führt die Korrektur erneut durch
+  const handleReCorrect = useCallback(async () => {
+    if (!preCorrectionState) return;
+    
+    setCorrecting(true);
+    setError(null);
+    
+    try {
+      if (mode === 'befund') {
+        const res = await fetch('/api/correct', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            befundFields: {
+              methodik: preCorrectionState.methodik,
+              befund: preCorrectionState.befund,
+              beurteilung: preCorrectionState.beurteilung
+            },
+            username
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.befundFields) {
+            setMethodik(data.befundFields.methodik || preCorrectionState.methodik);
+            setTranscript(data.befundFields.befund || preCorrectionState.befund);
+            setBeurteilung(data.befundFields.beurteilung || preCorrectionState.beurteilung);
+          }
+        } else {
+          throw new Error('Korrektur fehlgeschlagen');
+        }
+      } else {
+        const res = await fetch('/api/correct', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: preCorrectionState.transcript, username }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setTranscript(data.correctedText || preCorrectionState.transcript);
+        } else {
+          throw new Error('Korrektur fehlgeschlagen');
+        }
+      }
+    } catch (err: any) {
+      setError(err.message || 'Fehler bei erneuter Korrektur');
+    } finally {
+      setCorrecting(false);
+    }
+  }, [preCorrectionState, mode, username]);
 
   // Hotkey-Unterstützung für Philips SpeechMike und andere Diktiermikrofone
   // Konfigurieren Sie das SpeechMike im "Keyboard Mode" mit folgenden Tasten:
@@ -476,6 +552,14 @@ export default function HomePage() {
                 }
               }
               
+              // Speichere Text VOR der Korrektur für Revert-Funktion
+              setPreCorrectionState({
+                methodik: currentMethodik,
+                befund: currentBefund,
+                beurteilung: currentBeurteilung,
+                transcript: ''
+              });
+              
               // Korrigiere alle drei Felder gleichzeitig
               const res = await fetch('/api/correct', {
                 method: 'POST',
@@ -495,6 +579,7 @@ export default function HomePage() {
                   setMethodik(data.befundFields.methodik || currentMethodik);
                   setTranscript(data.befundFields.befund || currentBefund);
                   setBeurteilung(data.befundFields.beurteilung || currentBeurteilung);
+                  setCanRevert(true);
                 }
               } else {
                 // Fallback: Setze unkorrigierten Text
@@ -505,6 +590,15 @@ export default function HomePage() {
             } else {
               // Im Arztbrief-Modus: Normales Verhalten
               const fullText = combineTexts(existingTextRef.current, sessionTranscript);
+              
+              // Speichere Text VOR der Korrektur für Revert-Funktion
+              setPreCorrectionState({
+                methodik: '',
+                befund: '',
+                beurteilung: '',
+                transcript: fullText
+              });
+              
               const res = await fetch('/api/correct', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -513,6 +607,7 @@ export default function HomePage() {
               if (res.ok) {
                 const data = await res.json();
                 setTranscript(data.correctedText || fullText);
+                setCanRevert(true);
               } else {
                 setTranscript(fullText);
               }
@@ -908,6 +1003,26 @@ export default function HomePage() {
             >
               ✨ Neu
             </button>
+            {canRevert && preCorrectionState && (
+              <>
+                <button 
+                  className="btn btn-outline text-sm py-1.5 px-3 text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-600 dark:hover:bg-amber-900/20" 
+                  onClick={handleRevert}
+                  title="Korrektur rückgängig machen - zeigt den Originaltext"
+                  disabled={correcting}
+                >
+                  ↩ Revert
+                </button>
+                <button 
+                  className="btn btn-outline text-sm py-1.5 px-3 text-purple-600 border-purple-300 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-600 dark:hover:bg-purple-900/20" 
+                  onClick={handleReCorrect}
+                  title="Korrektur erneut durchführen"
+                  disabled={correcting}
+                >
+                  {correcting ? <Spinner size={14} /> : '🔄 Neu korrigieren'}
+                </button>
+              </>
+            )}
             <select className="select text-sm py-1.5 w-auto" value={mode} onChange={(e) => setMode(e.target.value as any)}>
               <option value="befund">Befund</option>
               <option value="arztbrief">Arztbrief</option>

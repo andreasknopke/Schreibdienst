@@ -984,6 +984,7 @@ export default function HomePage() {
                 className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                 value={methodik}
                 onChange={(e) => setMethodik(e.target.value)}
+                onFocus={() => setActiveField('methodik')}
                 placeholder="Methodik..."
                 rows={2}
                 readOnly={isProcessing}
@@ -1019,6 +1020,7 @@ export default function HomePage() {
                 className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                 value={transcript}
                 onChange={(e) => setTranscript(e.target.value)}
+                onFocus={() => setActiveField('befund')}
                 placeholder="Befund..."
                 readOnly={isProcessing}
               />
@@ -1053,6 +1055,7 @@ export default function HomePage() {
                 className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                 value={beurteilung}
                 onChange={(e) => setBeurteilung(e.target.value)}
+                onFocus={() => setActiveField('beurteilung')}
                 placeholder="Zusammenfassung..."
                 rows={2}
                 readOnly={isProcessing}

@@ -23,9 +23,11 @@ async function transcribeWithWhisperX(file: Blob, filename: string) {
     const authPass = process.env.WHISPER_AUTH_PASSWORD;
     
     // Step 1: Login to get session cookie
-    console.log(`[WhisperX Gradio] Step 1: Logging in with user: ${authUser}`);
+    console.log(`[WhisperX Gradio] Step 1: Logging in with user: ${authUser}, pass length: ${(authPass || '').length}`);
+    console.log(`[WhisperX Gradio] Password first 3 chars: ${(authPass || '').substring(0, 3)}...`);
     const loginBody = `username=${encodeURIComponent(authUser || '')}&password=${encodeURIComponent(authPass || '')}`;
     console.log(`[WhisperX Gradio] Login URL: ${whisperUrl}/login`);
+    console.log(`[WhisperX Gradio] Login body: ${loginBody}`);
     
     const loginRes = await fetch(`${whisperUrl}/login`, {
       method: 'POST',

@@ -84,51 +84,80 @@ export default function HomePage() {
     return existing + separator + newText;
   }, []);
 
-  // Erkennt Steuerbefehle und extrahiert Feld-Wechsel
-  const parseFieldCommands = useCallback((text: string): { field: BefundField | null; cleanedText: string } => {
-    // Regex für Steuerbefehle (case-insensitive)
-    const methodikPattern = /\b(methodik)\s*[:：]/gi;
-    const beurteilungPattern = /\b(beurteilung|zusammenfassung)\s*[:：]/gi;
-    const befundPattern = /\b(befund)\s*[:：]/gi;
+  // Erkennt Steuerbefehle und teilt Text auf alle Felder auf
+  const parseFieldCommands = useCallback((text: string): { 
+    methodik: string | null; 
+    befund: string | null; 
+    beurteilung: string | null;
+    lastField: BefundField | null;
+  } => {
+    // Regex für Steuerbefehle (case-insensitive) - matcht "Methodik:", "Methodik Doppelpunkt", etc.
+    const fieldPattern = /\b(methodik|befund|beurteilung|zusammenfassung)\s*(?:[:：]|doppelpunkt)/gi;
     
-    let field: BefundField | null = null;
-    let cleanedText = text;
+    // Finde alle Matches mit ihren Positionen
+    const matches: { field: BefundField; index: number; length: number }[] = [];
+    let match;
     
-    // Suche nach dem letzten Vorkommen eines Steuerbefehls
-    const methodikMatches = [...text.matchAll(methodikPattern)];
-    const beurteilungMatches = [...text.matchAll(beurteilungPattern)];
-    const befundMatches = [...text.matchAll(befundPattern)];
-    
-    const methodikMatch = methodikMatches.length > 0 ? methodikMatches[methodikMatches.length - 1] : null;
-    const beurteilungMatch = beurteilungMatches.length > 0 ? beurteilungMatches[beurteilungMatches.length - 1] : null;
-    const befundMatch = befundMatches.length > 0 ? befundMatches[befundMatches.length - 1] : null;
-    
-    // Finde den letzten Steuerbefehl
-    let lastMatchIndex = -1;
-    let lastMatchText = '';
-    
-    if (methodikMatch && (methodikMatch.index ?? 0) > lastMatchIndex) {
-      lastMatchIndex = methodikMatch.index ?? 0;
-      lastMatchText = methodikMatch[0];
-      field = 'methodik';
-    }
-    if (beurteilungMatch && (beurteilungMatch.index ?? 0) > lastMatchIndex) {
-      lastMatchIndex = beurteilungMatch.index ?? 0;
-      lastMatchText = beurteilungMatch[0];
-      field = 'beurteilung';
-    }
-    if (befundMatch && (befundMatch.index ?? 0) > lastMatchIndex) {
-      lastMatchIndex = befundMatch.index ?? 0;
-      lastMatchText = befundMatch[0];
-      field = 'befund';
+    while ((match = fieldPattern.exec(text)) !== null) {
+      const fieldName = match[1].toLowerCase();
+      let field: BefundField;
+      if (fieldName === 'methodik') field = 'methodik';
+      else if (fieldName === 'beurteilung' || fieldName === 'zusammenfassung') field = 'beurteilung';
+      else field = 'befund';
+      
+      matches.push({ field, index: match.index, length: match[0].length });
     }
     
-    if (field && lastMatchText) {
-      // Entferne den Steuerbefehl aus dem Text
-      cleanedText = text.replace(lastMatchText, '').trim();
+    // Wenn keine Matches, gib null zurück
+    if (matches.length === 0) {
+      return { methodik: null, befund: null, beurteilung: null, lastField: null };
     }
     
-    return { field, cleanedText };
+    // Teile den Text basierend auf den Matches auf
+    const result: { methodik: string | null; befund: string | null; beurteilung: string | null; lastField: BefundField | null } = {
+      methodik: null,
+      befund: null,
+      beurteilung: null,
+      lastField: matches[matches.length - 1].field
+    };
+    
+    // Text VOR dem ersten Match gehört zum aktuellen aktiven Feld (wird separat behandelt)
+    const textBeforeFirst = text.substring(0, matches[0].index).trim();
+    
+    // Verarbeite jeden Match
+    for (let i = 0; i < matches.length; i++) {
+      const current = matches[i];
+      const next = matches[i + 1];
+      
+      // Text nach diesem Match bis zum nächsten Match (oder Ende)
+      const startPos = current.index + current.length;
+      const endPos = next ? next.index : text.length;
+      const fieldText = text.substring(startPos, endPos).trim();
+      
+      // Füge zum entsprechenden Feld hinzu
+      if (fieldText) {
+        switch (current.field) {
+          case 'methodik':
+            result.methodik = result.methodik ? result.methodik + ' ' + fieldText : fieldText;
+            break;
+          case 'beurteilung':
+            result.beurteilung = result.beurteilung ? result.beurteilung + ' ' + fieldText : fieldText;
+            break;
+          case 'befund':
+            result.befund = result.befund ? result.befund + ' ' + fieldText : fieldText;
+            break;
+        }
+      }
+    }
+    
+    // Text vor dem ersten Steuerbefehl wird als "unzugewiesen" zurückgegeben
+    // Dieser wird dem aktuellen aktiven Feld hinzugefügt
+    if (textBeforeFirst) {
+      // Füge es zum Befund hinzu wenn kein anderes Feld explizit angegeben
+      result.befund = result.befund ? textBeforeFirst + ' ' + result.befund : textBeforeFirst;
+    }
+    
+    return result;
   }, []);
 
   // Verarbeitet Text und verteilt auf die richtigen Felder (für Befund-Modus)
@@ -138,37 +167,36 @@ export default function HomePage() {
       return;
     }
     
-    const { field, cleanedText } = parseFieldCommands(rawText);
+    const parsed = parseFieldCommands(rawText);
     
-    // Wenn ein Feldwechsel erkannt wurde, aktualisiere das aktive Feld
-    if (field) {
-      setActiveField(field);
-    }
-    
-    // Bestimme das Zielfeld (entweder neu erkannt oder das aktuelle aktive)
-    const targetField = field || activeField;
-    
-    // Setze den Text im entsprechenden Feld
-    switch (targetField) {
-      case 'methodik':
-        setMethodik(prev => {
-          const combined = combineTexts(existingMethodikRef.current, cleanedText);
-          return combined;
-        });
-        break;
-      case 'beurteilung':
-        setBeurteilung(prev => {
-          const combined = combineTexts(existingBeurteilungRef.current, cleanedText);
-          return combined;
-        });
-        break;
-      case 'befund':
-      default:
-        setTranscript(prev => {
-          const combined = combineTexts(existingTextRef.current, cleanedText);
-          return combined;
-        });
-        break;
+    // Wenn Steuerbefehle erkannt wurden, verteile Text auf die entsprechenden Felder
+    if (parsed.lastField) {
+      setActiveField(parsed.lastField);
+      
+      // Setze jeden Feldinhalt wenn vorhanden
+      if (parsed.methodik !== null) {
+        setMethodik(combineTexts(existingMethodikRef.current, parsed.methodik));
+      }
+      if (parsed.befund !== null) {
+        setTranscript(combineTexts(existingTextRef.current, parsed.befund));
+      }
+      if (parsed.beurteilung !== null) {
+        setBeurteilung(combineTexts(existingBeurteilungRef.current, parsed.beurteilung));
+      }
+    } else {
+      // Kein Steuerbefehl erkannt - Text geht ins aktive Feld
+      switch (activeField) {
+        case 'methodik':
+          setMethodik(combineTexts(existingMethodikRef.current, rawText));
+          break;
+        case 'beurteilung':
+          setBeurteilung(combineTexts(existingBeurteilungRef.current, rawText));
+          break;
+        case 'befund':
+        default:
+          setTranscript(combineTexts(existingTextRef.current, rawText));
+          break;
+      }
     }
   }, [mode, activeField, parseFieldCommands, combineTexts]);
 
@@ -187,25 +215,39 @@ export default function HomePage() {
         
         if (mode === 'befund') {
           // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
-          const { field, cleanedText } = parseFieldCommands(currentTranscript);
-          if (field) {
-            setActiveField(field);
-          }
-          const targetField = field || activeField;
+          const parsed = parseFieldCommands(currentTranscript);
           
-          switch (targetField) {
-            case 'methodik':
-              lastMethodikRef.current = cleanedText;
-              setMethodik(combineTexts(existingMethodikRef.current, cleanedText));
-              break;
-            case 'beurteilung':
-              lastBeurteilungRef.current = cleanedText;
-              setBeurteilung(combineTexts(existingBeurteilungRef.current, cleanedText));
-              break;
-            case 'befund':
-            default:
-              setTranscript(combineTexts(existingTextRef.current, cleanedText));
-              break;
+          if (parsed.lastField) {
+            setActiveField(parsed.lastField);
+            
+            // Verteile Text auf die entsprechenden Felder
+            if (parsed.methodik !== null) {
+              lastMethodikRef.current = parsed.methodik;
+              setMethodik(combineTexts(existingMethodikRef.current, parsed.methodik));
+            }
+            if (parsed.befund !== null) {
+              setTranscript(combineTexts(existingTextRef.current, parsed.befund));
+            }
+            if (parsed.beurteilung !== null) {
+              lastBeurteilungRef.current = parsed.beurteilung;
+              setBeurteilung(combineTexts(existingBeurteilungRef.current, parsed.beurteilung));
+            }
+          } else {
+            // Kein Steuerbefehl - Text geht ins aktive Feld
+            switch (activeField) {
+              case 'methodik':
+                lastMethodikRef.current = currentTranscript;
+                setMethodik(combineTexts(existingMethodikRef.current, currentTranscript));
+                break;
+              case 'beurteilung':
+                lastBeurteilungRef.current = currentTranscript;
+                setBeurteilung(combineTexts(existingBeurteilungRef.current, currentTranscript));
+                break;
+              case 'befund':
+              default:
+                setTranscript(combineTexts(existingTextRef.current, currentTranscript));
+                break;
+            }
           }
         } else {
           // Im Arztbrief-Modus: Normales Verhalten

@@ -368,25 +368,38 @@ export default function HomePage() {
           try {
             if (mode === 'befund') {
               // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
-              const { field, cleanedText } = parseFieldCommands(sessionTranscript);
-              const targetField = field || activeField;
+              const parsed = parseFieldCommands(sessionTranscript);
               
-              // Aktualisiere das entsprechende Feld
+              // Aktualisiere die Felder basierend auf parsed results
               let currentMethodik = methodik;
               let currentBefund = transcript;
               let currentBeurteilung = beurteilung;
               
-              switch (targetField) {
-                case 'methodik':
-                  currentMethodik = combineTexts(existingMethodikRef.current, cleanedText);
-                  break;
-                case 'beurteilung':
-                  currentBeurteilung = combineTexts(existingBeurteilungRef.current, cleanedText);
-                  break;
-                case 'befund':
-                default:
-                  currentBefund = combineTexts(existingTextRef.current, cleanedText);
-                  break;
+              if (parsed.lastField) {
+                // Steuerbefehle erkannt - verteile auf entsprechende Felder
+                if (parsed.methodik !== null) {
+                  currentMethodik = combineTexts(existingMethodikRef.current, parsed.methodik);
+                }
+                if (parsed.befund !== null) {
+                  currentBefund = combineTexts(existingTextRef.current, parsed.befund);
+                }
+                if (parsed.beurteilung !== null) {
+                  currentBeurteilung = combineTexts(existingBeurteilungRef.current, parsed.beurteilung);
+                }
+              } else {
+                // Kein Steuerbefehl - Text geht ins aktive Feld
+                switch (activeField) {
+                  case 'methodik':
+                    currentMethodik = combineTexts(existingMethodikRef.current, sessionTranscript);
+                    break;
+                  case 'beurteilung':
+                    currentBeurteilung = combineTexts(existingBeurteilungRef.current, sessionTranscript);
+                    break;
+                  case 'befund':
+                  default:
+                    currentBefund = combineTexts(existingTextRef.current, sessionTranscript);
+                    break;
+                }
               }
               
               // Korrigiere alle drei Felder gleichzeitig
@@ -433,17 +446,29 @@ export default function HomePage() {
           } catch {
             // Bei Fehler: Setze unkorrigierten Text
             if (mode === 'befund') {
-              const { field, cleanedText } = parseFieldCommands(sessionTranscript);
-              const targetField = field || activeField;
-              switch (targetField) {
-                case 'methodik':
-                  setMethodik(combineTexts(existingMethodikRef.current, cleanedText));
-                  break;
-                case 'beurteilung':
-                  setBeurteilung(combineTexts(existingBeurteilungRef.current, cleanedText));
-                  break;
-                default:
-                  setTranscript(combineTexts(existingTextRef.current, cleanedText));
+              const parsed = parseFieldCommands(sessionTranscript);
+              
+              if (parsed.lastField) {
+                if (parsed.methodik !== null) {
+                  setMethodik(combineTexts(existingMethodikRef.current, parsed.methodik));
+                }
+                if (parsed.befund !== null) {
+                  setTranscript(combineTexts(existingTextRef.current, parsed.befund));
+                }
+                if (parsed.beurteilung !== null) {
+                  setBeurteilung(combineTexts(existingBeurteilungRef.current, parsed.beurteilung));
+                }
+              } else {
+                switch (activeField) {
+                  case 'methodik':
+                    setMethodik(combineTexts(existingMethodikRef.current, sessionTranscript));
+                    break;
+                  case 'beurteilung':
+                    setBeurteilung(combineTexts(existingBeurteilungRef.current, sessionTranscript));
+                    break;
+                  default:
+                    setTranscript(combineTexts(existingTextRef.current, sessionTranscript));
+                }
               }
             } else {
               setTranscript(combineTexts(existingTextRef.current, sessionTranscript));

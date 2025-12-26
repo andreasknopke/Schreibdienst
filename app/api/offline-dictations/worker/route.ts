@@ -273,8 +273,14 @@ async function correctText(text: string, username: string): Promise<string> {
   const llmConfig = await getLLMConfig();
   const systemPrompt = `Du bist ein medizinischer Diktat-Korrektur-Assistent. Deine Aufgabe ist die sprachliche Korrektur diktierter medizinischer Texte.
 
+STIL UND DUKTUS:
+- Behalte den persönlichen Schreibstil und Duktus des Diktierenden bei
+- Ändere NIEMALS korrekte Satzstrukturen nur um sie "eleganter" zu machen
+- Formuliere Sätze NUR um wenn sie grammatikalisch falsch sind oder keinen Sinn ergeben
+- Lösche NIEMALS inhaltlich korrekte Sätze oder Satzteile
+
 HAUPTAUFGABEN:
-1. GRAMMATIK: Korrigiere grammatikalische Fehler (Kasus, Numerus, Tempus, Satzbau)
+1. GRAMMATIK: Korrigiere NUR echte grammatikalische Fehler (Kasus, Numerus, Tempus)
 2. ORTHOGRAPHIE: Korrigiere Rechtschreibfehler
 3. FACHBEGRIFFE: Korrigiere medizinische Fachbegriffe gemäß dem Benutzerwörterbuch
 4. SATZZEICHEN: Ausgesprochene Satzzeichen sind bereits in Zeichen umgewandelt - prüfe nur auf korrekte Verwendung
@@ -283,6 +289,7 @@ ${dictText ? `\nBENUTZERWÖRTERBUCH (wende diese Korrekturen an):\n${dictText}` 
 WICHTIG:
 - Verändere NICHT den medizinischen Inhalt oder die Bedeutung
 - Behalte die Struktur und Absätze bei
+- Keine stilistischen Änderungen - nur Fehlerkorrekturen
 - Gib NUR den korrigierten Text zurück, ohne Erklärungen`;
 
   const result = await callLLM(llmConfig, [
@@ -301,8 +308,14 @@ async function correctBefundFields(fields: { methodik: string; befund: string; b
   const llmConfig = await getLLMConfig();
   const systemPrompt = `Du bist ein medizinischer Befund-Korrektur-Assistent. Korrigiere die drei Felder.
 
+STIL UND DUKTUS:
+- Behalte den persönlichen Schreibstil und Duktus des Diktierenden bei
+- Ändere NIEMALS korrekte Satzstrukturen nur um sie "eleganter" zu machen
+- Formuliere Sätze NUR um wenn sie grammatikalisch falsch sind oder keinen Sinn ergeben
+- Lösche NIEMALS inhaltlich korrekte Sätze oder Satzteile
+
 HAUPTAUFGABEN:
-1. GRAMMATIK: Korrigiere grammatikalische Fehler
+1. GRAMMATIK: Korrigiere NUR echte grammatikalische Fehler
 2. ORTHOGRAPHIE: Korrigiere Rechtschreibfehler  
 3. FACHBEGRIFFE: Korrigiere medizinische Fachbegriffe gemäß dem Benutzerwörterbuch
 4. SATZZEICHEN: Prüfe auf korrekte Interpunktion
@@ -311,6 +324,7 @@ ${dictText ? `\nBENUTZERWÖRTERBUCH:\n${dictText}` : ''}
 WICHTIG:
 - Verändere NICHT den medizinischen Inhalt
 - Behalte die Struktur bei
+- Keine stilistischen Änderungen - nur Fehlerkorrekturen
 
 Antworte NUR mit JSON: {"methodik": "...", "befund": "...", "beurteilung": "..."}`;
 

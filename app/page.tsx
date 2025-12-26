@@ -56,8 +56,18 @@ export default function HomePage() {
       const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
       if (!res.ok) throw new Error(`Transkription fehlgeschlagen (${res.status})`);
       const data = await res.json();
+      
+      // Log provider info to browser console
+      const provider = data.provider || 'unknown';
+      const textLength = (data.text || '').length;
+      console.log(`[Transcription] Provider: ${provider}, Text: ${textLength} chars`);
+      if (data.text) {
+        console.log(`[Transcription] Result: "${data.text.substring(0, 100)}${data.text.length > 100 ? '...' : ''}"`);
+      }
+      
       return data.text || '';
     } catch (err: any) {
+      console.error('[Transcription] Error:', err.message);
       if (!isLive) {
         setError(err.message || 'Unbekannter Fehler');
       }

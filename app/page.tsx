@@ -37,6 +37,10 @@ export default function HomePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
+  // Status tracking for UI indicators
+  const isProcessing = transcribing || correcting || busy;
+  const processingStatus = correcting ? 'Korrektur läuft...' : transcribing ? 'Transkription läuft...' : busy ? 'Verarbeitung...' : null;
+  
   // Befund-spezifische Felder
   const [methodik, setMethodik] = useState("");
   const [beurteilung, setBeurteilung] = useState("");
@@ -803,10 +807,24 @@ export default function HomePage() {
       )}
       <div className="text-xs">
         {recording ? (
-          <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400">
-            <span className="pulse-dot" style={{ width: 8, height: 8 }} /> 
-            Aufnahme
-            {transcribing && <span className="opacity-70">(live)</span>}
+          <div className="flex flex-col">
+            <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400">
+              <span className="pulse-dot" style={{ width: 8, height: 8 }} /> 
+              Aufnahme
+            </span>
+            {transcribing && (
+              <span className="text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                <Spinner size={10} /> Live
+              </span>
+            )}
+          </div>
+        ) : correcting ? (
+          <span className="flex items-center gap-1.5 text-purple-600 dark:text-purple-400">
+            <Spinner size={10} /> KI-Korrektur
+          </span>
+        ) : busy ? (
+          <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
+            <Spinner size={10} /> Verarbeitung
           </span>
         ) : (
           <span className="text-gray-500">Bereit</span>
@@ -854,6 +872,26 @@ export default function HomePage() {
 
       {error && <div className="alert alert-error text-sm">{error}</div>}
 
+      {/* Processing Status Indicator */}
+      {isProcessing && (
+        <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-3 flex items-center gap-3">
+          <Spinner size={18} className="text-blue-600 dark:text-blue-400" />
+          <div className="flex-1">
+            <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+              {processingStatus}
+            </span>
+            <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
+              Bitte warten Sie, bis die Verarbeitung abgeschlossen ist.
+            </p>
+          </div>
+          <div className="flex gap-1">
+            <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+            <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+            <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+          </div>
+        </div>
+      )}
+
       {/* Befund-Modus: Drei separate Felder */}
       {mode === 'befund' ? (
         <div className="space-y-3">
@@ -882,11 +920,12 @@ export default function HomePage() {
                 </div>
               </div>
               <textarea
-                className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''}`}
+                className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                 value={methodik}
                 onChange={(e) => setMethodik(e.target.value)}
                 placeholder="Methodik..."
                 rows={2}
+                readOnly={isProcessing}
               />
             </div>
           </div>
@@ -916,10 +955,11 @@ export default function HomePage() {
                 </div>
               </div>
               <textarea
-                className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''}`}
+                className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                 value={transcript}
                 onChange={(e) => setTranscript(e.target.value)}
                 placeholder="Befund..."
+                readOnly={isProcessing}
               />
             </div>
           </div>
@@ -949,11 +989,12 @@ export default function HomePage() {
                 </div>
               </div>
               <textarea
-                className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''}`}
+                className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                 value={beurteilung}
                 onChange={(e) => setBeurteilung(e.target.value)}
                 placeholder="Beurteilung..."
                 rows={2}
+                readOnly={isProcessing}
               />
               <button 
                 className="btn btn-primary w-full text-sm py-2" 
@@ -988,10 +1029,11 @@ export default function HomePage() {
               </div>
             </div>
             <textarea
-              className="textarea font-mono text-sm min-h-40"
+              className={`textarea font-mono text-sm min-h-40 ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
               placeholder="Text erscheint hier..."
+              readOnly={isProcessing}
             />
             <div className="flex gap-2">
               <button className="btn btn-primary flex-1 text-sm py-2" onClick={handleFormat} disabled={busy || !transcript}>

@@ -25,14 +25,35 @@ async function transcribeWithWhisperX(file: Blob, filename: string) {
     // Debug: Log all WHISPER env vars with their values
     const whisperEnvVars = Object.keys(process.env).filter(k => k.includes('WHISPER'));
     console.log(`[WhisperX Gradio] Available WHISPER env vars: ${whisperEnvVars.join(', ')}`);
+    
+    // Debug: Log each var with its value and char codes
+    for (const key of whisperEnvVars) {
+      const val = process.env[key];
+      const keyChars = key.split('').map(c => c.charCodeAt(0)).join(',');
+      console.log(`[WhisperX Gradio] ${key} (chars: ${keyChars}) = "${val}" (length: ${(val||'').length})`);
+    }
+    
     console.log(`[WhisperX Gradio] WHISPER_AUTH_PASSWORD type: ${typeof process.env.WHISPER_AUTH_PASSWORD}`);
     console.log(`[WhisperX Gradio] WHISPER_AUTH_PASSWORD value: "${process.env.WHISPER_AUTH_PASSWORD}"`);
     console.log(`[WhisperX Gradio] WHISPER_AUTH_PASSWORD JSON: ${JSON.stringify(process.env.WHISPER_AUTH_PASSWORD)}`);
     
+    // Try to find the password by iterating
+    let foundPassword = '';
+    for (const key of whisperEnvVars) {
+      if (key.includes('PASSWORD')) {
+        foundPassword = process.env[key] || '';
+        console.log(`[WhisperX Gradio] Found password via iteration: "${foundPassword}" from key "${key}"`);
+      }
+    }
+    
+    // Use found password if direct access fails
+    const actualPassword = authPass || foundPassword;
+    console.log(`[WhisperX Gradio] Using password length: ${actualPassword.length}`);
+    
     // Step 1: Login to get session cookie
-    console.log(`[WhisperX Gradio] Step 1: Logging in with user: ${authUser}, pass length: ${(authPass || '').length}`);
-    console.log(`[WhisperX Gradio] Password first 3 chars: ${(authPass || '').substring(0, 3)}...`);
-    const loginBody = `username=${encodeURIComponent(authUser || '')}&password=${encodeURIComponent(authPass || '')}`;
+    console.log(`[WhisperX Gradio] Step 1: Logging in with user: ${authUser}, pass length: ${(actualPassword || '').length}`);
+    console.log(`[WhisperX Gradio] Password first 3 chars: ${(actualPassword || '').substring(0, 3)}...`);
+    const loginBody = `username=${encodeURIComponent(authUser || '')}&password=${encodeURIComponent(actualPassword || '')}`;
     console.log(`[WhisperX Gradio] Login URL: ${whisperUrl}/login`);
     console.log(`[WhisperX Gradio] Login body: ${loginBody}`);
     

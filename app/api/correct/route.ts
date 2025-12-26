@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { formatDictionaryForPrompt, applyDictionary } from '@/lib/dictionary';
+import { getRuntimeConfig } from '@/lib/runtimeConfig';
 
 export const runtime = 'nodejs';
 
@@ -7,7 +8,8 @@ export const runtime = 'nodejs';
 type LLMProvider = 'openai' | 'lmstudio';
 
 function getLLMConfig(): { provider: LLMProvider; baseUrl: string; apiKey: string; model: string } {
-  const provider = (process.env.LLM_PROVIDER || 'openai') as LLMProvider;
+  const runtimeConfig = getRuntimeConfig();
+  const provider = runtimeConfig.llmProvider;
   
   if (provider === 'lmstudio') {
     return {
@@ -22,7 +24,7 @@ function getLLMConfig(): { provider: LLMProvider; baseUrl: string; apiKey: strin
     provider: 'openai',
     baseUrl: 'https://api.openai.com',
     apiKey: process.env.OPENAI_API_KEY || '',
-    model: process.env.OPENAI_MODEL || 'gpt-4o-mini'
+    model: runtimeConfig.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini'
   };
 }
 

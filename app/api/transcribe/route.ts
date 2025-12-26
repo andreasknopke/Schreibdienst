@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getRuntimeConfig } from '@/lib/runtimeConfig';
 
 export const runtime = 'nodejs';
 
@@ -247,9 +248,10 @@ export async function POST(request: Request) {
     console.log('\n=== Transcription Request Started ===')
     const requestStart = Date.now();
 
-    // Provider-Auswahl: whisperx (Standard) oder elevenlabs
-    const provider = (process.env.TRANSCRIPTION_PROVIDER || 'whisperx') as TranscriptionProvider;
-    console.log(`[Config] Provider: ${provider} (from env: ${process.env.TRANSCRIPTION_PROVIDER || 'not set - using default'})`);
+    // Provider-Auswahl aus Runtime-Konfiguration
+    const runtimeConfig = getRuntimeConfig();
+    const provider = runtimeConfig.transcriptionProvider;
+    console.log(`[Config] Provider: ${provider} (from runtime config)`);
     
     const form = await request.formData();
     const file = form.get('file');

@@ -121,10 +121,16 @@ export async function POST(req: Request) {
     
     // Beurteilung vorschlagen basierend auf Befund
     if (suggestBeurteilung && befund) {
+      console.log('\n=== LLM Correction: Suggest Beurteilung ===');
+      const startTime = Date.now();
+      const inputLength = (methodik?.length || 0) + befund.length;
+      console.log(`[Input] Methodik: ${methodik?.length || 0} chars, Befund: ${befund.length} chars, Total: ${inputLength} chars`);
+      
       const userMessage = methodik 
         ? `Erstelle eine Beurteilung basierend auf folgenden Informationen:\n\nMethodik:\n"""${methodik}"""\n\nBefund:\n"""${befund}"""`
         : `Erstelle eine Beurteilung basierend auf folgendem Befund:\n\n"""${befund}"""`;
 
+      console.log(`[LLM] Model: gpt-4o-mini, Mode: Suggest Beurteilung, Temperature: 0.3`);
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -150,16 +156,32 @@ export async function POST(req: Request) {
 
       const data = await res.json();
       const suggestedBeurteilung = data.choices?.[0]?.message?.content?.trim() || '';
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      const tokens = data.usage ? `${data.usage.prompt_tokens}/${data.usage.completion_tokens}` : 'unknown';
+      console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}, Output: ${suggestedBeurteilung.length} chars`);
+      console.log('=== LLM Correction Complete ===\n');
 
       return NextResponse.json({ suggestedBeurteilung });
     }
     
     // Befund-Modus: Drei Felder korrigieren
     if (befundFields) {
+      console.log('\n=== LLM Correction: Befund Fields ===');
+      const startTime = Date.now();
       const hasContent = befundFields.methodik?.trim() || befundFields.befund?.trim() || befundFields.beurteilung?.trim();
       if (!hasContent) {
+        console.log('[Skip] All fields empty');
         return NextResponse.json({ befundFields: { methodik: '', befund: '', beurteilung: '' } });
       }
+      
+      const inputLengths = {
+        methodik: befundFields.methodik?.length || 0,
+        befund: befundFields.befund?.length || 0,
+        beurteilung: befundFields.beurteilung?.length || 0
+      };
+      const totalInput = inputLengths.methodik + inputLengths.befund + inputLengths.beurteilung;
+      console.log(`[Input] Methodik: ${inputLengths.methodik} chars, Befund: ${inputLengths.befund} chars, Beurteilung: ${inputLengths.beurteilung} chars, Total: ${totalInput} chars`);
+      console.log(`[User] ${username || 'anonymous'}${dictionaryPrompt ? ' (with dictionary)' : ''}`);
 
       const userMessage = `Korrigiere die folgenden drei Felder eines medizinischen Befunds:
 
@@ -174,6 +196,7 @@ Beurteilung:
 
 Antworte NUR mit dem JSON-Objekt.`;
 
+      console.log(`[LLM] Model: gpt-4o-mini, Mode: Befund fields, Temperature: 0.3, Response format: JSON`);
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -203,6 +226,17 @@ Antworte NUR mit dem JSON-Objekt.`;
       
       try {
         const correctedFields = JSON.parse(responseText) as BefundFields;
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        const tokens = data.usage ? `${data.usage.prompt_tokens}/${data.usage.completion_tokens}` : 'unknown';
+        const outputLengths = {
+          methodik: correctedFields.methodik?.length || 0,
+          befund: correctedFields.befund?.length || 0,
+          beurteilung: correctedFields.beurteilung?.length || 0
+        };
+        const totalOutput = outputLengths.methodik + outputLengths.befund + outputLengths.beurteilung;
+        console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}`);
+        console.log(`[Output] Methodik: ${outputLengths.methodik} chars, Befund: ${outputLengths.befund} chars, Beurteilung: ${outputLengths.beurteilung} chars, Total: ${totalOutput} chars`);
+        console.log('=== LLM Correction Complete ===\n');
         return NextResponse.json({ 
           befundFields: {
             methodik: correctedFields.methodik || befundFields.methodik || '',
@@ -211,7 +245,8 @@ Antworte NUR mit dem JSON-Objekt.`;
           }
         });
       } catch (parseError) {
-        console.error('JSON parse error:', parseError);
+        console.error('[Error] JSON parse error:', parseError);
+        console.log('=== LLM Correction Failed ===\n');
         return NextResponse.json({ befundFields });
       }
     }
@@ -221,11 +256,18 @@ Antworte NUR mit dem JSON-Objekt.`;
       return NextResponse.json({ correctedText: '' });
     }
 
+    console.log('\n=== LLM Correction: Standard Text ===');
+    const startTime = Date.now();
+    const mode = previousCorrectedText ? 'incremental' : 'single';
+    console.log(`[Input] Mode: ${mode}, Text: ${text.length} chars${previousCorrectedText ? `, Previous: ${previousCorrectedText.length} chars` : ''}`);
+    console.log(`[User] ${username || 'anonymous'}${dictionaryPrompt ? ' (with dictionary)' : ''}`);
+
     // Kontext für inkrementelle Korrektur
     const userMessage = previousCorrectedText 
       ? `Bisheriger korrigierter Text:\n"""${previousCorrectedText}"""\n\nNeuer diktierter Text zum Korrigieren und Anfügen:\n"""${text}"""\n\nGib den vollständigen korrigierten Text zurück (bisheriger + neuer Text).`
       : `Korrigiere den folgenden diktierten Text:\n"""${text}"""`;
 
+    console.log(`[LLM] Model: gpt-4o-mini, Mode: Standard text, Temperature: 0.3`);
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -251,10 +293,16 @@ Antworte NUR mit dem JSON-Objekt.`;
 
     const data = await res.json();
     const correctedText = data.choices?.[0]?.message?.content?.trim() || text;
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    const tokens = data.usage ? `${data.usage.prompt_tokens}/${data.usage.completion_tokens}` : 'unknown';
+    console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}, Output: ${correctedText.length} chars`);
+    console.log('=== LLM Correction Complete ===\n');
 
     return NextResponse.json({ correctedText });
   } catch (e: any) {
-    console.error('Correction error:', e);
+    console.error('[Error] Correction failed:', e.message);
+    console.error('[Error] Stack:', e.stack);
+    console.log('=== LLM Correction Failed ===\n');
     return NextResponse.json({ error: 'Correction error', message: e?.message }, { status: 500 });
   }
 }

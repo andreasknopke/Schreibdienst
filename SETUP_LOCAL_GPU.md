@@ -1,5 +1,8 @@
 # Lokales Setup mit NVIDIA GPU
 
+**Transcription Provider:** WhisperX (lokal mit GPU-Beschleunigung)  
+_Hinweis: Diese Anleitung gilt nur, wenn `TRANSCRIPTION_PROVIDER=whisperx` in .env.local gesetzt ist._
+
 ## Dein System
 - ✅ 64GB RAM - Perfekt für große Modelle
 - ✅ 12GB NVIDIA GPU (Pascal) - Ausreichend für large-v2

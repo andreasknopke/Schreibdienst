@@ -279,10 +279,16 @@ STIL UND DUKTUS:
 - Formuliere Sätze NUR um wenn sie grammatikalisch falsch sind oder keinen Sinn ergeben
 - Lösche NIEMALS inhaltlich korrekte Sätze oder Satzteile
 
+MEDIZINISCHE FACHBEGRIFFE:
+- KORRIGIERE falsch transkribierte medizinische Begriffe zum korrekten Fachbegriff
+- Beispiel: "Lekorräume" → "Liquorräume", "Kolezistektomie" → "Cholezystektomie"
+- Erkenne phonetisch ähnliche Transkriptionsfehler und korrigiere sie
+- Im Zweifelsfall bei UNBEKANNTEN Begriffen: Originalwort beibehalten
+
 HAUPTAUFGABEN:
 1. GRAMMATIK: Korrigiere NUR echte grammatikalische Fehler (Kasus, Numerus, Tempus)
 2. ORTHOGRAPHIE: Korrigiere Rechtschreibfehler
-3. FACHBEGRIFFE: Korrigiere medizinische Fachbegriffe gemäß dem Benutzerwörterbuch
+3. FACHBEGRIFFE: Korrigiere falsch transkribierte medizinische Begriffe + wende Benutzerwörterbuch an
 4. SATZZEICHEN: Ausgesprochene Satzzeichen sind bereits in Zeichen umgewandelt - prüfe nur auf korrekte Verwendung
 ${dictText ? `\nBENUTZERWÖRTERBUCH (wende diese Korrekturen an):\n${dictText}` : ''}
 
@@ -314,10 +320,16 @@ STIL UND DUKTUS:
 - Formuliere Sätze NUR um wenn sie grammatikalisch falsch sind oder keinen Sinn ergeben
 - Lösche NIEMALS inhaltlich korrekte Sätze oder Satzteile
 
+MEDIZINISCHE FACHBEGRIFFE:
+- KORRIGIERE falsch transkribierte medizinische Begriffe zum korrekten Fachbegriff
+- Beispiel: "Lekorräume" → "Liquorräume", "Spinalcanal" → "Spinalkanal"
+- Erkenne phonetisch ähnliche Transkriptionsfehler und korrigiere sie
+- Im Zweifelsfall bei UNBEKANNTEN Begriffen: Originalwort beibehalten
+
 HAUPTAUFGABEN:
 1. GRAMMATIK: Korrigiere NUR echte grammatikalische Fehler
 2. ORTHOGRAPHIE: Korrigiere Rechtschreibfehler  
-3. FACHBEGRIFFE: Korrigiere medizinische Fachbegriffe gemäß dem Benutzerwörterbuch
+3. FACHBEGRIFFE: Korrigiere falsch transkribierte medizinische Begriffe + wende Benutzerwörterbuch an
 4. SATZZEICHEN: Prüfe auf korrekte Interpunktion
 ${dictText ? `\nBENUTZERWÖRTERBUCH:\n${dictText}` : ''}
 

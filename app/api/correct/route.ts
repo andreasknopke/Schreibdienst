@@ -99,10 +99,12 @@ WICHTIG - STIL UND DUKTUS ERHALTEN:
 - Lösche NIEMALS inhaltlich korrekte Sätze oder Satzteile
 
 WICHTIG - MEDIZINISCHE FACHBEGRIFFE:
-- Behalte alle medizinischen Fachbegriffe EXAKT bei (z.B. "Plattenosteosynthese", "Cholezystektomie", "Osteochondrose")
-- Verändere NIEMALS Fachtermini, auch wenn sie wie Tippfehler aussehen
-- Im Zweifelsfall: Originalwort beibehalten statt ändern
-- Typische Endungen wie "-ektomie", "-itis", "-ose", "-synthese", "-plastik" etc. müssen erhalten bleiben
+- KORRIGIERE falsch transkribierte medizinische Begriffe zum korrekten Fachbegriff
+- Beispiel: "Lekorräume" → "Liquorräume", "Kolezistektomie" → "Cholezystektomie"
+- Erkenne phonetisch ähnliche Transkriptionsfehler und korrigiere sie
+- Behalte korrekt geschriebene Fachbegriffe exakt bei (z.B. "Plattenosteosynthese", "Osteochondrose")
+- Typische Endungen wie "-ektomie", "-itis", "-ose", "-synthese", "-plastik" helfen bei der Erkennung
+- Im Zweifelsfall bei UNBEKANNTEN Begriffen: Originalwort beibehalten
 
 REGELN:
 1. Korrigiere NUR echte Grammatik- und Rechtschreibfehler - keine stilistischen Änderungen
@@ -141,11 +143,13 @@ WICHTIG - STIL UND DUKTUS ERHALTEN:
 - Lösche NIEMALS inhaltlich korrekte Sätze oder Satzteile
 
 WICHTIG - MEDIZINISCHE FACHBEGRIFFE:
-- Behalte alle medizinischen Fachbegriffe EXAKT bei
-- Beispiele: "Plattenosteosynthese", "Spondylodese", "Diskektomie", "Laminektomie", "Arthroplastik"
-- Verändere NIEMALS Fachtermini - auch wenn sie wie Tippfehler aussehen könnten
+- KORRIGIERE falsch transkribierte medizinische Begriffe zum korrekten Fachbegriff
+- Beispiel: "Lekorräume" → "Liquorräume", "Kolezistektomie" → "Cholezystektomie", "Spinalcanal" → "Spinalkanal"
+- Erkenne phonetisch ähnliche Transkriptionsfehler und korrigiere sie
+- Behalte korrekt geschriebene Fachbegriffe exakt bei
+- Beispiele korrekter Begriffe: "Plattenosteosynthese", "Spondylodese", "Diskektomie", "Laminektomie", "Arthroplastik"
 - Radiologische Begriffe wie "hyperintens", "hypointens", "KM-Enhancement" etc. beibehalten
-- Im Zweifelsfall: Originalwort beibehalten statt ändern
+- Im Zweifelsfall bei UNBEKANNTEN Begriffen: Originalwort beibehalten
 
 REGELN:
 1. Korrigiere NUR echte Grammatik- und Rechtschreibfehler - keine stilistischen Änderungen

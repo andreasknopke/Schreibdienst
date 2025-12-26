@@ -33,6 +33,8 @@ async function callLLM(
   const config = getLLMConfig();
   const { temperature = 0.3, maxTokens = 2000, jsonMode = false } = options;
   
+  console.log(`[LLM] Config: provider=${config.provider}, baseUrl=${config.baseUrl}, model=${config.model}`);
+  
   if (config.provider === 'openai' && !config.apiKey) {
     throw new Error('OPENAI_API_KEY not configured');
   }
@@ -58,25 +60,31 @@ async function callLLM(
     body.response_format = { type: 'json_object' };
   }
   
-  console.log(`[LLM] Provider: ${config.provider}, Model: ${config.model}, Temperature: ${temperature}${jsonMode ? ', JSON mode' : ''}`);
+  console.log(`[LLM] Request: ${config.baseUrl}/v1/chat/completions, Temperature: ${temperature}${jsonMode ? ', JSON mode' : ''}`);
   
-  const res = await fetch(`${config.baseUrl}/v1/chat/completions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
-  
-  if (!res.ok) {
-    const errorText = await res.text();
-    console.error(`[LLM] ${config.provider} API error:`, res.status, errorText);
-    throw new Error(`${config.provider} API error (${res.status}): ${errorText}`);
+  try {
+    const res = await fetch(`${config.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`[LLM] ${config.provider} API error:`, res.status, errorText);
+      throw new Error(`${config.provider} API error (${res.status}): ${errorText}`);
+    }
+    
+    const data = await res.json();
+    const content = data.choices?.[0]?.message?.content?.trim() || '';
+    const tokens = data.usage ? { input: data.usage.prompt_tokens, output: data.usage.completion_tokens } : undefined;
+    
+    console.log(`[LLM] Response OK, content length: ${content.length} chars`);
+    return { content, tokens };
+  } catch (error: any) {
+    console.error(`[LLM] Fetch error: ${error.message}`);
+    throw error;
   }
-  
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content?.trim() || '';
-  const tokens = data.usage ? { input: data.usage.prompt_tokens, output: data.usage.completion_tokens } : undefined;
-  
-  return { content, tokens };
 }
 
 const SYSTEM_PROMPT = `Du bist ein medizinischer Diktat-Assistent mit Expertise in medizinischer Fachterminologie. Deine Aufgabe ist es, diktierte medizinische Texte zu korrigieren und Sprachbefehle auszuführen.

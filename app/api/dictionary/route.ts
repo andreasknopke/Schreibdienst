@@ -25,10 +25,11 @@ function getAuthenticatedUser(authHeader: string | null): string | null {
 
 // GET /api/dictionary - Get user's dictionary entries
 export async function GET(request: NextRequest) {
-  const username = getAuthenticatedUser(request.headers.get('Authorization'));
+  const authHeader = request.headers.get('Authorization');
+  const username = getAuthenticatedUser(authHeader);
   
   if (!username) {
-    return NextResponse.json({ error: 'Nicht authentifiziert' }, { status: 401 });
+    return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
   }
 
   const entries = getEntries(username);
@@ -37,14 +38,20 @@ export async function GET(request: NextRequest) {
 
 // POST /api/dictionary - Add entry to dictionary
 export async function POST(request: NextRequest) {
-  const username = getAuthenticatedUser(request.headers.get('Authorization'));
+  const authHeader = request.headers.get('Authorization');
+  const username = getAuthenticatedUser(authHeader);
   
   if (!username) {
-    return NextResponse.json({ error: 'Nicht authentifiziert' }, { status: 401 });
+    return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
   }
 
   try {
-    const { wrong, correct } = await request.json();
+    const body = await request.json();
+    const { wrong, correct } = body;
+    
+    if (!wrong || !correct) {
+      return NextResponse.json({ success: false, error: 'Beide Felder müssen ausgefüllt sein' }, { status: 400 });
+    }
     
     const result = addEntry(username, wrong, correct);
     
@@ -53,21 +60,28 @@ export async function POST(request: NextRequest) {
     }
     
     return NextResponse.json({ success: false, error: result.error }, { status: 400 });
-  } catch {
+  } catch (error) {
+    console.error('Dictionary POST error:', error);
     return NextResponse.json({ success: false, error: 'Ungültige Anfrage' }, { status: 400 });
   }
 }
 
 // DELETE /api/dictionary - Remove entry from dictionary
 export async function DELETE(request: NextRequest) {
-  const username = getAuthenticatedUser(request.headers.get('Authorization'));
+  const authHeader = request.headers.get('Authorization');
+  const username = getAuthenticatedUser(authHeader);
   
   if (!username) {
-    return NextResponse.json({ error: 'Nicht authentifiziert' }, { status: 401 });
+    return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
   }
 
   try {
-    const { wrong } = await request.json();
+    const body = await request.json();
+    const { wrong } = body;
+    
+    if (!wrong) {
+      return NextResponse.json({ success: false, error: 'Kein Wort zum Löschen angegeben' }, { status: 400 });
+    }
     
     const result = removeEntry(username, wrong);
     
@@ -76,7 +90,8 @@ export async function DELETE(request: NextRequest) {
     }
     
     return NextResponse.json({ success: false, error: result.error }, { status: 400 });
-  } catch {
+  } catch (error) {
+    console.error('Dictionary DELETE error:', error);
     return NextResponse.json({ success: false, error: 'Ungültige Anfrage' }, { status: 400 });
   }
 }

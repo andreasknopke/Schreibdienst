@@ -58,6 +58,11 @@ export default function DictionaryManager() {
 
       const data = await response.json();
 
+      if (response.status === 401) {
+        setError('Sitzung abgelaufen - bitte erneut anmelden');
+        return;
+      }
+
       if (data.success) {
         setSuccess(`"${wrong}" → "${correct}" hinzugefügt`);
         setWrong('');
@@ -88,6 +93,11 @@ export default function DictionaryManager() {
       });
 
       const data = await response.json();
+
+      if (response.status === 401) {
+        setError('Sitzung abgelaufen - bitte erneut anmelden');
+        return;
+      }
 
       if (data.success) {
         setSuccess(`"${wrongWord}" gelöscht`);

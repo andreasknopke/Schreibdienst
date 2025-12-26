@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 
 const USERS_FILE = path.join(process.cwd(), 'cache', 'users.json');
+const CACHE_DIR = path.join(process.cwd(), 'cache');
 
 export interface User {
   username: string;
@@ -26,22 +27,42 @@ export function verifyPassword(password: string, hash: string): boolean {
   return hashPassword(password) === hash;
 }
 
+// Ensure cache directory exists
+function ensureCacheDir(): void {
+  try {
+    if (!fs.existsSync(CACHE_DIR)) {
+      console.log('[Users] Creating cache directory:', CACHE_DIR);
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+    }
+  } catch (error) {
+    console.error('[Users] Failed to create cache directory:', error);
+  }
+}
+
 // Load users from file
 function loadUsers(): UsersData {
   try {
+    ensureCacheDir();
     if (fs.existsSync(USERS_FILE)) {
       const data = fs.readFileSync(USERS_FILE, 'utf-8');
       return JSON.parse(data);
     }
   } catch (error) {
-    console.error('Error loading users:', error);
+    console.error('[Users] Error loading users:', error);
   }
   return { users: [] };
 }
 
 // Save users to file
 function saveUsers(data: UsersData): void {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  try {
+    ensureCacheDir();
+    console.log('[Users] Saving users to:', USERS_FILE);
+    fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (error) {
+    console.error('[Users] Failed to save users:', error);
+    throw error;
+  }
 }
 
 // Get root password from environment

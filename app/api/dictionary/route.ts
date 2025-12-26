@@ -25,15 +25,20 @@ function getAuthenticatedUser(authHeader: string | null): string | null {
 
 // GET /api/dictionary - Get user's dictionary entries
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get('Authorization');
-  const username = getAuthenticatedUser(authHeader);
-  
-  if (!username) {
-    return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
-  }
+  try {
+    const authHeader = request.headers.get('Authorization');
+    const username = getAuthenticatedUser(authHeader);
+    
+    if (!username) {
+      return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
+    }
 
-  const entries = getEntries(username);
-  return NextResponse.json({ entries });
+    const entries = getEntries(username);
+    return NextResponse.json({ entries });
+  } catch (error) {
+    console.error('[Dictionary GET] Error:', error);
+    return NextResponse.json({ success: false, error: 'Fehler beim Laden des Wörterbuchs', entries: [] }, { status: 500 });
+  }
 }
 
 // POST /api/dictionary - Add entry to dictionary

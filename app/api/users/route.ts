@@ -24,14 +24,19 @@ function isAdmin(authHeader: string | null): { valid: boolean; username?: string
 
 // GET /api/users - List all users (admin only)
 export async function GET(request: NextRequest) {
-  const auth = isAdmin(request.headers.get('Authorization'));
-  
-  if (!auth.valid) {
-    return NextResponse.json({ error: 'Nur für Administratoren' }, { status: 403 });
-  }
+  try {
+    const auth = isAdmin(request.headers.get('Authorization'));
+    
+    if (!auth.valid) {
+      return NextResponse.json({ error: 'Nur für Administratoren' }, { status: 403 });
+    }
 
-  const users = listUsers();
-  return NextResponse.json({ users });
+    const users = listUsers();
+    return NextResponse.json({ users });
+  } catch (error) {
+    console.error('[Users GET] Error:', error);
+    return NextResponse.json({ error: 'Fehler beim Laden der Benutzer', users: [] }, { status: 500 });
+  }
 }
 
 // POST /api/users - Create a new user (admin only)

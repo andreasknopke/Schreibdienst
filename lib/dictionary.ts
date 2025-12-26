@@ -15,8 +15,14 @@ interface UserDictionary {
 
 // Ensure dictionaries directory exists
 function ensureDir(): void {
-  if (!fs.existsSync(DICTIONARIES_DIR)) {
-    fs.mkdirSync(DICTIONARIES_DIR, { recursive: true });
+  try {
+    if (!fs.existsSync(DICTIONARIES_DIR)) {
+      console.log('[Dictionary] Creating directory:', DICTIONARIES_DIR);
+      fs.mkdirSync(DICTIONARIES_DIR, { recursive: true });
+    }
+  } catch (error) {
+    console.error('[Dictionary] Failed to create directory:', DICTIONARIES_DIR, error);
+    throw error;
   }
 }
 
@@ -29,7 +35,14 @@ function getDictionaryPath(username: string): string {
 
 // Load user dictionary
 export function loadDictionary(username: string): UserDictionary {
-  ensureDir();
+  try {
+    ensureDir();
+  } catch (error) {
+    console.error('[Dictionary] ensureDir failed for', username, error);
+    // Return empty dictionary if we can't create the directory
+    return { entries: [] };
+  }
+  
   const filePath = getDictionaryPath(username);
   
   try {
@@ -38,7 +51,7 @@ export function loadDictionary(username: string): UserDictionary {
       return JSON.parse(data);
     }
   } catch (error) {
-    console.error('Error loading dictionary for', username, error);
+    console.error('[Dictionary] Error loading dictionary for', username, error);
   }
   
   return { entries: [] };
@@ -46,9 +59,15 @@ export function loadDictionary(username: string): UserDictionary {
 
 // Save user dictionary
 function saveDictionary(username: string, dictionary: UserDictionary): void {
-  ensureDir();
-  const filePath = getDictionaryPath(username);
-  fs.writeFileSync(filePath, JSON.stringify(dictionary, null, 2), 'utf-8');
+  try {
+    ensureDir();
+    const filePath = getDictionaryPath(username);
+    console.log('[Dictionary] Saving dictionary for', username, 'to', filePath);
+    fs.writeFileSync(filePath, JSON.stringify(dictionary, null, 2), 'utf-8');
+  } catch (error) {
+    console.error('[Dictionary] Failed to save dictionary for', username, error);
+    throw error;
+  }
 }
 
 // Add entry to user dictionary

@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { addEntry, removeEntry, getEntries } from '@/lib/dictionaryDb';
 import { authenticateUser } from '@/lib/usersDb';
 
-// Extract username from auth header
-async function getAuthenticatedUser(authHeader: string | null): Promise<string | null> {
+interface AuthResult {
+  username: string;
+  canViewAllDictations: boolean;
+}
+
+// Extract username and permissions from auth header
+async function getAuthenticatedUser(authHeader: string | null): Promise<AuthResult | null> {
   if (!authHeader || !authHeader.startsWith('Basic ')) {
     return null;
   }
@@ -14,7 +19,10 @@ async function getAuthenticatedUser(authHeader: string | null): Promise<string |
     const result = await authenticateUser(username, password);
     
     if (result.success && result.user) {
-      return result.user.username;
+      return {
+        username: result.user.username,
+        canViewAllDictations: result.user.canViewAllDictations || false,
+      };
     }
   } catch {
     // Invalid auth header
@@ -27,11 +35,16 @@ async function getAuthenticatedUser(authHeader: string | null): Promise<string |
 export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('Authorization');
-    const username = await getAuthenticatedUser(authHeader);
+    const auth = await getAuthenticatedUser(authHeader);
     
-    if (!username) {
+    if (!auth) {
       return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
     }
+
+    // Secretariat users can view other users' dictionaries
+    const { searchParams } = new URL(request.url);
+    const targetUser = searchParams.get('user');
+    const username = (auth.canViewAllDictations && targetUser) ? targetUser : auth.username;
 
     const entries = await getEntries(username);
     return NextResponse.json({ entries });
@@ -45,18 +58,21 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('Authorization');
-    const username = await getAuthenticatedUser(authHeader);
+    const auth = await getAuthenticatedUser(authHeader);
     
-    if (!username) {
+    if (!auth) {
       return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
     }
 
     const body = await request.json();
-    const { wrong, correct } = body;
+    const { wrong, correct, username: targetUsername } = body;
     
     if (!wrong || !correct) {
       return NextResponse.json({ success: false, error: 'Beide Felder müssen ausgefüllt sein' }, { status: 400 });
     }
+    
+    // Secretariat users can add to other users' dictionaries
+    const username = (auth.canViewAllDictations && targetUsername) ? targetUsername : auth.username;
     
     const result = await addEntry(username, wrong, correct);
     
@@ -75,18 +91,21 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const authHeader = request.headers.get('Authorization');
-    const username = await getAuthenticatedUser(authHeader);
+    const auth = await getAuthenticatedUser(authHeader);
     
-    if (!username) {
+    if (!auth) {
       return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
     }
 
     const body = await request.json();
-    const { wrong } = body;
+    const { wrong, username: targetUsername } = body;
     
     if (!wrong) {
       return NextResponse.json({ success: false, error: 'Kein Wort zum Löschen angegeben' }, { status: 400 });
     }
+    
+    // Secretariat users can delete from other users' dictionaries
+    const username = (auth.canViewAllDictations && targetUsername) ? targetUsername : auth.username;
     
     const result = await removeEntry(username, wrong);
     

@@ -41,6 +41,12 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [userFilter, setUserFilter] = useState<string>('');
   const [availableUsers, setAvailableUsers] = useState<string[]>([]);
+  
+  // Dictionary entry form state (for secretariat)
+  const [showDictForm, setShowDictForm] = useState(false);
+  const [dictWrong, setDictWrong] = useState('');
+  const [dictCorrect, setDictCorrect] = useState('');
+  const [dictFeedback, setDictFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Load available users for filter
   const loadUsers = useCallback(async () => {
@@ -157,6 +163,42 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     await navigator.clipboard.writeText(text);
     setCopyFeedback(id);
     setTimeout(() => setCopyFeedback(null), 1500);
+  };
+
+  // Add word to user's dictionary (for secretariat)
+  const handleAddToDictionary = async (targetUsername: string) => {
+    if (!dictWrong.trim() || !dictCorrect.trim()) {
+      setDictFeedback({ type: 'error', message: 'Beide Felder müssen ausgefüllt sein' });
+      return;
+    }
+    
+    try {
+      const res = await fetch('/api/dictionary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: targetUsername,
+          wrong: dictWrong.trim(),
+          correct: dictCorrect.trim(),
+        }),
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok) {
+        setDictFeedback({ type: 'success', message: `"${dictWrong}" → "${dictCorrect}" hinzugefügt` });
+        setDictWrong('');
+        setDictCorrect('');
+        setTimeout(() => {
+          setDictFeedback(null);
+          setShowDictForm(false);
+        }, 2000);
+      } else {
+        setDictFeedback({ type: 'error', message: data.error || 'Fehler beim Speichern' });
+      }
+    } catch (err: any) {
+      setDictFeedback({ type: 'error', message: err.message });
+    }
   };
 
   // Get combined text for a dictation
@@ -526,7 +568,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                 )}
 
                 {/* Actions */}
-                <div className="flex gap-2 pt-2 border-t">
+                <div className="flex gap-2 pt-2 border-t flex-wrap">
                   {selectedDictation.status === 'completed' && (
                     <>
                       <button
@@ -542,6 +584,15 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                       >
                         🎵✕
                       </button>
+                      {isSecretariat && (
+                        <button
+                          className="btn btn-sm btn-outline"
+                          onClick={() => setShowDictForm(!showDictForm)}
+                          title="Wort zum Wörterbuch hinzufügen"
+                        >
+                          📖+
+                        </button>
+                      )}
                     </>
                   )}
                   
@@ -561,6 +612,59 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                     🗑️ Löschen
                   </button>
                 </div>
+                
+                {/* Dictionary Entry Form (for secretariat) */}
+                {isSecretariat && showDictForm && selectedDictation.status === 'completed' && (
+                  <div className="mt-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
+                    <h4 className="text-sm font-medium mb-2">
+                      📖 Wörterbuch-Eintrag für <span className="text-purple-600 dark:text-purple-400">{selectedDictation.username}</span>
+                    </h4>
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        className="input w-full text-sm"
+                        placeholder="Falsches Wort (wie diktiert)"
+                        value={dictWrong}
+                        onChange={(e) => setDictWrong(e.target.value)}
+                      />
+                      <input
+                        type="text"
+                        className="input w-full text-sm"
+                        placeholder="Korrektes Wort"
+                        value={dictCorrect}
+                        onChange={(e) => setDictCorrect(e.target.value)}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          className="btn btn-sm btn-primary flex-1"
+                          onClick={() => handleAddToDictionary(selectedDictation.username)}
+                        >
+                          ✓ Hinzufügen
+                        </button>
+                        <button
+                          className="btn btn-sm btn-outline"
+                          onClick={() => {
+                            setShowDictForm(false);
+                            setDictWrong('');
+                            setDictCorrect('');
+                            setDictFeedback(null);
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {dictFeedback && (
+                        <div className={`text-xs p-2 rounded ${
+                          dictFeedback.type === 'success' 
+                            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                            : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                        }`}>
+                          {dictFeedback.message}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -119,3 +119,101 @@ export function applyDictionary(text: string, entries: DictionaryEntry[]): strin
 function escapeRegExp(string: string): string {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+// Convert spoken punctuation to actual punctuation marks
+export function convertSpokenPunctuation(text: string): string {
+  let result = text;
+  
+  // Map of spoken words to punctuation (case-insensitive)
+  const punctuationMap: [RegExp, string][] = [
+    // Periods and endings
+    [/\b(punkt|period)\b/gi, '.'],
+    [/\bsatzende\b/gi, '.'],
+    
+    // Commas
+    [/\b(komma|beistrich)\b/gi, ','],
+    
+    // Question and exclamation
+    [/\bfragezeichen\b/gi, '?'],
+    [/\bausrufezeichen\b/gi, '!'],
+    
+    // Colons and semicolons
+    [/\bdoppelpunkt\b/gi, ':'],
+    [/\bsemikolon\b/gi, ';'],
+    [/\bstrichpunkt\b/gi, ';'],
+    
+    // Dashes and hyphens
+    [/\bgedankenstrich\b/gi, ' – '],
+    [/\bbindestrich\b/gi, '-'],
+    
+    // Parentheses
+    [/\bklammer auf\b/gi, '('],
+    [/\bklammer zu\b/gi, ')'],
+    [/\brunde klammer auf\b/gi, '('],
+    [/\brunde klammer zu\b/gi, ')'],
+    
+    // Quotes
+    [/\banführungszeichen auf\b/gi, '„'],
+    [/\banführungszeichen zu\b/gi, '"'],
+    [/\bzitat anfang\b/gi, '„'],
+    [/\bzitat ende\b/gi, '"'],
+    
+    // Line breaks
+    [/\bneue zeile\b/gi, '\n'],
+    [/\bneuer absatz\b/gi, '\n\n'],
+    [/\babsatz\b/gi, '\n\n'],
+    [/\bzeilenumbruch\b/gi, '\n'],
+    
+    // Slash
+    [/\bschrägstrich\b/gi, '/'],
+  ];
+  
+  for (const [pattern, replacement] of punctuationMap) {
+    result = result.replace(pattern, replacement);
+  }
+  
+  return result;
+}
+
+// Remove duplicate punctuation marks (e.g., ".." -> "." or ",," -> ",")
+export function removeDuplicatePunctuation(text: string): string {
+  let result = text;
+  
+  // Remove duplicate periods, commas, etc.
+  result = result.replace(/\.{2,}/g, '.');
+  result = result.replace(/,{2,}/g, ',');
+  result = result.replace(/:{2,}/g, ':');
+  result = result.replace(/;{2,}/g, ';');
+  result = result.replace(/\?{2,}/g, '?');
+  result = result.replace(/!{2,}/g, '!');
+  
+  // Remove space before punctuation
+  result = result.replace(/\s+([.,;:!?])/g, '$1');
+  
+  // Remove punctuation followed by same punctuation with space
+  result = result.replace(/([.,;:!?])\s+\1/g, '$1');
+  
+  // Ensure space after punctuation (except at end or before newline)
+  result = result.replace(/([.,;:!?])([^\s\n"'"„"\)\]])/g, '$1 $2');
+  
+  // Fix multiple spaces
+  result = result.replace(/  +/g, ' ');
+  
+  return result.trim();
+}
+
+// Full text cleanup: apply all corrections
+export function cleanupText(text: string, entries: DictionaryEntry[]): string {
+  let result = text;
+  
+  // Step 1: Convert spoken punctuation to actual marks
+  result = convertSpokenPunctuation(result);
+  
+  // Step 2: Apply dictionary corrections
+  result = applyDictionary(result, entries);
+  
+  // Step 3: Remove duplicate punctuation
+  result = removeDuplicatePunctuation(result);
+  
+  return result;
+}

@@ -8,7 +8,7 @@ import {
   initOfflineDictationTable,
 } from '@/lib/offlineDictationDb';
 import { getRuntimeConfig } from '@/lib/configDb';
-import { formatDictionaryForPrompt, applyDictionary, loadDictionary } from '@/lib/dictionaryDb';
+import { formatDictionaryForPrompt, cleanupText, loadDictionary } from '@/lib/dictionaryDb';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes max for processing
@@ -271,21 +271,26 @@ async function correctText(text: string, username: string): Promise<string> {
   const dictText = formatDictionaryForPrompt(dictionary.entries);
   
   const llmConfig = await getLLMConfig();
-  const systemPrompt = `Du bist ein medizinischer Diktat-Assistent. Korrigiere den Text.
-${dictText ? `\nWÖRTERBUCH (verwende diese Korrekturen):\n${dictText}` : ''}
+  const systemPrompt = `Du bist ein medizinischer Diktat-Korrektur-Assistent. Deine Aufgabe ist die sprachliche Korrektur diktierter medizinischer Texte.
 
-REGELN:
-1. Korrigiere Grammatik und Rechtschreibung
-2. Behalte medizinische Fachbegriffe exakt bei
-3. Führe Sprachbefehle aus (Punkt, Komma, neuer Absatz, etc.)
-4. Gib NUR den korrigierten Text zurück`;
+HAUPTAUFGABEN:
+1. GRAMMATIK: Korrigiere grammatikalische Fehler (Kasus, Numerus, Tempus, Satzbau)
+2. ORTHOGRAPHIE: Korrigiere Rechtschreibfehler
+3. FACHBEGRIFFE: Korrigiere medizinische Fachbegriffe gemäß dem Benutzerwörterbuch
+4. SATZZEICHEN: Ausgesprochene Satzzeichen sind bereits in Zeichen umgewandelt - prüfe nur auf korrekte Verwendung
+${dictText ? `\nBENUTZERWÖRTERBUCH (wende diese Korrekturen an):\n${dictText}` : ''}
+
+WICHTIG:
+- Verändere NICHT den medizinischen Inhalt oder die Bedeutung
+- Behalte die Struktur und Absätze bei
+- Gib NUR den korrigierten Text zurück, ohne Erklärungen`;
 
   const result = await callLLM(llmConfig, [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: text }
   ]);
   
-  return applyDictionary(result, dictionary.entries);
+  return cleanupText(result, dictionary.entries);
 }
 
 // Correct befund fields using LLM
@@ -294,8 +299,18 @@ async function correctBefundFields(fields: { methodik: string; befund: string; b
   const dictText = formatDictionaryForPrompt(dictionary.entries);
   
   const llmConfig = await getLLMConfig();
-  const systemPrompt = `Du bist ein medizinischer Befund-Assistent. Korrigiere die drei Felder.
-${dictText ? `\nWÖRTERBUCH:\n${dictText}` : ''}
+  const systemPrompt = `Du bist ein medizinischer Befund-Korrektur-Assistent. Korrigiere die drei Felder.
+
+HAUPTAUFGABEN:
+1. GRAMMATIK: Korrigiere grammatikalische Fehler
+2. ORTHOGRAPHIE: Korrigiere Rechtschreibfehler  
+3. FACHBEGRIFFE: Korrigiere medizinische Fachbegriffe gemäß dem Benutzerwörterbuch
+4. SATZZEICHEN: Prüfe auf korrekte Interpunktion
+${dictText ? `\nBENUTZERWÖRTERBUCH:\n${dictText}` : ''}
+
+WICHTIG:
+- Verändere NICHT den medizinischen Inhalt
+- Behalte die Struktur bei
 
 Antworte NUR mit JSON: {"methodik": "...", "befund": "...", "beurteilung": "..."}`;
 
@@ -307,9 +322,9 @@ Antworte NUR mit JSON: {"methodik": "...", "befund": "...", "beurteilung": "..."
   try {
     const parsed = JSON.parse(result);
     return {
-      methodik: applyDictionary(parsed.methodik || fields.methodik, dictionary.entries),
-      befund: applyDictionary(parsed.befund || fields.befund, dictionary.entries),
-      beurteilung: applyDictionary(parsed.beurteilung || fields.beurteilung, dictionary.entries),
+      methodik: cleanupText(parsed.methodik || fields.methodik, dictionary.entries),
+      befund: cleanupText(parsed.befund || fields.befund, dictionary.entries),
+      beurteilung: cleanupText(parsed.beurteilung || fields.beurteilung, dictionary.entries),
     };
   } catch {
     return fields;

@@ -162,18 +162,21 @@ interface BefundFields {
   beurteilung: string;
 }
 
-const BEURTEILUNG_SUGGEST_PROMPT = `Du bist ein erfahrener Radiologe/Mediziner. Basierend auf den vorliegenden Befunden sollst du eine knappe, medizinisch korrekte Beurteilung/Zusammenfassung erstellen.
+const BEURTEILUNG_SUGGEST_PROMPT = `Du bist ein erfahrener Radiologe/Mediziner. Basierend auf den vorliegenden Befunden sollst du eine knappe Zusammenfassung der Hauptbefunde erstellen.
 
 REGELN:
-1. Fasse die wesentlichen Befunde prägnant zusammen
-2. Gib eine klare diagnostische Einschätzung
-3. Verwende medizinische Fachterminologie korrekt
-4. Halte die Beurteilung kurz und präzise (2-4 Sätze)
-5. Wenn relevant, gib Empfehlungen für weitere Diagnostik oder Verlaufskontrollen
-6. Antworte NUR mit der Beurteilung, keine Erklärungen oder Einleitungen
+1. Fasse die wesentlichen Befunde als kurze Aufzählung (Bullet Points) zusammen
+2. Jeder Punkt beginnt mit "- " (Bindestrich und Leerzeichen)
+3. Maximal 3-5 Aufzählungspunkte
+4. Verwende medizinische Fachterminologie korrekt
+5. KEINE Empfehlungen für weitere Diagnostik oder Verlaufskontrollen
+6. KEINE Anführungszeichen um den Text
+7. Antworte NUR mit der Aufzählung, keine Erklärungen oder Einleitungen
 
 BEISPIEL-FORMAT:
-"Kein Nachweis einer akuten intrakraniellen Pathologie. Altersentsprechend unauffälliger Befund. Empfehlung: Bei persistierender Symptomatik klinische Verlaufskontrolle."`;
+- Kein Nachweis einer akuten intrakraniellen Pathologie
+- Altersentsprechend unauffälliger Befund
+- Keine Raumforderung oder Blutung`;
 
 export async function POST(req: Request) {
   try {

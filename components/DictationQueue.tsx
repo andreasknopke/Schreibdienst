@@ -210,7 +210,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     const parts: string[] = [];
     if (d.methodik) parts.push(`Methodik:\n${d.methodik}`);
     if (d.befund) parts.push(`Befund:\n${d.befund}`);
-    if (d.beurteilung) parts.push(`Beurteilung:\n${d.beurteilung}`);
+    if (d.beurteilung) parts.push(`Zusammenfassung:\n${d.beurteilung}`);
     return parts.join('\n\n') || d.transcript || '';
   };
 
@@ -549,7 +549,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                         )}
                         {selectedDictation.beurteilung && (
                           <div>
-                            <label className="text-xs font-medium text-gray-500">Beurteilung</label>
+                            <label className="text-xs font-medium text-gray-500">Zusammenfassung</label>
                             <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-800 rounded text-sm whitespace-pre-wrap">
                               {selectedDictation.beurteilung}
                             </div>

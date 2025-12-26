@@ -38,8 +38,17 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   
   // Status tracking for UI indicators
-  const isProcessing = transcribing || correcting || busy;
-  const processingStatus = correcting ? 'Korrektur läuft...' : transcribing ? 'Transkription läuft...' : busy ? 'Verarbeitung...' : null;
+  // Show banner during entire recording session, not just during active processing
+  const isProcessing = recording || transcribing || correcting || busy;
+  const processingStatus = recording 
+    ? 'Aufnahme läuft...' 
+    : correcting 
+      ? 'Korrektur läuft...' 
+      : transcribing 
+        ? 'Transkription läuft...' 
+        : busy 
+          ? 'Verarbeitung...' 
+          : null;
   
   // Befund-spezifische Felder
   const [methodik, setMethodik] = useState("");
@@ -874,20 +883,20 @@ export default function HomePage() {
 
       {/* Processing Status Indicator */}
       {isProcessing && (
-        <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-3 flex items-center gap-3">
-          <Spinner size={18} className="text-blue-600 dark:text-blue-400" />
+        <div className={`${recording ? 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800' : 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800'} border rounded-lg px-4 py-3 flex items-center gap-3`}>
+          <Spinner size={18} className={recording ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'} />
           <div className="flex-1">
-            <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+            <span className={`text-sm font-medium ${recording ? 'text-green-700 dark:text-green-300' : 'text-blue-700 dark:text-blue-300'}`}>
               {processingStatus}
             </span>
-            <p className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
-              Bitte warten Sie, bis die Verarbeitung abgeschlossen ist.
+            <p className={`text-xs mt-0.5 ${recording ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>
+              {recording ? 'Sprechen Sie in das Mikrofon.' : 'Bitte warten Sie, bis die Verarbeitung abgeschlossen ist.'}
             </p>
           </div>
           <div className="flex gap-1">
-            <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-            <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-            <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+            <span className={`w-2 h-2 ${recording ? 'bg-green-500' : 'bg-blue-500'} rounded-full animate-bounce`} style={{ animationDelay: '0ms' }}></span>
+            <span className={`w-2 h-2 ${recording ? 'bg-green-500' : 'bg-blue-500'} rounded-full animate-bounce`} style={{ animationDelay: '150ms' }}></span>
+            <span className={`w-2 h-2 ${recording ? 'bg-green-500' : 'bg-blue-500'} rounded-full animate-bounce`} style={{ animationDelay: '300ms' }}></span>
           </div>
         </div>
       )}
@@ -969,7 +978,7 @@ export default function HomePage() {
             <div className="card-body py-3 space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-medium flex items-center gap-2">
-                  Beurteilung
+                  Zusammenfassung
                   {activeField === 'beurteilung' && recording && (
                     <span className="px-1.5 py-0.5 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded text-xs">
                       ●
@@ -992,7 +1001,7 @@ export default function HomePage() {
                 className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                 value={beurteilung}
                 onChange={(e) => setBeurteilung(e.target.value)}
-                placeholder="Beurteilung..."
+                placeholder="Zusammenfassung..."
                 rows={2}
                 readOnly={isProcessing}
               />
@@ -1004,7 +1013,7 @@ export default function HomePage() {
                 {suggestingBeurteilung ? (
                   <><Spinner className="mr-2" size={14} /> Generiere...</>
                 ) : (
-                  '✨ Beurteilung vorschlagen'
+                  '✨ Zusammenfassung erstellen'
                 )}
               </button>
             </div>

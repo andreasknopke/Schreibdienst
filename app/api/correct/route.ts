@@ -3,6 +3,82 @@ import { formatDictionaryForPrompt, applyDictionary } from '@/lib/dictionary';
 
 export const runtime = 'nodejs';
 
+// LLM Provider configuration
+type LLMProvider = 'openai' | 'lmstudio';
+
+function getLLMConfig(): { provider: LLMProvider; baseUrl: string; apiKey: string; model: string } {
+  const provider = (process.env.LLM_PROVIDER || 'openai') as LLMProvider;
+  
+  if (provider === 'lmstudio') {
+    return {
+      provider: 'lmstudio',
+      baseUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
+      apiKey: 'lm-studio', // LM Studio doesn't require a real API key
+      model: process.env.LLM_STUDIO_MODEL || 'local-model'
+    };
+  }
+  
+  return {
+    provider: 'openai',
+    baseUrl: 'https://api.openai.com',
+    apiKey: process.env.OPENAI_API_KEY || '',
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini'
+  };
+}
+
+async function callLLM(
+  messages: { role: string; content: string }[],
+  options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}
+): Promise<{ content: string; tokens?: { input: number; output: number } }> {
+  const config = getLLMConfig();
+  const { temperature = 0.3, maxTokens = 2000, jsonMode = false } = options;
+  
+  if (config.provider === 'openai' && !config.apiKey) {
+    throw new Error('OPENAI_API_KEY not configured');
+  }
+  
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  
+  // Only add Authorization header for OpenAI (LM Studio doesn't need it)
+  if (config.provider === 'openai') {
+    headers['Authorization'] = `Bearer ${config.apiKey}`;
+  }
+  
+  const body: any = {
+    model: config.model,
+    messages,
+    temperature,
+    max_tokens: maxTokens,
+  };
+  
+  // JSON mode only for OpenAI (LM Studio may not support it)
+  if (jsonMode && config.provider === 'openai') {
+    body.response_format = { type: 'json_object' };
+  }
+  
+  console.log(`[LLM] Provider: ${config.provider}, Model: ${config.model}, Temperature: ${temperature}${jsonMode ? ', JSON mode' : ''}`);
+  
+  const res = await fetch(`${config.baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[LLM] ${config.provider} API error:`, res.status, errorText);
+    throw new Error(`${config.provider} API error (${res.status}): ${errorText}`);
+  }
+  
+  const data = await res.json();
+  const content = data.choices?.[0]?.message?.content?.trim() || '';
+  const tokens = data.usage ? { input: data.usage.prompt_tokens, output: data.usage.completion_tokens } : undefined;
+  
+  return { content, tokens };
+}
+
 const SYSTEM_PROMPT = `Du bist ein medizinischer Diktat-Assistent mit Expertise in medizinischer Fachterminologie. Deine Aufgabe ist es, diktierte medizinische Texte zu korrigieren und Sprachbefehle auszuführen.
 
 WICHTIG - MEDIZINISCHE FACHBEGRIFFE:
@@ -91,8 +167,9 @@ BEISPIEL-FORMAT:
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
+    // Validate LLM configuration
+    const llmConfig = getLLMConfig();
+    if (llmConfig.provider === 'openai' && !llmConfig.apiKey) {
       return NextResponse.json({ error: 'Server misconfigured: OPENAI_API_KEY missing' }, { status: 500 });
     }
 
@@ -130,38 +207,26 @@ export async function POST(req: Request) {
         ? `Erstelle eine Beurteilung basierend auf folgenden Informationen:\n\nMethodik:\n"""${methodik}"""\n\nBefund:\n"""${befund}"""`
         : `Erstelle eine Beurteilung basierend auf folgendem Befund:\n\n"""${befund}"""`;
 
-      console.log(`[LLM] Model: gpt-4o-mini, Mode: Suggest Beurteilung, Temperature: 0.3`);
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
+      try {
+        const result = await callLLM(
+          [
             { role: 'system', content: BEURTEILUNG_SUGGEST_PROMPT },
             { role: 'user', content: userMessage }
           ],
-          temperature: 0.3,
-          max_tokens: 500,
-        }),
-      });
+          { temperature: 0.3, maxTokens: 500 }
+        );
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('OpenAI API error:', res.status, errorText);
-        return NextResponse.json({ error: 'OpenAI API error', details: errorText }, { status: res.status });
+        const suggestedBeurteilung = result.content;
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        const tokens = result.tokens ? `${result.tokens.input}/${result.tokens.output}` : 'unknown';
+        console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}, Output: ${suggestedBeurteilung.length} chars`);
+        console.log('=== LLM Correction Complete ===\n');
+
+        return NextResponse.json({ suggestedBeurteilung });
+      } catch (error: any) {
+        console.error('LLM API error:', error.message);
+        return NextResponse.json({ error: 'LLM API error', details: error.message }, { status: 500 });
       }
-
-      const data = await res.json();
-      const suggestedBeurteilung = data.choices?.[0]?.message?.content?.trim() || '';
-      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      const tokens = data.usage ? `${data.usage.prompt_tokens}/${data.usage.completion_tokens}` : 'unknown';
-      console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}, Output: ${suggestedBeurteilung.length} chars`);
-      console.log('=== LLM Correction Complete ===\n');
-
-      return NextResponse.json({ suggestedBeurteilung });
     }
     
     // Befund-Modus: Drei Felder korrigieren
@@ -196,58 +261,45 @@ Beurteilung:
 
 Antworte NUR mit dem JSON-Objekt.`;
 
-      console.log(`[LLM] Model: gpt-4o-mini, Mode: Befund fields, Temperature: 0.3, Response format: JSON`);
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
+      try {
+        const result = await callLLM(
+          [
             { role: 'system', content: enhancedBefundPrompt },
             { role: 'user', content: userMessage }
           ],
-          temperature: 0.3,
-          max_tokens: 4000,
-          response_format: { type: 'json_object' }
-        }),
-      });
+          { temperature: 0.3, maxTokens: 4000, jsonMode: true }
+        );
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('OpenAI API error:', res.status, errorText);
-        return NextResponse.json({ error: 'OpenAI API error', details: errorText }, { status: res.status });
-      }
-
-      const data = await res.json();
-      const responseText = data.choices?.[0]?.message?.content?.trim() || '{}';
-      
-      try {
-        const correctedFields = JSON.parse(responseText) as BefundFields;
-        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-        const tokens = data.usage ? `${data.usage.prompt_tokens}/${data.usage.completion_tokens}` : 'unknown';
-        const outputLengths = {
-          methodik: correctedFields.methodik?.length || 0,
-          befund: correctedFields.befund?.length || 0,
-          beurteilung: correctedFields.beurteilung?.length || 0
-        };
-        const totalOutput = outputLengths.methodik + outputLengths.befund + outputLengths.beurteilung;
-        console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}`);
-        console.log(`[Output] Methodik: ${outputLengths.methodik} chars, Befund: ${outputLengths.befund} chars, Beurteilung: ${outputLengths.beurteilung} chars, Total: ${totalOutput} chars`);
-        console.log('=== LLM Correction Complete ===\n');
-        return NextResponse.json({ 
-          befundFields: {
-            methodik: correctedFields.methodik || befundFields.methodik || '',
-            befund: correctedFields.befund || befundFields.befund || '',
-            beurteilung: correctedFields.beurteilung || befundFields.beurteilung || ''
-          }
-        });
-      } catch (parseError) {
-        console.error('[Error] JSON parse error:', parseError);
-        console.log('=== LLM Correction Failed ===\n');
-        return NextResponse.json({ befundFields });
+        const responseText = result.content || '{}';
+        
+        try {
+          const correctedFields = JSON.parse(responseText) as BefundFields;
+          const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+          const tokens = result.tokens ? `${result.tokens.input}/${result.tokens.output}` : 'unknown';
+          const outputLengths = {
+            methodik: correctedFields.methodik?.length || 0,
+            befund: correctedFields.befund?.length || 0,
+            beurteilung: correctedFields.beurteilung?.length || 0
+          };
+          const totalOutput = outputLengths.methodik + outputLengths.befund + outputLengths.beurteilung;
+          console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}`);
+          console.log(`[Output] Methodik: ${outputLengths.methodik} chars, Befund: ${outputLengths.befund} chars, Beurteilung: ${outputLengths.beurteilung} chars, Total: ${totalOutput} chars`);
+          console.log('=== LLM Correction Complete ===\n');
+          return NextResponse.json({ 
+            befundFields: {
+              methodik: correctedFields.methodik || befundFields.methodik || '',
+              befund: correctedFields.befund || befundFields.befund || '',
+              beurteilung: correctedFields.beurteilung || befundFields.beurteilung || ''
+            }
+          });
+        } catch (parseError) {
+          console.error('[Error] JSON parse error:', parseError);
+          console.log('=== LLM Correction Failed ===\n');
+          return NextResponse.json({ befundFields });
+        }
+      } catch (error: any) {
+        console.error('LLM API error:', error.message);
+        return NextResponse.json({ error: 'LLM API error', details: error.message }, { status: 500 });
       }
     }
     
@@ -267,38 +319,26 @@ Antworte NUR mit dem JSON-Objekt.`;
       ? `Bisheriger korrigierter Text:\n"""${previousCorrectedText}"""\n\nNeuer diktierter Text zum Korrigieren und Anfügen:\n"""${text}"""\n\nGib den vollständigen korrigierten Text zurück (bisheriger + neuer Text).`
       : `Korrigiere den folgenden diktierten Text:\n"""${text}"""`;
 
-    console.log(`[LLM] Model: gpt-4o-mini, Mode: Standard text, Temperature: 0.3`);
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
+    try {
+      const result = await callLLM(
+        [
           { role: 'system', content: enhancedSystemPrompt },
           { role: 'user', content: userMessage }
         ],
-        temperature: 0.3,
-        max_tokens: 2000,
-      }),
-    });
+        { temperature: 0.3, maxTokens: 2000 }
+      );
 
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error('OpenAI API error:', res.status, errorText);
-      return NextResponse.json({ error: 'OpenAI API error', details: errorText }, { status: res.status });
+      const correctedText = result.content || text;
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      const tokens = result.tokens ? `${result.tokens.input}/${result.tokens.output}` : 'unknown';
+      console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}, Output: ${correctedText.length} chars`);
+      console.log('=== LLM Correction Complete ===\n');
+
+      return NextResponse.json({ correctedText });
+    } catch (error: any) {
+      console.error('LLM API error:', error.message);
+      return NextResponse.json({ error: 'LLM API error', details: error.message }, { status: 500 });
     }
-
-    const data = await res.json();
-    const correctedText = data.choices?.[0]?.message?.content?.trim() || text;
-    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-    const tokens = data.usage ? `${data.usage.prompt_tokens}/${data.usage.completion_tokens}` : 'unknown';
-    console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}, Output: ${correctedText.length} chars`);
-    console.log('=== LLM Correction Complete ===\n');
-
-    return NextResponse.json({ correctedText });
   } catch (e: any) {
     console.error('[Error] Correction failed:', e.message);
     console.error('[Error] Stack:', e.stack);

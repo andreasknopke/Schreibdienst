@@ -22,9 +22,12 @@ async function transcribeWithWhisperX(file: Blob, filename: string) {
     const authUser = process.env.WHISPER_AUTH_USERNAME;
     const authPass = process.env.WHISPER_AUTH_PASSWORD;
     
-    // Debug: Log all WHISPER env vars
+    // Debug: Log all WHISPER env vars with their values
     const whisperEnvVars = Object.keys(process.env).filter(k => k.includes('WHISPER'));
     console.log(`[WhisperX Gradio] Available WHISPER env vars: ${whisperEnvVars.join(', ')}`);
+    console.log(`[WhisperX Gradio] WHISPER_AUTH_PASSWORD type: ${typeof process.env.WHISPER_AUTH_PASSWORD}`);
+    console.log(`[WhisperX Gradio] WHISPER_AUTH_PASSWORD value: "${process.env.WHISPER_AUTH_PASSWORD}"`);
+    console.log(`[WhisperX Gradio] WHISPER_AUTH_PASSWORD JSON: ${JSON.stringify(process.env.WHISPER_AUTH_PASSWORD)}`);
     
     // Step 1: Login to get session cookie
     console.log(`[WhisperX Gradio] Step 1: Logging in with user: ${authUser}, pass length: ${(authPass || '').length}`);

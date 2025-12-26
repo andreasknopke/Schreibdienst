@@ -60,9 +60,10 @@ try {
 
 // Start Next.js
 console.log('[Startup] Starting Next.js...');
-const nextProcess = spawn('npx', ['next', 'start'], {
+const nextProcess = spawn('npm', ['run', 'start:next'], {
   stdio: 'inherit',
-  env: process.env
+  env: process.env,
+  shell: true
 });
 
 nextProcess.on('close', (code) => {

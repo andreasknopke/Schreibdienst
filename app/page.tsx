@@ -290,6 +290,67 @@ export default function HomePage() {
     };
   }, []);
 
+  // Funktion zum Zurücksetzen aller Felder (New-Button) - hier oben für Hotkey-Unterstützung
+  const handleReset = useCallback(() => {
+    setTranscript('');
+    setMethodik('');
+    setBeurteilung('');
+    setActiveField('befund');
+    setError(null);
+  }, []);
+
+  // Hotkey-Unterstützung für Philips SpeechMike und andere Diktiermikrofone
+  // Konfigurieren Sie das SpeechMike im "Keyboard Mode" mit folgenden Tasten:
+  // - F9: Aufnahme starten/stoppen (Toggle)
+  // - F10: Aufnahme stoppen
+  // - F11: Alle Felder zurücksetzen (Neu)
+  // - Escape: Aufnahme abbrechen
+  const recordingRef = useRef(recording);
+  recordingRef.current = recording;
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignoriere Hotkeys wenn in Textfeldern
+      const activeElement = document.activeElement;
+      const isEditing = activeElement?.tagName === 'TEXTAREA' || activeElement?.tagName === 'INPUT';
+      if (isEditing) return;
+
+      switch (e.key) {
+        case 'F9':
+          e.preventDefault();
+          // Toggle Aufnahme
+          if (recordingRef.current) {
+            stopRecording();
+          } else {
+            startRecording();
+          }
+          break;
+        case 'F10':
+          e.preventDefault();
+          // Stoppe Aufnahme
+          if (recordingRef.current) {
+            stopRecording();
+          }
+          break;
+        case 'F11':
+          e.preventDefault();
+          // Neu (alle Felder löschen)
+          handleReset();
+          break;
+        case 'Escape':
+          e.preventDefault();
+          // Aufnahme abbrechen
+          if (recordingRef.current) {
+            stopRecording();
+          }
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [startRecording, stopRecording, handleReset]);
+
   async function startRecording() {
     setError(null);
     // Bestehenden Text behalten
@@ -731,15 +792,6 @@ export default function HomePage() {
 
   // Ref für den Mikrofon-Button
   const recordButtonRef = useRef<HTMLButtonElement>(null);
-
-  // Funktion zum Zurücksetzen aller Felder (New-Button)
-  const handleReset = useCallback(() => {
-    setTranscript('');
-    setMethodik('');
-    setBeurteilung('');
-    setActiveField('befund');
-    setError(null);
-  }, []);
 
   // Globaler Click-Handler: Klick auf nicht-interaktive Bereiche → Mikrofon-Button
   const handleGlobalClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {

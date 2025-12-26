@@ -195,12 +195,10 @@ export async function POST(req: Request) {
     };
     
     // Load dictionary for this user
-    if (username) {
-      await loadDictionary(username);
-    }
+    const dictionary = username ? await loadDictionary(username) : { entries: [] };
     
     // Get user's dictionary for personalized corrections
-    const dictionaryPrompt = username ? await formatDictionaryForPrompt(username) : '';
+    const dictionaryPrompt = formatDictionaryForPrompt(dictionary.entries);
     
     // Combine system prompt with dictionary
     const enhancedSystemPrompt = dictionaryPrompt 

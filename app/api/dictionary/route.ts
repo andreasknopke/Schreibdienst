@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addEntry, removeEntry, getEntries } from '@/lib/dictionary';
-import { authenticateUser } from '@/lib/users';
+import { addEntry, removeEntry, getEntries } from '@/lib/dictionaryDb';
+import { authenticateUser } from '@/lib/usersDb';
 
 // Extract username from auth header
-function getAuthenticatedUser(authHeader: string | null): string | null {
+async function getAuthenticatedUser(authHeader: string | null): Promise<string | null> {
   if (!authHeader || !authHeader.startsWith('Basic ')) {
     return null;
   }
@@ -11,7 +11,7 @@ function getAuthenticatedUser(authHeader: string | null): string | null {
   try {
     const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
     const [username, password] = credentials.split(':');
-    const result = authenticateUser(username, password);
+    const result = await authenticateUser(username, password);
     
     if (result.success && result.user) {
       return result.user.username;
@@ -27,13 +27,13 @@ function getAuthenticatedUser(authHeader: string | null): string | null {
 export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('Authorization');
-    const username = getAuthenticatedUser(authHeader);
+    const username = await getAuthenticatedUser(authHeader);
     
     if (!username) {
       return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
     }
 
-    const entries = getEntries(username);
+    const entries = await getEntries(username);
     return NextResponse.json({ entries });
   } catch (error) {
     console.error('[Dictionary GET] Error:', error);
@@ -43,14 +43,14 @@ export async function GET(request: NextRequest) {
 
 // POST /api/dictionary - Add entry to dictionary
 export async function POST(request: NextRequest) {
-  const authHeader = request.headers.get('Authorization');
-  const username = getAuthenticatedUser(authHeader);
-  
-  if (!username) {
-    return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
-  }
-
   try {
+    const authHeader = request.headers.get('Authorization');
+    const username = await getAuthenticatedUser(authHeader);
+    
+    if (!username) {
+      return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { wrong, correct } = body;
     
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Beide Felder müssen ausgefüllt sein' }, { status: 400 });
     }
     
-    const result = addEntry(username, wrong, correct);
+    const result = await addEntry(username, wrong, correct);
     
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Eintrag hinzugefügt' });
@@ -73,14 +73,14 @@ export async function POST(request: NextRequest) {
 
 // DELETE /api/dictionary - Remove entry from dictionary
 export async function DELETE(request: NextRequest) {
-  const authHeader = request.headers.get('Authorization');
-  const username = getAuthenticatedUser(authHeader);
-  
-  if (!username) {
-    return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
-  }
-
   try {
+    const authHeader = request.headers.get('Authorization');
+    const username = await getAuthenticatedUser(authHeader);
+    
+    if (!username) {
+      return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { wrong } = body;
     
@@ -88,7 +88,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Kein Wort zum Löschen angegeben' }, { status: 400 });
     }
     
-    const result = removeEntry(username, wrong);
+    const result = await removeEntry(username, wrong);
     
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Eintrag gelöscht' });

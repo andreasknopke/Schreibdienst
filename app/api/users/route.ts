@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createUser, deleteUser, changePassword, listUsers, authenticateUser } from '@/lib/users';
+import { createUser, deleteUser, changePassword, listUsers, authenticateUser } from '@/lib/usersDb';
 
 // Middleware to check if request is from admin
-function isAdmin(authHeader: string | null): { valid: boolean; username?: string } {
+async function isAdmin(authHeader: string | null): Promise<{ valid: boolean; username?: string }> {
   if (!authHeader || !authHeader.startsWith('Basic ')) {
     return { valid: false };
   }
@@ -10,7 +10,7 @@ function isAdmin(authHeader: string | null): { valid: boolean; username?: string
   try {
     const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
     const [username, password] = credentials.split(':');
-    const result = authenticateUser(username, password);
+    const result = await authenticateUser(username, password);
     
     if (result.success && result.user?.isAdmin) {
       return { valid: true, username: result.user.username };
@@ -25,13 +25,13 @@ function isAdmin(authHeader: string | null): { valid: boolean; username?: string
 // GET /api/users - List all users (admin only)
 export async function GET(request: NextRequest) {
   try {
-    const auth = isAdmin(request.headers.get('Authorization'));
+    const auth = await isAdmin(request.headers.get('Authorization'));
     
     if (!auth.valid) {
       return NextResponse.json({ error: 'Nur für Administratoren' }, { status: 403 });
     }
 
-    const users = listUsers();
+    const users = await listUsers();
     return NextResponse.json({ users });
   } catch (error) {
     console.error('[Users GET] Error:', error);
@@ -41,16 +41,16 @@ export async function GET(request: NextRequest) {
 
 // POST /api/users - Create a new user (admin only)
 export async function POST(request: NextRequest) {
-  const auth = isAdmin(request.headers.get('Authorization'));
-  
-  if (!auth.valid) {
-    return NextResponse.json({ error: 'Nur für Administratoren' }, { status: 403 });
-  }
-
   try {
+    const auth = await isAdmin(request.headers.get('Authorization'));
+    
+    if (!auth.valid) {
+      return NextResponse.json({ error: 'Nur für Administratoren' }, { status: 403 });
+    }
+
     const { username, password, isAdmin: makeAdmin = false } = await request.json();
     
-    const result = createUser(username, password, makeAdmin, auth.username!);
+    const result = await createUser(username, password, makeAdmin, auth.username!);
     
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Benutzer erstellt' });
@@ -64,16 +64,16 @@ export async function POST(request: NextRequest) {
 
 // DELETE /api/users - Delete a user (admin only)
 export async function DELETE(request: NextRequest) {
-  const auth = isAdmin(request.headers.get('Authorization'));
-  
-  if (!auth.valid) {
-    return NextResponse.json({ error: 'Nur für Administratoren' }, { status: 403 });
-  }
-
   try {
+    const auth = await isAdmin(request.headers.get('Authorization'));
+    
+    if (!auth.valid) {
+      return NextResponse.json({ error: 'Nur für Administratoren' }, { status: 403 });
+    }
+
     const { username } = await request.json();
     
-    const result = deleteUser(username);
+    const result = await deleteUser(username);
     
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Benutzer gelöscht' });
@@ -87,16 +87,16 @@ export async function DELETE(request: NextRequest) {
 
 // PATCH /api/users - Change user password (admin only)
 export async function PATCH(request: NextRequest) {
-  const auth = isAdmin(request.headers.get('Authorization'));
-  
-  if (!auth.valid) {
-    return NextResponse.json({ error: 'Nur für Administratoren' }, { status: 403 });
-  }
-
   try {
+    const auth = await isAdmin(request.headers.get('Authorization'));
+    
+    if (!auth.valid) {
+      return NextResponse.json({ error: 'Nur für Administratoren' }, { status: 403 });
+    }
+
     const { username, newPassword } = await request.json();
     
-    const result = changePassword(username, newPassword);
+    const result = await changePassword(username, newPassword);
     
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Passwort geändert' });

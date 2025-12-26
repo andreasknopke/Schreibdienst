@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateUser } from '@/lib/users';
-import { getRuntimeConfig, saveRuntimeConfig, type RuntimeConfig } from '@/lib/runtimeConfig';
+import { authenticateUser } from '@/lib/usersDb';
+import { getRuntimeConfig, saveRuntimeConfig, type RuntimeConfig } from '@/lib/configDb';
 
 // Authenticate admin user
-function getAuthenticatedAdmin(authHeader: string | null): boolean {
+async function getAuthenticatedAdmin(authHeader: string | null): Promise<boolean> {
   if (!authHeader || !authHeader.startsWith('Basic ')) {
     return false;
   }
@@ -11,7 +11,7 @@ function getAuthenticatedAdmin(authHeader: string | null): boolean {
   try {
     const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
     const [username, password] = credentials.split(':');
-    const result = authenticateUser(username, password);
+    const result = await authenticateUser(username, password);
     
     // Only admins can change config
     if (result.success && result.user?.isAdmin) {
@@ -26,7 +26,7 @@ function getAuthenticatedAdmin(authHeader: string | null): boolean {
 
 // GET /api/config - Get current config (any authenticated user)
 export async function GET() {
-  const config = getRuntimeConfig();
+  const config = await getRuntimeConfig();
   
   // Return config with environment info
   const envInfo = {
@@ -82,7 +82,7 @@ function getAvailableLLMProviders(envInfo: any): { id: string; name: string; ava
 
 // POST /api/config - Update config (admin only)
 export async function POST(request: NextRequest) {
-  const isAdmin = getAuthenticatedAdmin(request.headers.get('Authorization'));
+  const isAdmin = await getAuthenticatedAdmin(request.headers.get('Authorization'));
   
   if (!isAdmin) {
     return NextResponse.json({ success: false, error: 'Nur Administratoren können die Konfiguration ändern' }, { status: 403 });
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const currentConfig = getRuntimeConfig();
+    const currentConfig = await getRuntimeConfig();
     
     // Validate and merge
     const newConfig: RuntimeConfig = {
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
       newConfig.openaiModel = body.openaiModel;
     }
     
-    saveRuntimeConfig(newConfig);
+    await saveRuntimeConfig(newConfig);
     
     return NextResponse.json({ success: true, config: newConfig });
   } catch (error) {

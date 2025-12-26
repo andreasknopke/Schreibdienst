@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getRuntimeConfig } from '@/lib/runtimeConfig';
+import { getRuntimeConfig } from '@/lib/configDb';
 
 export const runtime = 'nodejs';
 
@@ -249,7 +249,7 @@ export async function POST(request: Request) {
     const requestStart = Date.now();
 
     // Provider-Auswahl aus Runtime-Konfiguration
-    const runtimeConfig = getRuntimeConfig();
+    const runtimeConfig = await getRuntimeConfig();
     const provider = runtimeConfig.transcriptionProvider;
     console.log(`[Config] Provider: ${provider} (from runtime config)`);
     

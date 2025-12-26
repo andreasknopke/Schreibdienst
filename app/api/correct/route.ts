@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server';
-import { formatDictionaryForPrompt, applyDictionary } from '@/lib/dictionary';
-import { getRuntimeConfig } from '@/lib/runtimeConfig';
+import { formatDictionaryForPrompt, applyDictionary, loadDictionary } from '@/lib/dictionaryDb';
+import { getRuntimeConfig } from '@/lib/configDb';
 
 export const runtime = 'nodejs';
 
 // LLM Provider configuration
 type LLMProvider = 'openai' | 'lmstudio';
 
-function getLLMConfig(): { provider: LLMProvider; baseUrl: string; apiKey: string; model: string } {
-  const runtimeConfig = getRuntimeConfig();
+async function getLLMConfig(): Promise<{ provider: LLMProvider; baseUrl: string; apiKey: string; model: string }> {
+  const runtimeConfig = await getRuntimeConfig();
   const provider = runtimeConfig.llmProvider;
   
   if (provider === 'lmstudio') {
@@ -178,7 +178,7 @@ BEISPIEL-FORMAT:
 export async function POST(req: Request) {
   try {
     // Validate LLM configuration
-    const llmConfig = getLLMConfig();
+    const llmConfig = await getLLMConfig();
     if (llmConfig.provider === 'openai' && !llmConfig.apiKey) {
       return NextResponse.json({ error: 'Server misconfigured: OPENAI_API_KEY missing' }, { status: 500 });
     }
@@ -194,8 +194,13 @@ export async function POST(req: Request) {
       username?: string;
     };
     
+    // Load dictionary for this user
+    if (username) {
+      await loadDictionary(username);
+    }
+    
     // Get user's dictionary for personalized corrections
-    const dictionaryPrompt = username ? formatDictionaryForPrompt(username) : '';
+    const dictionaryPrompt = username ? await formatDictionaryForPrompt(username) : '';
     
     // Combine system prompt with dictionary
     const enhancedSystemPrompt = dictionaryPrompt 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateUser } from '@/lib/users';
+import { authenticateUser } from '@/lib/usersDb';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Passwort erforderlich" }, { status: 400 });
     }
 
-    const result = authenticateUser(username.trim(), password);
+    const result = await authenticateUser(username.trim(), password);
     
     if (result.success && result.user) {
       return NextResponse.json({ 
@@ -24,7 +24,8 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ success: false, error: result.error || "Falsches Passwort" }, { status: 401 });
-  } catch {
+  } catch (error) {
+    console.error('[Auth] Error:', error);
     return NextResponse.json({ success: false, error: "Ungültige Anfrage" }, { status: 400 });
   }
 }

@@ -87,7 +87,11 @@ async function transcribeWithWhisperX(file: Blob, filename: string) {
       meta: { _type: 'gradio.FileData' }
     };
     
-    const whisperModel = process.env.WHISPER_MODEL || 'large-v3';
+    let whisperModel = process.env.WHISPER_MODEL || 'large-v3';
+    // Use optimized German model for large-v3
+    if (whisperModel === 'large-v3') {
+      whisperModel = 'cstr/whisper-large-v3-turbo-german-int8_float32';
+    }
     
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
       method: 'POST',

@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUser } from '@/lib/usersDb';
 import { getRuntimeConfig, saveRuntimeConfig, type RuntimeConfig } from '@/lib/configDb';
 
-// Authenticate admin user
-async function getAuthenticatedAdmin(authHeader: string | null): Promise<boolean> {
+// Authenticate root user only
+async function getAuthenticatedRoot(authHeader: string | null): Promise<boolean> {
   if (!authHeader || !authHeader.startsWith('Basic ')) {
     return false;
   }
@@ -11,12 +11,14 @@ async function getAuthenticatedAdmin(authHeader: string | null): Promise<boolean
   try {
     const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
     const [username, password] = credentials.split(':');
-    const result = await authenticateUser(username, password);
     
-    // Only admins can change config
-    if (result.success && result.user?.isAdmin) {
-      return true;
+    // Only root user can change system config
+    if (username.toLowerCase() !== 'root') {
+      return false;
     }
+    
+    const result = await authenticateUser(username, password);
+    return result.success;
   } catch {
     // Invalid auth header
   }
@@ -80,12 +82,12 @@ function getAvailableLLMProviders(envInfo: any): { id: string; name: string; ava
   ];
 }
 
-// POST /api/config - Update config (admin only)
+// POST /api/config - Update config (root only)
 export async function POST(request: NextRequest) {
-  const isAdmin = await getAuthenticatedAdmin(request.headers.get('Authorization'));
+  const isRoot = await getAuthenticatedRoot(request.headers.get('Authorization'));
   
-  if (!isAdmin) {
-    return NextResponse.json({ success: false, error: 'Nur Administratoren können die Konfiguration ändern' }, { status: 403 });
+  if (!isRoot) {
+    return NextResponse.json({ success: false, error: 'Nur der root-Benutzer kann die System-Konfiguration ändern' }, { status: 403 });
   }
 
   try {

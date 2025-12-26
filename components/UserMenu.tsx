@@ -49,7 +49,7 @@ export default function UserMenu() {
     document.body
   ) : null;
 
-  const configModal = showConfig && mounted ? createPortal(
+  const configModal = showConfig && username?.toLowerCase() === 'root' && mounted ? createPortal(
     <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
       <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-lg w-full my-8 flex flex-col max-h-[calc(100vh-4rem)]">
         <div className="flex items-center justify-between p-4 border-b dark:border-gray-700 flex-shrink-0">
@@ -58,7 +58,7 @@ export default function UserMenu() {
               <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
               <circle cx="12" cy="12" r="3"/>
             </svg>
-            Einstellungen
+            System-Einstellungen
           </h2>
           <button
             onClick={() => setShowConfig(false)}
@@ -117,13 +117,16 @@ export default function UserMenu() {
         >
           Wörterbuch
         </button>
-        <button
-          onClick={() => setShowConfig(!showConfig)}
-          className="text-xs text-purple-600 hover:text-purple-700 px-2 py-1 rounded hover:bg-purple-50 dark:hover:bg-purple-900/20"
-          title="Einstellungen"
-        >
-          ⚙️
-        </button>
+        {/* Config only visible for root user */}
+        {username?.toLowerCase() === 'root' && (
+          <button
+            onClick={() => setShowConfig(!showConfig)}
+            className="text-xs text-purple-600 hover:text-purple-700 px-2 py-1 rounded hover:bg-purple-50 dark:hover:bg-purple-900/20"
+            title="System-Einstellungen (nur root)"
+          >
+            ⚙️
+          </button>
+        )}
         {isAdmin && (
           <button
             onClick={() => setShowUserManagement(!showUserManagement)}

@@ -26,7 +26,8 @@ interface EnvInfo {
 }
 
 export default function ConfigPanel() {
-  const { getAuthHeader, isAdmin } = useAuth();
+  const { getAuthHeader, username } = useAuth();
+  const isRoot = username?.toLowerCase() === 'root';
   const [config, setConfig] = useState<RuntimeConfig | null>(null);
   const [envInfo, setEnvInfo] = useState<EnvInfo | null>(null);
   const [transcriptionProviders, setTranscriptionProviders] = useState<ProviderOption[]>([]);
@@ -56,8 +57,8 @@ export default function ConfigPanel() {
   }, []);
 
   const updateConfig = async (updates: Partial<RuntimeConfig>) => {
-    if (!isAdmin) {
-      setError('Nur Administratoren können die Konfiguration ändern');
+    if (!isRoot) {
+      setError('Nur der root-Benutzer kann die System-Konfiguration ändern');
       return;
     }
 
@@ -137,12 +138,6 @@ export default function ConfigPanel() {
         </div>
       )}
 
-      {!isAdmin && (
-        <div className="text-sm text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 rounded-lg">
-          ⚠️ Nur Administratoren können die Konfiguration ändern
-        </div>
-      )}
-
       {/* Transkriptions-Provider */}
       <div className="space-y-3">
         <h4 className="font-medium text-sm flex items-center gap-2">
@@ -159,7 +154,7 @@ export default function ConfigPanel() {
                   ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' 
                   : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}
                 ${!provider.available ? 'opacity-50 cursor-not-allowed' : ''}
-                ${!isAdmin ? 'pointer-events-none' : ''}
+                ${!isRoot ? 'pointer-events-none' : ''}
               `}
             >
               <input
@@ -168,7 +163,7 @@ export default function ConfigPanel() {
                 value={provider.id}
                 checked={config.transcriptionProvider === provider.id}
                 onChange={() => updateConfig({ transcriptionProvider: provider.id as any })}
-                disabled={!provider.available || !isAdmin || saving}
+                disabled={!provider.available || !isRoot || saving}
                 className="w-4 h-4 text-blue-600"
               />
               <div className="flex-1">
@@ -196,7 +191,7 @@ export default function ConfigPanel() {
             <select
               value={config.whisperModel || 'medium'}
               onChange={(e) => updateConfig({ whisperModel: e.target.value as any })}
-              disabled={!isAdmin || saving}
+              disabled={!isRoot || saving}
               className="input text-sm w-full max-w-xs"
             >
               {whisperModels.map((model) => (
@@ -225,7 +220,7 @@ export default function ConfigPanel() {
                   ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' 
                   : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}
                 ${!provider.available ? 'opacity-50 cursor-not-allowed' : ''}
-                ${!isAdmin ? 'pointer-events-none' : ''}
+                ${!isRoot ? 'pointer-events-none' : ''}
               `}
             >
               <input
@@ -234,7 +229,7 @@ export default function ConfigPanel() {
                 value={provider.id}
                 checked={config.llmProvider === provider.id}
                 onChange={() => updateConfig({ llmProvider: provider.id as any })}
-                disabled={!provider.available || !isAdmin || saving}
+                disabled={!provider.available || !isRoot || saving}
                 className="w-4 h-4 text-blue-600"
               />
               <div className="flex-1">
@@ -262,7 +257,7 @@ export default function ConfigPanel() {
             <select
               value={config.openaiModel || 'gpt-4o-mini'}
               onChange={(e) => updateConfig({ openaiModel: e.target.value })}
-              disabled={!isAdmin || saving}
+              disabled={!isRoot || saving}
               className="input text-sm w-full max-w-xs"
             >
               {openaiModels.map((model) => (

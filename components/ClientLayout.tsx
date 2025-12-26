@@ -1,5 +1,7 @@
 "use client";
 import { ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { AuthProvider, useAuth } from '@/components/AuthProvider';
 import ThemeToggle from '@/components/ThemeToggle';
 import VoiceAgentButton from '@/components/VoiceAgentButton';
@@ -8,6 +10,7 @@ import LoginForm from '@/components/LoginForm';
 
 function LayoutContent({ children }: { children: ReactNode }) {
   const { isLoggedIn } = useAuth();
+  const pathname = usePathname();
 
   if (!isLoggedIn) {
     return (
@@ -53,6 +56,31 @@ function LayoutContent({ children }: { children: ReactNode }) {
             <VoiceAgentButton />
             <ThemeToggle />
           </nav>
+        </div>
+        {/* Mode Navigation Tabs */}
+        <div className="max-w-2xl mx-auto px-3 pb-2">
+          <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+            <Link
+              href="/"
+              className={`flex-1 py-1.5 px-3 text-center text-sm font-medium rounded-md transition-all ${
+                pathname === '/'
+                  ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+              }`}
+            >
+              🎤 Live-Diktat
+            </Link>
+            <Link
+              href="/offline"
+              className={`flex-1 py-1.5 px-3 text-center text-sm font-medium rounded-md transition-all ${
+                pathname === '/offline'
+                  ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+              }`}
+            >
+              📁 Offline-Diktat
+            </Link>
+          </div>
         </div>
       </header>
       <main className="max-w-2xl mx-auto px-3 py-4">{children}</main>

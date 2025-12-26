@@ -1,7 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 
-const CONFIG_FILE = path.join(process.cwd(), 'cache', 'runtime-config.json');
+// Use DATA_DIR env var if set (for Railway volume), otherwise use cache/
+const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'cache');
+const CONFIG_FILE = path.join(DATA_DIR, 'runtime-config.json');
 
 // Verfügbare Provider
 export interface RuntimeConfig {

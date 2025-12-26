@@ -1,7 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 
-const DICTIONARIES_DIR = path.join(process.cwd(), 'cache', 'dictionaries');
+// Use DATA_DIR env var if set (for Railway volume), otherwise use cache/
+const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'cache');
+const DICTIONARIES_DIR = path.join(DATA_DIR, 'dictionaries');
 
 export interface DictionaryEntry {
   wrong: string;       // Falsch erkanntes Wort

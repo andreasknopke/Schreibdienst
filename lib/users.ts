@@ -2,8 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
-const USERS_FILE = path.join(process.cwd(), 'cache', 'users.json');
-const CACHE_DIR = path.join(process.cwd(), 'cache');
+// Use DATA_DIR env var if set (for Railway volume), otherwise use cache/
+const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'cache');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const CACHE_DIR = DATA_DIR;
 
 export interface User {
   username: string;

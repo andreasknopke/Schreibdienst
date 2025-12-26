@@ -16,46 +16,24 @@ async function transcribeWithWhisperX(file: Blob, filename: string) {
   const isGradio = whisperUrl.includes(':7860');
   
   if (isGradio) {
-    console.log(`[WhisperX] Detected Gradio interface (v5.x)`);
+    console.log(`[WhisperX] Detected Gradio interface`);
     
-    // Get auth credentials
+    // Get auth credentials (with workaround for env var names with trailing newlines)
     const authUser = process.env.WHISPER_AUTH_USERNAME;
-    const authPass = process.env.WHISPER_AUTH_PASSWORD;
+    let authPass = process.env.WHISPER_AUTH_PASSWORD;
     
-    // Debug: Log all WHISPER env vars with their values
-    const whisperEnvVars = Object.keys(process.env).filter(k => k.includes('WHISPER'));
-    console.log(`[WhisperX Gradio] Available WHISPER env vars: ${whisperEnvVars.join(', ')}`);
-    
-    // Debug: Log each var with its value and char codes
-    for (const key of whisperEnvVars) {
-      const val = process.env[key];
-      const keyChars = key.split('').map(c => c.charCodeAt(0)).join(',');
-      console.log(`[WhisperX Gradio] ${key} (chars: ${keyChars}) = "${val}" (length: ${(val||'').length})`);
-    }
-    
-    console.log(`[WhisperX Gradio] WHISPER_AUTH_PASSWORD type: ${typeof process.env.WHISPER_AUTH_PASSWORD}`);
-    console.log(`[WhisperX Gradio] WHISPER_AUTH_PASSWORD value: "${process.env.WHISPER_AUTH_PASSWORD}"`);
-    console.log(`[WhisperX Gradio] WHISPER_AUTH_PASSWORD JSON: ${JSON.stringify(process.env.WHISPER_AUTH_PASSWORD)}`);
-    
-    // Try to find the password by iterating
-    let foundPassword = '';
-    for (const key of whisperEnvVars) {
-      if (key.includes('PASSWORD')) {
-        foundPassword = process.env[key] || '';
-        console.log(`[WhisperX Gradio] Found password via iteration: "${foundPassword}" from key "${key}"`);
+    // Fallback: find password by iterating env vars (handles malformed var names)
+    if (!authPass) {
+      const whisperEnvVars = Object.keys(process.env).filter(k => k.includes('WHISPER'));
+      for (const key of whisperEnvVars) {
+        if (key.includes('PASSWORD')) {
+          authPass = process.env[key] || '';
+        }
       }
     }
     
-    // Use found password if direct access fails
-    const actualPassword = authPass || foundPassword;
-    console.log(`[WhisperX Gradio] Using password length: ${actualPassword.length}`);
-    
     // Step 1: Login to get session cookie
-    console.log(`[WhisperX Gradio] Step 1: Logging in with user: ${authUser}, pass length: ${(actualPassword || '').length}`);
-    console.log(`[WhisperX Gradio] Password first 3 chars: ${(actualPassword || '').substring(0, 3)}...`);
-    const loginBody = `username=${encodeURIComponent(authUser || '')}&password=${encodeURIComponent(actualPassword || '')}`;
-    console.log(`[WhisperX Gradio] Login URL: ${whisperUrl}/login`);
-    console.log(`[WhisperX Gradio] Login body: ${loginBody}`);
+    const loginBody = `username=${encodeURIComponent(authUser || '')}&password=${encodeURIComponent(authPass || '')}`;
     
     const loginRes = await fetch(`${whisperUrl}/login`, {
       method: 'POST',
@@ -67,17 +45,14 @@ async function transcribeWithWhisperX(file: Blob, filename: string) {
     
     if (!loginRes.ok) {
       const errorText = await loginRes.text();
-      console.log(`[WhisperX Gradio] Login failed - Status: ${loginRes.status}, Response: ${errorText}`);
       throw new Error(`Gradio login failed (${loginRes.status}): ${errorText}`);
     }
     
     // Get session cookie from response
     const setCookieHeader = loginRes.headers.get('set-cookie');
     const sessionCookie = setCookieHeader?.split(';')[0] || '';
-    console.log(`[WhisperX Gradio] Login successful, got session cookie`);
     
     // Step 2: Upload file
-    console.log(`[WhisperX Gradio] Step 2: Uploading file...`);
     const uploadFormData = new FormData();
     uploadFormData.append('files', file, filename);
     
@@ -95,15 +70,12 @@ async function transcribeWithWhisperX(file: Blob, filename: string) {
     }
     
     const uploadData = await uploadRes.json();
-    console.log(`[WhisperX Gradio] Upload response:`, JSON.stringify(uploadData));
     
     // uploadData is array of file info objects
     const uploadedFile = uploadData[0];
     const filePath = uploadedFile.path || uploadedFile;
-    console.log(`[WhisperX Gradio] File uploaded: ${filePath}`);
     
     // Step 3: Call start_process API
-    console.log(`[WhisperX Gradio] Step 3: Starting transcription...`);
     
     // Create FileData object as expected by Gradio
     const fileDataObj = {
@@ -115,7 +87,6 @@ async function transcribeWithWhisperX(file: Blob, filename: string) {
     };
     
     const whisperModel = process.env.WHISPER_MODEL || 'large-v3';
-    console.log(`[WhisperX Gradio] Using model: ${whisperModel}`);
     
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
       method: 'POST',
@@ -140,10 +111,8 @@ async function transcribeWithWhisperX(file: Blob, filename: string) {
     
     const processData = await processRes.json();
     const eventId = processData.event_id;
-    console.log(`[WhisperX Gradio] Process queued, event_id: ${eventId}`);
     
     // Step 4: Poll for result using SSE endpoint
-    console.log(`[WhisperX Gradio] Step 4: Waiting for result...`);
     
     const resultRes = await fetch(`${whisperUrl}/gradio_api/call/start_process/${eventId}`, {
       headers: {
@@ -158,7 +127,6 @@ async function transcribeWithWhisperX(file: Blob, filename: string) {
     
     // Parse SSE response
     const resultText = await resultRes.text();
-    console.log(`[WhisperX Gradio] Raw result:`, resultText.substring(0, 500));
     
     // SSE format: "event: complete\ndata: [...]"
     const dataMatch = resultText.match(/data:\s*(\[.*\])/s);

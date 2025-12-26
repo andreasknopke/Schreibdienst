@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createUser, deleteUser, changePassword, listUsers, authenticateUser } from '@/lib/usersDb';
+import { createUser, deleteUser, changePassword, listUsers, authenticateUser, updateUserPermissions } from '@/lib/usersDb';
 
 // Middleware to check if request is from admin
 async function isAdmin(authHeader: string | null): Promise<{ valid: boolean; username?: string }> {
@@ -48,9 +48,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Nur für Administratoren' }, { status: 403 });
     }
 
-    const { username, password, isAdmin: makeAdmin = false } = await request.json();
+    const { username, password, isAdmin: makeAdmin = false, canViewAllDictations = false } = await request.json();
     
-    const result = await createUser(username, password, makeAdmin, auth.username!);
+    const result = await createUser(username, password, makeAdmin, auth.username!, canViewAllDictations);
     
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Benutzer erstellt' });
@@ -85,7 +85,7 @@ export async function DELETE(request: NextRequest) {
   }
 }
 
-// PATCH /api/users - Change user password (admin only)
+// PATCH /api/users - Change user password or permissions (admin only)
 export async function PATCH(request: NextRequest) {
   try {
     const auth = await isAdmin(request.headers.get('Authorization'));
@@ -94,8 +94,20 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Nur für Administratoren' }, { status: 403 });
     }
 
-    const { username, newPassword } = await request.json();
+    const { username, newPassword, permissions } = await request.json();
     
+    // If permissions update
+    if (permissions) {
+      const result = await updateUserPermissions(username, permissions);
+      
+      if (result.success) {
+        return NextResponse.json({ success: true, message: 'Berechtigungen aktualisiert' });
+      }
+      
+      return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+    }
+    
+    // Password change
     const result = await changePassword(username, newPassword);
     
     if (result.success) {

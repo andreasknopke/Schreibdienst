@@ -119,6 +119,28 @@ export async function getUserDictations(username: string): Promise<Omit<OfflineD
   );
 }
 
+// Get all dictations (for users with view all permission)
+export async function getAllDictations(statusFilter?: DictationStatus): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
+  const whereClause = statusFilter ? `WHERE status = ?` : '';
+  const params = statusFilter ? [statusFilter] : [];
+  
+  return query(
+    `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
+            priority, status, mode, transcript, methodik, befund, beurteilung, corrected_text, error_message,
+            created_at, processing_started_at, completed_at
+     FROM offline_dictations 
+     ${whereClause}
+     ORDER BY 
+       CASE priority 
+         WHEN 'stat' THEN 1 
+         WHEN 'urgent' THEN 2 
+         ELSE 3 
+       END,
+       created_at DESC`,
+    params
+  );
+}
+
 // Get all pending dictations for processing (worker)
 export async function getPendingDictations(limit: number = 10): Promise<OfflineDictation[]> {
   // Note: LIMIT must be embedded directly as mysql2 has issues with parameterized LIMIT

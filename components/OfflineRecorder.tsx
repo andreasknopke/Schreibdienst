@@ -36,11 +36,13 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
   const [error, setError] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  const [undoMessage, setUndoMessage] = useState<string | null>(null);
   
   // Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const deletedChunksRef = useRef<Blob[]>([]); // For redo functionality
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -173,6 +175,39 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
     }
   };
 
+  // Rewind - delete last few seconds of recording (during pause)
+  const rewindRecording = (seconds: number = 5) => {
+    if (!isPaused || chunksRef.current.length === 0) return;
+    
+    // Each chunk is ~1 second (from start(1000))
+    const chunksToRemove = Math.min(seconds, chunksRef.current.length);
+    
+    // Save removed chunks for redo
+    const removedChunks = chunksRef.current.splice(-chunksToRemove);
+    deletedChunksRef.current = [...removedChunks, ...deletedChunksRef.current];
+    
+    // Update duration
+    setDuration(d => Math.max(0, d - chunksToRemove));
+    
+    setUndoMessage(`${chunksToRemove}s gelöscht`);
+    setTimeout(() => setUndoMessage(null), 2000);
+  };
+
+  // Redo - restore deleted chunks
+  const redoRecording = () => {
+    if (deletedChunksRef.current.length === 0) return;
+    
+    // Restore up to 5 seconds
+    const chunksToRestore = deletedChunksRef.current.splice(0, 5);
+    chunksRef.current.push(...chunksToRestore);
+    
+    // Update duration
+    setDuration(d => d + chunksToRestore.length);
+    
+    setUndoMessage(`${chunksToRestore.length}s wiederhergestellt`);
+    setTimeout(() => setUndoMessage(null), 2000);
+  };
+
   // Delete recording and reset
   const deleteRecording = () => {
     if (audioUrl) URL.revokeObjectURL(audioUrl);
@@ -181,6 +216,7 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
     setDuration(0);
     setCurrentTime(0);
     chunksRef.current = [];
+    deletedChunksRef.current = [];
   };
 
   // Handle audio playback time update
@@ -283,9 +319,24 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
 
             {isRecording && (
               <>
+                {/* Rewind button - only when paused */}
+                <button
+                  className={`btn btn-outline ${!isPaused || chunksRef.current.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  onClick={() => rewindRecording(5)}
+                  disabled={!isPaused || chunksRef.current.length === 0}
+                  title="Letzte 5 Sekunden löschen (Pause erforderlich)"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                    <path d="M3 3v5h5"/>
+                    <text x="12" y="15" textAnchor="middle" fontSize="8" fill="currentColor">5</text>
+                  </svg>
+                </button>
+                
                 <button
                   className="btn btn-outline"
                   onClick={togglePause}
+                  title={isPaused ? 'Fortsetzen' : 'Pause'}
                 >
                   {isPaused ? (
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -297,12 +348,28 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
                     </svg>
                   )}
                 </button>
+                
                 <span className="font-mono text-lg min-w-16 text-center">
                   {formatTime(duration)}
                 </span>
+                
+                {/* Redo button - only when paused and there are deleted chunks */}
+                <button
+                  className={`btn btn-outline ${!isPaused || deletedChunksRef.current.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  onClick={redoRecording}
+                  disabled={!isPaused || deletedChunksRef.current.length === 0}
+                  title="Gelöschte Sekunden wiederherstellen"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+                    <path d="M21 3v5h-5"/>
+                  </svg>
+                </button>
+                
                 <button
                   className="btn btn-error"
                   onClick={() => stopRecording()}
+                  title="Aufnahme beenden"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M6 6h12v12H6z"/>
@@ -311,6 +378,20 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
               </>
             )}
           </div>
+          
+          {/* Undo/Redo Feedback */}
+          {undoMessage && (
+            <div className="text-center text-sm text-blue-600 dark:text-blue-400 animate-pulse">
+              {undoMessage}
+            </div>
+          )}
+
+          {/* Pause Hint */}
+          {isRecording && isPaused && (
+            <div className="text-center text-xs text-gray-500">
+              💡 Im Pausemodus: ⏪ löscht die letzten 5 Sekunden, ⏩ stellt wieder her
+            </div>
+          )}
 
           {/* Playback Controls */}
           {audioUrl && !isRecording && (

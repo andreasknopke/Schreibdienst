@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   createOfflineDictation,
   getUserDictations,
+  getAllDictations,
   getDictationById,
   deleteDictation,
   deleteAudioData,
@@ -9,6 +10,7 @@ import {
   initOfflineDictationTable,
   getQueueStats,
   DictationPriority,
+  DictationStatus,
 } from '@/lib/offlineDictationDb';
 
 export const runtime = 'nodejs';
@@ -32,6 +34,8 @@ export async function GET(req: NextRequest) {
     const username = searchParams.get('username');
     const id = searchParams.get('id');
     const stats = searchParams.get('stats');
+    const all = searchParams.get('all');
+    const statusFilter = searchParams.get('status') as DictationStatus | null;
     
     // Get queue statistics
     if (stats === 'true') {
@@ -46,6 +50,12 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: 'Dictation not found' }, { status: 404 });
       }
       return NextResponse.json(dictation);
+    }
+    
+    // Get all dictations (for users with permission)
+    if (all === 'true') {
+      const dictations = await getAllDictations(statusFilter || undefined);
+      return NextResponse.json(dictations);
     }
     
     // Get user dictations

@@ -5,7 +5,7 @@ import OfflineRecorder from '@/components/OfflineRecorder';
 import DictationQueue from '@/components/DictationQueue';
 
 export default function OfflineDictationPage() {
-  const { username } = useAuth();
+  const { username, canViewAllDictations } = useAuth();
   const [activeTab, setActiveTab] = useState<'record' | 'queue'>('record');
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -97,6 +97,7 @@ export default function OfflineDictationPage() {
         <DictationQueue
           key={refreshKey}
           username={username}
+          canViewAll={canViewAllDictations}
         />
       )}
     </div>

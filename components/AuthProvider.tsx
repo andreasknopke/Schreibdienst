@@ -5,6 +5,7 @@ interface AuthContextType {
   isLoggedIn: boolean;
   username: string | null;
   isAdmin: boolean;
+  canViewAllDictations: boolean;
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   getAuthHeader: () => string;
@@ -18,6 +19,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [canViewAllDictations, setCanViewAllDictations] = useState(false);
   const [password, setPassword] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -30,6 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (data.username) {
           setUsername(data.username);
           setIsAdmin(data.isAdmin || false);
+          setCanViewAllDictations(data.canViewAllDictations || data.isAdmin || false);
           setPassword(data.password || null);
           setIsLoggedIn(true);
         }
@@ -53,11 +56,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data.success) {
         setUsername(data.username);
         setIsAdmin(data.isAdmin || false);
+        setCanViewAllDictations(data.canViewAllDictations || data.isAdmin || false);
         setPassword(pass);
         setIsLoggedIn(true);
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ 
           username: data.username, 
           isAdmin: data.isAdmin || false,
+          canViewAllDictations: data.canViewAllDictations || data.isAdmin || false,
           password: pass
         }));
         return { success: true };
@@ -72,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     setUsername(null);
     setIsAdmin(false);
+    setCanViewAllDictations(false);
     setPassword(null);
     setIsLoggedIn(false);
     localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -93,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ isLoggedIn, username, isAdmin, login, logout, getAuthHeader }}>
+    <AuthContext.Provider value={{ isLoggedIn, username, isAdmin, canViewAllDictations, login, logout, getAuthHeader }}>
       {children}
     </AuthContext.Provider>
   );

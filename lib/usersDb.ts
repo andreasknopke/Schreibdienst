@@ -5,6 +5,7 @@ export interface User {
   username: string;
   password_hash: string;
   is_admin: boolean;
+  can_view_all_dictations: boolean;
   created_at: Date;
   created_by: string;
 }
@@ -25,7 +26,7 @@ function getRootPassword(): string {
 }
 
 // Authenticate user - returns user info if successful
-export async function authenticateUser(username: string, password: string): Promise<{ success: boolean; user?: { username: string; isAdmin: boolean }; error?: string }> {
+export async function authenticateUser(username: string, password: string): Promise<{ success: boolean; user?: { username: string; isAdmin: boolean; canViewAllDictations: boolean }; error?: string }> {
   // Check for root user first
   if (username.toLowerCase() === 'root') {
     const rootPassword = getRootPassword();
@@ -33,7 +34,7 @@ export async function authenticateUser(username: string, password: string): Prom
       return { success: false, error: 'Root-Passwort nicht konfiguriert' };
     }
     if (password === rootPassword) {
-      return { success: true, user: { username: 'root', isAdmin: true } };
+      return { success: true, user: { username: 'root', isAdmin: true, canViewAllDictations: true } };
     }
     return { success: false, error: 'Falsches Passwort' };
   }
@@ -55,7 +56,7 @@ export async function authenticateUser(username: string, password: string): Prom
       return { success: false, error: 'Falsches Passwort' };
     }
     
-    return { success: true, user: { username: user.username, isAdmin: user.is_admin } };
+    return { success: true, user: { username: user.username, isAdmin: user.is_admin, canViewAllDictations: user.can_view_all_dictations || user.is_admin } };
   } catch (error) {
     console.error('[Users] Auth error:', error);
     return { success: false, error: 'Datenbankfehler' };
@@ -63,7 +64,7 @@ export async function authenticateUser(username: string, password: string): Prom
 }
 
 // Create a new user
-export async function createUser(username: string, password: string, isAdmin: boolean, createdBy: string): Promise<{ success: boolean; error?: string }> {
+export async function createUser(username: string, password: string, isAdmin: boolean, createdBy: string, canViewAllDictations: boolean = false): Promise<{ success: boolean; error?: string }> {
   if (!username || !password) {
     return { success: false, error: 'Benutzername und Passwort erforderlich' };
   }
@@ -89,8 +90,8 @@ export async function createUser(username: string, password: string, isAdmin: bo
     
     // Create user
     await execute(
-      'INSERT INTO users (username, password_hash, is_admin, created_by) VALUES (?, ?, ?, ?)',
-      [username, hashPassword(password), isAdmin, createdBy]
+      'INSERT INTO users (username, password_hash, is_admin, can_view_all_dictations, created_by) VALUES (?, ?, ?, ?, ?)',
+      [username, hashPassword(password), isAdmin, canViewAllDictations || isAdmin, createdBy]
     );
     
     console.log('[Users] Created user:', username);
@@ -160,20 +161,63 @@ export async function changePassword(username: string, newPassword: string): Pro
 }
 
 // List all users (for admin)
-export async function listUsers(): Promise<{ username: string; isAdmin: boolean; createdAt: string; createdBy: string }[]> {
+export async function listUsers(): Promise<{ username: string; isAdmin: boolean; canViewAllDictations: boolean; createdAt: string; createdBy: string }[]> {
   try {
     const users = await query<User>(
-      'SELECT username, is_admin, created_at, created_by FROM users ORDER BY created_at DESC'
+      'SELECT username, is_admin, can_view_all_dictations, created_at, created_by FROM users ORDER BY created_at DESC'
     );
     
     return users.map(u => ({
       username: u.username,
       isAdmin: u.is_admin,
+      canViewAllDictations: u.can_view_all_dictations || u.is_admin,
       createdAt: u.created_at?.toISOString() || new Date().toISOString(),
       createdBy: u.created_by || 'system'
     }));
   } catch (error) {
     console.error('[Users] List error:', error);
     return [];
+  }
+}
+
+// Update user permissions
+export async function updateUserPermissions(username: string, permissions: { isAdmin?: boolean; canViewAllDictations?: boolean }): Promise<{ success: boolean; error?: string }> {
+  if (username.toLowerCase() === 'root') {
+    return { success: false, error: 'Root-Benutzer kann nicht geändert werden' };
+  }
+
+  try {
+    const updates: string[] = [];
+    const params: any[] = [];
+    
+    if (permissions.isAdmin !== undefined) {
+      updates.push('is_admin = ?');
+      params.push(permissions.isAdmin);
+    }
+    if (permissions.canViewAllDictations !== undefined) {
+      updates.push('can_view_all_dictations = ?');
+      params.push(permissions.canViewAllDictations);
+    }
+    
+    if (updates.length === 0) {
+      return { success: false, error: 'Keine Änderungen angegeben' };
+    }
+    
+    params.push(username);
+    
+    const result = await execute(
+      `UPDATE users SET ${updates.join(', ')} WHERE LOWER(username) = LOWER(?)`,
+      params
+    );
+    
+    if (result.affectedRows === 0) {
+      return { success: false, error: 'Benutzer nicht gefunden' };
+    }
+    
+    console.log('[Users] Updated permissions for:', username, permissions);
+    return { success: true };
+  } catch (error) {
+    console.error('[Users] Update permissions error:', error);
+    return { success: false, error: 'Datenbankfehler' };
   }
 }

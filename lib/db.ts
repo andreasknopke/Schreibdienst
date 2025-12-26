@@ -51,10 +51,24 @@ export async function initDatabase(): Promise<void> {
       username VARCHAR(255) NOT NULL UNIQUE,
       password_hash VARCHAR(255) NOT NULL,
       is_admin BOOLEAN DEFAULT FALSE,
+      can_view_all_dictations BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_by VARCHAR(255)
     )
   `);
+  
+  // Migration: Add can_view_all_dictations column if not exists
+  try {
+    await db.execute(`
+      ALTER TABLE users ADD COLUMN can_view_all_dictations BOOLEAN DEFAULT FALSE
+    `);
+    console.log('[DB] ✓ Added can_view_all_dictations column');
+  } catch (e: any) {
+    // Column already exists - ignore
+    if (!e.message?.includes('Duplicate column')) {
+      console.log('[DB] can_view_all_dictations column already exists');
+    }
+  }
   console.log('[DB] ✓ Users table ready');
   
   // Dictionary entries table

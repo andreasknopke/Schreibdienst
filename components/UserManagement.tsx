@@ -5,6 +5,7 @@ import { useAuth } from './AuthProvider';
 interface User {
   username: string;
   isAdmin: boolean;
+  canViewAllDictations: boolean;
   createdAt: string;
   createdBy: string;
 }
@@ -20,6 +21,7 @@ export default function UserManagement() {
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newIsAdmin, setNewIsAdmin] = useState(false);
+  const [newCanViewAll, setNewCanViewAll] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const fetchUsers = async () => {
@@ -60,7 +62,8 @@ export default function UserManagement() {
         body: JSON.stringify({
           username: newUsername,
           password: newPassword,
-          isAdmin: newIsAdmin
+          isAdmin: newIsAdmin,
+          canViewAllDictations: newCanViewAll || newIsAdmin
         })
       });
 
@@ -71,6 +74,7 @@ export default function UserManagement() {
         setNewUsername('');
         setNewPassword('');
         setNewIsAdmin(false);
+        setNewCanViewAll(false);
         fetchUsers();
       } else {
         setError(data.error || 'Fehler beim Erstellen');
@@ -162,16 +166,31 @@ export default function UserManagement() {
               minLength={4}
             />
           </div>
-          <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={newIsAdmin}
-                onChange={(e) => setNewIsAdmin(e.target.checked)}
-                className="rounded"
-              />
-              Administrator
-            </label>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={newIsAdmin}
+                  onChange={(e) => {
+                    setNewIsAdmin(e.target.checked);
+                    if (e.target.checked) setNewCanViewAll(true);
+                  }}
+                  className="rounded"
+                />
+                Administrator
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={newCanViewAll || newIsAdmin}
+                  onChange={(e) => setNewCanViewAll(e.target.checked)}
+                  disabled={newIsAdmin}
+                  className="rounded"
+                />
+                Alle Diktate sehen
+              </label>
+            </div>
             <button type="submit" className="btn btn-primary text-sm" disabled={creating}>
               {creating ? 'Erstelle...' : 'Erstellen'}
             </button>
@@ -184,9 +203,10 @@ export default function UserManagement() {
           
           {/* Root user (always shown) */}
           <div className="flex items-center justify-between p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-medium">root</span>
               <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded">Admin</span>
+              <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded">Alle Diktate</span>
               <span className="text-xs text-gray-500">(System)</span>
             </div>
           </div>
@@ -198,10 +218,13 @@ export default function UserManagement() {
           ) : (
             users.map((user) => (
               <div key={user.username} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-medium">{user.username}</span>
                   {user.isAdmin && (
                     <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded">Admin</span>
+                  )}
+                  {user.canViewAllDictations && (
+                    <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded">Alle Diktate</span>
                   )}
                   <span className="text-xs text-gray-500">
                     von {user.createdBy}

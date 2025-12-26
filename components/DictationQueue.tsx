@@ -24,21 +24,35 @@ interface Dictation {
 
 interface DictationQueueProps {
   username: string;
+  canViewAll?: boolean;
   onRefreshNeeded?: () => void;
 }
 
-export default function DictationQueue({ username, onRefreshNeeded }: DictationQueueProps) {
+export default function DictationQueue({ username, canViewAll = false, onRefreshNeeded }: DictationQueueProps) {
   const [dictations, setDictations] = useState<Dictation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<number | null>(null);
   const [workerStatus, setWorkerStatus] = useState<{ isProcessing: boolean } | null>(null);
+  const [viewMode, setViewMode] = useState<'mine' | 'all'>('mine');
+  const [statusFilter, setStatusFilter] = useState<string>('');
 
   // Load dictations
   const loadDictations = useCallback(async () => {
     try {
-      const res = await fetch(`/api/offline-dictations?username=${encodeURIComponent(username)}`);
+      let url = `/api/offline-dictations`;
+      
+      if (viewMode === 'all' && canViewAll) {
+        url += `?all=true`;
+        if (statusFilter) {
+          url += `&status=${statusFilter}`;
+        }
+      } else {
+        url += `?username=${encodeURIComponent(username)}`;
+      }
+      
+      const res = await fetch(url);
       if (!res.ok) throw new Error('Laden fehlgeschlagen');
       const data = await res.json();
       setDictations(data);
@@ -48,7 +62,7 @@ export default function DictationQueue({ username, onRefreshNeeded }: DictationQ
     } finally {
       setLoading(false);
     }
-  }, [username]);
+  }, [username, viewMode, canViewAll, statusFilter]);
 
   // Check worker status
   const checkWorkerStatus = useCallback(async () => {
@@ -207,7 +221,7 @@ export default function DictationQueue({ username, onRefreshNeeded }: DictationQ
     <div className="space-y-4">
       {/* Header with stats */}
       <div className="card">
-        <div className="card-body py-3">
+        <div className="card-body py-3 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <h3 className="font-medium">Diktat-Warteschlange</h3>
@@ -250,6 +264,54 @@ export default function DictationQueue({ username, onRefreshNeeded }: DictationQ
               </button>
             </div>
           </div>
+          
+          {/* View mode toggle and filters */}
+          {canViewAll && (
+            <div className="flex items-center gap-4 pt-2 border-t border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600 dark:text-gray-400">Ansicht:</span>
+                <div className="flex rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600">
+                  <button
+                    className={`px-3 py-1 text-sm transition-colors ${
+                      viewMode === 'mine'
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                    onClick={() => setViewMode('mine')}
+                  >
+                    Meine
+                  </button>
+                  <button
+                    className={`px-3 py-1 text-sm transition-colors ${
+                      viewMode === 'all'
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                    onClick={() => setViewMode('all')}
+                  >
+                    Alle
+                  </button>
+                </div>
+              </div>
+              
+              {viewMode === 'all' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Status:</span>
+                  <select
+                    className="input py-1 text-sm"
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                  >
+                    <option value="">Alle</option>
+                    <option value="completed">Fertig</option>
+                    <option value="pending">Wartend</option>
+                    <option value="processing">In Bearbeitung</option>
+                    <option value="error">Fehler</option>
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -283,6 +345,11 @@ export default function DictationQueue({ username, onRefreshNeeded }: DictationQ
                         <span className="font-medium">{d.order_number}</span>
                         <PriorityBadge priority={d.priority} />
                         <StatusBadge status={d.status} />
+                        {viewMode === 'all' && (
+                          <span className="px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                            👤 {d.username}
+                          </span>
+                        )}
                       </div>
                       <div className="text-sm text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
                         <span>{formatDate(d.created_at)}</span>
@@ -338,6 +405,11 @@ export default function DictationQueue({ username, onRefreshNeeded }: DictationQ
                     <div className="flex items-center gap-2 mt-1">
                       <PriorityBadge priority={selectedDictation.priority} />
                       <StatusBadge status={selectedDictation.status} />
+                      {viewMode === 'all' && (
+                        <span className="px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                          👤 {selectedDictation.username}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <button

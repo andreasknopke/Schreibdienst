@@ -19,7 +19,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ 
         success: true, 
         username: result.user.username,
-        isAdmin: result.user.isAdmin
+        isAdmin: result.user.isAdmin,
+        canViewAllDictations: result.user.canViewAllDictations
       });
     }
 

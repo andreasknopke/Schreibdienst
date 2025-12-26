@@ -32,7 +32,7 @@ async function callLLM(
   messages: { role: string; content: string }[],
   options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}
 ): Promise<{ content: string; tokens?: { input: number; output: number } }> {
-  const config = getLLMConfig();
+  const config = await getLLMConfig();
   const { temperature = 0.3, maxTokens = 2000, jsonMode = false } = options;
   
   console.log(`[LLM] Config: provider=${config.provider}, baseUrl=${config.baseUrl}, model=${config.model}`);

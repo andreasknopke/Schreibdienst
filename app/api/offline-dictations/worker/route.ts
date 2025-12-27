@@ -453,6 +453,17 @@ function cleanLLMOutput(text: string): string {
     .replace(/<<<ENDE_KORRIGIERT>>>/g, '')
     .trim();
   
+  // Remove LLM meta-comments that explain what it's doing (these should NOT be in the output)
+  cleaned = cleaned
+    .replace(/^\s*Der diktierte Text enthält keine Fehler[^"]*:\s*/i, '')
+    .replace(/^\s*Der Text enthält keine Fehler[^"]*:\s*/i, '')
+    .replace(/^\s*Es wurden keine Fehler gefunden[^"]*:\s*/i, '')
+    .replace(/^\s*Der Text ist bereits korrekt[^"]*:\s*/i, '')
+    .replace(/^\s*Keine Korrekturen erforderlich[^"]*:\s*/i, '')
+    .replace(/^\s*Der Text wurde unverändert zurückgegeben[^"]*:\s*/i, '')
+    .replace(/^\s*Hier ist der unveränderte Text[^"]*:\s*/i, '')
+    .replace(/^\s*Der Text wird unverändert zurückgegeben[^"]*:\s*/i, '');
+  
   // Remove common prompt leakage patterns at the beginning (with possible leading whitespace/newlines)
   cleaned = cleaned
     .replace(/^\s*(Korrigierte[r]? Text:?\s*)/i, '')
@@ -473,6 +484,12 @@ function cleanLLMOutput(text: string): string {
     .replace(/Der Patient äh klagt über Kopfschmerzen Punkt Er hat auch Fieber Komma etwa 38 Grad Punkt Neuer Absatz Die Diagnose lautet lösche das letzte Wort ergibt/g, '')
     .replace(/Der Patient klagt über Kopfschmerzen\. Er hat auch Fieber, etwa 38 Grad\.\s*\n?\s*Die Diagnose (ergibt|lautet)/g, '')
     .trim();
+  
+  // Remove surrounding quotes if the LLM wrapped the text in quotes
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || 
+      (cleaned.startsWith('„') && cleaned.endsWith('"'))) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
   
   return cleaned;
 }

@@ -154,6 +154,18 @@ function cleanLLMOutput(text: string, originalChunk?: string): string | null {
     .replace(/<<<ENDE_KORRIGIERT>>>/g, '')
     .trim();
   
+  // Remove LLM meta-comments that explain what it's doing (these should NOT be in the output)
+  // Pattern: "Der diktierte Text enthält keine Fehler... Daher wird der Text unverändert zurückgegeben:"
+  cleaned = cleaned
+    .replace(/^\s*Der diktierte Text enthält keine Fehler[^"]*:\s*/i, '')
+    .replace(/^\s*Der Text enthält keine Fehler[^"]*:\s*/i, '')
+    .replace(/^\s*Es wurden keine Fehler gefunden[^"]*:\s*/i, '')
+    .replace(/^\s*Der Text ist bereits korrekt[^"]*:\s*/i, '')
+    .replace(/^\s*Keine Korrekturen erforderlich[^"]*:\s*/i, '')
+    .replace(/^\s*Der Text wurde unverändert zurückgegeben[^"]*:\s*/i, '')
+    .replace(/^\s*Hier ist der unveränderte Text[^"]*:\s*/i, '')
+    .replace(/^\s*Der Text wird unverändert zurückgegeben[^"]*:\s*/i, '');
+  
   // Remove common prompt leakage patterns at the beginning (with possible leading whitespace/newlines)
   cleaned = cleaned
     .replace(/^\s*(Korrigierte[r]? Text:?\s*)/i, '')
@@ -171,6 +183,12 @@ function cleanLLMOutput(text: string, originalChunk?: string): string | null {
     .replace(/^\s*\*\*Korrektur:?\*\*\s*/i, '')
     .replace(/korrigieren Sie bitte den Text entsprechend der vorgegebenen Regeln und geben Sie das Ergebnis zurück\.?\s*/gi, '')
     .trim();
+  
+  // Remove surrounding quotes if the LLM wrapped the text in quotes
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || 
+      (cleaned.startsWith('„') && cleaned.endsWith('"'))) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
   
   return cleaned;
 }

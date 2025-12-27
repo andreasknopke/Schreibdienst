@@ -39,7 +39,7 @@ async function processDictation(dictationId: number): Promise<void> {
     // Convert Buffer to Uint8Array for Blob compatibility
     const audioData = new Uint8Array(dictation.audio_data);
     const audioBlob = new Blob([audioData], { type: dictation.audio_mime_type });
-    const transcriptionResult = await transcribeAudio(audioBlob);
+    const transcriptionResult = await transcribeAudio(audioBlob, dictation.username);
     
     if (!transcriptionResult.text) {
       throw new Error('Transcription returned empty text');
@@ -72,16 +72,37 @@ async function processDictation(dictationId: number): Promise<void> {
 }
 
 // Transcribe audio using the same logic as the transcribe API
-async function transcribeAudio(audioBlob: Blob): Promise<{ text: string }> {
+async function transcribeAudio(audioBlob: Blob, username?: string): Promise<{ text: string }> {
   const runtimeConfig = await getRuntimeConfig();
   const provider = runtimeConfig.transcriptionProvider;
+  
+  // Lade Wörterbuch für initial_prompt bei WhisperX
+  let initialPrompt: string | undefined;
+  if (username && provider !== 'elevenlabs') {
+    try {
+      const dictionary = await loadDictionary(username);
+      // Extrahiere einzigartige korrekte Wörter
+      const correctWords = new Set<string>();
+      for (const entry of dictionary.entries) {
+        if (entry.correct) {
+          correctWords.add(entry.correct);
+        }
+      }
+      if (correctWords.size > 0) {
+        initialPrompt = Array.from(correctWords).join(', ');
+        console.log(`[Worker] Using ${correctWords.size} dictionary words as initial_prompt`);
+      }
+    } catch (err) {
+      console.warn('[Worker] Failed to load dictionary:', err);
+    }
+  }
   
   if (provider === 'elevenlabs') {
     return transcribeWithElevenLabs(audioBlob);
   }
   
   try {
-    return await transcribeWithWhisperX(audioBlob);
+    return await transcribeWithWhisperX(audioBlob, initialPrompt);
   } catch (error: any) {
     console.warn('[Worker] WhisperX failed, trying ElevenLabs fallback:', error.message);
     if (process.env.ELEVENLABS_API_KEY) {
@@ -91,7 +112,7 @@ async function transcribeAudio(audioBlob: Blob): Promise<{ text: string }> {
   }
 }
 
-async function transcribeWithWhisperX(file: Blob): Promise<{ text: string }> {
+async function transcribeWithWhisperX(file: Blob, initialPrompt?: string): Promise<{ text: string }> {
   const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:5000';
   const isGradio = whisperUrl.includes(':7860');
   
@@ -176,6 +197,12 @@ async function transcribeWithWhisperX(file: Blob): Promise<{ text: string }> {
   formData.append('file', file, 'audio.webm');
   formData.append('language', 'de');
   formData.append('align', 'true');
+  
+  // Füge initial_prompt hinzu wenn Wörterbuch-Wörter vorhanden
+  if (initialPrompt) {
+    formData.append('initial_prompt', initialPrompt);
+    console.log(`[Worker] Using initial_prompt: "${initialPrompt.substring(0, 100)}${initialPrompt.length > 100 ? '...' : ''}"`);
+  }
   
   const res = await fetch(`${whisperUrl}/transcribe`, { method: 'POST', body: formData });
   if (!res.ok) throw new Error(`WhisperX API error (${res.status})`);

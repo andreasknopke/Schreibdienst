@@ -76,6 +76,9 @@ export default function HomePage() {
     try {
       const fd = new FormData();
       fd.append('file', blob, 'audio.webm');
+      if (username) {
+        fd.append('username', username);
+      }
       const res = await fetchWithDbToken('/api/transcribe', { method: 'POST', body: fd });
       if (!res.ok) throw new Error(`Transkription fehlgeschlagen (${res.status})`);
       const data = await res.json();
@@ -96,7 +99,7 @@ export default function HomePage() {
       }
       return '';
     }
-  }, []);
+  }, [username]);
 
   // Kombiniert existierenden Text mit neuem Transkript
   const combineTexts = useCallback((existing: string, newText: string): string => {

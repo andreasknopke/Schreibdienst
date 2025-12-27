@@ -1,15 +1,33 @@
 import { NextResponse } from 'next/server';
 import { getRuntimeConfig } from '@/lib/configDb';
+import { loadDictionary } from '@/lib/dictionaryDb';
 
 export const runtime = 'nodejs';
+
+// Extrahiere eindeutige korrekte Wörter aus dem Wörterbuch für initial_prompt
+function getUniqueCorrectWords(dictionary: { entries: { wrong: string; correct: string }[] }): string {
+  if (!dictionary?.entries || dictionary.entries.length === 0) return '';
+  
+  // Sammle alle korrekten Wörter, entferne Doubletten
+  const uniqueWords = new Set<string>();
+  for (const entry of dictionary.entries) {
+    if (entry.correct) {
+      // Füge das gesamte korrekte Wort/Phrase hinzu
+      uniqueWords.add(entry.correct.trim());
+    }
+  }
+  
+  // Verbinde mit Komma für den initial_prompt
+  return Array.from(uniqueWords).join(', ');
+}
 
 // Transkriptions-Provider auswählen
 type TranscriptionProvider = 'whisperx' | 'elevenlabs';
 
-async function transcribeWithWhisperX(file: Blob, filename: string) {
+async function transcribeWithWhisperX(file: Blob, filename: string, initialPrompt?: string) {
   const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:5000';
   const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
-  console.log(`[WhisperX] Starting transcription - File: ${filename}, Size: ${fileSizeMB}MB, URL: ${whisperUrl}`);
+  console.log(`[WhisperX] Starting transcription - File: ${filename}, Size: ${fileSizeMB}MB, URL: ${whisperUrl}${initialPrompt ? `, Initial prompt: ${initialPrompt.length} chars` : ''}`);
 
   const startTime = Date.now();
   
@@ -180,6 +198,12 @@ async function transcribeWithWhisperX(file: Blob, filename: string) {
   upstream.append('file', file, filename);
   upstream.append('language', 'de');
   upstream.append('align', 'true');
+  
+  // Füge initial_prompt hinzu wenn Wörterbuch-Wörter vorhanden
+  if (initialPrompt) {
+    upstream.append('initial_prompt', initialPrompt);
+    console.log(`[WhisperX] Using initial_prompt with dictionary words: "${initialPrompt.substring(0, 100)}${initialPrompt.length > 100 ? '...' : ''}"`);
+  }
 
   const res = await fetch(`${whisperUrl}/transcribe`, {
     method: 'POST',
@@ -259,6 +283,7 @@ export async function POST(request: Request) {
     
     const form = await request.formData();
     const file = form.get('file');
+    const username = form.get('username') as string | null;
     
     if (!file || !(file instanceof Blob)) {
       console.error('[Error] Invalid file:', file);
@@ -267,7 +292,21 @@ export async function POST(request: Request) {
 
     const filename = (file as File).name || 'audio.webm';
     const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
-    console.log(`[Input] File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type || 'unknown'}`);
+    console.log(`[Input] File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type || 'unknown'}, User: ${username || 'unknown'}`);
+
+    // Lade Wörterbuch für initial_prompt bei WhisperX
+    let initialPrompt: string | undefined;
+    if (username && provider !== 'elevenlabs') {
+      try {
+        const dictionary = await loadDictionary(username);
+        initialPrompt = getUniqueCorrectWords(dictionary);
+        if (initialPrompt) {
+          console.log(`[Dictionary] Loaded ${initialPrompt.split(', ').length} unique words for initial_prompt`);
+        }
+      } catch (err) {
+        console.warn('[Dictionary] Failed to load dictionary:', err);
+      }
+    }
 
     // Transkription mit gewähltem Provider
     let result;
@@ -279,7 +318,7 @@ export async function POST(request: Request) {
       // WhisperX ist Standard, mit Fallback zu ElevenLabs
       console.log('Using WhisperX as primary provider');
       try {
-        result = await transcribeWithWhisperX(file, filename);
+        result = await transcribeWithWhisperX(file, filename, initialPrompt);
       } catch (whisperError: any) {
         console.warn('WhisperX failed, trying ElevenLabs fallback:', whisperError.message);
         

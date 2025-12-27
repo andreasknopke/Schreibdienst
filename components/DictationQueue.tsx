@@ -63,6 +63,9 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     beurteilung: string;
     corrected_text: string;
   }>({ methodik: '', befund: '', beurteilung: '', corrected_text: '' });
+  
+  // Fullscreen mode for better readability of long texts
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Load available users for filter
   const loadUsers = useCallback(async () => {
@@ -568,7 +571,18 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
 
           {/* Detail View */}
           {selectedDictation && (
-            <div className="card sticky top-20">
+            <div className={`card ${
+              isFullscreen 
+                ? 'fixed inset-4 z-50 overflow-auto' 
+                : 'sticky top-20'
+            }`}>
+              {/* Fullscreen backdrop */}
+              {isFullscreen && (
+                <div 
+                  className="fixed inset-0 bg-black/50 -z-10" 
+                  onClick={() => setIsFullscreen(false)}
+                />
+              )}
               <div className="card-body space-y-4">
                 <div className="flex items-start justify-between">
                   <div>
@@ -637,7 +651,9 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                         )}
                       </div>
                       <textarea
-                        className={`mt-1 w-full p-2 rounded text-sm font-mono resize-y min-h-[200px] ${
+                        className={`mt-1 w-full p-2 rounded text-sm font-mono resize-y ${
+                          isFullscreen ? 'min-h-[60vh]' : 'min-h-[200px]'
+                        } ${
                           isReverted 
                             ? 'bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800' 
                             : 'bg-gray-50 dark:bg-gray-800'
@@ -694,6 +710,13 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                         onClick={() => handleCopy(getCombinedTextEdited(), selectedDictation.id)}
                       >
                         {copyFeedback === selectedDictation.id ? '✓ Kopiert!' : '📋 In Zwischenablage'}
+                      </button>
+                      <button
+                        className="btn btn-sm btn-outline"
+                        onClick={() => setIsFullscreen(!isFullscreen)}
+                        title={isFullscreen ? 'Vollbild beenden' : 'Vollbild anzeigen'}
+                      >
+                        {isFullscreen ? '🗗✕' : '🗖'}
                       </button>
                       <button
                         className="btn btn-sm btn-outline"

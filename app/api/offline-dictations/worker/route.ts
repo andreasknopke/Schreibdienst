@@ -280,10 +280,50 @@ WICHTIG:
 - Gib NUR den korrigierten Text zurück, ohne Erklärungen, ohne Einleitungen, ohne Kommentare
 - NIEMALS die Markierungen <<<DIKTAT_START>>> oder <<<DIKTAT_ENDE>>> in die Ausgabe übernehmen!`;
 
-  const result = await callLLM(llmConfig, [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: `<<<DIKTAT_START>>>${text}<<<DIKTAT_ENDE>>>` }
-  ]);
+  let result: string;
+  
+  // For LM Studio: Use chunked processing for longer texts
+  if (llmConfig.provider === 'lmstudio') {
+    const chunks = splitTextIntoChunks(text, LM_STUDIO_MAX_SENTENCES);
+    
+    if (chunks.length > 1) {
+      console.log(`[Worker] LM Studio: Processing ${chunks.length} chunks of max ${LM_STUDIO_MAX_SENTENCES} sentences`);
+      
+      const correctedChunks: string[] = [];
+      
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        console.log(`[Worker] Chunk ${i + 1}/${chunks.length}: ${chunk.length} chars`);
+        
+        const chunkResult = await callLLM(llmConfig, [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `<<<DIKTAT_START>>>${chunk}<<<DIKTAT_ENDE>>>` }
+        ]);
+        
+        const cleanedChunk = chunkResult
+          .replace(/<<<DIKTAT_START>>>/g, '')
+          .replace(/<<<DIKTAT_ENDE>>>/g, '')
+          .replace(/<<<DIKTAT>>>/g, '')
+          .trim();
+        
+        correctedChunks.push(cleanedChunk);
+      }
+      
+      result = correctedChunks.join(' ').replace(/\s+/g, ' ').trim();
+    } else {
+      // Single chunk
+      result = await callLLM(llmConfig, [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `<<<DIKTAT_START>>>${text}<<<DIKTAT_ENDE>>>` }
+      ]);
+    }
+  } else {
+    // OpenAI: Process all at once
+    result = await callLLM(llmConfig, [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `<<<DIKTAT_START>>>${text}<<<DIKTAT_ENDE>>>` }
+    ]);
+  }
   
   // Entferne Markierungen falls das LLM sie versehentlich übernommen hat
   let cleaned = result
@@ -315,6 +355,48 @@ async function getLLMConfig() {
     apiKey: process.env.OPENAI_API_KEY || '',
     model: runtimeConfig.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini'
   };
+}
+
+// Split text into chunks of sentences for smaller models (LM Studio)
+const LM_STUDIO_MAX_SENTENCES = 5;
+
+function splitTextIntoChunks(text: string, maxSentences: number = LM_STUDIO_MAX_SENTENCES): string[] {
+  if (!text || text.trim().length === 0) return [''];
+  
+  // Split by sentence-ending punctuation while keeping the punctuation
+  const sentenceRegex = /([^.!?]*[.!?]+[\s"')\]]*)/g;
+  const sentences: string[] = [];
+  let match;
+  let lastIndex = 0;
+  
+  while ((match = sentenceRegex.exec(text)) !== null) {
+    sentences.push(match[1]);
+    lastIndex = sentenceRegex.lastIndex;
+  }
+  
+  // Add any remaining text that doesn't end with punctuation
+  if (lastIndex < text.length) {
+    const remaining = text.slice(lastIndex).trim();
+    if (remaining) {
+      sentences.push(remaining);
+    }
+  }
+  
+  // If no sentences were found, return the original text as one chunk
+  if (sentences.length === 0) {
+    return [text];
+  }
+  
+  // Group sentences into chunks
+  const chunks: string[] = [];
+  for (let i = 0; i < sentences.length; i += maxSentences) {
+    const chunk = sentences.slice(i, i + maxSentences).join('');
+    if (chunk.trim()) {
+      chunks.push(chunk.trim());
+    }
+  }
+  
+  return chunks.length > 0 ? chunks : [text];
 }
 
 async function callLLM(

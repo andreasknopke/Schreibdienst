@@ -406,13 +406,20 @@ export async function POST(req: Request) {
     const preprocessedBefund = befund ? preprocessTranscription(befund) : undefined;
     const preprocessedMethodik = methodik ? preprocessTranscription(methodik) : undefined;
     
-    // Combine system prompt with dictionary
-    const enhancedSystemPrompt = dictionaryPrompt 
-      ? `${SYSTEM_PROMPT}\n${dictionaryPrompt}`
+    // Load runtime config to get custom prompt addition
+    const runtimeConfig = await getRuntimeConfig();
+    const promptAddition = runtimeConfig.llmPromptAddition?.trim();
+    
+    // Build prompt suffix with dictionary and custom additions
+    const promptSuffix = [dictionaryPrompt, promptAddition].filter(Boolean).join('\n\n');
+    
+    // Combine system prompt with dictionary and custom additions
+    const enhancedSystemPrompt = promptSuffix 
+      ? `${SYSTEM_PROMPT}\n\n${promptSuffix}`
       : SYSTEM_PROMPT;
     
-    const enhancedBefundPrompt = dictionaryPrompt 
-      ? `${BEFUND_SYSTEM_PROMPT}\n${dictionaryPrompt}`
+    const enhancedBefundPrompt = promptSuffix 
+      ? `${BEFUND_SYSTEM_PROMPT}\n\n${promptSuffix}`
       : BEFUND_SYSTEM_PROMPT;
     
     // Beurteilung vorschlagen basierend auf Befund
@@ -666,9 +673,9 @@ export async function POST(req: Request) {
         if (chunks.length > 1) {
           console.log(`[Chunked] Processing ${chunks.length} chunks of max ${LM_STUDIO_MAX_SENTENCES} sentences each`);
           
-          // Use simplified chunk prompt with dictionary if available
-          const chunkSystemPrompt = dictionaryPrompt 
-            ? `${CHUNK_SYSTEM_PROMPT}\n${dictionaryPrompt}`
+          // Use simplified chunk prompt with dictionary and custom additions if available
+          const chunkSystemPrompt = promptSuffix 
+            ? `${CHUNK_SYSTEM_PROMPT}\n\n${promptSuffix}`
             : CHUNK_SYSTEM_PROMPT;
           
           const correctedChunks: string[] = [];

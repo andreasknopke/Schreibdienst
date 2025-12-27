@@ -6,6 +6,7 @@ export interface RuntimeConfig {
   llmProvider: 'openai' | 'lmstudio';
   whisperModel?: string;
   openaiModel?: string;
+  llmPromptAddition?: string;
 }
 
 const DEFAULT_CONFIG: RuntimeConfig = {
@@ -41,6 +42,9 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
           break;
         case 'openaiModel':
           config.openaiModel = row.config_value;
+          break;
+        case 'llmPromptAddition':
+          config.llmPromptAddition = row.config_value;
           break;
       }
     }
@@ -101,6 +105,9 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
           break;
         case 'openaiModel':
           config.openaiModel = row.config_value;
+          break;
+        case 'llmPromptAddition':
+          config.llmPromptAddition = row.config_value;
           break;
       }
     }

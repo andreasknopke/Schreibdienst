@@ -251,6 +251,10 @@ async function correctText(text: string, username: string): Promise<string> {
   
   const llmConfig = await getLLMConfig();
   
+  // Load runtime config to get custom prompt addition
+  const runtimeConfig = await getRuntimeConfig();
+  const promptAddition = runtimeConfig.llmPromptAddition?.trim();
+  
   // Full system prompt for OpenAI or single-chunk processing
   const systemPrompt = `Du bist ein medizinischer Diktat-Korrektur-Assistent. Deine EINZIGE Aufgabe ist die sprachliche Korrektur diktierter medizinischer Texte.
 
@@ -294,6 +298,7 @@ HAUPTAUFGABEN:
    - "neue Zeile" → Zeilenumbruch
    - "Punkt", "Komma", "Doppelpunkt" → entsprechendes Satzzeichen
 ${dictText ? `\nBENUTZERWÖRTERBUCH (wende diese Korrekturen an):\n${dictText}` : ''}
+${promptAddition ? `\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : ''}
 
 WICHTIG:
 - Verändere NICHT den medizinischen Inhalt oder die Bedeutung
@@ -340,6 +345,7 @@ REGELN:
 4. Entferne "lösche das letzte Wort/Satz" und das entsprechende Wort/Satz
 5. Entferne Füllwörter wie "ähm", "äh"
 ${dictText ? `\nBENUTZERWÖRTERBUCH:\n${dictText}` : ''}
+${promptAddition ? `\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : ''}
 
 WICHTIG - DATUMSFORMATE:
 - Datumsangaben wie "18.09.2025" NICHT ändern - sie sind bereits korrekt!

@@ -15,6 +15,7 @@ interface RuntimeConfig {
   llmProvider: 'openai' | 'lmstudio';
   whisperModel?: string;
   openaiModel?: string;
+  llmPromptAddition?: string;
 }
 
 interface EnvInfo {
@@ -272,6 +273,23 @@ export default function ConfigPanel() {
             </select>
           </div>
         )}
+
+        {/* LLM Prompt-Ergänzung */}
+        <div className="mt-4">
+          <label className="text-xs text-gray-500 block mb-1">
+            Zusätzliche Anweisungen für die KI-Korrektur (optional)
+          </label>
+          <textarea
+            value={config.llmPromptAddition || ''}
+            onChange={(e) => updateConfig({ llmPromptAddition: e.target.value })}
+            disabled={!isRoot || saving}
+            placeholder="z.B. 'Verwende immer die formelle Anrede' oder 'Ersetze Dr. durch Doktor'"
+            className="input text-sm w-full h-24 resize-y"
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            Diese Anweisungen werden dem System-Prompt für die LLM-Korrektur hinzugefügt.
+          </p>
+        </div>
       </div>
 
       {/* Status-Anzeige */}

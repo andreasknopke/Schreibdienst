@@ -116,6 +116,10 @@ export async function POST(request: NextRequest) {
       newConfig.openaiModel = body.openaiModel;
     }
     
+    if (typeof body.llmPromptAddition === 'string') {
+      newConfig.llmPromptAddition = body.llmPromptAddition;
+    }
+    
     await saveRuntimeConfigWithRequest(request, newConfig);
     
     return NextResponse.json({ success: true, config: newConfig });

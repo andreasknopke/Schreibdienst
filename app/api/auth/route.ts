@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateUser } from '@/lib/usersDb';
+import { authenticateUserWithRequest } from '@/lib/usersDb';
+import { initDatabaseWithRequest } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   try {
+    // Falls DB-Token vorhanden, initialisiere dynamische DB
+    const dbToken = request.headers.get('x-db-token');
+    if (dbToken) {
+      try {
+        await initDatabaseWithRequest(request);
+      } catch (e) {
+        console.warn('[Auth] Dynamic DB init failed:', e);
+      }
+    }
+
     const { username, password } = await request.json();
 
     if (!username?.trim()) {
@@ -13,7 +24,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Passwort erforderlich" }, { status: 400 });
     }
 
-    const result = await authenticateUser(username.trim(), password);
+    const result = await authenticateUserWithRequest(request, username.trim(), password);
     
     if (result.success && result.user) {
       return NextResponse.json({ 

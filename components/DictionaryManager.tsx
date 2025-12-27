@@ -9,7 +9,7 @@ interface DictionaryEntry {
 }
 
 export default function DictionaryManager() {
-  const { getAuthHeader } = useAuth();
+  const { getAuthHeader, getDbTokenHeader } = useAuth();
   const [entries, setEntries] = useState<DictionaryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -23,7 +23,10 @@ export default function DictionaryManager() {
   const fetchEntries = async () => {
     try {
       const response = await fetch('/api/dictionary', {
-        headers: { 'Authorization': getAuthHeader() }
+        headers: { 
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        }
       });
       const data = await response.json();
       if (data.entries) {
@@ -51,7 +54,8 @@ export default function DictionaryManager() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': getAuthHeader()
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
         },
         body: JSON.stringify({ wrong, correct })
       });
@@ -87,7 +91,8 @@ export default function DictionaryManager() {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': getAuthHeader()
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
         },
         body: JSON.stringify({ wrong: wrongWord })
       });

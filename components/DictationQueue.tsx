@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from 'react';
 import Spinner from './Spinner';
+import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 
 interface Dictation {
   id: number;
@@ -47,12 +48,20 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [dictWrong, setDictWrong] = useState('');
   const [dictCorrect, setDictCorrect] = useState('');
   const [dictFeedback, setDictFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  
+  // Editable text state for completed dictations
+  const [editedTexts, setEditedTexts] = useState<{
+    methodik: string;
+    befund: string;
+    beurteilung: string;
+    corrected_text: string;
+  }>({ methodik: '', befund: '', beurteilung: '', corrected_text: '' });
 
   // Load available users for filter
   const loadUsers = useCallback(async () => {
     if (!canViewAll && !isSecretariat) return;
     try {
-      const res = await fetch('/api/offline-dictations?listUsers=true');
+      const res = await fetchWithDbToken('/api/offline-dictations?listUsers=true');
       if (res.ok) {
         const users = await res.json();
         setAvailableUsers(users);
@@ -79,7 +88,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
         url += `?username=${encodeURIComponent(username)}`;
       }
       
-      const res = await fetch(url);
+      const res = await fetchWithDbToken(url);
       if (!res.ok) throw new Error('Laden fehlgeschlagen');
       const data = await res.json();
       setDictations(data);
@@ -94,7 +103,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   // Check worker status
   const checkWorkerStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/offline-dictations/worker');
+      const res = await fetchWithDbToken('/api/offline-dictations/worker');
       if (res.ok) {
         const data = await res.json();
         setWorkerStatus(data);
@@ -107,7 +116,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   // Trigger worker to process pending dictations
   const triggerWorker = async () => {
     try {
-      await fetch('/api/offline-dictations/worker', { method: 'POST' });
+      await fetchWithDbToken('/api/offline-dictations/worker', { method: 'POST' });
       await checkWorkerStatus();
       setTimeout(loadDictations, 2000);
     } catch {
@@ -135,7 +144,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     if (!confirm(audioOnly ? 'Audio-Daten löschen?' : 'Diktat vollständig löschen?')) return;
     
     try {
-      await fetch(`/api/offline-dictations?id=${id}&audioOnly=${audioOnly}`, { method: 'DELETE' });
+      await fetchWithDbToken(`/api/offline-dictations?id=${id}&audioOnly=${audioOnly}`, { method: 'DELETE' });
       loadDictations();
       if (selectedId === id && !audioOnly) setSelectedId(null);
     } catch (err: any) {
@@ -146,7 +155,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   // Retry failed dictation
   const handleRetry = async (id: number) => {
     try {
-      await fetch('/api/offline-dictations', {
+      await fetchWithDbToken('/api/offline-dictations', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, action: 'retry' })
@@ -173,7 +182,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     }
     
     try {
-      const res = await fetch('/api/dictionary', {
+      const res = await fetchWithDbToken('/api/dictionary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -265,6 +274,35 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       </span>
     );
   };
+
+  // Initialize edited texts when selected dictation changes
+  useEffect(() => {
+    const selected = dictations.find(d => d.id === selectedId);
+    if (selected && selected.status === 'completed') {
+      setEditedTexts({
+        methodik: selected.methodik || '',
+        befund: selected.befund || '',
+        beurteilung: selected.beurteilung || '',
+        corrected_text: selected.corrected_text || selected.transcript || ''
+      });
+    }
+  }, [selectedId, dictations]);
+
+  // Get combined text for copy (uses edited values)
+  const getCombinedTextEdited = useCallback((): string => {
+    const selected = dictations.find(d => d.id === selectedId);
+    if (!selected) return '';
+    
+    if (selected.mode === 'arztbrief') {
+      return editedTexts.corrected_text;
+    }
+    
+    const parts: string[] = [];
+    if (editedTexts.methodik) parts.push(`Methodik:\n${editedTexts.methodik}`);
+    if (editedTexts.befund) parts.push(`Befund:\n${editedTexts.befund}`);
+    if (editedTexts.beurteilung) parts.push(`Zusammenfassung:\n${editedTexts.beurteilung}`);
+    return parts.join('\n\n');
+  }, [selectedId, dictations, editedTexts]);
 
   if (loading) {
     return (
@@ -531,39 +569,48 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   <div className="space-y-3">
                     {selectedDictation.mode === 'befund' ? (
                       <>
-                        {selectedDictation.methodik && (
-                          <div>
-                            <label className="text-xs font-medium text-gray-500">Methodik</label>
-                            <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-800 rounded text-sm whitespace-pre-wrap">
-                              {selectedDictation.methodik}
-                            </div>
-                          </div>
-                        )}
-                        {selectedDictation.befund && (
-                          <div>
-                            <label className="text-xs font-medium text-gray-500">Befund</label>
-                            <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-800 rounded text-sm whitespace-pre-wrap">
-                              {selectedDictation.befund}
-                            </div>
-                          </div>
-                        )}
-                        {selectedDictation.beurteilung && (
-                          <div>
-                            <label className="text-xs font-medium text-gray-500">Zusammenfassung</label>
-                            <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-800 rounded text-sm whitespace-pre-wrap">
-                              {selectedDictation.beurteilung}
-                            </div>
-                          </div>
-                        )}
+                        <div>
+                          <label className="text-xs font-medium text-gray-500">Methodik</label>
+                          <textarea
+                            className="mt-1 w-full p-2 bg-gray-50 dark:bg-gray-800 rounded text-sm font-mono resize-y min-h-[60px]"
+                            value={editedTexts.methodik}
+                            onChange={(e) => setEditedTexts(prev => ({ ...prev, methodik: e.target.value }))}
+                            placeholder="(leer)"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-gray-500">Befund</label>
+                          <textarea
+                            className="mt-1 w-full p-2 bg-gray-50 dark:bg-gray-800 rounded text-sm font-mono resize-y min-h-[150px]"
+                            value={editedTexts.befund}
+                            onChange={(e) => setEditedTexts(prev => ({ ...prev, befund: e.target.value }))}
+                            placeholder="(leer)"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-gray-500">Zusammenfassung</label>
+                          <textarea
+                            className="mt-1 w-full p-2 bg-gray-50 dark:bg-gray-800 rounded text-sm font-mono resize-y min-h-[80px]"
+                            value={editedTexts.beurteilung}
+                            onChange={(e) => setEditedTexts(prev => ({ ...prev, beurteilung: e.target.value }))}
+                            placeholder="(leer)"
+                          />
+                        </div>
                       </>
                     ) : (
                       <div>
                         <label className="text-xs font-medium text-gray-500">Ergebnis</label>
-                        <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-800 rounded text-sm whitespace-pre-wrap">
-                          {selectedDictation.corrected_text || selectedDictation.transcript}
-                        </div>
+                        <textarea
+                          className="mt-1 w-full p-2 bg-gray-50 dark:bg-gray-800 rounded text-sm font-mono resize-y min-h-[200px]"
+                          value={editedTexts.corrected_text}
+                          onChange={(e) => setEditedTexts(prev => ({ ...prev, corrected_text: e.target.value }))}
+                          placeholder="(leer)"
+                        />
                       </div>
                     )}
+                    <p className="text-xs text-gray-400 italic">
+                      💡 Tipp: Texte können bearbeitet und an den Ecken vergrößert werden
+                    </p>
                   </div>
                 )}
 
@@ -573,7 +620,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                     <>
                       <button
                         className={`btn btn-sm flex-1 ${copyFeedback === selectedDictation.id ? 'btn-success' : 'btn-primary'}`}
-                        onClick={() => handleCopy(getCombinedText(selectedDictation), selectedDictation.id)}
+                        onClick={() => handleCopy(getCombinedTextEdited(), selectedDictation.id)}
                       >
                         {copyFeedback === selectedDictation.id ? '✓ Kopiert!' : '📋 In Zwischenablage'}
                       </button>

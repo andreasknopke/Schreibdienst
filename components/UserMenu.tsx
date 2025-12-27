@@ -5,12 +5,14 @@ import { useAuth } from './AuthProvider';
 import UserManagement from './UserManagement';
 import DictionaryManager from './DictionaryManager';
 import ConfigPanel from './ConfigPanel';
+import HelpPanel from './HelpPanel';
 
 export default function UserMenu() {
   const { isLoggedIn, username, isAdmin, logout } = useAuth();
   const [showUserManagement, setShowUserManagement] = useState(false);
   const [showDictionary, setShowDictionary] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   // Nur im Browser rendern
@@ -103,6 +105,37 @@ export default function UserMenu() {
     document.body
   ) : null;
 
+  const helpModal = showHelp && mounted ? createPortal(
+    <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-lg w-full my-8 flex flex-col max-h-[calc(100vh-4rem)]">
+        <div className="flex items-center justify-between p-4 border-b dark:border-gray-700 flex-shrink-0">
+          <h2 className="font-semibold flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+              <path d="M12 17h.01"/>
+            </svg>
+            Hilfe & Bedienung
+          </h2>
+          <button
+            onClick={() => setShowHelp(false)}
+            className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            title="Schließen"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6L6 18"/>
+              <path d="M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div className="p-4 overflow-y-auto flex-1">
+          <HelpPanel />
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null;
+
   return (
     <>
       <div className="flex items-center gap-2">
@@ -116,6 +149,13 @@ export default function UserMenu() {
           title="Mein Wörterbuch"
         >
           Wörterbuch
+        </button>
+        <button
+          onClick={() => setShowHelp(!showHelp)}
+          className="text-xs text-gray-600 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-900/20"
+          title="Hilfe & Bedienung"
+        >
+          ❓
         </button>
         {/* Config only visible for root user */}
         {username?.toLowerCase() === 'root' && (
@@ -148,6 +188,7 @@ export default function UserMenu() {
       {dictionaryModal}
       {configModal}
       {userManagementModal}
+      {helpModal}
     </>
   );
 }

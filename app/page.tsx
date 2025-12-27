@@ -4,6 +4,7 @@ import { Tabs } from '@/components/Tabs';
 import { exportDocx } from '@/lib/formatMedical';
 import Spinner from '@/components/Spinner';
 import { useAuth } from '@/components/AuthProvider';
+import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 
 // Intervall für kontinuierliche Transkription (in ms)
 const TRANSCRIPTION_INTERVAL = 3000;
@@ -75,7 +76,7 @@ export default function HomePage() {
     try {
       const fd = new FormData();
       fd.append('file', blob, 'audio.webm');
-      const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
+      const res = await fetchWithDbToken('/api/transcribe', { method: 'POST', body: fd });
       if (!res.ok) throw new Error(`Transkription fehlgeschlagen (${res.status})`);
       const data = await res.json();
       
@@ -333,7 +334,7 @@ export default function HomePage() {
     
     try {
       if (mode === 'befund') {
-        const res = await fetch('/api/correct', {
+        const res = await fetchWithDbToken('/api/correct', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -356,7 +357,7 @@ export default function HomePage() {
           throw new Error('Korrektur fehlgeschlagen');
         }
       } else {
-        const res = await fetch('/api/correct', {
+        const res = await fetchWithDbToken('/api/correct', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: preCorrectionState.transcript, username }),
@@ -561,7 +562,7 @@ export default function HomePage() {
               });
               
               // Korrigiere alle drei Felder gleichzeitig
-              const res = await fetch('/api/correct', {
+              const res = await fetchWithDbToken('/api/correct', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
@@ -599,7 +600,7 @@ export default function HomePage() {
                 transcript: fullText
               });
               
-              const res = await fetch('/api/correct', {
+              const res = await fetchWithDbToken('/api/correct', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: fullText, username }),
@@ -662,7 +663,7 @@ export default function HomePage() {
       if (text) {
         setCorrecting(true);
         try {
-          const res = await fetch('/api/correct', {
+          const res = await fetchWithDbToken('/api/correct', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text, username }),
@@ -686,7 +687,7 @@ export default function HomePage() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch('/api/format', {
+      const res = await fetchWithDbToken('/api/format', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: transcript, mode }),
@@ -707,7 +708,7 @@ export default function HomePage() {
     setError(null);
     setCorrecting(true);
     try {
-      const res = await fetch('/api/correct', {
+      const res = await fetchWithDbToken('/api/correct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -764,7 +765,7 @@ export default function HomePage() {
     setSuggestingBeurteilung(true);
     setError(null);
     try {
-      const res = await fetch('/api/correct', {
+      const res = await fetchWithDbToken('/api/correct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

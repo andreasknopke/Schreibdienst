@@ -11,7 +11,7 @@ interface User {
 }
 
 export default function UserManagement() {
-  const { isAdmin, getAuthHeader } = useAuth();
+  const { isAdmin, getAuthHeader, getDbTokenHeader } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -27,7 +27,10 @@ export default function UserManagement() {
   const fetchUsers = async () => {
     try {
       const response = await fetch('/api/users', {
-        headers: { 'Authorization': getAuthHeader() }
+        headers: { 
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        }
       });
       const data = await response.json();
       if (data.users) {
@@ -57,7 +60,8 @@ export default function UserManagement() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': getAuthHeader()
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
         },
         body: JSON.stringify({
           username: newUsername,
@@ -97,7 +101,8 @@ export default function UserManagement() {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': getAuthHeader()
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
         },
         body: JSON.stringify({ username })
       });

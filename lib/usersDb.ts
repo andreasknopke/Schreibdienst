@@ -1,5 +1,6 @@
 import crypto from 'crypto';
-import { query, execute } from './db';
+import { NextRequest } from 'next/server';
+import { query, execute, getPoolForRequest } from './db';
 
 export interface User {
   username: string;
@@ -218,6 +219,231 @@ export async function updateUserPermissions(username: string, permissions: { isA
     return { success: true };
   } catch (error) {
     console.error('[Users] Update permissions error:', error);
+    return { success: false, error: 'Datenbankfehler' };
+  }
+}
+
+// ============================================================
+// Request-basierte Funktionen (für dynamische DB über Token)
+// ============================================================
+
+// Authenticate user with Request context (uses dynamic DB if token present)
+export async function authenticateUserWithRequest(
+  request: NextRequest,
+  username: string, 
+  password: string
+): Promise<{ success: boolean; user?: { username: string; isAdmin: boolean; canViewAllDictations: boolean }; error?: string }> {
+  // Check for root user first
+  if (username.toLowerCase() === 'root') {
+    const rootPassword = getRootPassword();
+    if (!rootPassword) {
+      return { success: false, error: 'Root-Passwort nicht konfiguriert' };
+    }
+    if (password === rootPassword) {
+      return { success: true, user: { username: 'root', isAdmin: true, canViewAllDictations: true } };
+    }
+    return { success: false, error: 'Falsches Passwort' };
+  }
+
+  // Check database users with dynamic pool
+  try {
+    const db = await getPoolForRequest(request);
+    const [rows] = await db.execute<any[]>(
+      'SELECT * FROM users WHERE LOWER(username) = LOWER(?)',
+      [username]
+    );
+    
+    if (rows.length === 0) {
+      return { success: false, error: 'Benutzer nicht gefunden' };
+    }
+    
+    const user = rows[0] as User;
+    
+    if (!verifyPassword(password, user.password_hash)) {
+      return { success: false, error: 'Falsches Passwort' };
+    }
+    
+    return { success: true, user: { username: user.username, isAdmin: user.is_admin, canViewAllDictations: user.can_view_all_dictations || user.is_admin } };
+  } catch (error) {
+    console.error('[Users] Auth error (with request):', error);
+    return { success: false, error: 'Datenbankfehler' };
+  }
+}
+
+// List users with Request context
+export async function listUsersWithRequest(request: NextRequest): Promise<{ username: string; isAdmin: boolean; canViewAllDictations: boolean; createdAt: string; createdBy: string }[]> {
+  try {
+    const db = await getPoolForRequest(request);
+    const [rows] = await db.execute<any[]>(
+      'SELECT username, is_admin, can_view_all_dictations, created_at, created_by FROM users ORDER BY created_at DESC'
+    );
+    
+    return (rows as User[]).map(u => ({
+      username: u.username,
+      isAdmin: u.is_admin,
+      canViewAllDictations: u.can_view_all_dictations || u.is_admin,
+      createdAt: u.created_at?.toISOString() || new Date().toISOString(),
+      createdBy: u.created_by || 'system'
+    }));
+  } catch (error) {
+    console.error('[Users] List error (with request):', error);
+    return [];
+  }
+}
+
+// Create user with Request context
+export async function createUserWithRequest(
+  request: NextRequest,
+  username: string, 
+  password: string, 
+  isAdmin: boolean, 
+  createdBy: string, 
+  canViewAllDictations: boolean = false
+): Promise<{ success: boolean; error?: string }> {
+  if (!username || !password) {
+    return { success: false, error: 'Benutzername und Passwort erforderlich' };
+  }
+
+  if (username.toLowerCase() === 'root') {
+    return { success: false, error: 'Benutzername "root" ist reserviert' };
+  }
+
+  if (password.length < 4) {
+    return { success: false, error: 'Passwort muss mindestens 4 Zeichen haben' };
+  }
+
+  try {
+    const db = await getPoolForRequest(request);
+    
+    // Check if user exists
+    const [existing] = await db.execute<any[]>(
+      'SELECT username FROM users WHERE LOWER(username) = LOWER(?)',
+      [username]
+    );
+    
+    if ((existing as any[]).length > 0) {
+      return { success: false, error: 'Benutzer existiert bereits' };
+    }
+    
+    // Create user
+    await db.execute(
+      'INSERT INTO users (username, password_hash, is_admin, can_view_all_dictations, created_by) VALUES (?, ?, ?, ?, ?)',
+      [username, hashPassword(password), isAdmin, canViewAllDictations || isAdmin, createdBy]
+    );
+    
+    console.log('[Users] Created user (with request):', username);
+    return { success: true };
+  } catch (error) {
+    console.error('[Users] Create error (with request):', error);
+    return { success: false, error: 'Datenbankfehler' };
+  }
+}
+
+// Delete user with Request context
+export async function deleteUserWithRequest(request: NextRequest, username: string): Promise<{ success: boolean; error?: string }> {
+  if (username.toLowerCase() === 'root') {
+    return { success: false, error: 'Root-Benutzer kann nicht gelöscht werden' };
+  }
+
+  try {
+    const db = await getPoolForRequest(request);
+    
+    const [result] = await db.execute(
+      'DELETE FROM users WHERE LOWER(username) = LOWER(?)',
+      [username]
+    );
+    
+    if ((result as any).affectedRows === 0) {
+      return { success: false, error: 'Benutzer nicht gefunden' };
+    }
+    
+    // Also delete user's dictionary entries
+    await db.execute(
+      'DELETE FROM dictionary_entries WHERE LOWER(username) = LOWER(?)',
+      [username]
+    );
+    
+    console.log('[Users] Deleted user (with request):', username);
+    return { success: true };
+  } catch (error) {
+    console.error('[Users] Delete error (with request):', error);
+    return { success: false, error: 'Datenbankfehler' };
+  }
+}
+
+// Change password with Request context
+export async function changePasswordWithRequest(request: NextRequest, username: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
+  if (username.toLowerCase() === 'root') {
+    return { success: false, error: 'Root-Passwort kann nur über Umgebungsvariable geändert werden' };
+  }
+
+  if (newPassword.length < 4) {
+    return { success: false, error: 'Passwort muss mindestens 4 Zeichen haben' };
+  }
+
+  try {
+    const db = await getPoolForRequest(request);
+    
+    const [result] = await db.execute(
+      'UPDATE users SET password_hash = ? WHERE LOWER(username) = LOWER(?)',
+      [hashPassword(newPassword), username]
+    );
+    
+    if ((result as any).affectedRows === 0) {
+      return { success: false, error: 'Benutzer nicht gefunden' };
+    }
+    
+    console.log('[Users] Changed password (with request) for:', username);
+    return { success: true };
+  } catch (error) {
+    console.error('[Users] Change password error (with request):', error);
+    return { success: false, error: 'Datenbankfehler' };
+  }
+}
+
+// Update permissions with Request context
+export async function updateUserPermissionsWithRequest(
+  request: NextRequest,
+  username: string, 
+  permissions: { isAdmin?: boolean; canViewAllDictations?: boolean }
+): Promise<{ success: boolean; error?: string }> {
+  if (username.toLowerCase() === 'root') {
+    return { success: false, error: 'Root-Benutzer kann nicht geändert werden' };
+  }
+
+  try {
+    const updates: string[] = [];
+    const params: any[] = [];
+    
+    if (permissions.isAdmin !== undefined) {
+      updates.push('is_admin = ?');
+      params.push(permissions.isAdmin);
+    }
+    if (permissions.canViewAllDictations !== undefined) {
+      updates.push('can_view_all_dictations = ?');
+      params.push(permissions.canViewAllDictations);
+    }
+    
+    if (updates.length === 0) {
+      return { success: false, error: 'Keine Änderungen angegeben' };
+    }
+    
+    params.push(username);
+    
+    const db = await getPoolForRequest(request);
+    const [result] = await db.execute(
+      `UPDATE users SET ${updates.join(', ')} WHERE LOWER(username) = LOWER(?)`,
+      params
+    );
+    
+    if ((result as any).affectedRows === 0) {
+      return { success: false, error: 'Benutzer nicht gefunden' };
+    }
+    
+    console.log('[Users] Updated permissions (with request) for:', username, permissions);
+    return { success: true };
+  } catch (error) {
+    console.error('[Users] Update permissions error (with request):', error);
     return { success: false, error: 'Datenbankfehler' };
   }
 }

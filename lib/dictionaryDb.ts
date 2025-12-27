@@ -1,4 +1,5 @@
-import { query, execute } from './db';
+import { NextRequest } from 'next/server';
+import { query, execute, getPoolForRequest } from './db';
 
 export interface DictionaryEntry {
   wrong: string;
@@ -216,4 +217,94 @@ export function cleanupText(text: string, entries: DictionaryEntry[]): string {
   result = removeDuplicatePunctuation(result);
   
   return result;
+}
+
+// ============================================================
+// Request-basierte Funktionen (für dynamische DB über Token)
+// ============================================================
+
+// Get entries with Request context
+export async function getEntriesWithRequest(request: NextRequest, username: string): Promise<DictionaryEntry[]> {
+  try {
+    const db = await getPoolForRequest(request);
+    const [rows] = await db.execute<any[]>(
+      'SELECT wrong_word, correct_word, added_at FROM dictionary_entries WHERE LOWER(username) = LOWER(?) ORDER BY added_at DESC',
+      [username]
+    );
+    
+    return (rows as DbDictionaryEntry[]).map(e => ({
+      wrong: e.wrong_word,
+      correct: e.correct_word,
+      addedAt: e.added_at?.toISOString() || new Date().toISOString()
+    }));
+  } catch (error) {
+    console.error('[Dictionary] Get entries error (with request):', error);
+    return [];
+  }
+}
+
+// Add entry with Request context
+export async function addEntryWithRequest(
+  request: NextRequest,
+  username: string, 
+  wrong: string, 
+  correct: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!wrong?.trim() || !correct?.trim()) {
+    return { success: false, error: 'Beide Felder müssen ausgefüllt sein' };
+  }
+
+  const wrongTrimmed = wrong.trim();
+  const correctTrimmed = correct.trim();
+
+  if (wrongTrimmed.toLowerCase() === correctTrimmed.toLowerCase()) {
+    return { success: false, error: 'Falsches und korrektes Wort sind identisch' };
+  }
+
+  try {
+    const db = await getPoolForRequest(request);
+    await db.execute(
+      `INSERT INTO dictionary_entries (username, wrong_word, correct_word) 
+       VALUES (?, ?, ?) 
+       ON DUPLICATE KEY UPDATE correct_word = ?, added_at = CURRENT_TIMESTAMP`,
+      [username.toLowerCase(), wrongTrimmed, correctTrimmed, correctTrimmed]
+    );
+    
+    console.log('[Dictionary] Added/updated entry (with request) for', username, ':', wrongTrimmed, '->', correctTrimmed);
+    return { success: true };
+  } catch (error) {
+    console.error('[Dictionary] Add entry error (with request):', error);
+    return { success: false, error: 'Datenbankfehler' };
+  }
+}
+
+// Remove entry with Request context
+export async function removeEntryWithRequest(
+  request: NextRequest,
+  username: string, 
+  wrong: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getPoolForRequest(request);
+    const [result] = await db.execute(
+      'DELETE FROM dictionary_entries WHERE LOWER(username) = LOWER(?) AND LOWER(wrong_word) = LOWER(?)',
+      [username, wrong]
+    );
+    
+    if ((result as any).affectedRows === 0) {
+      return { success: false, error: 'Eintrag nicht gefunden' };
+    }
+    
+    console.log('[Dictionary] Removed entry (with request) for', username, ':', wrong);
+    return { success: true };
+  } catch (error) {
+    console.error('[Dictionary] Remove entry error (with request):', error);
+    return { success: false, error: 'Datenbankfehler' };
+  }
+}
+
+// Load dictionary with Request context
+export async function loadDictionaryWithRequest(request: NextRequest, username: string): Promise<{ entries: DictionaryEntry[] }> {
+  const entries = await getEntriesWithRequest(request, username);
+  return { entries };
 }

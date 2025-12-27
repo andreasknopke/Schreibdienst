@@ -1,5 +1,13 @@
 "use client";
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { 
+  syncDbTokenFromIndexedDB, 
+  extractAndSaveDbTokenFromUrl, 
+  getDbToken, 
+  hasValidDbToken,
+  getCurrentDbCredentials,
+  type DbCredentials 
+} from '@/lib/dbToken';
 
 interface AuthContextType {
   isLoggedIn: boolean;
@@ -9,6 +17,9 @@ interface AuthContextType {
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   getAuthHeader: () => string;
+  getDbTokenHeader: () => Record<string, string>;
+  dbCredentials: DbCredentials | null;
+  hasDbToken: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -22,6 +33,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [canViewAllDictations, setCanViewAllDictations] = useState(false);
   const [password, setPassword] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [dbTokenReady, setDbTokenReady] = useState(false);
+
+  // DB-Token Synchronisierung beim App-Start
+  useEffect(() => {
+    const initDbToken = async () => {
+      try {
+        // Erst aus IndexedDB synchronisieren (für PWA)
+        await syncDbTokenFromIndexedDB();
+        // Dann aus URL extrahieren (falls vorhanden)
+        extractAndSaveDbTokenFromUrl();
+      } catch (e) {
+        console.warn('[Auth] DB Token init error:', e);
+      }
+      setDbTokenReady(true);
+    };
+    initDbToken();
+  }, []);
 
   // Beim Laden: Prüfe ob bereits eingeloggt
   useEffect(() => {
@@ -43,11 +71,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
+  // Hilfsfunktion um DB-Token Header zu erstellen
+  const getDbTokenHeader = (): Record<string, string> => {
+    const token = getDbToken();
+    if (token) {
+      return { 'X-DB-Token': token };
+    }
+    return {};
+  };
+
   const login = async (user: string, pass: string): Promise<{ success: boolean; error?: string }> => {
     try {
       const response = await fetch('/api/auth', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...getDbTokenHeader()
+        },
         body: JSON.stringify({ username: user, password: pass }),
       });
       
@@ -90,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return '';
   };
 
-  if (isLoading) {
+  if (isLoading || !dbTokenReady) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -99,7 +139,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ isLoggedIn, username, isAdmin, canViewAllDictations, login, logout, getAuthHeader }}>
+    <AuthContext.Provider value={{ 
+      isLoggedIn, 
+      username, 
+      isAdmin, 
+      canViewAllDictations, 
+      login, 
+      logout, 
+      getAuthHeader,
+      getDbTokenHeader,
+      dbCredentials: getCurrentDbCredentials(),
+      hasDbToken: hasValidDbToken()
+    }}>
       {children}
     </AuthContext.Provider>
   );

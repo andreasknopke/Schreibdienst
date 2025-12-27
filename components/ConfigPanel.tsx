@@ -26,7 +26,7 @@ interface EnvInfo {
 }
 
 export default function ConfigPanel() {
-  const { getAuthHeader, username } = useAuth();
+  const { getAuthHeader, getDbTokenHeader, username } = useAuth();
   const isRoot = username?.toLowerCase() === 'root';
   const [config, setConfig] = useState<RuntimeConfig | null>(null);
   const [envInfo, setEnvInfo] = useState<EnvInfo | null>(null);
@@ -39,7 +39,9 @@ export default function ConfigPanel() {
 
   const fetchConfig = async () => {
     try {
-      const response = await fetch('/api/config');
+      const response = await fetch('/api/config', {
+        headers: { ...getDbTokenHeader() }
+      });
       const data = await response.json();
       setConfig(data.config);
       setEnvInfo(data.envInfo);
@@ -71,7 +73,8 @@ export default function ConfigPanel() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': getAuthHeader()
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
         },
         body: JSON.stringify(updates)
       });

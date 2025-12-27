@@ -7,6 +7,7 @@ import {
   deleteDictation,
   deleteAudioData,
   retryDictation,
+  updateCorrectedText,
   initOfflineDictationTable,
   getQueueStats,
   getDictationUsers,
@@ -172,12 +173,12 @@ export async function DELETE(req: NextRequest) {
   }
 }
 
-// PATCH: Retry failed dictation
+// PATCH: Retry failed dictation or save corrected text
 export async function PATCH(req: NextRequest) {
   try {
     await ensureTable();
     
-    const { id, action } = await req.json();
+    const { id, action, correctedText, changeScore } = await req.json();
     
     if (!id) {
       return NextResponse.json({ error: 'ID required' }, { status: 400 });
@@ -187,6 +188,15 @@ export async function PATCH(req: NextRequest) {
       await retryDictation(id);
       console.log(`[Offline Dictations] Retry queued for dictation #${id}`);
       return NextResponse.json({ message: 'Dictation queued for retry' });
+    }
+    
+    if (action === 'save') {
+      if (correctedText === undefined) {
+        return NextResponse.json({ error: 'correctedText required for save action' }, { status: 400 });
+      }
+      await updateCorrectedText(id, correctedText, changeScore);
+      console.log(`[Offline Dictations] Saved corrected text for dictation #${id}`);
+      return NextResponse.json({ message: 'Corrected text saved' });
     }
     
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });

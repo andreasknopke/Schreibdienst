@@ -55,6 +55,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   // Revert/Re-Correct state
   const [isReverted, setIsReverted] = useState(false);
   const [isReCorrecting, setIsReCorrecting] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   
   // Editable text state for completed dictations
   const [editedTexts, setEditedTexts] = useState<{
@@ -356,6 +357,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
           corrected_text: data.correctedText || selected.raw_transcript
         }));
         setIsReverted(false);
+        setHasUnsavedChanges(true);
       } else {
         throw new Error('Korrektur fehlgeschlagen');
       }
@@ -365,6 +367,34 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       setIsReCorrecting(false);
     }
   }, [selectedId, dictations, editedTexts.corrected_text]);
+
+  // Save corrected text to database
+  const handleSave = useCallback(async () => {
+    const selected = dictations.find(d => d.id === selectedId);
+    if (!selected) return;
+    
+    try {
+      const res = await fetchWithDbToken('/api/offline-dictations', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          id: selected.id,
+          action: 'save',
+          correctedText: editedTexts.corrected_text,
+        }),
+      });
+      
+      if (res.ok) {
+        setHasUnsavedChanges(false);
+        // Reload to get updated data
+        loadDictations();
+      } else {
+        throw new Error('Speichern fehlgeschlagen');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Fehler beim Speichern');
+    }
+  }, [selectedId, dictations, editedTexts.corrected_text, loadDictations]);
 
   // Get combined text for a dictation - always Arztbrief mode now
   const getCombinedText = (d: Dictation): string => {
@@ -441,6 +471,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
         corrected_text: selected.corrected_text || selected.transcript || ''
       });
       setIsReverted(false); // Reset revert state when selection changes
+      setHasUnsavedChanges(false); // Reset unsaved changes when selection changes
     }
   }, [selectedId, dictations]);
 
@@ -848,7 +879,10 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             : 'bg-gray-50 dark:bg-gray-800'
                         }`}
                         value={editedTexts.corrected_text}
-                        onChange={(e) => setEditedTexts(prev => ({ ...prev, corrected_text: e.target.value }))}
+                        onChange={(e) => {
+                          setEditedTexts(prev => ({ ...prev, corrected_text: e.target.value }));
+                          setHasUnsavedChanges(true);
+                        }}
                         placeholder="(leer)"
                       />
                     </div>
@@ -900,6 +934,15 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                       >
                         {copyFeedback === selectedDictation.id ? '✓ Kopiert!' : '📋 In Zwischenablage'}
                       </button>
+                      {hasUnsavedChanges && (
+                        <button
+                          className="btn btn-sm btn-warning"
+                          onClick={handleSave}
+                          title="Änderungen speichern"
+                        >
+                          💾 Speichern
+                        </button>
+                      )}
                       <button
                         className="btn btn-sm btn-outline"
                         onClick={() => setIsFullscreen(!isFullscreen)}

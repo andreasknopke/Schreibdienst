@@ -287,6 +287,20 @@ export async function deleteAudioData(id: number): Promise<void> {
   );
 }
 
+// Update corrected text (after manual re-correction)
+export async function updateCorrectedText(
+  id: number, 
+  correctedText: string, 
+  changeScore?: number
+): Promise<void> {
+  await execute(
+    `UPDATE offline_dictations 
+     SET corrected_text = ?, change_score = ?
+     WHERE id = ?`,
+    [correctedText, changeScore ?? null, id]
+  );
+}
+
 // Delete dictation completely
 export async function deleteDictation(id: number): Promise<void> {
   await execute(`DELETE FROM offline_dictations WHERE id = ?`, [id]);

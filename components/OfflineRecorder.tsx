@@ -16,6 +16,21 @@ interface OfflineRecorderProps {
   onCancel?: () => void;
 }
 
+// Erlaubte Audio-Formate
+const ALLOWED_AUDIO_TYPES = [
+  'audio/mpeg',      // MP3
+  'audio/mp3',       // MP3 alternative
+  'audio/wav',       // WAV
+  'audio/wave',      // WAV alternative
+  'audio/x-wav',     // WAV alternative
+  'audio/aiff',      // AIFF
+  'audio/x-aiff',    // AIFF alternative
+  'audio/webm',      // WebM (für Konsistenz mit Aufnahmen)
+  'audio/ogg',       // OGG
+];
+
+const ALLOWED_EXTENSIONS = '.mp3,.wav,.aiff,.aif,.webm,.ogg';
+
 export default function OfflineRecorder({ username, onSubmit, onCancel }: OfflineRecorderProps) {
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -23,6 +38,7 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
   const [duration, setDuration] = useState(0);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [isUploadedFile, setIsUploadedFile] = useState(false); // Track if audio is from upload
   
   // Form state
   const [orderNumber, setOrderNumber] = useState('');
@@ -37,6 +53,7 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
   const [audioLevel, setAudioLevel] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [undoMessage, setUndoMessage] = useState<string | null>(null);
+  const [uploadFileName, setUploadFileName] = useState<string | null>(null);
   
   // Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -48,6 +65,7 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -215,8 +233,72 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
     setAudioBlob(null);
     setDuration(0);
     setCurrentTime(0);
+    setIsUploadedFile(false);
+    setUploadFileName(null);
     chunksRef.current = [];
     deletedChunksRef.current = [];
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Handle file upload
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setError(null);
+    
+    // Validate file type
+    if (!ALLOWED_AUDIO_TYPES.includes(file.type) && !file.name.match(/\.(mp3|wav|aiff?|webm|ogg)$/i)) {
+      setError('Ungültiges Dateiformat. Erlaubt: MP3, WAV, AIFF, WebM, OGG');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    
+    // Validate file size (max 100MB)
+    const maxSize = 100 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setError('Datei zu groß. Maximal 100MB erlaubt.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    
+    try {
+      // Create blob and URL
+      const blob = new Blob([file], { type: file.type });
+      const url = URL.createObjectURL(blob);
+      
+      // Get audio duration
+      const audio = new Audio(url);
+      
+      await new Promise<void>((resolve, reject) => {
+        audio.onloadedmetadata = () => {
+          if (audio.duration && isFinite(audio.duration)) {
+            setDuration(Math.round(audio.duration));
+            resolve();
+          } else {
+            // Fallback for files without metadata
+            setDuration(0);
+            resolve();
+          }
+        };
+        audio.onerror = () => reject(new Error('Audio-Datei konnte nicht gelesen werden'));
+        
+        // Timeout for files without proper metadata
+        setTimeout(() => resolve(), 3000);
+      });
+      
+      setAudioBlob(blob);
+      setAudioUrl(url);
+      setIsUploadedFile(true);
+      setUploadFileName(file.name);
+      
+    } catch (err: any) {
+      setError(err.message || 'Fehler beim Laden der Audiodatei');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   // Handle audio playback time update
@@ -283,7 +365,7 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
       <div className="card">
         <div className="card-body space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="font-medium">Offline-Diktat aufnehmen</h3>
+            <h3 className="font-medium">Offline-Diktat {isUploadedFile ? '(Datei)' : 'aufnehmen'}</h3>
             {isRecording && (
               <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400 text-sm">
                 <span className="pulse-dot" style={{ width: 8, height: 8 }} />
@@ -305,16 +387,41 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
           {/* Recording Controls */}
           <div className="flex items-center justify-center gap-4">
             {!isRecording && !audioUrl && (
-              <button
-                className="btn btn-primary flex items-center gap-2 px-6 py-3"
-                onClick={startRecording}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
-                  <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
-                </svg>
-                Aufnahme starten
-              </button>
+              <>
+                <button
+                  className="btn btn-primary flex items-center gap-2 px-6 py-3"
+                  onClick={startRecording}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                  </svg>
+                  Aufnahme starten
+                </button>
+                
+                <span className="text-gray-400 text-sm">oder</span>
+                
+                {/* File Upload Button */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ALLOWED_EXTENSIONS}
+                  onChange={handleFileUpload}
+                  className="hidden"
+                  id="audio-upload"
+                />
+                <label
+                  htmlFor="audio-upload"
+                  className="btn btn-outline flex items-center gap-2 px-6 py-3 cursor-pointer"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
+                  Datei hochladen
+                </label>
+              </>
             )}
 
             {isRecording && (
@@ -396,6 +503,18 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
           {/* Playback Controls */}
           {audioUrl && !isRecording && (
             <div className="space-y-3">
+              {/* Show filename if uploaded */}
+              {isUploadedFile && uploadFileName && (
+                <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
+                  <span className="truncate">{uploadFileName}</span>
+                </div>
+              )}
+              
               <audio
                 ref={audioRef}
                 src={audioUrl}

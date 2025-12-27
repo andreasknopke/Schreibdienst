@@ -29,7 +29,7 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
   const [patientName, setPatientName] = useState('');
   const [patientDob, setPatientDob] = useState('');
   const [priority, setPriority] = useState<'normal' | 'urgent' | 'stat'>('normal');
-  const [mode, setMode] = useState<'befund' | 'arztbrief'>('befund');
+  const [mode] = useState<'befund' | 'arztbrief'>('arztbrief'); // Immer Arztbrief-Modus
   
   // UI state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -498,18 +498,6 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
                   value={patientDob}
                   onChange={(e) => setPatientDob(e.target.value)}
                 />
-              </div>
-              
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium mb-1">Diktattyp</label>
-                <select
-                  className="select w-full"
-                  value={mode}
-                  onChange={(e) => setMode(e.target.value as any)}
-                >
-                  <option value="befund">Befund (Radiologie)</option>
-                  <option value="arztbrief">Arztbrief</option>
-                </select>
               </div>
             </div>
 

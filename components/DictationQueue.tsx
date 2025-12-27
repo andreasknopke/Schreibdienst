@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Spinner from './Spinner';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 
@@ -318,7 +318,14 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   };
 
   // Initialize edited texts when selected dictation changes
+  // Use ref to track previous selectedId to avoid resetting on polling updates
+  const prevSelectedIdRef = useRef<number | null>(null);
+  
   useEffect(() => {
+    // Only initialize when selectedId actually changes, not on every dictations poll
+    if (selectedId === prevSelectedIdRef.current) return;
+    prevSelectedIdRef.current = selectedId;
+    
     const selected = dictations.find(d => d.id === selectedId);
     if (selected && selected.status === 'completed') {
       setEditedTexts({

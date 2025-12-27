@@ -14,10 +14,12 @@ const TRANSCRIPTION_INTERVAL = 3000;
 type BefundField = 'methodik' | 'befund' | 'beurteilung';
 
 export default function HomePage() {
-  const { username } = useAuth();
+  const { username, autoCorrect } = useAuth();
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [correcting, setCorrecting] = useState(false);
+  // Flag um zu tracken ob nach Aufnahme noch keine Korrektur durchgeführt wurde
+  const [pendingCorrection, setPendingCorrection] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const allChunksRef = useRef<BlobPart[]>([]);
@@ -321,6 +323,7 @@ export default function HomePage() {
     setError(null);
     setPreCorrectionState(null);
     setCanRevert(false);
+    setPendingCorrection(false);
   }, []);
 
   // Revert-Funktion: Stellt den Text vor der letzten Korrektur wieder her
@@ -531,179 +534,177 @@ export default function HomePage() {
         const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
         const sessionTranscript = await transcribeChunk(blob, false);
         if (sessionTranscript) {
-          // Finale Korrektur
-          setCorrecting(true);
-          try {
-            if (mode === 'befund') {
-              // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
-              const parsed = parseFieldCommands(sessionTranscript);
-              
-              // Aktualisiere die Felder basierend auf parsed results
-              let currentMethodik = methodik;
-              let currentBefund = transcript;
-              let currentBeurteilung = beurteilung;
-              
-              if (parsed.lastField) {
-                // Steuerbefehle erkannt - verteile auf entsprechende Felder
-                if (parsed.methodik !== null) {
-                  currentMethodik = combineTexts(existingMethodikRef.current, parsed.methodik);
-                }
-                if (parsed.befund !== null) {
-                  currentBefund = combineTexts(existingTextRef.current, parsed.befund);
-                }
-                if (parsed.beurteilung !== null) {
-                  currentBeurteilung = combineTexts(existingBeurteilungRef.current, parsed.beurteilung);
-                }
-              } else {
-                // Kein Steuerbefehl - Text geht ins aktive Feld
-                switch (activeField) {
-                  case 'methodik':
-                    currentMethodik = combineTexts(existingMethodikRef.current, sessionTranscript);
-                    break;
-                  case 'beurteilung':
-                    currentBeurteilung = combineTexts(existingBeurteilungRef.current, sessionTranscript);
-                    break;
-                  case 'befund':
-                  default:
-                    currentBefund = combineTexts(existingTextRef.current, sessionTranscript);
-                    break;
-                }
+          // Verarbeite Transkript und setze Text in Felder
+          if (mode === 'befund') {
+            // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
+            const parsed = parseFieldCommands(sessionTranscript);
+            
+            // Aktualisiere die Felder basierend auf parsed results
+            let currentMethodik = methodik;
+            let currentBefund = transcript;
+            let currentBeurteilung = beurteilung;
+            
+            if (parsed.lastField) {
+              // Steuerbefehle erkannt - verteile auf entsprechende Felder
+              if (parsed.methodik !== null) {
+                currentMethodik = combineTexts(existingMethodikRef.current, parsed.methodik);
               }
-              
-              // Speichere Text VOR der Korrektur für Revert-Funktion
-              setPreCorrectionState({
-                methodik: currentMethodik,
-                befund: currentBefund,
-                beurteilung: currentBeurteilung,
-                transcript: ''
-              });
-              
-              // Korrigiere NUR das aktive Feld (oder die Felder mit neuen Steuerbefehlen)
-              // Ermittle welche Felder sich geändert haben
-              const changedFields: { methodik?: string; befund?: string; beurteilung?: string } = {};
-              
-              if (parsed.lastField) {
-                // Steuerbefehle erkannt - korrigiere nur die betroffenen Felder
-                if (parsed.methodik !== null) changedFields.methodik = currentMethodik;
-                if (parsed.befund !== null) changedFields.befund = currentBefund;
-                if (parsed.beurteilung !== null) changedFields.beurteilung = currentBeurteilung;
-              } else {
-                // Nur das aktive Feld wurde geändert
-                switch (activeField) {
-                  case 'methodik':
-                    changedFields.methodik = currentMethodik;
-                    break;
-                  case 'beurteilung':
-                    changedFields.beurteilung = currentBeurteilung;
-                    break;
-                  case 'befund':
-                  default:
-                    changedFields.befund = currentBefund;
-                    break;
-                }
+              if (parsed.befund !== null) {
+                currentBefund = combineTexts(existingTextRef.current, parsed.befund);
               }
-              
-              // Korrigiere nur die geänderten Felder
-              const res = await fetchWithDbToken('/api/correct', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                  befundFields: changedFields,
-                  username
-                }),
-              });
-              if (res.ok) {
-                const data = await res.json();
-                if (data.befundFields) {
-                  // Speichere Änderungsscores für Ampelsystem
-                  if (data.changeScores) {
-                    setBefundChangeScores(data.changeScores);
+              if (parsed.beurteilung !== null) {
+                currentBeurteilung = combineTexts(existingBeurteilungRef.current, parsed.beurteilung);
+              }
+            } else {
+              // Kein Steuerbefehl - Text geht ins aktive Feld
+              switch (activeField) {
+                case 'methodik':
+                  currentMethodik = combineTexts(existingMethodikRef.current, sessionTranscript);
+                  break;
+                case 'beurteilung':
+                  currentBeurteilung = combineTexts(existingBeurteilungRef.current, sessionTranscript);
+                  break;
+                case 'befund':
+                default:
+                  currentBefund = combineTexts(existingTextRef.current, sessionTranscript);
+                  break;
+              }
+            }
+            
+            // Speichere Text VOR der Korrektur für Revert-Funktion
+            setPreCorrectionState({
+              methodik: currentMethodik,
+              befund: currentBefund,
+              beurteilung: currentBeurteilung,
+              transcript: ''
+            });
+            
+            // Wenn autoCorrect deaktiviert: Nur Text setzen, keine Korrektur
+            if (!autoCorrect) {
+              setMethodik(currentMethodik);
+              setTranscript(currentBefund);
+              setBeurteilung(currentBeurteilung);
+              setPendingCorrection(true);
+            } else {
+              // Automatische Korrektur durchführen
+              setCorrecting(true);
+              try {
+                // Korrigiere NUR das aktive Feld (oder die Felder mit neuen Steuerbefehlen)
+                // Ermittle welche Felder sich geändert haben
+                const changedFields: { methodik?: string; befund?: string; beurteilung?: string } = {};
+                
+                if (parsed.lastField) {
+                  // Steuerbefehle erkannt - korrigiere nur die betroffenen Felder
+                  if (parsed.methodik !== null) changedFields.methodik = currentMethodik;
+                  if (parsed.befund !== null) changedFields.befund = currentBefund;
+                  if (parsed.beurteilung !== null) changedFields.beurteilung = currentBeurteilung;
+                } else {
+                  // Nur das aktive Feld wurde geändert
+                  switch (activeField) {
+                    case 'methodik':
+                      changedFields.methodik = currentMethodik;
+                      break;
+                    case 'beurteilung':
+                      changedFields.beurteilung = currentBeurteilung;
+                      break;
+                    case 'befund':
+                    default:
+                      changedFields.befund = currentBefund;
+                      break;
                   }
-                  setChangeScore(data.changeScore ?? null);
-                  
-                  // Setze nur die korrigierten Felder, behalte andere unverändert
-                  if (changedFields.methodik !== undefined) {
-                    setMethodik(data.befundFields.methodik || currentMethodik);
-                  } else {
-                    setMethodik(currentMethodik);
-                  }
-                  if (changedFields.befund !== undefined) {
-                    setTranscript(data.befundFields.befund || currentBefund);
-                  } else {
-                    setTranscript(currentBefund);
-                  }
-                  if (changedFields.beurteilung !== undefined) {
-                    setBeurteilung(data.befundFields.beurteilung || currentBeurteilung);
-                  } else {
-                    setBeurteilung(currentBeurteilung);
-                  }
-                  setCanRevert(true);
                 }
-              } else {
-                // Fallback: Setze unkorrigierten Text
+                
+                // Korrigiere nur die geänderten Felder
+                const res = await fetchWithDbToken('/api/correct', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ 
+                    befundFields: changedFields,
+                    username
+                  }),
+                });
+                if (res.ok) {
+                  const data = await res.json();
+                  if (data.befundFields) {
+                    // Speichere Änderungsscores für Ampelsystem
+                    if (data.changeScores) {
+                      setBefundChangeScores(data.changeScores);
+                    }
+                    setChangeScore(data.changeScore ?? null);
+                    
+                    // Setze nur die korrigierten Felder, behalte andere unverändert
+                    if (changedFields.methodik !== undefined) {
+                      setMethodik(data.befundFields.methodik || currentMethodik);
+                    } else {
+                      setMethodik(currentMethodik);
+                    }
+                    if (changedFields.befund !== undefined) {
+                      setTranscript(data.befundFields.befund || currentBefund);
+                    } else {
+                      setTranscript(currentBefund);
+                    }
+                    if (changedFields.beurteilung !== undefined) {
+                      setBeurteilung(data.befundFields.beurteilung || currentBeurteilung);
+                    } else {
+                      setBeurteilung(currentBeurteilung);
+                    }
+                    setCanRevert(true);
+                  }
+                } else {
+                  // Fallback: Setze unkorrigierten Text
+                  setMethodik(currentMethodik);
+                  setTranscript(currentBefund);
+                  setBeurteilung(currentBeurteilung);
+                }
+              } catch {
+                // Bei Fehler: Setze unkorrigierten Text
                 setMethodik(currentMethodik);
                 setTranscript(currentBefund);
                 setBeurteilung(currentBeurteilung);
+              } finally {
+                setCorrecting(false);
               }
+            }
+          } else {
+            // Im Arztbrief-Modus: Normales Verhalten
+            const fullText = combineTexts(existingTextRef.current, sessionTranscript);
+            
+            // Speichere Text VOR der Korrektur für Revert-Funktion
+            setPreCorrectionState({
+              methodik: '',
+              befund: '',
+              beurteilung: '',
+              transcript: fullText
+            });
+            
+            // Wenn autoCorrect deaktiviert: Nur Text setzen, keine Korrektur
+            if (!autoCorrect) {
+              setTranscript(fullText);
+              setPendingCorrection(true);
             } else {
-              // Im Arztbrief-Modus: Normales Verhalten
-              const fullText = combineTexts(existingTextRef.current, sessionTranscript);
-              
-              // Speichere Text VOR der Korrektur für Revert-Funktion
-              setPreCorrectionState({
-                methodik: '',
-                befund: '',
-                beurteilung: '',
-                transcript: fullText
-              });
-              
-              const res = await fetchWithDbToken('/api/correct', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: fullText, username }),
-              });
-              if (res.ok) {
-                const data = await res.json();
-                setTranscript(data.correctedText || fullText);
-                setChangeScore(data.changeScore ?? null);
-                setCanRevert(true);
-              } else {
+              // Automatische Korrektur durchführen
+              setCorrecting(true);
+              try {
+                const res = await fetchWithDbToken('/api/correct', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ text: fullText, username }),
+                });
+                if (res.ok) {
+                  const data = await res.json();
+                  setTranscript(data.correctedText || fullText);
+                  setChangeScore(data.changeScore ?? null);
+                  setCanRevert(true);
+                } else {
+                  setTranscript(fullText);
+                  setChangeScore(null);
+                }
+              } catch {
                 setTranscript(fullText);
-                setChangeScore(null);
+              } finally {
+                setCorrecting(false);
               }
             }
-          } catch {
-            // Bei Fehler: Setze unkorrigierten Text
-            if (mode === 'befund') {
-              const parsed = parseFieldCommands(sessionTranscript);
-              
-              if (parsed.lastField) {
-                if (parsed.methodik !== null) {
-                  setMethodik(combineTexts(existingMethodikRef.current, parsed.methodik));
-                }
-                if (parsed.befund !== null) {
-                  setTranscript(combineTexts(existingTextRef.current, parsed.befund));
-                }
-                if (parsed.beurteilung !== null) {
-                  setBeurteilung(combineTexts(existingBeurteilungRef.current, parsed.beurteilung));
-                }
-              } else {
-                switch (activeField) {
-                  case 'methodik':
-                    setMethodik(combineTexts(existingMethodikRef.current, sessionTranscript));
-                    break;
-                  case 'beurteilung':
-                    setBeurteilung(combineTexts(existingBeurteilungRef.current, sessionTranscript));
-                    break;
-                  default:
-                    setTranscript(combineTexts(existingTextRef.current, sessionTranscript));
-                }
-              }
-            } else {
-              setTranscript(combineTexts(existingTextRef.current, sessionTranscript));
-            }
-          } finally {
-            setCorrecting(false);
           }
         }
       } finally {
@@ -718,8 +719,17 @@ export default function HomePage() {
     try {
       const text = await transcribeChunk(file, false);
       setTranscript(text);
-      // Korrektur nach Upload
+      // Speichere Text VOR der Korrektur für Revert-Funktion
       if (text) {
+        setPreCorrectionState({
+          methodik: '',
+          befund: '',
+          beurteilung: '',
+          transcript: text
+        });
+      }
+      // Korrektur nach Upload nur wenn autoCorrect aktiviert
+      if (text && autoCorrect) {
         setCorrecting(true);
         try {
           const res = await fetchWithDbToken('/api/correct', {
@@ -732,11 +742,15 @@ export default function HomePage() {
             if (data.correctedText) {
               setTranscript(data.correctedText);
               setChangeScore(data.changeScore ?? null);
+              setCanRevert(true);
             }
           }
         } finally {
           setCorrecting(false);
         }
+      } else if (text && !autoCorrect) {
+        // Wenn autoCorrect deaktiviert, zeige Button für manuelle Korrektur
+        setPendingCorrection(true);
       }
     } finally {
       setBusy(false);
@@ -786,7 +800,43 @@ export default function HomePage() {
           setMethodik(data.befundFields.methodik || methodik);
           setTranscript(data.befundFields.befund || transcript);
           setBeurteilung(data.befundFields.beurteilung || beurteilung);
+          if (data.changeScores) {
+            setBefundChangeScores(data.changeScores);
+          }
+          setChangeScore(data.changeScore ?? null);
+          setCanRevert(true);
+          setPendingCorrection(false);
         }
+      } else {
+        throw new Error('Korrektur fehlgeschlagen');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Fehler bei der Korrektur');
+    } finally {
+      setCorrecting(false);
+      setBusy(false);
+    }
+  }
+
+  // Manuelle Korrektur für Arztbrief-Modus
+  async function handleManualCorrect() {
+    if (!transcript.trim()) return;
+    
+    setBusy(true);
+    setError(null);
+    setCorrecting(true);
+    try {
+      const res = await fetchWithDbToken('/api/correct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: transcript, username }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTranscript(data.correctedText || transcript);
+        setChangeScore(data.changeScore ?? null);
+        setCanRevert(true);
+        setPendingCorrection(false);
       } else {
         throw new Error('Korrektur fehlgeschlagen');
       }
@@ -1083,6 +1133,17 @@ export default function HomePage() {
                   {correcting ? <Spinner size={14} /> : '🔄 Neu korrigieren'}
                 </button>
               </>
+            )}
+            {/* Manueller Korrektur-Button wenn autoCorrect deaktiviert */}
+            {pendingCorrection && !autoCorrect && (
+              <button 
+                className="btn btn-primary text-sm py-1.5 px-3 animate-pulse" 
+                onClick={mode === 'befund' ? handleFormatBefund : handleManualCorrect}
+                title="KI-Korrektur durchführen"
+                disabled={correcting || busy}
+              >
+                {correcting ? <Spinner size={14} /> : '🤖 Korrigieren'}
+              </button>
             )}
             <select className="select text-sm py-1.5 w-auto" value={mode} onChange={(e) => setMode(e.target.value as any)}>
               <option value="befund">Befund</option>

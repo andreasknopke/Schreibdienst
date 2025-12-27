@@ -165,6 +165,19 @@ export async function initDatabase(): Promise<void> {
       console.log('[DB] can_view_all_dictations column already exists');
     }
   }
+  
+  // Migration: Add auto_correct column if not exists (default TRUE for automatic correction)
+  try {
+    await db.execute(`
+      ALTER TABLE users ADD COLUMN auto_correct BOOLEAN DEFAULT TRUE
+    `);
+    console.log('[DB] ✓ Added auto_correct column');
+  } catch (e: any) {
+    // Column already exists - ignore
+    if (!e.message?.includes('Duplicate column')) {
+      console.log('[DB] auto_correct column already exists');
+    }
+  }
   console.log('[DB] ✓ Users table ready');
   
   // Dictionary entries table
@@ -221,6 +234,18 @@ export async function initDatabaseWithRequest(request: NextRequest): Promise<voi
   } catch (e: any) {
     if (!e.message?.includes('Duplicate column')) {
       console.log('[DB] can_view_all_dictations column already exists');
+    }
+  }
+  
+  // Migration: Add auto_correct column if not exists (default TRUE for automatic correction)
+  try {
+    await db.execute(`
+      ALTER TABLE users ADD COLUMN auto_correct BOOLEAN DEFAULT TRUE
+    `);
+    console.log('[DB] ✓ Added auto_correct column (dynamic)');
+  } catch (e: any) {
+    if (!e.message?.includes('Duplicate column')) {
+      console.log('[DB] auto_correct column already exists');
     }
   }
   

@@ -14,6 +14,8 @@ interface AuthContextType {
   username: string | null;
   isAdmin: boolean;
   canViewAllDictations: boolean;
+  autoCorrect: boolean;
+  setAutoCorrect: (value: boolean) => Promise<boolean>;
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   getAuthHeader: () => string;
@@ -31,6 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [username, setUsername] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [canViewAllDictations, setCanViewAllDictations] = useState(false);
+  const [autoCorrect, setAutoCorrectState] = useState(true);
   const [password, setPassword] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [dbTokenReady, setDbTokenReady] = useState(false);
@@ -61,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUsername(data.username);
           setIsAdmin(data.isAdmin || false);
           setCanViewAllDictations(data.canViewAllDictations || data.isAdmin || false);
+          setAutoCorrectState(data.autoCorrect !== false);
           setPassword(data.password || null);
           setIsLoggedIn(true);
         }
@@ -97,12 +101,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUsername(data.username);
         setIsAdmin(data.isAdmin || false);
         setCanViewAllDictations(data.canViewAllDictations || data.isAdmin || false);
+        setAutoCorrectState(data.autoCorrect !== false);
         setPassword(pass);
         setIsLoggedIn(true);
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ 
           username: data.username, 
           isAdmin: data.isAdmin || false,
           canViewAllDictations: data.canViewAllDictations || data.isAdmin || false,
+          autoCorrect: data.autoCorrect !== false,
           password: pass
         }));
         return { success: true };
@@ -118,9 +124,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUsername(null);
     setIsAdmin(false);
     setCanViewAllDictations(false);
+    setAutoCorrectState(true);
     setPassword(null);
     setIsLoggedIn(false);
     localStorage.removeItem(AUTH_STORAGE_KEY);
+  };
+
+  // Funktion um autoCorrect-Einstellung zu ändern und zu speichern
+  const setAutoCorrect = async (value: boolean): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/users/settings', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        },
+        body: JSON.stringify({ autoCorrect: value })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setAutoCorrectState(value);
+        // Update localStorage
+        const stored = localStorage.getItem(AUTH_STORAGE_KEY);
+        if (stored) {
+          const authData = JSON.parse(stored);
+          authData.autoCorrect = value;
+          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
+        }
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
   };
 
   const getAuthHeader = (): string => {
@@ -144,6 +183,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       username, 
       isAdmin, 
       canViewAllDictations, 
+      autoCorrect,
+      setAutoCorrect,
       login, 
       logout, 
       getAuthHeader,

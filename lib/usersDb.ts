@@ -7,6 +7,7 @@ export interface User {
   password_hash: string;
   is_admin: boolean;
   can_view_all_dictations: boolean;
+  auto_correct: boolean;
   created_at: Date;
   created_by: string;
 }
@@ -27,7 +28,7 @@ function getRootPassword(): string {
 }
 
 // Authenticate user - returns user info if successful
-export async function authenticateUser(username: string, password: string): Promise<{ success: boolean; user?: { username: string; isAdmin: boolean; canViewAllDictations: boolean }; error?: string }> {
+export async function authenticateUser(username: string, password: string): Promise<{ success: boolean; user?: { username: string; isAdmin: boolean; canViewAllDictations: boolean; autoCorrect: boolean }; error?: string }> {
   // Check for root user first
   if (username.toLowerCase() === 'root') {
     const rootPassword = getRootPassword();
@@ -35,7 +36,7 @@ export async function authenticateUser(username: string, password: string): Prom
       return { success: false, error: 'Root-Passwort nicht konfiguriert' };
     }
     if (password === rootPassword) {
-      return { success: true, user: { username: 'root', isAdmin: true, canViewAllDictations: true } };
+      return { success: true, user: { username: 'root', isAdmin: true, canViewAllDictations: true, autoCorrect: true } };
     }
     return { success: false, error: 'Falsches Passwort' };
   }
@@ -57,7 +58,7 @@ export async function authenticateUser(username: string, password: string): Prom
       return { success: false, error: 'Falsches Passwort' };
     }
     
-    return { success: true, user: { username: user.username, isAdmin: user.is_admin, canViewAllDictations: user.can_view_all_dictations || user.is_admin } };
+    return { success: true, user: { username: user.username, isAdmin: user.is_admin, canViewAllDictations: user.can_view_all_dictations || user.is_admin, autoCorrect: user.auto_correct !== false } };
   } catch (error) {
     console.error('[Users] Auth error:', error);
     return { success: false, error: 'Datenbankfehler' };
@@ -232,7 +233,7 @@ export async function authenticateUserWithRequest(
   request: NextRequest,
   username: string, 
   password: string
-): Promise<{ success: boolean; user?: { username: string; isAdmin: boolean; canViewAllDictations: boolean }; error?: string }> {
+): Promise<{ success: boolean; user?: { username: string; isAdmin: boolean; canViewAllDictations: boolean; autoCorrect: boolean }; error?: string }> {
   // Check for root user first
   if (username.toLowerCase() === 'root') {
     const rootPassword = getRootPassword();
@@ -240,7 +241,7 @@ export async function authenticateUserWithRequest(
       return { success: false, error: 'Root-Passwort nicht konfiguriert' };
     }
     if (password === rootPassword) {
-      return { success: true, user: { username: 'root', isAdmin: true, canViewAllDictations: true } };
+      return { success: true, user: { username: 'root', isAdmin: true, canViewAllDictations: true, autoCorrect: true } };
     }
     return { success: false, error: 'Falsches Passwort' };
   }
@@ -263,9 +264,81 @@ export async function authenticateUserWithRequest(
       return { success: false, error: 'Falsches Passwort' };
     }
     
-    return { success: true, user: { username: user.username, isAdmin: user.is_admin, canViewAllDictations: user.can_view_all_dictations || user.is_admin } };
+    return { success: true, user: { username: user.username, isAdmin: user.is_admin, canViewAllDictations: user.can_view_all_dictations || user.is_admin, autoCorrect: user.auto_correct !== false } };
   } catch (error) {
     console.error('[Users] Auth error (with request):', error);
+    return { success: false, error: 'Datenbankfehler' };
+  }
+}
+
+// Get user settings with Request context
+export async function getUserSettingsWithRequest(
+  request: NextRequest,
+  username: string
+): Promise<{ autoCorrect: boolean } | null> {
+  // Root user always has autoCorrect enabled
+  if (username.toLowerCase() === 'root') {
+    return { autoCorrect: true };
+  }
+
+  try {
+    const db = await getPoolForRequest(request);
+    const [rows] = await db.execute<any[]>(
+      'SELECT auto_correct FROM users WHERE LOWER(username) = LOWER(?)',
+      [username]
+    );
+    
+    if (rows.length === 0) {
+      return null;
+    }
+    
+    const user = rows[0];
+    return { autoCorrect: user.auto_correct !== false };
+  } catch (error) {
+    console.error('[Users] Get settings error:', error);
+    return null;
+  }
+}
+
+// Update user settings with Request context
+export async function updateUserSettingsWithRequest(
+  request: NextRequest,
+  username: string,
+  settings: { autoCorrect?: boolean }
+): Promise<{ success: boolean; error?: string }> {
+  if (username.toLowerCase() === 'root') {
+    return { success: false, error: 'Root-Benutzer-Einstellungen können nicht geändert werden' };
+  }
+
+  try {
+    const updates: string[] = [];
+    const params: any[] = [];
+    
+    if (settings.autoCorrect !== undefined) {
+      updates.push('auto_correct = ?');
+      params.push(settings.autoCorrect);
+    }
+    
+    if (updates.length === 0) {
+      return { success: false, error: 'Keine Änderungen angegeben' };
+    }
+    
+    params.push(username);
+    
+    const db = await getPoolForRequest(request);
+    const [result] = await db.execute(
+      `UPDATE users SET ${updates.join(', ')} WHERE LOWER(username) = LOWER(?)`,
+      params
+    );
+    
+    if ((result as any).affectedRows === 0) {
+      return { success: false, error: 'Benutzer nicht gefunden' };
+    }
+    
+    console.log('[Users] Updated settings for:', username, settings);
+    return { success: true };
+  } catch (error) {
+    console.error('[Users] Update settings error:', error);
     return { success: false, error: 'Datenbankfehler' };
   }
 }

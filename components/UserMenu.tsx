@@ -8,12 +8,13 @@ import ConfigPanel from './ConfigPanel';
 import HelpPanel from './HelpPanel';
 
 export default function UserMenu() {
-  const { isLoggedIn, username, isAdmin, logout } = useAuth();
+  const { isLoggedIn, username, isAdmin, autoCorrect, setAutoCorrect, logout } = useAuth();
   const [showUserManagement, setShowUserManagement] = useState(false);
   const [showDictionary, setShowDictionary] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [savingAutoCorrect, setSavingAutoCorrect] = useState(false);
 
   // Nur im Browser rendern
   useEffect(() => {
@@ -143,6 +144,29 @@ export default function UserMenu() {
           {username}
           {isAdmin && <span className="ml-1 text-blue-600">(Admin)</span>}
         </span>
+        {/* Auto-Correct Toggle */}
+        <button
+          onClick={async () => {
+            setSavingAutoCorrect(true);
+            await setAutoCorrect(!autoCorrect);
+            setSavingAutoCorrect(false);
+          }}
+          disabled={savingAutoCorrect}
+          className={`text-xs px-2 py-1 rounded flex items-center gap-1 transition-colors ${
+            autoCorrect 
+              ? 'text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20' 
+              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
+          }`}
+          title={autoCorrect ? 'Auto-Korrektur aktiv (klicken zum Deaktivieren)' : 'Auto-Korrektur deaktiviert (klicken zum Aktivieren)'}
+        >
+          {savingAutoCorrect ? (
+            <span className="animate-spin">⏳</span>
+          ) : autoCorrect ? (
+            <>🤖 Auto</>
+          ) : (
+            <>🤖 Manuell</>
+          )}
+        </button>
         <button
           onClick={() => setShowDictionary(!showDictionary)}
           className="text-xs text-green-600 hover:text-green-700 px-2 py-1 rounded hover:bg-green-50 dark:hover:bg-green-900/20"

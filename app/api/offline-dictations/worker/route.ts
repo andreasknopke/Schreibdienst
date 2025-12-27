@@ -47,36 +47,20 @@ async function processDictation(dictationId: number): Promise<void> {
     
     console.log(`[Worker] Transcription complete for #${dictationId}: ${transcriptionResult.text.length} chars`);
     
-    // Step 2: Correct with LLM
-    console.log(`[Worker] Correcting dictation #${dictationId}...`);
+    // Step 2: Correct with LLM - ALWAYS use Arztbrief mode (no Methodik/Beurteilung sections)
+    console.log(`[Worker] Correcting dictation #${dictationId} as Arztbrief...`);
     
-    if (dictation.mode === 'befund') {
-      // Parse field commands for befund mode
-      const parsed = parseFieldCommands(transcriptionResult.text);
-      
-      const befundFields = {
-        methodik: parsed.methodik || '',
-        befund: parsed.befund || transcriptionResult.text,
-        beurteilung: parsed.beurteilung || '',
-      };
-      
-      const correctedFields = await correctBefundFields(befundFields, dictation.username);
-      
-      await completeDictation(dictationId, {
-        transcript: transcriptionResult.text,
-        methodik: correctedFields.methodik,
-        befund: correctedFields.befund,
-        beurteilung: correctedFields.beurteilung,
-      });
-    } else {
-      // Arztbrief mode
-      const correctedText = await correctText(transcriptionResult.text, dictation.username);
-      
-      await completeDictation(dictationId, {
-        transcript: transcriptionResult.text,
-        correctedText: correctedText,
-      });
-    }
+    // Store raw transcription before LLM correction
+    const rawTranscript = transcriptionResult.text;
+    
+    // Always use Arztbrief mode - no field parsing
+    const correctedText = await correctText(rawTranscript, dictation.username);
+    
+    await completeDictation(dictationId, {
+      rawTranscript: rawTranscript,
+      transcript: rawTranscript, // Keep for backwards compatibility
+      correctedText: correctedText,
+    });
     
     console.log(`[Worker] ✓ Dictation #${dictationId} completed successfully`);
     
@@ -221,50 +205,6 @@ async function transcribeWithElevenLabs(file: Blob): Promise<{ text: string }> {
   return { text: data.text ?? '' };
 }
 
-// Parse field commands for Befund mode
-function parseFieldCommands(text: string): { methodik: string | null; befund: string | null; beurteilung: string | null } {
-  const fieldPattern = /\b(methodik|befund|beurteilung|zusammenfassung)\s*(?:[:：]|doppelpunkt)/gi;
-  const matches: { field: 'methodik' | 'befund' | 'beurteilung'; index: number; length: number }[] = [];
-  let match;
-  
-  while ((match = fieldPattern.exec(text)) !== null) {
-    const fieldName = match[1].toLowerCase();
-    let field: 'methodik' | 'befund' | 'beurteilung';
-    if (fieldName === 'methodik') field = 'methodik';
-    else if (fieldName === 'beurteilung' || fieldName === 'zusammenfassung') field = 'beurteilung';
-    else field = 'befund';
-    matches.push({ field, index: match.index, length: match[0].length });
-  }
-  
-  if (matches.length === 0) {
-    return { methodik: null, befund: text, beurteilung: null };
-  }
-  
-  const result: { methodik: string | null; befund: string | null; beurteilung: string | null } = {
-    methodik: null, befund: null, beurteilung: null
-  };
-  
-  for (let i = 0; i < matches.length; i++) {
-    const current = matches[i];
-    const next = matches[i + 1];
-    const startPos = current.index + current.length;
-    const endPos = next ? next.index : text.length;
-    const fieldText = text.substring(startPos, endPos).trim();
-    
-    if (fieldText) {
-      result[current.field] = result[current.field] ? result[current.field] + ' ' + fieldText : fieldText;
-    }
-  }
-  
-  // Text before first command goes to befund
-  const textBefore = text.substring(0, matches[0].index).trim();
-  if (textBefore) {
-    result.befund = result.befund ? textBefore + ' ' + result.befund : textBefore;
-  }
-  
-  return result;
-}
-
 // Correct text using LLM
 async function correctText(text: string, username: string): Promise<string> {
   const dictionary = await loadDictionary(username);
@@ -304,57 +244,6 @@ WICHTIG:
   ]);
   
   return cleanupText(result, dictionary.entries);
-}
-
-// Correct befund fields using LLM
-async function correctBefundFields(fields: { methodik: string; befund: string; beurteilung: string }, username: string): Promise<{ methodik: string; befund: string; beurteilung: string }> {
-  const dictionary = await loadDictionary(username);
-  const dictText = formatDictionaryForPrompt(dictionary.entries);
-  
-  const llmConfig = await getLLMConfig();
-  const systemPrompt = `Du bist ein medizinischer Befund-Korrektur-Assistent. Korrigiere die drei Felder.
-
-STIL UND DUKTUS:
-- Behalte den persönlichen Schreibstil und Duktus des Diktierenden bei
-- Ändere NIEMALS korrekte Satzstrukturen nur um sie "eleganter" zu machen
-- Formuliere Sätze NUR um wenn sie grammatikalisch falsch sind oder keinen Sinn ergeben
-- Lösche NIEMALS inhaltlich korrekte Sätze oder Satzteile
-
-MEDIZINISCHE FACHBEGRIFFE:
-- KORRIGIERE falsch transkribierte medizinische Begriffe zum korrekten Fachbegriff
-- Beispiel: "Lekorräume" → "Liquorräume", "Spinalcanal" → "Spinalkanal"
-- Erkenne phonetisch ähnliche Transkriptionsfehler und korrigiere sie
-- Im Zweifelsfall bei UNBEKANNTEN Begriffen: Originalwort beibehalten
-
-HAUPTAUFGABEN:
-1. GRAMMATIK: Korrigiere NUR echte grammatikalische Fehler
-2. ORTHOGRAPHIE: Korrigiere Rechtschreibfehler  
-3. FACHBEGRIFFE: Korrigiere falsch transkribierte medizinische Begriffe + wende Benutzerwörterbuch an
-4. SATZZEICHEN: Prüfe auf korrekte Interpunktion
-${dictText ? `\nBENUTZERWÖRTERBUCH:\n${dictText}` : ''}
-
-WICHTIG:
-- Verändere NICHT den medizinischen Inhalt
-- Behalte die Struktur bei
-- Keine stilistischen Änderungen - nur Fehlerkorrekturen
-
-Antworte NUR mit JSON: {"methodik": "...", "befund": "...", "beurteilung": "..."}`;
-
-  const result = await callLLM(llmConfig, [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: JSON.stringify(fields) }
-  ], { jsonMode: true });
-  
-  try {
-    const parsed = JSON.parse(result);
-    return {
-      methodik: cleanupText(parsed.methodik || fields.methodik, dictionary.entries),
-      befund: cleanupText(parsed.befund || fields.befund, dictionary.entries),
-      beurteilung: cleanupText(parsed.beurteilung || fields.beurteilung, dictionary.entries),
-    };
-  } catch {
-    return fields;
-  }
 }
 
 // LLM helper

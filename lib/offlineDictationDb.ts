@@ -20,6 +20,7 @@ export interface OfflineDictation {
   status: DictationStatus;
   mode: 'befund' | 'arztbrief';
   // Results
+  raw_transcript?: string; // Pure Transkription vor LLM-Korrektur
   transcript?: string;
   methodik?: string;
   befund?: string;
@@ -49,6 +50,7 @@ export async function initOfflineDictationTable(): Promise<void> {
       priority ENUM('normal', 'urgent', 'stat') DEFAULT 'normal',
       status ENUM('pending', 'processing', 'completed', 'error') DEFAULT 'pending',
       mode ENUM('befund', 'arztbrief') DEFAULT 'befund',
+      raw_transcript TEXT,
       transcript TEXT,
       methodik TEXT,
       befund TEXT,
@@ -64,6 +66,18 @@ export async function initOfflineDictationTable(): Promise<void> {
       INDEX idx_created_at (created_at)
     )
   `);
+  
+  // Migrate existing tables to add raw_transcript column if missing
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN raw_transcript TEXT AFTER mode`);
+    console.log('[DB] ✓ Added raw_transcript column');
+  } catch (e: any) {
+    // Column already exists - ignore error
+    if (!e.message?.includes('Duplicate column')) {
+      console.log('[DB] raw_transcript column already exists');
+    }
+  }
+  
   console.log('[DB] ✓ Offline dictations table ready');
 }
 
@@ -104,7 +118,7 @@ export async function createOfflineDictation(
 export async function getUserDictations(username: string): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
   return query(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, transcript, methodik, befund, beurteilung, corrected_text, error_message,
+            priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, error_message,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
      WHERE username = ?
@@ -137,7 +151,7 @@ export async function getAllDictations(statusFilter?: DictationStatus, userFilte
   
   return query(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, transcript, methodik, befund, beurteilung, corrected_text, error_message,
+            priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, error_message,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
      ${whereClause}
@@ -185,7 +199,7 @@ export async function getDictationById(id: number, includeAudio: boolean = false
   const fields = includeAudio 
     ? '*' 
     : `id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-       priority, status, mode, transcript, methodik, befund, beurteilung, corrected_text, error_message,
+       priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, error_message,
        created_at, processing_started_at, completed_at`;
   
   const rows = await query<OfflineDictation>(
@@ -209,6 +223,7 @@ export async function markDictationProcessing(id: number): Promise<void> {
 export async function completeDictation(
   id: number,
   results: {
+    rawTranscript?: string;
     transcript?: string;
     methodik?: string;
     befund?: string;
@@ -219,6 +234,7 @@ export async function completeDictation(
   await execute(
     `UPDATE offline_dictations 
      SET status = 'completed',
+         raw_transcript = ?,
          transcript = ?,
          methodik = ?,
          befund = ?,
@@ -227,6 +243,7 @@ export async function completeDictation(
          completed_at = NOW()
      WHERE id = ?`,
     [
+      results.rawTranscript || null,
       results.transcript || null,
       results.methodik || null,
       results.befund || null,

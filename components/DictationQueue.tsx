@@ -13,6 +13,7 @@ interface Dictation {
   priority: 'normal' | 'urgent' | 'stat';
   status: 'pending' | 'processing' | 'completed' | 'error';
   mode: 'befund' | 'arztbrief';
+  raw_transcript?: string; // Pure Transkription vor LLM-Korrektur
   transcript?: string;
   methodik?: string;
   befund?: string;
@@ -48,6 +49,10 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [dictWrong, setDictWrong] = useState('');
   const [dictCorrect, setDictCorrect] = useState('');
   const [dictFeedback, setDictFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  
+  // Revert/Re-Correct state
+  const [isReverted, setIsReverted] = useState(false);
+  const [isReCorrecting, setIsReCorrecting] = useState(false);
   
   // Editable text state for completed dictations
   const [editedTexts, setEditedTexts] = useState<{
@@ -210,17 +215,54 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     }
   };
 
-  // Get combined text for a dictation
-  const getCombinedText = (d: Dictation): string => {
-    if (d.mode === 'arztbrief') {
-      return d.corrected_text || d.transcript || '';
-    }
+  // Revert to raw transcription (before LLM correction)
+  const handleRevert = useCallback(() => {
+    const selected = dictations.find(d => d.id === selectedId);
+    if (!selected?.raw_transcript) return;
     
-    const parts: string[] = [];
-    if (d.methodik) parts.push(`Methodik:\n${d.methodik}`);
-    if (d.befund) parts.push(`Befund:\n${d.befund}`);
-    if (d.beurteilung) parts.push(`Zusammenfassung:\n${d.beurteilung}`);
-    return parts.join('\n\n') || d.transcript || '';
+    setEditedTexts(prev => ({
+      ...prev,
+      corrected_text: selected.raw_transcript || ''
+    }));
+    setIsReverted(true);
+  }, [selectedId, dictations]);
+
+  // Re-correct with LLM
+  const handleReCorrect = useCallback(async () => {
+    const selected = dictations.find(d => d.id === selectedId);
+    if (!selected?.raw_transcript) return;
+    
+    setIsReCorrecting(true);
+    try {
+      const res = await fetchWithDbToken('/api/correct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          text: selected.raw_transcript,
+          username: selected.username
+        }),
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setEditedTexts(prev => ({
+          ...prev,
+          corrected_text: data.correctedText || selected.raw_transcript
+        }));
+        setIsReverted(false);
+      } else {
+        throw new Error('Korrektur fehlgeschlagen');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Fehler bei erneuter Korrektur');
+    } finally {
+      setIsReCorrecting(false);
+    }
+  }, [selectedId, dictations]);
+
+  // Get combined text for a dictation - always Arztbrief mode now
+  const getCombinedText = (d: Dictation): string => {
+    return d.corrected_text || d.transcript || '';
   };
 
   // Format date
@@ -285,24 +327,14 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
         beurteilung: selected.beurteilung || '',
         corrected_text: selected.corrected_text || selected.transcript || ''
       });
+      setIsReverted(false); // Reset revert state when selection changes
     }
   }, [selectedId, dictations]);
 
-  // Get combined text for copy (uses edited values)
+  // Get combined text for copy (uses edited values) - always Arztbrief mode
   const getCombinedTextEdited = useCallback((): string => {
-    const selected = dictations.find(d => d.id === selectedId);
-    if (!selected) return '';
-    
-    if (selected.mode === 'arztbrief') {
-      return editedTexts.corrected_text;
-    }
-    
-    const parts: string[] = [];
-    if (editedTexts.methodik) parts.push(`Methodik:\n${editedTexts.methodik}`);
-    if (editedTexts.befund) parts.push(`Befund:\n${editedTexts.befund}`);
-    if (editedTexts.beurteilung) parts.push(`Zusammenfassung:\n${editedTexts.beurteilung}`);
-    return parts.join('\n\n');
-  }, [selectedId, dictations, editedTexts]);
+    return editedTexts.corrected_text;
+  }, [editedTexts]);
 
   if (loading) {
     return (
@@ -564,50 +596,61 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   </div>
                 )}
 
-                {/* Results */}
+                {/* Results - always Arztbrief mode */}
                 {selectedDictation.status === 'completed' && (
                   <div className="space-y-3">
-                    {selectedDictation.mode === 'befund' ? (
-                      <>
-                        <div>
-                          <label className="text-xs font-medium text-gray-500">Methodik</label>
-                          <textarea
-                            className="mt-1 w-full p-2 bg-gray-50 dark:bg-gray-800 rounded text-sm font-mono resize-y min-h-[60px]"
-                            value={editedTexts.methodik}
-                            onChange={(e) => setEditedTexts(prev => ({ ...prev, methodik: e.target.value }))}
-                            placeholder="(leer)"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs font-medium text-gray-500">Befund</label>
-                          <textarea
-                            className="mt-1 w-full p-2 bg-gray-50 dark:bg-gray-800 rounded text-sm font-mono resize-y min-h-[150px]"
-                            value={editedTexts.befund}
-                            onChange={(e) => setEditedTexts(prev => ({ ...prev, befund: e.target.value }))}
-                            placeholder="(leer)"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs font-medium text-gray-500">Zusammenfassung</label>
-                          <textarea
-                            className="mt-1 w-full p-2 bg-gray-50 dark:bg-gray-800 rounded text-sm font-mono resize-y min-h-[80px]"
-                            value={editedTexts.beurteilung}
-                            onChange={(e) => setEditedTexts(prev => ({ ...prev, beurteilung: e.target.value }))}
-                            placeholder="(leer)"
-                          />
-                        </div>
-                      </>
-                    ) : (
-                      <div>
-                        <label className="text-xs font-medium text-gray-500">Ergebnis</label>
-                        <textarea
-                          className="mt-1 w-full p-2 bg-gray-50 dark:bg-gray-800 rounded text-sm font-mono resize-y min-h-[200px]"
-                          value={editedTexts.corrected_text}
-                          onChange={(e) => setEditedTexts(prev => ({ ...prev, corrected_text: e.target.value }))}
-                          placeholder="(leer)"
-                        />
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-medium text-gray-500">
+                          {isReverted ? 'Reine Transkription (vor Korrektur)' : 'Korrigiertes Ergebnis'}
+                        </label>
+                        {isReverted && (
+                          <span className="text-xs text-orange-600 dark:text-orange-400">⚠️ Unkorrigiert</span>
+                        )}
+                      </div>
+                      <textarea
+                        className={`mt-1 w-full p-2 rounded text-sm font-mono resize-y min-h-[200px] ${
+                          isReverted 
+                            ? 'bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800' 
+                            : 'bg-gray-50 dark:bg-gray-800'
+                        }`}
+                        value={editedTexts.corrected_text}
+                        onChange={(e) => setEditedTexts(prev => ({ ...prev, corrected_text: e.target.value }))}
+                        placeholder="(leer)"
+                      />
+                    </div>
+                    
+                    {/* Revert/Re-Correct Buttons */}
+                    {selectedDictation.raw_transcript && (
+                      <div className="flex gap-2">
+                        {!isReverted ? (
+                          <button
+                            className="btn btn-sm btn-outline flex-1"
+                            onClick={handleRevert}
+                            title="Zur reinen Transkription zurückkehren"
+                          >
+                            ↩️ Zur Transkription
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-sm btn-primary flex-1"
+                            onClick={handleReCorrect}
+                            disabled={isReCorrecting}
+                            title="Erneut mit KI korrigieren"
+                          >
+                            {isReCorrecting ? (
+                              <>
+                                <Spinner size={12} className="mr-1" />
+                                Korrigiere...
+                              </>
+                            ) : (
+                              '✨ Neu korrigieren'
+                            )}
+                          </button>
+                        )}
                       </div>
                     )}
+                    
                     <p className="text-xs text-gray-400 italic">
                       💡 Tipp: Texte können bearbeitet und an den Ecken vergrößert werden
                     </p>

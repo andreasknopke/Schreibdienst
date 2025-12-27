@@ -384,7 +384,15 @@ export async function POST(req: Request) {
         { temperature: 0.3, maxTokens: 2000 }
       );
 
-      const correctedText = result.content || text;
+      // Entferne Markierungen falls das LLM sie versehentlich übernommen hat
+      let correctedText = (result.content || text)
+        .replace(/<<<DIKTAT_START>>>/g, '')
+        .replace(/<<<DIKTAT_ENDE>>>/g, '')
+        .replace(/<<<DIKTAT>>>/g, '')
+        .replace(/<<<BEREITS_KORRIGIERT>>>/g, '')
+        .replace(/<<<ENDE_KORRIGIERT>>>/g, '')
+        .trim();
+      
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
       const tokens = result.tokens ? `${result.tokens.input}/${result.tokens.output}` : 'unknown';
       console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}, Output: ${correctedText.length} chars`);

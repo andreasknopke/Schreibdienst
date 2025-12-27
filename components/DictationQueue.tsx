@@ -232,13 +232,16 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     const selected = dictations.find(d => d.id === selectedId);
     if (!selected?.raw_transcript) return;
     
+    // Verwende den aktuell angezeigten Text (editedTexts wenn vorhanden, sonst raw_transcript)
+    const textToCorrect = editedTexts.corrected_text || selected.raw_transcript;
+    
     setIsReCorrecting(true);
     try {
       const res = await fetchWithDbToken('/api/correct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          text: selected.raw_transcript,
+          text: textToCorrect,
           username: selected.username
         }),
       });
@@ -258,7 +261,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     } finally {
       setIsReCorrecting(false);
     }
-  }, [selectedId, dictations]);
+  }, [selectedId, dictations, editedTexts.corrected_text]);
 
   // Get combined text for a dictation - always Arztbrief mode now
   const getCombinedText = (d: Dictation): string => {

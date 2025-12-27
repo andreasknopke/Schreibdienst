@@ -271,14 +271,22 @@ WICHTIG:
 - Verändere NICHT den medizinischen Inhalt oder die Bedeutung
 - Behalte die Struktur und Absätze bei
 - Keine stilistischen Änderungen - nur Fehlerkorrekturen
-- Gib NUR den korrigierten Text zurück, ohne Erklärungen, ohne Einleitungen, ohne Kommentare`;
+- Gib NUR den korrigierten Text zurück, ohne Erklärungen, ohne Einleitungen, ohne Kommentare
+- NIEMALS die Markierungen <<<DIKTAT_START>>> oder <<<DIKTAT_ENDE>>> in die Ausgabe übernehmen!`;
 
   const result = await callLLM(llmConfig, [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: `<<<DIKTAT_START>>>${text}<<<DIKTAT_ENDE>>>` }
   ]);
   
-  return cleanupText(result, dictionary.entries);
+  // Entferne Markierungen falls das LLM sie versehentlich übernommen hat
+  let cleaned = result
+    .replace(/<<<DIKTAT_START>>>/g, '')
+    .replace(/<<<DIKTAT_ENDE>>>/g, '')
+    .replace(/<<<DIKTAT>>>/g, '')
+    .trim();
+  
+  return cleanupText(cleaned, dictionary.entries);
 }
 
 // LLM helper

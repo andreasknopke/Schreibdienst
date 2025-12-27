@@ -10,6 +10,7 @@ import {
 import { getRuntimeConfig } from '@/lib/configDb';
 import { formatDictionaryForPrompt, cleanupText, loadDictionary } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
+import { preprocessTranscription } from '@/lib/textFormatting';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes max for processing
@@ -51,13 +52,18 @@ async function processDictation(dictationId: number): Promise<void> {
     // Step 2: Correct with LLM - ALWAYS use Arztbrief mode (no Methodik/Beurteilung sections)
     console.log(`[Worker] Correcting dictation #${dictationId} as Arztbrief...`);
     
-    // Store raw transcription before LLM correction
+    // Store raw transcription before any processing
     const rawTranscript = transcriptionResult.text;
     
-    // Always use Arztbrief mode - no field parsing
-    const correctedText = await correctText(rawTranscript, dictation.username);
+    // Preprocess: apply formatting control words BEFORE LLM
+    // This handles "neuer Absatz", "neue Zeile", "Klammer auf/zu", etc. programmatically
+    const preprocessedText = preprocessTranscription(rawTranscript);
+    console.log(`[Worker] Preprocessed text: ${rawTranscript.length} → ${preprocessedText.length} chars`);
     
-    // Berechne Änderungsscore für Ampelsystem
+    // Always use Arztbrief mode - no field parsing
+    const correctedText = await correctText(preprocessedText, dictation.username);
+    
+    // Berechne Änderungsscore für Ampelsystem (compare with raw transcript)
     const changeScore = calculateChangeScore(rawTranscript, correctedText);
     console.log(`[Worker] Change score for #${dictationId}: ${changeScore}%`);
     

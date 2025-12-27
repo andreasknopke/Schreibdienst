@@ -66,6 +66,15 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   
   // Fullscreen mode for better readability of long texts
   const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  // Audio player state for fullscreen mode
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
 
   // Load available users for filter
   const loadUsers = useCallback(async () => {
@@ -148,6 +157,95 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     
     return () => clearInterval(interval);
   }, [loadDictations, checkWorkerStatus, loadUsers]);
+
+  // Load audio for fullscreen playback
+  const loadAudio = useCallback(async (id: number) => {
+    setAudioLoading(true);
+    setAudioError(null);
+    
+    // Clean up previous audio URL
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrl(null);
+    }
+    
+    try {
+      const res = await fetchWithDbToken(`/api/offline-dictations?id=${id}&audio=true`);
+      if (!res.ok) {
+        if (res.status === 404) {
+          setAudioError('Audio nicht mehr verfügbar');
+        } else {
+          setAudioError('Fehler beim Laden');
+        }
+        return;
+      }
+      
+      const blob = await res.blob();
+      if (blob.size === 0) {
+        setAudioError('Audio wurde gelöscht');
+        return;
+      }
+      
+      const url = URL.createObjectURL(blob);
+      setAudioUrl(url);
+    } catch (err) {
+      setAudioError('Fehler beim Laden');
+    } finally {
+      setAudioLoading(false);
+    }
+  }, [audioUrl]);
+  
+  // Audio control functions
+  const togglePlayPause = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+  
+  const seekToStart = () => {
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = 0;
+  };
+  
+  const seekRelative = (seconds: number) => {
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = Math.max(0, Math.min(audioDuration, audioRef.current.currentTime + seconds));
+  };
+  
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+  
+  // Load audio when entering fullscreen
+  useEffect(() => {
+    if (isFullscreen && selectedId) {
+      loadAudio(selectedId);
+    } else {
+      // Clean up audio when leaving fullscreen
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+        setAudioUrl(null);
+      }
+      setIsPlaying(false);
+      setAudioCurrentTime(0);
+      setAudioError(null);
+    }
+  }, [isFullscreen, selectedId]);
+  
+  // Clean up audio URL on unmount
+  useEffect(() => {
+    return () => {
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+      }
+    };
+  }, [audioUrl]);
 
   // Delete dictation
   const handleDelete = async (id: number, audioOnly: boolean = false) => {
@@ -625,6 +723,97 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                 {selectedDictation.status === 'error' && selectedDictation.error_message && (
                   <div className="alert alert-error text-sm">
                     {selectedDictation.error_message}
+                  </div>
+                )}
+
+                {/* Audio Player - only in fullscreen mode */}
+                {isFullscreen && selectedDictation.status === 'completed' && (
+                  <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3">
+                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                      <span>🎵 Audio-Wiedergabe</span>
+                      {audioLoading && <Spinner size={14} />}
+                      {audioError && <span className="text-orange-500">{audioError}</span>}
+                    </div>
+                    
+                    {audioUrl && (
+                      <>
+                        <audio
+                          ref={audioRef}
+                          src={audioUrl}
+                          onTimeUpdate={(e) => setAudioCurrentTime(e.currentTarget.currentTime)}
+                          onLoadedMetadata={(e) => setAudioDuration(e.currentTarget.duration)}
+                          onEnded={() => setIsPlaying(false)}
+                          onPlay={() => setIsPlaying(true)}
+                          onPause={() => setIsPlaying(false)}
+                        />
+                        
+                        <div className="flex items-center gap-2">
+                          {/* Skip to start */}
+                          <button
+                            className="btn btn-sm btn-outline"
+                            onClick={seekToStart}
+                            title="Zum Anfang"
+                          >
+                            ⏮️
+                          </button>
+                          
+                          {/* Rewind 10s */}
+                          <button
+                            className="btn btn-sm btn-outline"
+                            onClick={() => seekRelative(-10)}
+                            title="10s zurück"
+                          >
+                            ⏪ 10
+                          </button>
+                          
+                          {/* Play/Pause */}
+                          <button
+                            className="btn btn-sm btn-primary"
+                            onClick={togglePlayPause}
+                            title={isPlaying ? 'Pause' : 'Abspielen'}
+                          >
+                            {isPlaying ? '⏸️' : '▶️'}
+                          </button>
+                          
+                          {/* Forward 10s */}
+                          <button
+                            className="btn btn-sm btn-outline"
+                            onClick={() => seekRelative(10)}
+                            title="10s vorwärts"
+                          >
+                            10 ⏩
+                          </button>
+                          
+                          {/* Time display */}
+                          <span className="text-sm font-mono text-gray-600 dark:text-gray-400 ml-2">
+                            {formatTime(audioCurrentTime)} / {formatTime(audioDuration)}
+                          </span>
+                          
+                          {/* Progress bar */}
+                          <input
+                            type="range"
+                            min="0"
+                            max={audioDuration || 100}
+                            value={audioCurrentTime}
+                            onChange={(e) => {
+                              if (audioRef.current) {
+                                audioRef.current.currentTime = parseFloat(e.target.value);
+                              }
+                            }}
+                            className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-gray-300 dark:bg-gray-600"
+                          />
+                        </div>
+                      </>
+                    )}
+                    
+                    {!audioUrl && !audioLoading && !audioError && (
+                      <button
+                        className="btn btn-sm btn-outline"
+                        onClick={() => loadAudio(selectedDictation.id)}
+                      >
+                        🔄 Audio laden
+                      </button>
+                    )}
                   </div>
                 )}
 

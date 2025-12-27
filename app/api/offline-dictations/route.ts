@@ -54,10 +54,24 @@ export async function GET(req: NextRequest) {
     
     // Get single dictation
     if (id) {
-      const dictation = await getDictationById(parseInt(id), false);
+      const includeAudio = searchParams.get('audio') === 'true';
+      const dictation = await getDictationById(parseInt(id), includeAudio);
       if (!dictation) {
         return NextResponse.json({ error: 'Dictation not found' }, { status: 404 });
       }
+      
+      // If audio requested, return as binary stream
+      if (includeAudio && dictation.audio_data) {
+        const audioBuffer = Buffer.from(dictation.audio_data);
+        return new Response(audioBuffer, {
+          headers: {
+            'Content-Type': dictation.audio_mime_type || 'audio/webm',
+            'Content-Length': audioBuffer.length.toString(),
+            'Cache-Control': 'private, max-age=3600',
+          },
+        });
+      }
+      
       return NextResponse.json(dictation);
     }
     

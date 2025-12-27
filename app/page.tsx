@@ -324,6 +324,8 @@ export default function HomePage() {
     setPreCorrectionState(null);
     setCanRevert(false);
     setPendingCorrection(false);
+    setChangeScore(null);
+    setBefundChangeScores({ methodik: 0, befund: 0, beurteilung: 0 });
   }, []);
 
   // Revert-Funktion: Stellt den Text vor der letzten Korrektur wieder her

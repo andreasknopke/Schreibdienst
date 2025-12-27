@@ -130,7 +130,7 @@ export async function createOfflineDictation(
 export async function getUserDictations(username: string): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
   return query(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, error_message,
+            priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
      WHERE username = ?
@@ -163,7 +163,7 @@ export async function getAllDictations(statusFilter?: DictationStatus, userFilte
   
   return query(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, error_message,
+            priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
      ${whereClause}

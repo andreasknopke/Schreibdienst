@@ -83,7 +83,12 @@ Korrigiere den Text zwischen <<<DIKTAT_START>>> und <<<DIKTAT_ENDE>>> und gib NU
 REGELN:
 1. Korrigiere Grammatik- und Rechtschreibfehler
 2. Korrigiere falsch transkribierte medizinische Fachbegriffe (z.B. "Scholecystitis" → "Cholecystitis")
-3. Führe Diktat-Befehle aus: "Punkt" → ".", "Komma" → ",", "neuer Absatz" → Absatzumbruch
+3. FORMATIERUNGSBEFEHLE UMSETZEN - ersetze diese Wörter durch echte Formatierung:
+   - "Neuer Absatz" oder "neuer Absatz" → zwei Zeilenumbrüche (leere Zeile)
+   - "Neue Zeile" oder "neue Zeile" → ein Zeilenumbruch
+   - "Punkt" → "."
+   - "Komma" → ","
+   - "Doppelpunkt" → ":"
 4. Entferne "lösche das letzte Wort/Satz" und das entsprechende Wort/Satz
 5. Entferne Füllwörter wie "ähm", "äh"
 6. Konvertiere Datumsangaben zu DD.MM.YYYY
@@ -629,8 +634,12 @@ export async function POST(req: Request) {
             }
           }
           
-          // Join corrected chunks with proper spacing
-          const correctedText = correctedChunks.join(' ').replace(/\s+/g, ' ').trim();
+          // Join corrected chunks - preserve paragraph breaks, normalize other whitespace
+          const correctedText = correctedChunks
+            .join('\n\n')  // Join chunks with paragraph break
+            .replace(/\n{3,}/g, '\n\n')  // Max 2 newlines (1 empty line)
+            .replace(/[^\S\n]+/g, ' ')  // Normalize spaces but keep newlines
+            .trim();
           
           // Berechne Änderungsscore für Ampelsystem
           const changeScore = calculateChangeScore(text, correctedText);

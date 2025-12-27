@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Spinner from './Spinner';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
+import { ChangeIndicator, ChangeIndicatorDot, ChangeWarningBanner } from './ChangeIndicator';
 
 interface Dictation {
   id: number;
@@ -19,6 +20,7 @@ interface Dictation {
   befund?: string;
   beurteilung?: string;
   corrected_text?: string;
+  change_score?: number; // Änderungsscore für Ampelsystem
   error_message?: string;
   created_at: string;
   completed_at?: string;
@@ -526,6 +528,12 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             <span className="truncate max-w-32">{d.patient_name}</span>
                           </>
                         )}
+                        {d.status === 'completed' && d.change_score !== undefined && (
+                          <>
+                            <span>·</span>
+                            <ChangeIndicatorDot score={d.change_score} />
+                          </>
+                        )}
                       </div>
                     </div>
                     
@@ -606,14 +614,24 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   </div>
                 )}
 
+                {/* Change score warning banner */}
+                {selectedDictation.status === 'completed' && !isReverted && (
+                  <ChangeWarningBanner score={selectedDictation.change_score} />
+                )}
+
                 {/* Results - always Arztbrief mode */}
                 {selectedDictation.status === 'completed' && (
                   <div className="space-y-3">
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <label className="text-xs font-medium text-gray-500">
-                          {isReverted ? 'Reine Transkription (vor Korrektur)' : 'Korrigiertes Ergebnis'}
-                        </label>
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs font-medium text-gray-500">
+                            {isReverted ? 'Reine Transkription (vor Korrektur)' : 'Korrigiertes Ergebnis'}
+                          </label>
+                          {!isReverted && selectedDictation.change_score !== undefined && (
+                            <ChangeIndicator score={selectedDictation.change_score} size="sm" />
+                          )}
+                        </div>
                         {isReverted && (
                           <span className="text-xs text-orange-600 dark:text-orange-400">⚠️ Unkorrigiert</span>
                         )}

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { formatDictionaryForPrompt, applyDictionary, loadDictionary } from '@/lib/dictionaryDb';
 import { getRuntimeConfig } from '@/lib/configDb';
+import { calculateChangeScore } from '@/lib/changeScore';
 
 export const runtime = 'nodejs';
 
@@ -338,15 +339,31 @@ export async function POST(req: Request) {
             beurteilung: correctedFields.beurteilung?.length || 0
           };
           const totalOutput = outputLengths.methodik + outputLengths.befund + outputLengths.beurteilung;
+          
+          // Berechne Änderungsscores für Ampelsystem
+          const changeScores = {
+            methodik: hasMethodik ? calculateChangeScore(befundFields.methodik || '', correctedFields.methodik || '') : 0,
+            befund: hasBefund ? calculateChangeScore(befundFields.befund || '', correctedFields.befund || '') : 0,
+            beurteilung: hasBeurteilung ? calculateChangeScore(befundFields.beurteilung || '', correctedFields.beurteilung || '') : 0
+          };
+          // Gesamtscore: Durchschnitt der geänderten Felder
+          const activeFields = [hasMethodik, hasBefund, hasBeurteilung].filter(Boolean).length;
+          const totalChangeScore = activeFields > 0 
+            ? Math.round((changeScores.methodik + changeScores.befund + changeScores.beurteilung) / activeFields)
+            : 0;
+          
           console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}`);
           console.log(`[Output] Methodik: ${outputLengths.methodik} chars, Befund: ${outputLengths.befund} chars, Beurteilung: ${outputLengths.beurteilung} chars, Total: ${totalOutput} chars`);
+          console.log(`[Changes] Methodik: ${changeScores.methodik}%, Befund: ${changeScores.befund}%, Beurteilung: ${changeScores.beurteilung}%, Total: ${totalChangeScore}%`);
           console.log('=== LLM Correction Complete ===\n');
           return NextResponse.json({ 
             befundFields: {
               methodik: correctedFields.methodik || befundFields.methodik || '',
               befund: correctedFields.befund || befundFields.befund || '',
               beurteilung: correctedFields.beurteilung || befundFields.beurteilung || ''
-            }
+            },
+            changeScore: totalChangeScore,
+            changeScores
           });
         } catch (parseError) {
           console.error('[Error] JSON parse error:', parseError);
@@ -393,12 +410,15 @@ export async function POST(req: Request) {
         .replace(/<<<ENDE_KORRIGIERT>>>/g, '')
         .trim();
       
+      // Berechne Änderungsscore für Ampelsystem
+      const changeScore = calculateChangeScore(text, correctedText);
+      
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
       const tokens = result.tokens ? `${result.tokens.input}/${result.tokens.output}` : 'unknown';
-      console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}, Output: ${correctedText.length} chars`);
+      console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}, Output: ${correctedText.length} chars, Change: ${changeScore}%`);
       console.log('=== LLM Correction Complete ===\n');
 
-      return NextResponse.json({ correctedText });
+      return NextResponse.json({ correctedText, changeScore });
     } catch (error: any) {
       console.error('LLM API error:', error.message);
       return NextResponse.json({ error: 'LLM API error', details: error.message }, { status: 500 });

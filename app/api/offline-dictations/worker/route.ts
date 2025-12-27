@@ -9,6 +9,7 @@ import {
 } from '@/lib/offlineDictationDb';
 import { getRuntimeConfig } from '@/lib/configDb';
 import { formatDictionaryForPrompt, cleanupText, loadDictionary } from '@/lib/dictionaryDb';
+import { calculateChangeScore } from '@/lib/changeScore';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes max for processing
@@ -56,10 +57,15 @@ async function processDictation(dictationId: number): Promise<void> {
     // Always use Arztbrief mode - no field parsing
     const correctedText = await correctText(rawTranscript, dictation.username);
     
+    // Berechne Änderungsscore für Ampelsystem
+    const changeScore = calculateChangeScore(rawTranscript, correctedText);
+    console.log(`[Worker] Change score for #${dictationId}: ${changeScore}%`);
+    
     await completeDictation(dictationId, {
       rawTranscript: rawTranscript,
       transcript: rawTranscript, // Keep for backwards compatibility
       correctedText: correctedText,
+      changeScore: changeScore,
     });
     
     console.log(`[Worker] ✓ Dictation #${dictationId} completed successfully`);

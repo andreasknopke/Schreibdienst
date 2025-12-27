@@ -5,6 +5,7 @@ import { exportDocx } from '@/lib/formatMedical';
 import Spinner from '@/components/Spinner';
 import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
+import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
 
 // Intervall für kontinuierliche Transkription (in ms)
 const TRANSCRIPTION_INTERVAL = 3000;
@@ -70,6 +71,14 @@ export default function HomePage() {
     transcript: string; // Für Arztbrief-Modus
   } | null>(null);
   const [canRevert, setCanRevert] = useState(false);
+  
+  // Änderungsscore für Ampelsystem
+  const [changeScore, setChangeScore] = useState<number | null>(null);
+  const [befundChangeScores, setBefundChangeScores] = useState<{
+    methodik: number;
+    befund: number;
+    beurteilung: number;
+  } | null>(null);
 
   // Funktion zum Transkribieren eines Blobs
   const transcribeChunk = useCallback(async (blob: Blob, isLive: boolean = false): Promise<string> => {
@@ -355,6 +364,10 @@ export default function HomePage() {
             setMethodik(data.befundFields.methodik || preCorrectionState.methodik);
             setTranscript(data.befundFields.befund || preCorrectionState.befund);
             setBeurteilung(data.befundFields.beurteilung || preCorrectionState.beurteilung);
+            if (data.changeScores) {
+              setBefundChangeScores(data.changeScores);
+            }
+            setChangeScore(data.changeScore ?? null);
           }
         } else {
           throw new Error('Korrektur fehlgeschlagen');
@@ -368,6 +381,7 @@ export default function HomePage() {
         if (res.ok) {
           const data = await res.json();
           setTranscript(data.correctedText || preCorrectionState.transcript);
+          setChangeScore(data.changeScore ?? null);
         } else {
           throw new Error('Korrektur fehlgeschlagen');
         }
@@ -601,6 +615,12 @@ export default function HomePage() {
               if (res.ok) {
                 const data = await res.json();
                 if (data.befundFields) {
+                  // Speichere Änderungsscores für Ampelsystem
+                  if (data.changeScores) {
+                    setBefundChangeScores(data.changeScores);
+                  }
+                  setChangeScore(data.changeScore ?? null);
+                  
                   // Setze nur die korrigierten Felder, behalte andere unverändert
                   if (changedFields.methodik !== undefined) {
                     setMethodik(data.befundFields.methodik || currentMethodik);
@@ -645,9 +665,11 @@ export default function HomePage() {
               if (res.ok) {
                 const data = await res.json();
                 setTranscript(data.correctedText || fullText);
+                setChangeScore(data.changeScore ?? null);
                 setCanRevert(true);
               } else {
                 setTranscript(fullText);
+                setChangeScore(null);
               }
             }
           } catch {
@@ -709,6 +731,7 @@ export default function HomePage() {
             const data = await res.json();
             if (data.correctedText) {
               setTranscript(data.correctedText);
+              setChangeScore(data.changeScore ?? null);
             }
           }
         } finally {
@@ -1180,18 +1203,28 @@ export default function HomePage() {
             </div>
           </div>
 
+          {/* Warnbanner bei signifikanten Änderungen */}
+          {changeScore !== null && changeScore > 35 && !isProcessing && (
+            <ChangeWarningBanner score={changeScore} />
+          )}
+
           {/* Beurteilung-Feld */}
           <div className="card">
             <div className="card-body py-3 space-y-2">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-medium flex items-center gap-2">
-                  Zusammenfassung
-                  {activeField === 'beurteilung' && recording && (
-                    <span className="px-1.5 py-0.5 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded text-xs">
-                      ●
-                    </span>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium flex items-center gap-2">
+                    Zusammenfassung
+                    {activeField === 'beurteilung' && recording && (
+                      <span className="px-1.5 py-0.5 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded text-xs">
+                        ●
+                      </span>
                   )}
-                </label>
+                  </label>
+                  {changeScore !== null && !isProcessing && (
+                    <ChangeIndicator score={changeScore} size="sm" />
+                  )}
+                </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-400">{beurteilung ? `${beurteilung.length}` : ''}</span>
                   <button 
@@ -1232,7 +1265,12 @@ export default function HomePage() {
         <div className="card">
           <div className="card-body py-3 space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium">Ergebnis</label>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium">Ergebnis</label>
+                {changeScore !== null && !isProcessing && (
+                  <ChangeIndicator score={changeScore} size="sm" />
+                )}
+              </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-400">{transcript ? `${transcript.length}` : ''}</span>
                 <button 
@@ -1245,6 +1283,10 @@ export default function HomePage() {
                 </button>
               </div>
             </div>
+            
+            {/* Warnbanner bei signifikanten Änderungen */}
+            <ChangeWarningBanner score={changeScore} />
+            
             <textarea
               className={`textarea font-mono text-sm min-h-40 ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
               value={transcript}

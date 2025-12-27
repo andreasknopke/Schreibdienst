@@ -26,6 +26,7 @@ export interface OfflineDictation {
   befund?: string;
   beurteilung?: string;
   corrected_text?: string;
+  change_score?: number; // Änderungsscore (0-100) für Ampelsystem
   error_message?: string;
   // Timestamps
   created_at: Date;
@@ -75,6 +76,17 @@ export async function initOfflineDictationTable(): Promise<void> {
     // Column already exists - ignore error
     if (!e.message?.includes('Duplicate column')) {
       console.log('[DB] raw_transcript column already exists');
+    }
+  }
+  
+  // Migrate existing tables to add change_score column if missing
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN change_score INT DEFAULT NULL AFTER corrected_text`);
+    console.log('[DB] ✓ Added change_score column');
+  } catch (e: any) {
+    // Column already exists - ignore error
+    if (!e.message?.includes('Duplicate column')) {
+      console.log('[DB] change_score column already exists');
     }
   }
   
@@ -199,7 +211,7 @@ export async function getDictationById(id: number, includeAudio: boolean = false
   const fields = includeAudio 
     ? '*' 
     : `id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-       priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, error_message,
+       priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
        created_at, processing_started_at, completed_at`;
   
   const rows = await query<OfflineDictation>(
@@ -229,6 +241,7 @@ export async function completeDictation(
     befund?: string;
     beurteilung?: string;
     correctedText?: string;
+    changeScore?: number;
   }
 ): Promise<void> {
   await execute(
@@ -240,6 +253,7 @@ export async function completeDictation(
          befund = ?,
          beurteilung = ?,
          corrected_text = ?,
+         change_score = ?,
          completed_at = NOW()
      WHERE id = ?`,
     [
@@ -249,6 +263,7 @@ export async function completeDictation(
       results.befund || null,
       results.beurteilung || null,
       results.correctedText || null,
+      results.changeScore ?? null,
       id
     ]
   );

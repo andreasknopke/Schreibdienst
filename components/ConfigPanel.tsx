@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from 'react';
 import { useAuth } from './AuthProvider';
+import DbTokenManager from './DbTokenManager';
 
 interface ProviderOption {
   id: string;
@@ -293,6 +294,11 @@ export default function ConfigPanel() {
           <span>LM Studio: {envInfo?.hasLMStudioUrl ? 'Konfiguriert' : 'Nicht konfiguriert'}</span>
         </div>
       </div>
+
+      {/* Datenbank-Token Manager - nur für root */}
+      {isRoot && (
+        <DbTokenManager isRoot={true} />
+      )}
     </div>
   );
 }

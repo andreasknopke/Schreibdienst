@@ -7,7 +7,6 @@ import ThemeToggle from '@/components/ThemeToggle';
 import VoiceAgentButton from '@/components/VoiceAgentButton';
 import UserMenu from '@/components/UserMenu';
 import LoginForm from '@/components/LoginForm';
-import DbTokenManager from '@/components/DbTokenManager';
 
 function LayoutContent({ children }: { children: ReactNode }) {
   const { isLoggedIn } = useAuth();
@@ -53,7 +52,6 @@ function LayoutContent({ children }: { children: ReactNode }) {
             <h1 className="text-base font-semibold">Schreibdienst</h1>
           </div>
           <nav className="flex items-center gap-2 text-sm text-gray-600">
-            <DbTokenManager />
             <UserMenu />
             <VoiceAgentButton />
             <ThemeToggle />

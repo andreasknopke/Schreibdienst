@@ -10,7 +10,12 @@ import {
   type DbCredentials 
 } from '@/lib/dbToken';
 
-export default function DbTokenManager() {
+// Props für die Komponente - wird jetzt inline im ConfigPanel angezeigt
+interface DbTokenManagerProps {
+  isRoot?: boolean;
+}
+
+export default function DbTokenManager({ isRoot = false }: DbTokenManagerProps) {
   const { hasDbToken, dbCredentials } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setMode] = useState<'view' | 'generate' | 'enter'>('view');
@@ -85,44 +90,18 @@ export default function DbTokenManager() {
     setTimeout(() => setFeedback(null), 2000);
   };
 
-  if (!isOpen) {
-    return (
-      <button
-        onClick={() => setIsOpen(true)}
-        className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
-        title="Datenbank-Verbindung"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <ellipse cx="12" cy="5" rx="9" ry="3"/>
-          <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
-          <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-        </svg>
-        {hasDbToken && (
-          <span className="w-2 h-2 bg-green-500 rounded-full" title="Dynamische DB aktiv"/>
-        )}
-      </button>
-    );
-  }
-
+  // Komponente wird jetzt inline angezeigt (im ConfigPanel), kein Modal mehr
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setIsOpen(false)}>
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="p-4 border-b dark:border-gray-700 flex justify-between items-center">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <ellipse cx="12" cy="5" rx="9" ry="3"/>
-              <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
-              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-            </svg>
-            Datenbank-Verbindung
-          </h2>
-          <button onClick={() => setIsOpen(false)} className="text-gray-500 hover:text-gray-700">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"/>
-              <line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
-        </div>
+    <div className="card">
+      <div className="card-body space-y-4">
+        <h3 className="text-lg font-semibold flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <ellipse cx="12" cy="5" rx="9" ry="3"/>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          </svg>
+          Datenbank-Verbindung
+        </h3>
 
         <div className="p-4 space-y-4">
           {/* Current Status */}
@@ -152,7 +131,7 @@ export default function DbTokenManager() {
             </div>
           )}
 
-          {/* Mode Tabs */}
+          {/* Mode Tabs - Token generieren nur für root */}
           <div className="flex gap-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
             <button
               onClick={() => setMode('view')}
@@ -174,16 +153,18 @@ export default function DbTokenManager() {
             >
               Token eingeben
             </button>
-            <button
-              onClick={() => setMode('generate')}
-              className={`flex-1 py-1.5 px-3 text-sm font-medium rounded-md transition-all ${
-                mode === 'generate'
-                  ? 'bg-white dark:bg-gray-600 shadow-sm'
-                  : 'text-gray-600 dark:text-gray-400'
-              }`}
-            >
-              Token generieren
-            </button>
+            {isRoot && (
+              <button
+                onClick={() => setMode('generate')}
+                className={`flex-1 py-1.5 px-3 text-sm font-medium rounded-md transition-all ${
+                  mode === 'generate'
+                    ? 'bg-white dark:bg-gray-600 shadow-sm'
+                    : 'text-gray-600 dark:text-gray-400'
+                }`}
+              >
+                Token generieren
+              </button>
+            )}
           </div>
 
           {/* View Mode */}

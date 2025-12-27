@@ -157,33 +157,35 @@ function cleanLLMOutput(text: string, originalChunk?: string): string | null {
     .replace(/<<<ENDE_KORRIGIERT>>>/g, '')
     .trim();
   
-  // Remove LLM meta-comments that explain what it's doing (these should NOT be in the output)
-  // Pattern: "Der diktierte Text enthält keine Fehler... Daher wird der Text unverändert zurückgegeben:"
+  // Remove complete LLM meta-sentences that explain what it's doing
+  // These are full sentences the LLM adds instead of just returning the corrected text
   cleaned = cleaned
-    .replace(/^\s*Der diktierte Text enthält keine Fehler[^"]*:\s*/i, '')
-    .replace(/^\s*Der Text enthält keine Fehler[^"]*:\s*/i, '')
-    .replace(/^\s*Es wurden keine Fehler gefunden[^"]*:\s*/i, '')
-    .replace(/^\s*Der Text ist bereits korrekt[^"]*:\s*/i, '')
-    .replace(/^\s*Keine Korrekturen erforderlich[^"]*:\s*/i, '')
-    .replace(/^\s*Der Text wurde unverändert zurückgegeben[^"]*:\s*/i, '')
-    .replace(/^\s*Hier ist der unveränderte Text[^"]*:\s*/i, '')
-    .replace(/^\s*Der Text wird unverändert zurückgegeben[^"]*:\s*/i, '');
+    // Match entire meta-sentences about no errors/no corrections needed
+    .replace(/^\s*Der (diktierte )?Text enthält keine Fehler[^.]*\.\s*/gi, '')
+    .replace(/^\s*Es wurden keine Fehler gefunden[^.]*\.\s*/gi, '')
+    .replace(/^\s*Der Text ist bereits korrekt[^.]*\.\s*/gi, '')
+    .replace(/^\s*Keine Korrekturen (sind )?erforderlich[^.]*\.\s*/gi, '')
+    .replace(/^\s*Der Text (wurde |wird )?unverändert zurückgegeben[^.]*\.\s*/gi, '')
+    .replace(/^\s*Hier ist der unveränderte Text[^.]*\.\s*/gi, '')
+    .replace(/^\s*Der Text muss nicht korrigiert werden[^.]*\.\s*/gi, '')
+    .replace(/^\s*Es gibt keine Fehler[^.]*\.\s*/gi, '')
+    .replace(/^\s*Der Text braucht keine Korrektur[^.]*\.\s*/gi, '');
   
-  // Remove common prompt leakage patterns at the beginning (with possible leading whitespace/newlines)
+  // Remove prefix patterns followed by colon (with optional content after colon)
   cleaned = cleaned
-    .replace(/^\s*(Korrigierte[r]? Text:?\s*)/i, '')
-    .replace(/^\s*(Der korrigierte Text lautet:?\s*)/i, '')
-    .replace(/^\s*(Der korrigierte Text:?\s*)/i, '')
-    .replace(/^\s*(Hier ist der korrigierte Text:?\s*)/i, '')
-    .replace(/^\s*(Hier ist die Korrektur:?\s*)/i, '')
-    .replace(/^\s*(Korrektur:?\s*)/i, '')
-    .replace(/^\s*(Korrigiere den folgenden diktierten Text:?\s*)/i, '')
-    .replace(/^\s*(Output:?\s*)/i, '')
-    .replace(/^\s*(Input:?\s*)/i, '')
-    .replace(/^\s*(Ergebnis:?\s*)/i, '')
-    .replace(/^\s*(Antwort:?\s*)/i, '')
+    .replace(/^\s*Der korrigierte Text lautet:?\s*/i, '')
+    .replace(/^\s*Der korrigierte Text:?\s*/i, '')
+    .replace(/^\s*Hier ist der korrigierte Text:?\s*/i, '')
+    .replace(/^\s*Hier ist die Korrektur:?\s*/i, '')
+    .replace(/^\s*Korrigierte[r]? Text:?\s*/i, '')
+    .replace(/^\s*Korrektur:?\s*/i, '')
+    .replace(/^\s*Output:?\s*/i, '')
+    .replace(/^\s*Input:?\s*/i, '')
+    .replace(/^\s*Ergebnis:?\s*/i, '')
+    .replace(/^\s*Antwort:?\s*/i, '')
     .replace(/^\s*\*\*Korrigierter Text:?\*\*\s*/i, '')
     .replace(/^\s*\*\*Korrektur:?\*\*\s*/i, '')
+    .replace(/^\s*Korrigiere den folgenden diktierten Text:?\s*/i, '')
     .replace(/korrigieren Sie bitte den Text entsprechend der vorgegebenen Regeln und geben Sie das Ergebnis zurück\.?\s*/gi, '')
     .trim();
   

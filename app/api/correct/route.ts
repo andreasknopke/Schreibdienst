@@ -152,13 +152,23 @@ function cleanLLMOutput(text: string, originalChunk?: string): string | null {
     .replace(/<<<DIKTAT>>>/g, '')
     .replace(/<<<BEREITS_KORRIGIERT>>>/g, '')
     .replace(/<<<ENDE_KORRIGIERT>>>/g, '')
-    // Remove common prompt leakage patterns
-    .replace(/^(Korrigiere den folgenden diktierten Text:?\s*)/i, '')
-    .replace(/^(Korrektur:?\s*)/i, '')
-    .replace(/^(Output:?\s*)/i, '')
-    .replace(/^(Input:?\s*)/i, '')
-    .replace(/^(Der korrigierte Text lautet:?\s*)/i, '')
-    .replace(/^(Hier ist der korrigierte Text:?\s*)/i, '')
+    .trim();
+  
+  // Remove common prompt leakage patterns at the beginning (with possible leading whitespace/newlines)
+  cleaned = cleaned
+    .replace(/^\s*(Korrigierte[r]? Text:?\s*)/i, '')
+    .replace(/^\s*(Der korrigierte Text lautet:?\s*)/i, '')
+    .replace(/^\s*(Der korrigierte Text:?\s*)/i, '')
+    .replace(/^\s*(Hier ist der korrigierte Text:?\s*)/i, '')
+    .replace(/^\s*(Hier ist die Korrektur:?\s*)/i, '')
+    .replace(/^\s*(Korrektur:?\s*)/i, '')
+    .replace(/^\s*(Korrigiere den folgenden diktierten Text:?\s*)/i, '')
+    .replace(/^\s*(Output:?\s*)/i, '')
+    .replace(/^\s*(Input:?\s*)/i, '')
+    .replace(/^\s*(Ergebnis:?\s*)/i, '')
+    .replace(/^\s*(Antwort:?\s*)/i, '')
+    .replace(/^\s*\*\*Korrigierter Text:?\*\*\s*/i, '')
+    .replace(/^\s*\*\*Korrektur:?\*\*\s*/i, '')
     .replace(/korrigieren Sie bitte den Text entsprechend der vorgegebenen Regeln und geben Sie das Ergebnis zurück\.?\s*/gi, '')
     .trim();
   

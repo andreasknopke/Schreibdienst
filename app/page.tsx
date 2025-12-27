@@ -561,25 +561,59 @@ export default function HomePage() {
                 transcript: ''
               });
               
-              // Korrigiere alle drei Felder gleichzeitig
+              // Korrigiere NUR das aktive Feld (oder die Felder mit neuen Steuerbefehlen)
+              // Ermittle welche Felder sich geändert haben
+              const changedFields: { methodik?: string; befund?: string; beurteilung?: string } = {};
+              
+              if (parsed.lastField) {
+                // Steuerbefehle erkannt - korrigiere nur die betroffenen Felder
+                if (parsed.methodik !== null) changedFields.methodik = currentMethodik;
+                if (parsed.befund !== null) changedFields.befund = currentBefund;
+                if (parsed.beurteilung !== null) changedFields.beurteilung = currentBeurteilung;
+              } else {
+                // Nur das aktive Feld wurde geändert
+                switch (activeField) {
+                  case 'methodik':
+                    changedFields.methodik = currentMethodik;
+                    break;
+                  case 'beurteilung':
+                    changedFields.beurteilung = currentBeurteilung;
+                    break;
+                  case 'befund':
+                  default:
+                    changedFields.befund = currentBefund;
+                    break;
+                }
+              }
+              
+              // Korrigiere nur die geänderten Felder
               const res = await fetchWithDbToken('/api/correct', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
-                  befundFields: {
-                    methodik: currentMethodik,
-                    befund: currentBefund,
-                    beurteilung: currentBeurteilung
-                  },
+                  befundFields: changedFields,
                   username
                 }),
               });
               if (res.ok) {
                 const data = await res.json();
                 if (data.befundFields) {
-                  setMethodik(data.befundFields.methodik || currentMethodik);
-                  setTranscript(data.befundFields.befund || currentBefund);
-                  setBeurteilung(data.befundFields.beurteilung || currentBeurteilung);
+                  // Setze nur die korrigierten Felder, behalte andere unverändert
+                  if (changedFields.methodik !== undefined) {
+                    setMethodik(data.befundFields.methodik || currentMethodik);
+                  } else {
+                    setMethodik(currentMethodik);
+                  }
+                  if (changedFields.befund !== undefined) {
+                    setTranscript(data.befundFields.befund || currentBefund);
+                  } else {
+                    setTranscript(currentBefund);
+                  }
+                  if (changedFields.beurteilung !== undefined) {
+                    setBeurteilung(data.befundFields.beurteilung || currentBeurteilung);
+                  } else {
+                    setBeurteilung(currentBeurteilung);
+                  }
                   setCanRevert(true);
                 }
               } else {

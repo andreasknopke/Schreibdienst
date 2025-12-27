@@ -96,8 +96,8 @@ export function formatDictionaryForPrompt(entries: DictionaryEntry[]): string {
     return '';
   }
   
-  const lines = entries.map(e => `- "${e.wrong}" → "${e.correct}"`);
-  return `\n\nBenutzerwörterbuch (bitte diese Korrekturen anwenden):\n${lines.join('\n')}`;
+  const lines = entries.map(e => `- "${e.wrong}" MUSS IMMER ersetzt werden durch "${e.correct}"`);
+  return `\n\nKRITISCH - BENUTZERWÖRTERBUCH (MUSS angewendet werden):\nDie folgenden Ersetzungen sind PFLICHT und müssen IMMER durchgeführt werden, unabhängig vom Kontext:\n${lines.join('\n')}\n\nWenn du eines dieser Wörter im Text findest, MUSST du es ersetzen!`;
 }
 
 // Apply dictionary corrections to text

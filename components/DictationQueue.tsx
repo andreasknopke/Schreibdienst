@@ -239,6 +239,18 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     }
   }, [isFullscreen, selectedId]);
   
+  // Handle Escape key to exit fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        setIsFullscreen(false);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen]);
+  
   // Clean up audio URL on unmount
   useEffect(() => {
     return () => {
@@ -633,7 +645,13 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                     ? 'ring-2 ring-blue-500' 
                     : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
                 }`}
-                onClick={() => setSelectedId(d.id)}
+                onClick={() => {
+                  setSelectedId(d.id);
+                  // Bei fertigen Diktaten direkt Vollbild öffnen
+                  if (d.status === 'completed') {
+                    setIsFullscreen(true);
+                  }
+                }}
               >
                 <div className="card-body py-3">
                   <div className="flex items-start justify-between gap-2">
@@ -866,9 +884,18 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             <ChangeIndicator score={selectedDictation.change_score} size="sm" />
                           )}
                         </div>
-                        {isReverted && (
-                          <span className="text-xs text-orange-600 dark:text-orange-400">⚠️ Unkorrigiert</span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {isReverted && (
+                            <span className="text-xs text-orange-600 dark:text-orange-400">⚠️ Unkorrigiert</span>
+                          )}
+                          <button
+                            className="btn btn-xs btn-ghost"
+                            onClick={() => setIsFullscreen(!isFullscreen)}
+                            title={isFullscreen ? 'Vollbild beenden (Esc)' : 'Vollbild anzeigen'}
+                          >
+                            {isFullscreen ? '🗗 Verkleinern' : '🗖 Vollbild'}
+                          </button>
+                        </div>
                       </div>
                       <textarea
                         className={`mt-1 w-full p-2 rounded text-sm font-mono resize-y ${
@@ -943,13 +970,6 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                           💾 Speichern
                         </button>
                       )}
-                      <button
-                        className="btn btn-sm btn-outline"
-                        onClick={() => setIsFullscreen(!isFullscreen)}
-                        title={isFullscreen ? 'Vollbild beenden' : 'Vollbild anzeigen'}
-                      >
-                        {isFullscreen ? '🗗✕' : '🗖'}
-                      </button>
                       <button
                         className="btn btn-sm btn-outline"
                         onClick={() => handleDelete(selectedDictation.id, true)}

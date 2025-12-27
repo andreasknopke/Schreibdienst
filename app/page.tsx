@@ -6,6 +6,7 @@ import Spinner from '@/components/Spinner';
 import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
+import { applyFormattingControlWords } from '@/lib/textFormatting';
 
 // Intervall für kontinuierliche Transkription (in ms)
 const TRANSCRIPTION_INTERVAL = 3000;
@@ -200,11 +201,14 @@ export default function HomePage() {
   // Verarbeitet Text und verteilt auf die richtigen Felder (für Befund-Modus)
   const processTextForBefundFields = useCallback((rawText: string) => {
     if (mode !== 'befund') {
-      setTranscript(rawText);
+      const formatted = applyFormattingControlWords(rawText);
+      setTranscript(formatted);
       return;
     }
     
-    const parsed = parseFieldCommands(rawText);
+    // Formatierung auf den Text anwenden (um Steuerwörter sofort zu ersetzen)
+    const formattedText = applyFormattingControlWords(rawText);
+    const parsed = parseFieldCommands(formattedText);
     
     // Wenn Steuerbefehle erkannt wurden, verteile Text auf die entsprechenden Felder
     if (parsed.lastField) {
@@ -224,14 +228,14 @@ export default function HomePage() {
       // Kein Steuerbefehl erkannt - Text geht ins aktive Feld
       switch (activeField) {
         case 'methodik':
-          setMethodik(combineTexts(existingMethodikRef.current, rawText));
+          setMethodik(combineTexts(existingMethodikRef.current, formattedText));
           break;
         case 'beurteilung':
-          setBeurteilung(combineTexts(existingBeurteilungRef.current, rawText));
+          setBeurteilung(combineTexts(existingBeurteilungRef.current, formattedText));
           break;
         case 'befund':
         default:
-          setTranscript(combineTexts(existingTextRef.current, rawText));
+          setTranscript(combineTexts(existingTextRef.current, formattedText));
           break;
       }
     }
@@ -250,9 +254,12 @@ export default function HomePage() {
       if (currentTranscript && currentTranscript !== lastTranscriptRef.current) {
         lastTranscriptRef.current = currentTranscript;
         
+        // Formatierung auf den transkribierten Text anwenden (um Steuerwörter sofort zu ersetzen)
+        const formattedTranscript = applyFormattingControlWords(currentTranscript);
+        
         if (mode === 'befund') {
           // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
-          const parsed = parseFieldCommands(currentTranscript);
+          const parsed = parseFieldCommands(formattedTranscript);
           
           if (parsed.lastField) {
             setActiveField(parsed.lastField);
@@ -273,22 +280,22 @@ export default function HomePage() {
             // Kein Steuerbefehl - Text geht ins aktive Feld
             switch (activeField) {
               case 'methodik':
-                lastMethodikRef.current = currentTranscript;
-                setMethodik(combineTexts(existingMethodikRef.current, currentTranscript));
+                lastMethodikRef.current = formattedTranscript;
+                setMethodik(combineTexts(existingMethodikRef.current, formattedTranscript));
                 break;
               case 'beurteilung':
-                lastBeurteilungRef.current = currentTranscript;
-                setBeurteilung(combineTexts(existingBeurteilungRef.current, currentTranscript));
+                lastBeurteilungRef.current = formattedTranscript;
+                setBeurteilung(combineTexts(existingBeurteilungRef.current, formattedTranscript));
                 break;
               case 'befund':
               default:
-                setTranscript(combineTexts(existingTextRef.current, currentTranscript));
+                setTranscript(combineTexts(existingTextRef.current, formattedTranscript));
                 break;
             }
           }
         } else {
           // Im Arztbrief-Modus: Normales Verhalten
-          const fullText = combineTexts(existingTextRef.current, currentTranscript);
+          const fullText = combineTexts(existingTextRef.current, formattedTranscript);
           setTranscript(fullText);
         }
       }
@@ -536,10 +543,13 @@ export default function HomePage() {
         const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
         const sessionTranscript = await transcribeChunk(blob, false);
         if (sessionTranscript) {
+          // Formatierung auf den Text anwenden (um Steuerwörter sofort zu ersetzen)
+          const formattedTranscript = applyFormattingControlWords(sessionTranscript);
+          
           // Verarbeite Transkript und setze Text in Felder
           if (mode === 'befund') {
             // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
-            const parsed = parseFieldCommands(sessionTranscript);
+            const parsed = parseFieldCommands(formattedTranscript);
             
             // Aktualisiere die Felder basierend auf parsed results
             let currentMethodik = methodik;
@@ -561,14 +571,14 @@ export default function HomePage() {
               // Kein Steuerbefehl - Text geht ins aktive Feld
               switch (activeField) {
                 case 'methodik':
-                  currentMethodik = combineTexts(existingMethodikRef.current, sessionTranscript);
+                  currentMethodik = combineTexts(existingMethodikRef.current, formattedTranscript);
                   break;
                 case 'beurteilung':
-                  currentBeurteilung = combineTexts(existingBeurteilungRef.current, sessionTranscript);
+                  currentBeurteilung = combineTexts(existingBeurteilungRef.current, formattedTranscript);
                   break;
                 case 'befund':
                 default:
-                  currentBefund = combineTexts(existingTextRef.current, sessionTranscript);
+                  currentBefund = combineTexts(existingTextRef.current, formattedTranscript);
                   break;
               }
             }
@@ -669,7 +679,7 @@ export default function HomePage() {
             }
           } else {
             // Im Arztbrief-Modus: Normales Verhalten
-            const fullText = combineTexts(existingTextRef.current, sessionTranscript);
+            const fullText = combineTexts(existingTextRef.current, formattedTranscript);
             
             // Speichere Text VOR der Korrektur für Revert-Funktion
             setPreCorrectionState({
@@ -720,24 +730,26 @@ export default function HomePage() {
     setError(null);
     try {
       const text = await transcribeChunk(file, false);
-      setTranscript(text);
+      // Formatierung auf den Text anwenden (um Steuerwörter sofort zu ersetzen)
+      const formattedText = applyFormattingControlWords(text);
+      setTranscript(formattedText);
       // Speichere Text VOR der Korrektur für Revert-Funktion
-      if (text) {
+      if (formattedText) {
         setPreCorrectionState({
           methodik: '',
           befund: '',
           beurteilung: '',
-          transcript: text
+          transcript: formattedText
         });
       }
       // Korrektur nach Upload nur wenn autoCorrect aktiviert
-      if (text && autoCorrect) {
+      if (formattedText && autoCorrect) {
         setCorrecting(true);
         try {
           const res = await fetchWithDbToken('/api/correct', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, username }),
+            body: JSON.stringify({ text: formattedText, username }),
           });
           if (res.ok) {
             const data = await res.json();
@@ -750,7 +762,7 @@ export default function HomePage() {
         } finally {
           setCorrecting(false);
         }
-      } else if (text && !autoCorrect) {
+      } else if (formattedText && !autoCorrect) {
         // Wenn autoCorrect deaktiviert, zeige Button für manuelle Korrektur
         setPendingCorrection(true);
       }

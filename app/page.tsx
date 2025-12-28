@@ -74,6 +74,7 @@ export default function HomePage() {
     transcript: string; // Für Arztbrief-Modus
   } | null>(null);
   const [canRevert, setCanRevert] = useState(false);
+  const [isReverted, setIsReverted] = useState(false); // Zeigt an ob gerade der unkorrigierte Text angezeigt wird
   
   // Änderungsscore für Ampelsystem
   const [changeScore, setChangeScore] = useState<number | null>(null);
@@ -347,6 +348,7 @@ export default function HomePage() {
       setTranscript(preCorrectionState.transcript);
     }
     setCanRevert(false);
+    setIsReverted(true); // Jetzt zeigen wir den unkorrigierten Text
   }, [preCorrectionState, mode]);
 
   // Re-Correct-Funktion: Führt die Korrektur erneut durch
@@ -381,6 +383,8 @@ export default function HomePage() {
             }
             setChangeScore(data.changeScore ?? null);
           }
+          setCanRevert(true);
+          setIsReverted(false);
         } else {
           throw new Error('Korrektur fehlgeschlagen');
         }
@@ -394,6 +398,8 @@ export default function HomePage() {
           const data = await res.json();
           setTranscript(data.correctedText || preCorrectionState.transcript);
           setChangeScore(data.changeScore ?? null);
+          setCanRevert(true);
+          setIsReverted(false);
         } else {
           throw new Error('Korrektur fehlgeschlagen');
         }
@@ -1129,24 +1135,24 @@ export default function HomePage() {
               ✨ Neu
             </button>
             {canRevert && preCorrectionState && (
-              <>
-                <button 
-                  className="btn btn-outline text-sm py-1.5 px-3 text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-600 dark:hover:bg-amber-900/20" 
-                  onClick={handleRevert}
-                  title="Korrektur rückgängig machen - zeigt den Originaltext"
-                  disabled={correcting}
-                >
-                  ↩ Revert
-                </button>
-                <button 
-                  className="btn btn-outline text-sm py-1.5 px-3 text-purple-600 border-purple-300 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-600 dark:hover:bg-purple-900/20" 
-                  onClick={handleReCorrect}
-                  title="Korrektur erneut durchführen"
-                  disabled={correcting}
-                >
-                  {correcting ? <Spinner size={14} /> : '🔄 Neu korrigieren'}
-                </button>
-              </>
+              <button 
+                className="btn btn-outline text-sm py-1.5 px-3 text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-600 dark:hover:bg-amber-900/20" 
+                onClick={handleRevert}
+                title="Korrektur rückgängig machen - zeigt den Originaltext"
+                disabled={correcting}
+              >
+                ↩ Revert
+              </button>
+            )}
+            {isReverted && preCorrectionState && (
+              <button 
+                className="btn btn-outline text-sm py-1.5 px-3 text-purple-600 border-purple-300 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-600 dark:hover:bg-purple-900/20" 
+                onClick={handleReCorrect}
+                title="Korrektur erneut durchführen"
+                disabled={correcting}
+              >
+                {correcting ? <Spinner size={14} /> : '🔄 Neu korrigieren'}
+              </button>
             )}
             {/* Manueller Korrektur-Button wenn autoCorrect deaktiviert */}
             {pendingCorrection && !autoCorrect && (

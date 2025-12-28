@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from './AuthProvider';
 import UserManagement from './UserManagement';
@@ -15,10 +15,25 @@ export default function UserMenu() {
   const [showHelp, setShowHelp] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [savingAutoCorrect, setSavingAutoCorrect] = useState(false);
+  const [dictionaryInitialWord, setDictionaryInitialWord] = useState('');
 
   // Nur im Browser rendern
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  // Öffnet das Wörterbuch und übernimmt selektierten Text
+  const handleOpenDictionary = useCallback(() => {
+    const selection = window.getSelection();
+    const selectedText = selection?.toString().trim() || '';
+    setDictionaryInitialWord(selectedText);
+    setShowDictionary(true);
+  }, []);
+
+  // Schließt das Wörterbuch und setzt den Initial-Word zurück
+  const handleCloseDictionary = useCallback(() => {
+    setShowDictionary(false);
+    setDictionaryInitialWord('');
   }, []);
 
   if (!isLoggedIn) return null;
@@ -34,7 +49,7 @@ export default function UserMenu() {
             Mein Wörterbuch
           </h2>
           <button
-            onClick={() => setShowDictionary(false)}
+            onClick={handleCloseDictionary}
             className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
             title="Schließen"
           >
@@ -45,7 +60,7 @@ export default function UserMenu() {
           </button>
         </div>
         <div className="p-4 overflow-y-auto flex-1">
-          <DictionaryManager />
+          <DictionaryManager initialWrong={dictionaryInitialWord} />
         </div>
       </div>
     </div>,
@@ -168,9 +183,9 @@ export default function UserMenu() {
           )}
         </button>
         <button
-          onClick={() => setShowDictionary(!showDictionary)}
+          onClick={handleOpenDictionary}
           className="text-xs text-green-600 hover:text-green-700 px-1.5 sm:px-2 py-1 rounded hover:bg-green-50 dark:hover:bg-green-900/20"
-          title="Mein Wörterbuch"
+          title="Mein Wörterbuch (markierter Text wird übernommen)"
         >
           📖<span className="hidden sm:inline"> Wörterbuch</span>
         </button>

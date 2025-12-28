@@ -8,7 +8,11 @@ interface DictionaryEntry {
   addedAt: string;
 }
 
-export default function DictionaryManager() {
+interface DictionaryManagerProps {
+  initialWrong?: string;
+}
+
+export default function DictionaryManager({ initialWrong = '' }: DictionaryManagerProps) {
   const { getAuthHeader, getDbTokenHeader } = useAuth();
   const [entries, setEntries] = useState<DictionaryEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -16,7 +20,7 @@ export default function DictionaryManager() {
   const [success, setSuccess] = useState('');
   
   // Form state
-  const [wrong, setWrong] = useState('');
+  const [wrong, setWrong] = useState(initialWrong);
   const [correct, setCorrect] = useState('');
   const [adding, setAdding] = useState(false);
 

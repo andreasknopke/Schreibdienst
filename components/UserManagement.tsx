@@ -6,6 +6,7 @@ interface User {
   username: string;
   isAdmin: boolean;
   canViewAllDictations: boolean;
+  defaultMode: 'befund' | 'arztbrief';
   createdAt: string;
   createdBy: string;
 }
@@ -120,6 +121,38 @@ export default function UserManagement() {
     }
   };
 
+  const handleModeChange = async (username: string, newMode: 'befund' | 'arztbrief') => {
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await fetch('/api/users', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        },
+        body: JSON.stringify({ 
+          username, 
+          permissions: { defaultMode: newMode } 
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSuccess(`Modus für "${username}" auf ${newMode === 'befund' ? 'Befund' : 'Arztbrief'} geändert`);
+        fetchUsers();
+        setTimeout(() => setSuccess(''), 3000);
+      } else {
+        setError(data.error || 'Fehler beim Ändern');
+      }
+    } catch {
+      setError('Verbindungsfehler');
+    }
+  };
+
   if (!isAdmin) {
     return null;
   }
@@ -212,6 +245,7 @@ export default function UserManagement() {
               <span className="font-medium">root</span>
               <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded">Admin</span>
               <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded">Alle Diktate</span>
+              <span className="text-xs bg-green-600 text-white px-2 py-0.5 rounded">Befund</span>
               <span className="text-xs text-gray-500">(System)</span>
             </div>
           </div>
@@ -231,6 +265,15 @@ export default function UserManagement() {
                   {user.canViewAllDictations && (
                     <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded">Alle Diktate</span>
                   )}
+                  <select
+                    value={user.defaultMode}
+                    onChange={(e) => handleModeChange(user.username, e.target.value as 'befund' | 'arztbrief')}
+                    className="text-xs px-2 py-0.5 rounded border dark:bg-gray-700 dark:border-gray-600"
+                    title="Standard-Modus"
+                  >
+                    <option value="befund">Befund</option>
+                    <option value="arztbrief">Arztbrief</option>
+                  </select>
                   <span className="text-xs text-gray-500">
                     von {user.createdBy}
                   </span>

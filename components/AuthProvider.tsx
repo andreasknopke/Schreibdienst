@@ -15,6 +15,7 @@ interface AuthContextType {
   isAdmin: boolean;
   canViewAllDictations: boolean;
   autoCorrect: boolean;
+  defaultMode: 'befund' | 'arztbrief';
   setAutoCorrect: (value: boolean) => Promise<boolean>;
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
@@ -34,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [canViewAllDictations, setCanViewAllDictations] = useState(false);
   const [autoCorrect, setAutoCorrectState] = useState(true);
+  const [defaultMode, setDefaultMode] = useState<'befund' | 'arztbrief'>('befund');
   const [password, setPassword] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [dbTokenReady, setDbTokenReady] = useState(false);
@@ -65,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsAdmin(data.isAdmin || false);
           setCanViewAllDictations(data.canViewAllDictations || data.isAdmin || false);
           setAutoCorrectState(data.autoCorrect !== false);
+          setDefaultMode(data.defaultMode || 'befund');
           setPassword(data.password || null);
           setIsLoggedIn(true);
         }
@@ -102,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsAdmin(data.isAdmin || false);
         setCanViewAllDictations(data.canViewAllDictations || data.isAdmin || false);
         setAutoCorrectState(data.autoCorrect !== false);
+        setDefaultMode(data.defaultMode || 'befund');
         setPassword(pass);
         setIsLoggedIn(true);
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ 
@@ -109,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           isAdmin: data.isAdmin || false,
           canViewAllDictations: data.canViewAllDictations || data.isAdmin || false,
           autoCorrect: data.autoCorrect !== false,
+          defaultMode: data.defaultMode || 'befund',
           password: pass
         }));
         return { success: true };
@@ -125,6 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsAdmin(false);
     setCanViewAllDictations(false);
     setAutoCorrectState(true);
+    setDefaultMode('befund');
     setPassword(null);
     setIsLoggedIn(false);
     localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -184,6 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAdmin, 
       canViewAllDictations, 
       autoCorrect,
+      defaultMode,
       setAutoCorrect,
       login, 
       logout, 

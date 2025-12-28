@@ -51,10 +51,25 @@ export async function POST(request: NextRequest) {
           password_hash VARCHAR(255) NOT NULL,
           is_admin BOOLEAN DEFAULT FALSE,
           can_view_all_dictations BOOLEAN DEFAULT FALSE,
+          default_mode ENUM('befund', 'arztbrief') DEFAULT 'befund',
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )
       `);
+      
+      // Migration: default_mode Spalte hinzufügen falls nicht vorhanden
+      try {
+        await pool.execute(`
+          ALTER TABLE users ADD COLUMN default_mode ENUM('befund', 'arztbrief') DEFAULT 'befund'
+        `);
+        console.log('[Migration] users table: added default_mode column');
+      } catch (alterError: any) {
+        // Spalte existiert bereits - das ist OK
+        if (!alterError.message.includes('Duplicate column')) {
+          console.log('[Migration] users table: default_mode column already exists');
+        }
+      }
+      
       status.users = true;
       console.log('[Migration] users table: OK');
     } catch (error: any) {

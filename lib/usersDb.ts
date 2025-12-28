@@ -8,6 +8,7 @@ export interface User {
   is_admin: boolean;
   can_view_all_dictations: boolean;
   auto_correct: boolean;
+  default_mode: 'befund' | 'arztbrief';
   created_at: Date;
   created_by: string;
 }
@@ -28,7 +29,7 @@ function getRootPassword(): string {
 }
 
 // Authenticate user - returns user info if successful
-export async function authenticateUser(username: string, password: string): Promise<{ success: boolean; user?: { username: string; isAdmin: boolean; canViewAllDictations: boolean; autoCorrect: boolean }; error?: string }> {
+export async function authenticateUser(username: string, password: string): Promise<{ success: boolean; user?: { username: string; isAdmin: boolean; canViewAllDictations: boolean; autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief' }; error?: string }> {
   // Check for root user first
   if (username.toLowerCase() === 'root') {
     const rootPassword = getRootPassword();
@@ -36,7 +37,7 @@ export async function authenticateUser(username: string, password: string): Prom
       return { success: false, error: 'Root-Passwort nicht konfiguriert' };
     }
     if (password === rootPassword) {
-      return { success: true, user: { username: 'root', isAdmin: true, canViewAllDictations: true, autoCorrect: true } };
+      return { success: true, user: { username: 'root', isAdmin: true, canViewAllDictations: true, autoCorrect: true, defaultMode: 'befund' } };
     }
     return { success: false, error: 'Falsches Passwort' };
   }
@@ -58,7 +59,7 @@ export async function authenticateUser(username: string, password: string): Prom
       return { success: false, error: 'Falsches Passwort' };
     }
     
-    return { success: true, user: { username: user.username, isAdmin: user.is_admin, canViewAllDictations: user.can_view_all_dictations || user.is_admin, autoCorrect: user.auto_correct !== false } };
+    return { success: true, user: { username: user.username, isAdmin: user.is_admin, canViewAllDictations: user.can_view_all_dictations || user.is_admin, autoCorrect: user.auto_correct !== false, defaultMode: user.default_mode || 'befund' } };
   } catch (error) {
     console.error('[Users] Auth error:', error);
     return { success: false, error: 'Datenbankfehler' };
@@ -233,7 +234,7 @@ export async function authenticateUserWithRequest(
   request: NextRequest,
   username: string, 
   password: string
-): Promise<{ success: boolean; user?: { username: string; isAdmin: boolean; canViewAllDictations: boolean; autoCorrect: boolean }; error?: string }> {
+): Promise<{ success: boolean; user?: { username: string; isAdmin: boolean; canViewAllDictations: boolean; autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief' }; error?: string }> {
   // Check for root user first
   if (username.toLowerCase() === 'root') {
     const rootPassword = getRootPassword();
@@ -241,7 +242,7 @@ export async function authenticateUserWithRequest(
       return { success: false, error: 'Root-Passwort nicht konfiguriert' };
     }
     if (password === rootPassword) {
-      return { success: true, user: { username: 'root', isAdmin: true, canViewAllDictations: true, autoCorrect: true } };
+      return { success: true, user: { username: 'root', isAdmin: true, canViewAllDictations: true, autoCorrect: true, defaultMode: 'befund' } };
     }
     return { success: false, error: 'Falsches Passwort' };
   }
@@ -264,7 +265,7 @@ export async function authenticateUserWithRequest(
       return { success: false, error: 'Falsches Passwort' };
     }
     
-    return { success: true, user: { username: user.username, isAdmin: user.is_admin, canViewAllDictations: user.can_view_all_dictations || user.is_admin, autoCorrect: user.auto_correct !== false } };
+    return { success: true, user: { username: user.username, isAdmin: user.is_admin, canViewAllDictations: user.can_view_all_dictations || user.is_admin, autoCorrect: user.auto_correct !== false, defaultMode: user.default_mode || 'befund' } };
   } catch (error) {
     console.error('[Users] Auth error (with request):', error);
     return { success: false, error: 'Datenbankfehler' };
@@ -275,16 +276,16 @@ export async function authenticateUserWithRequest(
 export async function getUserSettingsWithRequest(
   request: NextRequest,
   username: string
-): Promise<{ autoCorrect: boolean } | null> {
+): Promise<{ autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief' } | null> {
   // Root user always has autoCorrect enabled
   if (username.toLowerCase() === 'root') {
-    return { autoCorrect: true };
+    return { autoCorrect: true, defaultMode: 'befund' };
   }
 
   try {
     const db = await getPoolForRequest(request);
     const [rows] = await db.execute<any[]>(
-      'SELECT auto_correct FROM users WHERE LOWER(username) = LOWER(?)',
+      'SELECT auto_correct, default_mode FROM users WHERE LOWER(username) = LOWER(?)',
       [username]
     );
     
@@ -293,7 +294,7 @@ export async function getUserSettingsWithRequest(
     }
     
     const user = rows[0];
-    return { autoCorrect: user.auto_correct !== false };
+    return { autoCorrect: user.auto_correct !== false, defaultMode: user.default_mode || 'befund' };
   } catch (error) {
     console.error('[Users] Get settings error:', error);
     return null;
@@ -344,17 +345,18 @@ export async function updateUserSettingsWithRequest(
 }
 
 // List users with Request context
-export async function listUsersWithRequest(request: NextRequest): Promise<{ username: string; isAdmin: boolean; canViewAllDictations: boolean; createdAt: string; createdBy: string }[]> {
+export async function listUsersWithRequest(request: NextRequest): Promise<{ username: string; isAdmin: boolean; canViewAllDictations: boolean; defaultMode: 'befund' | 'arztbrief'; createdAt: string; createdBy: string }[]> {
   try {
     const db = await getPoolForRequest(request);
     const [rows] = await db.execute<any[]>(
-      'SELECT username, is_admin, can_view_all_dictations, created_at, created_by FROM users ORDER BY created_at DESC'
+      'SELECT username, is_admin, can_view_all_dictations, default_mode, created_at, created_by FROM users ORDER BY created_at DESC'
     );
     
     return (rows as User[]).map(u => ({
       username: u.username,
       isAdmin: u.is_admin,
       canViewAllDictations: u.can_view_all_dictations || u.is_admin,
+      defaultMode: u.default_mode || 'befund',
       createdAt: u.created_at?.toISOString() || new Date().toISOString(),
       createdBy: u.created_by || 'system'
     }));
@@ -478,7 +480,7 @@ export async function changePasswordWithRequest(request: NextRequest, username: 
 export async function updateUserPermissionsWithRequest(
   request: NextRequest,
   username: string, 
-  permissions: { isAdmin?: boolean; canViewAllDictations?: boolean }
+  permissions: { isAdmin?: boolean; canViewAllDictations?: boolean; defaultMode?: 'befund' | 'arztbrief' }
 ): Promise<{ success: boolean; error?: string }> {
   if (username.toLowerCase() === 'root') {
     return { success: false, error: 'Root-Benutzer kann nicht geändert werden' };
@@ -495,6 +497,10 @@ export async function updateUserPermissionsWithRequest(
     if (permissions.canViewAllDictations !== undefined) {
       updates.push('can_view_all_dictations = ?');
       params.push(permissions.canViewAllDictations);
+    }
+    if (permissions.defaultMode !== undefined) {
+      updates.push('default_mode = ?');
+      params.push(permissions.defaultMode);
     }
     
     if (updates.length === 0) {

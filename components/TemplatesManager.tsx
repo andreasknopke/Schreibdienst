@@ -88,6 +88,8 @@ export default function TemplatesManager() {
         setContent('');
         setField('befund');
         await fetchTemplates();
+        // Event senden um andere Komponenten zu aktualisieren
+        window.dispatchEvent(new CustomEvent('templates-changed'));
         setTimeout(() => setSuccess(''), 3000);
       }
     } catch {
@@ -144,6 +146,8 @@ export default function TemplatesManager() {
         setSuccess('Textbaustein aktualisiert');
         handleCancelEdit();
         await fetchTemplates();
+        // Event senden um andere Komponenten zu aktualisieren
+        window.dispatchEvent(new CustomEvent('templates-changed'));
         setTimeout(() => setSuccess(''), 3000);
       }
     } catch {
@@ -180,6 +184,8 @@ export default function TemplatesManager() {
       if (data.success) {
         setSuccess('Textbaustein gelöscht');
         await fetchTemplates();
+        // Event senden um andere Komponenten zu aktualisieren
+        window.dispatchEvent(new CustomEvent('templates-changed'));
         setTimeout(() => setSuccess(''), 3000);
       }
     } catch {

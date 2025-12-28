@@ -23,7 +23,7 @@ interface Template {
 }
 
 export default function HomePage() {
-  const { username, autoCorrect, getAuthHeader, getDbTokenHeader } = useAuth();
+  const { username, autoCorrect, defaultMode, getAuthHeader, getDbTokenHeader } = useAuth();
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [correcting, setCorrecting] = useState(false);
@@ -120,12 +120,30 @@ export default function HomePage() {
     }
   }, [username, getAuthHeader, getDbTokenHeader]);
 
+  // Mode vom defaultMode des Benutzers setzen
+  useEffect(() => {
+    if (defaultMode) {
+      setMode(defaultMode);
+    }
+  }, [defaultMode]);
+
   // Templates beim Start laden
   useEffect(() => {
     if (username && mode === 'befund') {
       fetchTemplates();
     }
   }, [username, mode, fetchTemplates]);
+
+  // Event-Listener für Template-Aktualisierungen (wenn Templates im Modal geändert werden)
+  useEffect(() => {
+    const handleTemplatesChanged = () => {
+      console.log('[Templates] Received update event, refreshing...');
+      fetchTemplates();
+    };
+    
+    window.addEventListener('templates-changed', handleTemplatesChanged);
+    return () => window.removeEventListener('templates-changed', handleTemplatesChanged);
+  }, [fetchTemplates]);
 
   // Funktion zum Transkribieren eines Blobs
   const transcribeChunk = useCallback(async (blob: Blob, isLive: boolean = false): Promise<string> => {
@@ -1273,10 +1291,10 @@ export default function HomePage() {
                 {correcting ? <Spinner size={14} /> : '🤖 Korrigieren'}
               </button>
             )}
-            <select className="select text-sm py-1.5 w-auto" value={mode} onChange={(e) => setMode(e.target.value as any)}>
-              <option value="befund">Befund</option>
-              <option value="arztbrief">Arztbrief</option>
-            </select>
+            {/* Modus-Anzeige (wird über User-Management gesetzt) */}
+            <span className="text-sm px-2 py-1.5 bg-gray-100 dark:bg-gray-800 rounded border dark:border-gray-700" title="Modus wird in der Benutzerverwaltung festgelegt">
+              {mode === 'befund' ? '📋 Befund' : '📝 Arztbrief'}
+            </span>
             
             {/* Textbaustein-Auswahl (nur im Befund-Modus) */}
             {mode === 'befund' && templates.length > 0 && (

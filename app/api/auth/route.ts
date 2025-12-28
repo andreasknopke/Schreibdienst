@@ -32,7 +32,8 @@ export async function POST(request: NextRequest) {
         username: result.user.username,
         isAdmin: result.user.isAdmin,
         canViewAllDictations: result.user.canViewAllDictations,
-        autoCorrect: result.user.autoCorrect
+        autoCorrect: result.user.autoCorrect,
+        defaultMode: result.user.defaultMode || 'befund'
       });
     }
 

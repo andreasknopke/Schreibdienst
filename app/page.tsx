@@ -1291,10 +1291,6 @@ export default function HomePage() {
                 {correcting ? <Spinner size={14} /> : '🤖 Korrigieren'}
               </button>
             )}
-            {/* Modus-Anzeige (wird über User-Management gesetzt) */}
-            <span className="text-sm px-2 py-1.5 bg-gray-100 dark:bg-gray-800 rounded border dark:border-gray-700" title="Modus wird in der Benutzerverwaltung festgelegt">
-              {mode === 'befund' ? '📋 Befund' : '📝 Arztbrief'}
-            </span>
             
             {/* Textbaustein-Auswahl (nur im Befund-Modus) */}
             {mode === 'befund' && templates.length > 0 && (

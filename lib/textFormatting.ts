@@ -17,13 +17,17 @@ export interface DictionaryEntry {
  */
 export function applyDictionaryCorrections(text: string, entries: DictionaryEntry[]): string {
   if (!text || !entries || entries.length === 0) {
+    console.log('[Dictionary] No text or entries provided, skipping corrections');
     return text;
   }
 
   let result = text;
+  let replacementCount = 0;
 
   // Sort entries by length of wrong word (longest first) to avoid partial replacements
   const sortedEntries = [...entries].sort((a, b) => b.wrong.length - a.wrong.length);
+  
+  console.log(`[Dictionary] Applying ${sortedEntries.length} dictionary entries to text (${text.length} chars)`);
 
   for (const entry of sortedEntries) {
     if (!entry.wrong || !entry.correct) continue;
@@ -35,7 +39,10 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
     // But also handle cases where the word might be at start/end or surrounded by punctuation
     const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapedWrong}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
     
+    const beforeReplace = result;
     result = result.replace(regex, (match) => {
+      replacementCount++;
+      console.log(`[Dictionary] MATCH FOUND: "${match}" → "${entry.correct}" (from entry: "${entry.wrong}" → "${entry.correct}")`);
       // Preserve case pattern of original match where possible
       if (match === match.toUpperCase() && entry.correct.length > 0) {
         return entry.correct.toUpperCase();
@@ -44,6 +51,20 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
       }
       return entry.correct;
     });
+    
+    // Log if this entry didn't match anything
+    if (beforeReplace === result) {
+      // Check if the wrong word even exists in the text (case-insensitive simple check)
+      if (text.toLowerCase().includes(entry.wrong.toLowerCase())) {
+        console.log(`[Dictionary] WARNING: "${entry.wrong}" exists in text but regex didn't match! Pattern: ${regex.source}`);
+      }
+    }
+  }
+
+  console.log(`[Dictionary] Applied ${replacementCount} replacements`);
+  if (replacementCount > 0) {
+    console.log(`[Dictionary] Text before: "${text.substring(0, 200)}${text.length > 200 ? '...' : ''}"`);
+    console.log(`[Dictionary] Text after:  "${result.substring(0, 200)}${result.length > 200 ? '...' : ''}"`);
   }
 
   return result;
@@ -222,6 +243,12 @@ export function removeFillerWords(text: string): string {
 export function preprocessTranscription(text: string, dictionaryEntries?: DictionaryEntry[]): string {
   if (!text) return text;
   
+  console.log(`[Preprocess] Starting preprocessing of text (${text.length} chars)`);
+  console.log(`[Preprocess] Dictionary entries provided: ${dictionaryEntries?.length || 0}`);
+  if (dictionaryEntries && dictionaryEntries.length > 0) {
+    console.log(`[Preprocess] Dictionary entries:`, dictionaryEntries.map(e => `"${e.wrong}" → "${e.correct}"`).join(', '));
+  }
+  
   let result = text;
   
   // Step 1: Remove filler words
@@ -232,8 +259,16 @@ export function preprocessTranscription(text: string, dictionaryEntries?: Dictio
   
   // Step 3: Apply dictionary corrections (if entries provided)
   if (dictionaryEntries && dictionaryEntries.length > 0) {
+    const beforeDict = result;
     result = applyDictionaryCorrections(result, dictionaryEntries);
+    if (beforeDict !== result) {
+      console.log(`[Preprocess] Dictionary corrections applied - text changed`);
+    } else {
+      console.log(`[Preprocess] Dictionary corrections applied - NO changes made`);
+    }
   }
+  
+  console.log(`[Preprocess] Preprocessing complete (${result.length} chars)`);
   
   return result;
 }

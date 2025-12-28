@@ -139,7 +139,7 @@ export default function UserMenu() {
 
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 sm:gap-2">
         <span className="text-xs text-gray-500 hidden sm:inline">
           {username}
           {isAdmin && <span className="ml-1 text-blue-600">(Admin)</span>}
@@ -152,7 +152,7 @@ export default function UserMenu() {
             setSavingAutoCorrect(false);
           }}
           disabled={savingAutoCorrect}
-          className={`text-xs px-2 py-1 rounded flex items-center gap-1 transition-colors ${
+          className={`text-xs px-1.5 sm:px-2 py-1 rounded flex items-center gap-1 transition-colors ${
             autoCorrect 
               ? 'text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20' 
               : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
@@ -162,21 +162,21 @@ export default function UserMenu() {
           {savingAutoCorrect ? (
             <span className="animate-spin">⏳</span>
           ) : autoCorrect ? (
-            <>🤖 Auto</>
+            <>🤖<span className="hidden sm:inline"> Auto</span></>
           ) : (
-            <>🤖 Manuell</>
+            <>🤖<span className="hidden sm:inline"> Manuell</span></>
           )}
         </button>
         <button
           onClick={() => setShowDictionary(!showDictionary)}
-          className="text-xs text-green-600 hover:text-green-700 px-2 py-1 rounded hover:bg-green-50 dark:hover:bg-green-900/20"
+          className="text-xs text-green-600 hover:text-green-700 px-1.5 sm:px-2 py-1 rounded hover:bg-green-50 dark:hover:bg-green-900/20"
           title="Mein Wörterbuch"
         >
-          Wörterbuch
+          📖<span className="hidden sm:inline"> Wörterbuch</span>
         </button>
         <button
           onClick={() => setShowHelp(!showHelp)}
-          className="text-xs text-gray-600 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-900/20"
+          className="text-xs text-gray-600 hover:text-gray-700 px-1.5 sm:px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-900/20"
           title="Hilfe & Bedienung"
         >
           ❓

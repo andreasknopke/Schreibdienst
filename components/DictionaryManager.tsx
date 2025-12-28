@@ -67,6 +67,16 @@ export default function DictionaryManager() {
         return;
       }
 
+      if (response.status === 403) {
+        setError('Keine Berechtigung für diese Aktion');
+        return;
+      }
+
+      if (!response.ok) {
+        setError(data.error || `Fehler (${response.status})`);
+        return;
+      }
+
       if (data.success) {
         setSuccess(`"${wrong}" → "${correct}" hinzugefügt`);
         setWrong('');
@@ -75,7 +85,8 @@ export default function DictionaryManager() {
       } else {
         setError(data.error || 'Fehler beim Hinzufügen');
       }
-    } catch {
+    } catch (err) {
+      console.error('[DictionaryManager] Add error:', err);
       setError('Verbindungsfehler');
     } finally {
       setAdding(false);

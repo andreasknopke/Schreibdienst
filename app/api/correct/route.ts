@@ -573,15 +573,15 @@ export async function POST(req: Request) {
             return correctedChunks.join(' ').replace(/\s+/g, ' ').trim();
           };
           
-          // Process each field
-          if (hasMethodik && befundFields.methodik?.trim()) {
-            correctedFields.methodik = await correctFieldChunked('Methodik', befundFields.methodik);
+          // Process each field - USE PREPROCESSED VERSIONS
+          if (hasMethodik && preprocessedBefundFields?.methodik?.trim()) {
+            correctedFields.methodik = await correctFieldChunked('Methodik', preprocessedBefundFields.methodik);
           }
-          if (hasBefund && befundFields.befund?.trim()) {
-            correctedFields.befund = await correctFieldChunked('Befund', befundFields.befund);
+          if (hasBefund && preprocessedBefundFields?.befund?.trim()) {
+            correctedFields.befund = await correctFieldChunked('Befund', preprocessedBefundFields.befund);
           }
-          if (hasBeurteilung && befundFields.beurteilung?.trim()) {
-            correctedFields.beurteilung = await correctFieldChunked('Beurteilung', befundFields.beurteilung);
+          if (hasBeurteilung && preprocessedBefundFields?.beurteilung?.trim()) {
+            correctedFields.beurteilung = await correctFieldChunked('Beurteilung', preprocessedBefundFields.beurteilung);
           }
           
           const duration = ((Date.now() - startTime) / 1000).toFixed(2);

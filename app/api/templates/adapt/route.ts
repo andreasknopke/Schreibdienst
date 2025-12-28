@@ -198,6 +198,13 @@ ${changes}
 
 Gib den vollständigen angepassten Text zurück:`;
 
+    // Detailliertes Logging des gesamten Prompts
+    console.log('\n--- SYSTEM PROMPT ---');
+    console.log(systemPrompt);
+    console.log('\n--- USER MESSAGE ---');
+    console.log(userMessage);
+    console.log('\n--- END PROMPT ---\n');
+
     const result = await callLLM(llmConfig, 
       [
         { role: 'system', content: systemPrompt },
@@ -219,7 +226,9 @@ Gib den vollständigen angepassten Text zurück:`;
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     const tokens = result.tokens ? `${result.tokens.input}/${result.tokens.output}` : 'unknown';
     console.log(`[Template] Success - Duration: ${duration}s, Tokens: ${tokens}`);
-    console.log(`[Template] Output: ${adaptedText.substring(0, 100)}...`);
+    console.log('\n--- LLM OUTPUT ---');
+    console.log(adaptedText);
+    console.log('--- END OUTPUT ---\n');
     console.log('=== Template Adapt Complete ===\n');
     
     return NextResponse.json({ 

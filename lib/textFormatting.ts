@@ -17,7 +17,6 @@ export interface DictionaryEntry {
  */
 export function applyDictionaryCorrections(text: string, entries: DictionaryEntry[]): string {
   if (!text || !entries || entries.length === 0) {
-    console.log('[Dictionary] No text or entries provided, skipping corrections');
     return text;
   }
 
@@ -26,8 +25,6 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
 
   // Sort entries by length of wrong word (longest first) to avoid partial replacements
   const sortedEntries = [...entries].sort((a, b) => b.wrong.length - a.wrong.length);
-  
-  console.log(`[Dictionary] Applying ${sortedEntries.length} dictionary entries to text (${text.length} chars)`);
 
   for (const entry of sortedEntries) {
     if (!entry.wrong || !entry.correct) continue;
@@ -39,10 +36,8 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
     // But also handle cases where the word might be at start/end or surrounded by punctuation
     const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapedWrong}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
     
-    const beforeReplace = result;
     result = result.replace(regex, (match) => {
       replacementCount++;
-      console.log(`[Dictionary] MATCH FOUND: "${match}" → "${entry.correct}" (from entry: "${entry.wrong}" → "${entry.correct}")`);
       // Preserve case pattern of original match where possible
       if (match === match.toUpperCase() && entry.correct.length > 0) {
         return entry.correct.toUpperCase();
@@ -51,20 +46,10 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
       }
       return entry.correct;
     });
-    
-    // Log if this entry didn't match anything
-    if (beforeReplace === result) {
-      // Check if the wrong word even exists in the text (case-insensitive simple check)
-      if (text.toLowerCase().includes(entry.wrong.toLowerCase())) {
-        console.log(`[Dictionary] WARNING: "${entry.wrong}" exists in text but regex didn't match! Pattern: ${regex.source}`);
-      }
-    }
   }
 
-  console.log(`[Dictionary] Applied ${replacementCount} replacements`);
   if (replacementCount > 0) {
-    console.log(`[Dictionary] Text before: "${text.substring(0, 200)}${text.length > 200 ? '...' : ''}"`);
-    console.log(`[Dictionary] Text after:  "${result.substring(0, 200)}${result.length > 200 ? '...' : ''}"`);
+    console.log(`[Dictionary] Applied ${replacementCount} corrections`);
   }
 
   return result;
@@ -122,23 +107,90 @@ const DELETE_PATTERNS = [
  * @param text - Raw transcription text with spoken control words
  * @returns Text with control words replaced by actual formatting
  */
+/**
+ * Result of control word application with statistics
+ */
+export interface ControlWordResult {
+  text: string;
+  stats: {
+    paragraphs: number;  // "neuer Absatz", "Absatz"
+    lineBreaks: number;  // "neue Zeile"
+    punctuation: number; // "Punkt", "Komma", "Doppelpunkt" etc.
+    brackets: number;    // "Klammer auf/zu"
+    deletions: number;   // "lösche das letzte Wort" etc.
+    total: number;
+  };
+}
+
+/**
+ * Apply formatting control words programmatically.
+ * This should be called BEFORE sending text to LLM for correction.
+ * 
+ * @param text - Raw transcription text with spoken control words
+ * @returns Text with control words replaced by actual formatting
+ */
 export function applyFormattingControlWords(text: string): string {
-  if (!text) return text;
+  const result = applyFormattingControlWordsWithStats(text);
+  return result.text;
+}
+
+/**
+ * Apply formatting control words and return statistics about what was applied.
+ * Use this version when you need to log/display the results.
+ */
+export function applyFormattingControlWordsWithStats(text: string): ControlWordResult {
+  if (!text) return { text, stats: { paragraphs: 0, lineBreaks: 0, punctuation: 0, brackets: 0, deletions: 0, total: 0 } };
   
   let result = text;
+  const stats = { paragraphs: 0, lineBreaks: 0, punctuation: 0, brackets: 0, deletions: 0, total: 0 };
   
-  // Step 1: Apply simple replacements
+  // Step 1: Apply simple replacements and count
   for (const { pattern, replacement } of CONTROL_WORD_REPLACEMENTS) {
+    const matches = result.match(pattern);
+    if (matches) {
+      const count = matches.length;
+      stats.total += count;
+      
+      // Categorize the match
+      const patternStr = pattern.source.toLowerCase();
+      if (patternStr.includes('absatz') || patternStr.includes('zeile')) {
+        if (patternStr.includes('zeile')) {
+          stats.lineBreaks += count;
+        } else {
+          stats.paragraphs += count;
+        }
+      } else if (patternStr.includes('klammer')) {
+        stats.brackets += count;
+      } else {
+        stats.punctuation += count;
+      }
+    }
     result = result.replace(pattern, replacement);
   }
   
   // Step 2: Handle delete commands
+  const beforeDelete = result;
   result = handleDeleteCommands(result);
+  if (beforeDelete !== result) {
+    stats.deletions++;
+    stats.total++;
+  }
   
   // Step 3: Clean up formatting
   result = cleanupFormatting(result);
   
-  return result;
+  // Log if any control words were applied
+  if (stats.total > 0) {
+    const details: string[] = [];
+    if (stats.paragraphs > 0) details.push(`${stats.paragraphs}x Absatz`);
+    if (stats.lineBreaks > 0) details.push(`${stats.lineBreaks}x Zeile`);
+    if (stats.punctuation > 0) details.push(`${stats.punctuation}x Satzzeichen`);
+    if (stats.brackets > 0) details.push(`${stats.brackets}x Klammer`);
+    if (stats.deletions > 0) details.push(`${stats.deletions}x Löschung`);
+    console.log(`[ControlWords] ${stats.total} Steuerbefehle erkannt: ${details.join(', ')}`);
+  }
+  
+  return { text: result, stats };
 }
 
 /**
@@ -243,32 +295,18 @@ export function removeFillerWords(text: string): string {
 export function preprocessTranscription(text: string, dictionaryEntries?: DictionaryEntry[]): string {
   if (!text) return text;
   
-  console.log(`[Preprocess] Starting preprocessing of text (${text.length} chars)`);
-  console.log(`[Preprocess] Dictionary entries provided: ${dictionaryEntries?.length || 0}`);
-  if (dictionaryEntries && dictionaryEntries.length > 0) {
-    console.log(`[Preprocess] Dictionary entries:`, dictionaryEntries.map(e => `"${e.wrong}" → "${e.correct}"`).join(', '));
-  }
-  
   let result = text;
   
   // Step 1: Remove filler words
   result = removeFillerWords(result);
   
-  // Step 2: Apply formatting control words
+  // Step 2: Apply formatting control words (logs automatically if any found)
   result = applyFormattingControlWords(result);
   
-  // Step 3: Apply dictionary corrections (if entries provided)
+  // Step 3: Apply dictionary corrections (if entries provided, logs automatically if any applied)
   if (dictionaryEntries && dictionaryEntries.length > 0) {
-    const beforeDict = result;
     result = applyDictionaryCorrections(result, dictionaryEntries);
-    if (beforeDict !== result) {
-      console.log(`[Preprocess] Dictionary corrections applied - text changed`);
-    } else {
-      console.log(`[Preprocess] Dictionary corrections applied - NO changes made`);
-    }
   }
-  
-  console.log(`[Preprocess] Preprocessing complete (${result.length} chars)`);
   
   return result;
 }

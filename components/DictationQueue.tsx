@@ -970,18 +970,24 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                           💾 Speichern
                         </button>
                       )}
-                      <button
-                        className="btn btn-sm btn-outline"
-                        onClick={() => handleDelete(selectedDictation.id, true)}
-                        title="Audio löschen, Text behalten"
-                      >
-                        🎵✕
-                      </button>
                       {isSecretariat && (
                         <button
                           className="btn btn-sm btn-outline"
+                          onClick={() => handleDelete(selectedDictation.id, true)}
+                          title="Audio löschen, Text behalten"
+                        >
+                          🎵✕
+                        </button>
+                      )}
+                      {/* Dictionary button: visible for secretariat (all dictations) or regular users (own dictations) */}
+                      {(isSecretariat || selectedDictation.username === username) && (
+                        <button
+                          className="btn btn-sm btn-outline"
                           onClick={() => setShowDictForm(!showDictForm)}
-                          title="Wort zum Wörterbuch hinzufügen"
+                          title={isSecretariat && selectedDictation.username !== username 
+                            ? `Wort zu ${selectedDictation.username}s Wörterbuch hinzufügen`
+                            : "Wort zu meinem Wörterbuch hinzufügen"
+                          }
                         >
                           📖+
                         </button>
@@ -1006,11 +1012,13 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   </button>
                 </div>
                 
-                {/* Dictionary Entry Form (for secretariat) */}
-                {isSecretariat && showDictForm && selectedDictation.status === 'completed' && (
+                {/* Dictionary Entry Form (for secretariat or own dictations) */}
+                {(isSecretariat || selectedDictation.username === username) && showDictForm && selectedDictation.status === 'completed' && (
                   <div className="mt-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
                     <h4 className="text-sm font-medium mb-2">
-                      📖 Wörterbuch-Eintrag für <span className="text-purple-600 dark:text-purple-400">{selectedDictation.username}</span>
+                      📖 Wörterbuch-Eintrag {isSecretariat && selectedDictation.username !== username 
+                        ? <>für <span className="text-purple-600 dark:text-purple-400">{selectedDictation.username}</span></>
+                        : <>(mein Wörterbuch)</>}
                     </h4>
                     <div className="space-y-2">
                       <input

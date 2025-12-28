@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
-import { loadDictionary } from '@/lib/dictionaryDb';
+import { NextRequest, NextResponse } from 'next/server';
+import { loadDictionaryWithRequest } from '@/lib/dictionaryDb';
 import { getRuntimeConfig } from '@/lib/configDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription } from '@/lib/textFormatting';
@@ -400,7 +400,7 @@ BEISPIEL-FORMAT:
 - Altersentsprechend unauffälliger Befund
 - Keine Raumforderung oder Blutung`;
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     // Validate LLM configuration
     const llmConfig = await getLLMConfig();
@@ -419,9 +419,11 @@ export async function POST(req: Request) {
       username?: string;
     };
     
-    // Load dictionary for this user
-    const dictionary = username ? await loadDictionary(username) : { entries: [] };
+    // Load dictionary for this user (using request context for dynamic DB support)
+    console.log(`[Correct] Loading dictionary for user: ${username || 'anonymous'}`);
+    const dictionary = username ? await loadDictionaryWithRequest(req, username) : { entries: [] };
     const dictionaryEntries = dictionary.entries;
+    console.log(`[Correct] Dictionary loaded: ${dictionaryEntries.length} entries`);
     
     // Preprocess text: apply formatting control words AND dictionary corrections BEFORE LLM
     // This handles "neuer Absatz", "neue Zeile", "Klammer auf/zu", etc. programmatically

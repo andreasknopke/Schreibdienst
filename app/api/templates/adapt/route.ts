@@ -4,21 +4,15 @@ import { loadDictionaryWithRequest, formatDictionaryForPrompt } from '@/lib/dict
 
 export const runtime = 'nodejs';
 
-// LLM Provider configuration
+// LLM Provider configuration - Template-Modus verwendet IMMER OpenAI für bessere Qualität
 type LLMProvider = 'openai' | 'lmstudio';
 
 async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; baseUrl: string; apiKey: string; model: string }> {
   const runtimeConfig = await getRuntimeConfigWithRequest(req);
-  const provider = runtimeConfig.llmProvider;
   
-  if (provider === 'lmstudio') {
-    return {
-      provider: 'lmstudio',
-      baseUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
-      apiKey: 'lm-studio',
-      model: process.env.LLM_STUDIO_MODEL || 'local-model'
-    };
-  }
+  // Template-Anpassung verwendet IMMER OpenAI, da LM Studio bei komplexen Kontextänderungen
+  // oft Fehler macht (z.B. Text mitten im Satz einfügt)
+  console.log('[Template] Forcing OpenAI for template adaptation (better quality)');
   
   return {
     provider: 'openai',

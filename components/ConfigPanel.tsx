@@ -27,6 +27,13 @@ interface EnvInfo {
   lmStudioUrl: string;
 }
 
+interface MigrationStatus {
+  templates: boolean;
+  dictionary: boolean;
+  users: boolean;
+  config: boolean;
+}
+
 export default function ConfigPanel() {
   const { getAuthHeader, getDbTokenHeader, username } = useAuth();
   const isRoot = username?.toLowerCase() === 'root';
@@ -38,6 +45,8 @@ export default function ConfigPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [migrationStatus, setMigrationStatus] = useState<MigrationStatus | null>(null);
+  const [runningMigration, setRunningMigration] = useState(false);
 
   const fetchConfig = async () => {
     try {
@@ -94,6 +103,43 @@ export default function ConfigPanel() {
       setError('Verbindungsfehler');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Datenbank-Migrationen ausführen
+  const runMigrations = async () => {
+    if (!isRoot) {
+      setError('Nur der root-Benutzer kann Migrationen ausführen');
+      return;
+    }
+
+    setError('');
+    setSuccess('');
+    setRunningMigration(true);
+
+    try {
+      const response = await fetch('/api/config/migrate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setMigrationStatus(data.status);
+        setSuccess('Datenbank-Migrationen erfolgreich ausgeführt');
+        setTimeout(() => setSuccess(''), 5000);
+      } else {
+        setError(data.error || 'Migration fehlgeschlagen');
+      }
+    } catch (err: any) {
+      setError('Migrations-Fehler: ' + (err.message || 'Unbekannt'));
+    } finally {
+      setRunningMigration(false);
     }
   };
 
@@ -312,6 +358,57 @@ export default function ConfigPanel() {
           <span>LM Studio: {envInfo?.hasLMStudioUrl ? 'Konfiguriert' : 'Nicht konfiguriert'}</span>
         </div>
       </div>
+
+      {/* Datenbank-Migrationen - nur für root */}
+      {isRoot && (
+        <div className="space-y-3">
+          <h4 className="font-medium text-sm flex items-center gap-2">
+            <span>🗄️</span>
+            <span>Datenbank-Migrationen</span>
+          </h4>
+          <p className="text-xs text-gray-500">
+            Führt alle notwendigen Datenbank-Migrationen für die aktuelle Datenbank aus.
+            Dies erstellt fehlende Tabellen (templates, dictionary_entries, etc.).
+          </p>
+          <button
+            onClick={runMigrations}
+            disabled={runningMigration}
+            className="w-full px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {runningMigration ? (
+              <>
+                <span className="animate-spin">⏳</span>
+                <span>Migrationen werden ausgeführt...</span>
+              </>
+            ) : (
+              <>
+                <span>🔧</span>
+                <span>Migrationen ausführen</span>
+              </>
+            )}
+          </button>
+          {migrationStatus && (
+            <div className="p-2 bg-gray-50 dark:bg-gray-800 rounded text-xs space-y-1">
+              <div className="flex items-center gap-2">
+                <span className={migrationStatus.templates ? 'text-green-500' : 'text-gray-400'}>●</span>
+                <span>Textbausteine (templates): {migrationStatus.templates ? 'OK' : 'Nicht erstellt'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={migrationStatus.dictionary ? 'text-green-500' : 'text-gray-400'}>●</span>
+                <span>Wörterbuch (dictionary_entries): {migrationStatus.dictionary ? 'OK' : 'Nicht erstellt'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={migrationStatus.users ? 'text-green-500' : 'text-gray-400'}>●</span>
+                <span>Benutzer (users): {migrationStatus.users ? 'OK' : 'Nicht erstellt'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={migrationStatus.config ? 'text-green-500' : 'text-gray-400'}>●</span>
+                <span>Konfiguration (runtime_config): {migrationStatus.config ? 'OK' : 'Nicht erstellt'}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Datenbank-Token Manager - nur für root */}
       {isRoot && (

@@ -8,17 +8,17 @@ export const runtime = 'nodejs';
 type LLMProvider = 'openai' | 'lmstudio';
 
 async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; baseUrl: string; apiKey: string; model: string }> {
-  const runtimeConfig = await getRuntimeConfigWithRequest(req);
-  
   // Template-Anpassung verwendet IMMER OpenAI, da LM Studio bei komplexen Kontextänderungen
   // oft Fehler macht (z.B. Text mitten im Satz einfügt)
-  console.log('[Template] Forcing OpenAI for template adaptation (better quality)');
+  // Modell über TEMPLATE_OPENAI_MODEL konfigurierbar, Standard: gpt-4o
+  const model = process.env.TEMPLATE_OPENAI_MODEL || 'gpt-4o';
+  console.log(`[Template] Forcing OpenAI for template adaptation, model: ${model}`);
   
   return {
     provider: 'openai',
     baseUrl: 'https://api.openai.com',
     apiKey: process.env.OPENAI_API_KEY || '',
-    model: runtimeConfig.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini'
+    model
   };
 }
 

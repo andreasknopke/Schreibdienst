@@ -3,6 +3,52 @@
  * Applied BEFORE LLM correction for consistent, deterministic results.
  */
 
+// Dictionary entry interface (compatible with dictionaryDb.ts)
+export interface DictionaryEntry {
+  wrong: string;
+  correct: string;
+  addedAt?: string;
+}
+
+/**
+ * Apply dictionary corrections to text.
+ * Replaces all occurrences of wrong words with their correct versions.
+ * Uses word boundaries for more precise matching.
+ */
+export function applyDictionaryCorrections(text: string, entries: DictionaryEntry[]): string {
+  if (!text || !entries || entries.length === 0) {
+    return text;
+  }
+
+  let result = text;
+
+  // Sort entries by length of wrong word (longest first) to avoid partial replacements
+  const sortedEntries = [...entries].sort((a, b) => b.wrong.length - a.wrong.length);
+
+  for (const entry of sortedEntries) {
+    if (!entry.wrong || !entry.correct) continue;
+    
+    // Escape special regex characters in the wrong word
+    const escapedWrong = entry.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // Use word boundary matching for better precision
+    // But also handle cases where the word might be at start/end or surrounded by punctuation
+    const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapedWrong}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
+    
+    result = result.replace(regex, (match) => {
+      // Preserve case pattern of original match where possible
+      if (match === match.toUpperCase() && entry.correct.length > 0) {
+        return entry.correct.toUpperCase();
+      } else if (match[0] === match[0].toUpperCase() && entry.correct.length > 0) {
+        return entry.correct.charAt(0).toUpperCase() + entry.correct.slice(1);
+      }
+      return entry.correct;
+    });
+  }
+
+  return result;
+}
+
 // Control word replacements - order matters for multi-word phrases first
 const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string }> = [
   // Paragraph/line breaks (must come before simpler patterns)
@@ -167,10 +213,13 @@ export function removeFillerWords(text: string): string {
 }
 
 /**
- * Combined preprocessing: apply formatting + remove fillers
+ * Combined preprocessing: apply formatting + remove fillers + dictionary corrections
  * Use this before sending to LLM
+ * 
+ * @param text - Raw transcription text
+ * @param dictionaryEntries - Optional dictionary entries for user-specific corrections
  */
-export function preprocessTranscription(text: string): string {
+export function preprocessTranscription(text: string, dictionaryEntries?: DictionaryEntry[]): string {
   if (!text) return text;
   
   let result = text;
@@ -180,6 +229,11 @@ export function preprocessTranscription(text: string): string {
   
   // Step 2: Apply formatting control words
   result = applyFormattingControlWords(result);
+  
+  // Step 3: Apply dictionary corrections (if entries provided)
+  if (dictionaryEntries && dictionaryEntries.length > 0) {
+    result = applyDictionaryCorrections(result, dictionaryEntries);
+  }
   
   return result;
 }

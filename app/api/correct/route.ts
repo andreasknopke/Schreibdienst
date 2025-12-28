@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { formatDictionaryForPrompt, applyDictionary, loadDictionary } from '@/lib/dictionaryDb';
+import { loadDictionary } from '@/lib/dictionaryDb';
 import { getRuntimeConfig } from '@/lib/configDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription } from '@/lib/textFormatting';
@@ -421,27 +421,27 @@ export async function POST(req: Request) {
     
     // Load dictionary for this user
     const dictionary = username ? await loadDictionary(username) : { entries: [] };
+    const dictionaryEntries = dictionary.entries;
     
-    // Get user's dictionary for personalized corrections
-    const dictionaryPrompt = formatDictionaryForPrompt(dictionary.entries);
-    
-    // Preprocess text: apply formatting control words BEFORE LLM
+    // Preprocess text: apply formatting control words AND dictionary corrections BEFORE LLM
     // This handles "neuer Absatz", "neue Zeile", "Klammer auf/zu", etc. programmatically
-    const preprocessedText = text ? preprocessTranscription(text) : undefined;
+    // AND applies user dictionary corrections deterministically (saves tokens & more reliable)
+    const preprocessedText = text ? preprocessTranscription(text, dictionaryEntries) : undefined;
     const preprocessedBefundFields = befundFields ? {
-      methodik: befundFields.methodik ? preprocessTranscription(befundFields.methodik) : befundFields.methodik,
-      befund: befundFields.befund ? preprocessTranscription(befundFields.befund) : befundFields.befund,
-      beurteilung: befundFields.beurteilung ? preprocessTranscription(befundFields.beurteilung) : befundFields.beurteilung,
+      methodik: befundFields.methodik ? preprocessTranscription(befundFields.methodik, dictionaryEntries) : befundFields.methodik,
+      befund: befundFields.befund ? preprocessTranscription(befundFields.befund, dictionaryEntries) : befundFields.befund,
+      beurteilung: befundFields.beurteilung ? preprocessTranscription(befundFields.beurteilung, dictionaryEntries) : befundFields.beurteilung,
     } : undefined;
-    const preprocessedBefund = befund ? preprocessTranscription(befund) : undefined;
-    const preprocessedMethodik = methodik ? preprocessTranscription(methodik) : undefined;
+    const preprocessedBefund = befund ? preprocessTranscription(befund, dictionaryEntries) : undefined;
+    const preprocessedMethodik = methodik ? preprocessTranscription(methodik, dictionaryEntries) : undefined;
     
     // Load runtime config to get custom prompt addition
     const runtimeConfig = await getRuntimeConfig();
     const promptAddition = runtimeConfig.llmPromptAddition?.trim();
     
-    // Build prompt suffix with dictionary and custom additions
-    const promptSuffix = [dictionaryPrompt, promptAddition].filter(Boolean).join('\n\n');
+    // Note: Dictionary is now applied programmatically above, so we don't need it in the prompt
+    // This saves tokens and ensures deterministic corrections
+    const promptSuffix = promptAddition || '';
     
     // Combine system prompt with dictionary and custom additions
     const enhancedSystemPrompt = promptSuffix 
@@ -509,7 +509,7 @@ export async function POST(req: Request) {
         beurteilung: hasBeurteilung ? (befundFields.beurteilung?.length || 0) : -1
       };
       console.log(`[Input] Methodik: ${hasMethodik ? inputLengths.methodik + ' chars' : 'nicht geändert'}, Befund: ${hasBefund ? inputLengths.befund + ' chars' : 'nicht geändert'}, Beurteilung: ${hasBeurteilung ? inputLengths.beurteilung + ' chars' : 'nicht geändert'}`);
-      console.log(`[User] ${username || 'anonymous'}${dictionaryPrompt ? ' (with dictionary)' : ''}`);
+      console.log(`[User] ${username || 'anonymous'}${dictionaryEntries.length > 0 ? ` (dictionary: ${dictionaryEntries.length} entries applied)` : ''}`);
 
       try {
         // For LM Studio: Process each field individually with chunking for long texts
@@ -695,7 +695,7 @@ export async function POST(req: Request) {
     const startTime = Date.now();
     const mode = previousCorrectedText ? 'incremental' : 'single';
     console.log(`[Input] Mode: ${mode}, Text: ${preprocessedText.length} chars${previousCorrectedText ? `, Previous: ${previousCorrectedText.length} chars` : ''}`);
-    console.log(`[User] ${username || 'anonymous'}${dictionaryPrompt ? ' (with dictionary)' : ''}`);
+    console.log(`[User] ${username || 'anonymous'}${dictionaryEntries.length > 0 ? ` (dictionary: ${dictionaryEntries.length} entries applied)` : ''}`);
 
     try {
       // Check if we should use chunked processing for LM Studio

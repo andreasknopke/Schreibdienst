@@ -8,7 +8,7 @@ import {
   initOfflineDictationTable,
 } from '@/lib/offlineDictationDb';
 import { getRuntimeConfig } from '@/lib/configDb';
-import { formatDictionaryForPrompt, cleanupText, loadDictionary } from '@/lib/dictionaryDb';
+import { loadDictionary } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription } from '@/lib/textFormatting';
 
@@ -55,10 +55,15 @@ async function processDictation(dictationId: number): Promise<void> {
     // Store raw transcription before any processing
     const rawTranscript = transcriptionResult.text;
     
-    // Preprocess: apply formatting control words BEFORE LLM
+    // Load user dictionary for preprocessing
+    const dictionary = dictation.username ? await loadDictionary(dictation.username) : { entries: [] };
+    const dictionaryEntries = dictionary.entries;
+    
+    // Preprocess: apply formatting control words AND dictionary corrections BEFORE LLM
     // This handles "neuer Absatz", "neue Zeile", "Klammer auf/zu", etc. programmatically
-    const preprocessedText = preprocessTranscription(rawTranscript);
-    console.log(`[Worker] Preprocessed text: ${rawTranscript.length} → ${preprocessedText.length} chars`);
+    // AND applies user dictionary corrections deterministically (saves tokens & more reliable)
+    const preprocessedText = preprocessTranscription(rawTranscript, dictionaryEntries);
+    console.log(`[Worker] Preprocessed text: ${rawTranscript.length} → ${preprocessedText.length} chars${dictionaryEntries.length > 0 ? ` (dictionary: ${dictionaryEntries.length} entries applied)` : ''}`);
     
     // Always use Arztbrief mode - no field parsing
     const correctedText = await correctText(preprocessedText, dictation.username);
@@ -246,14 +251,14 @@ async function transcribeWithElevenLabs(file: Blob): Promise<{ text: string }> {
 
 // Correct text using LLM
 async function correctText(text: string, username: string): Promise<string> {
-  const dictionary = await loadDictionary(username);
-  const dictText = formatDictionaryForPrompt(dictionary.entries);
-  
   const llmConfig = await getLLMConfig();
   
   // Load runtime config to get custom prompt addition
   const runtimeConfig = await getRuntimeConfig();
   const promptAddition = runtimeConfig.llmPromptAddition?.trim();
+  
+  // Note: Dictionary corrections are now applied programmatically in preprocessTranscription()
+  // This saves tokens and ensures deterministic corrections
   
   // Full system prompt for OpenAI or single-chunk processing
   const systemPrompt = `Du bist ein medizinischer Diktat-Korrektur-Assistent. Deine EINZIGE Aufgabe ist die sprachliche Korrektur diktierter medizinischer Texte.
@@ -292,12 +297,11 @@ MEDIZINISCHE FACHBEGRIFFE:
 HAUPTAUFGABEN:
 1. GRAMMATIK: Korrigiere NUR echte grammatikalische Fehler (Kasus, Numerus, Tempus)
 2. ORTHOGRAPHIE: Korrigiere Rechtschreibfehler
-3. FACHBEGRIFFE: Korrigiere falsch transkribierte medizinische Begriffe + wende Benutzerwörterbuch an
+3. FACHBEGRIFFE: Korrigiere falsch transkribierte medizinische Begriffe
 4. FORMATIERUNGSBEFEHLE: Ersetze durch echte Formatierung:
    - "neuer Absatz" → Absatzumbruch (Leerzeile)
    - "neue Zeile" → Zeilenumbruch
    - "Punkt", "Komma", "Doppelpunkt" → entsprechendes Satzzeichen
-${dictText ? `\nBENUTZERWÖRTERBUCH (wende diese Korrekturen an):\n${dictText}` : ''}
 ${promptAddition ? `\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : ''}
 
 KRITISCH - AUSGABEFORMAT:
@@ -348,7 +352,6 @@ REGELN:
    - "Klammer zu" → ")"
 4. Entferne "lösche das letzte Wort/Satz" und das entsprechende Wort/Satz
 5. Entferne Füllwörter wie "ähm", "äh"
-${dictText ? `\nBENUTZERWÖRTERBUCH:\n${dictText}` : ''}
 ${promptAddition ? `\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : ''}
 
 WICHTIG - DATUMSFORMATE:
@@ -421,7 +424,9 @@ KRITISCH - AUSGABEFORMAT:
   // Use robust cleanup function for final result
   let cleaned = cleanLLMOutput(result);
   
-  return cleanupText(cleaned, dictionary.entries);
+  // Note: Dictionary corrections are already applied in preprocessTranscription()
+  // No need for cleanupText here anymore
+  return cleaned;
 }
 
 // LLM helper

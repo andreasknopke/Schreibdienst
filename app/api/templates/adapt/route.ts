@@ -97,40 +97,53 @@ EINGABE:
 1. Ein VOLLSTÄNDIGER medizinischer Textbaustein (Vorlage) - dieser Text ist bereits strukturiert und formatiert
 2. Diktierte Änderungen/Ergänzungen vom Arzt
 
-DEINE AUFGABE - SEMANTISCH PASSENDE INTEGRATION:
+DEINE AUFGABE - INTELLIGENTE INTEGRATION:
 1. Analysiere den Textbaustein und verstehe seine Struktur und den inhaltlichen Aufbau
 2. Identifiziere, WO die diktierten Änderungen inhaltlich hingehören
-3. Füge die Änderungen an der SEMANTISCH PASSENDEN Stelle ein, NICHT einfach am Anfang oder Ende
-4. Wenn die Änderung sich auf einen bestimmten anatomischen Bereich oder Befund bezieht, füge sie dort ein
-5. Behalte den Rest des Textbausteins UNVERÄNDERT bei
+3. Füge die Änderungen an der SEMANTISCH PASSENDEN Stelle ein
+4. PRÜFE AUF WIDERSPRÜCHE: Wenn die Änderung einer bestehenden Aussage WIDERSPRICHT, muss die widersprüchliche Aussage ENTFERNT oder ERSETZT werden
+5. Behalte nur die Teile des Textbausteins bei, die mit den Änderungen VEREINBAR sind
+
+WIDERSPRÜCHE ERKENNEN UND BEHEBEN:
+- Wenn eine pathologische Änderung eine "unauffällig/normal"-Aussage widerspricht, ERSETZE diese
+- Beispiel: "Hydrocephalus" widerspricht "normalweite Liquorräume" → Entferne "normalweite Liquorräume"
+- Beispiel: "Hepatomegalie" widerspricht "Leber normal groß" → Ersetze durch die pathologische Angabe
+- Beispiel: "Harnstau Grad II rechts" widerspricht "keine Harnstauung" → Passe an
 
 WICHTIGE REGELN:
-- Wenn "sonst keine Änderungen" oder ähnliches gesagt wird, behalte den Rest EXAKT unverändert
-- Wenn etwas als "nicht vorhanden" oder "unauffällig" beschrieben wird, entferne NICHTS
+- Wenn "sonst keine Änderungen" gesagt wird, behalte alle NICHT-WIDERSPRÜCHLICHEN Teile bei
+- Prüfe JEDEN Teil des Textbausteins auf Konsistenz mit den Änderungen
 - Behalte die Formatierung (Absätze, Zeilenumbrüche) des Originals bei
 - Behalte den professionellen medizinischen Schreibstil bei
-- Die Ausgabe muss ein vollständiger, kohärenter Befundtext sein
+- Die Ausgabe muss ein vollständiger, medizinisch KONSISTENTER Befundtext sein
 
-BEISPIELE FÜR KORREKTES EINFÜGEN:
+BEISPIELE:
 
-Beispiel 1 - Änderung am Anfang:
+Beispiel 1 - Einfache Ergänzung (kein Widerspruch):
 Textbaustein: "Normalweite innere und äußere Liquorräume. Keine Mittellinienverlagerung. Keine Hirndruckzeichen."
 Änderungen: "Zeichen einer diffusen Mikroangiopathie"
 Ergebnis: "Zeichen einer diffusen Mikroangiopathie. Normalweite innere und äußere Liquorräume. Keine Mittellinienverlagerung. Keine Hirndruckzeichen."
 
-Beispiel 2 - Änderung an passender Stelle (NICHT mitten im Satz!):
-Textbaustein: "Leber normal groß, glatt begrenzt, homogenes Parenchym. Gallenblase unauffällig, kein Steinnachweis. Pankreas gut beurteilbar, keine fokale Läsion."
-Änderungen: "In der Gallenblase ein einzelner 8mm großer Konkrement"
-Ergebnis: "Leber normal groß, glatt begrenzt, homogenes Parenchym. Gallenblase mit solitärem 8 mm großen Konkrement. Pankreas gut beurteilbar, keine fokale Läsion."
+Beispiel 2 - WIDERSPRUCH erkennen und beheben:
+Textbaustein: "Normalweite innere und äußere Liquorräume. Keine Mittellinienverlagerung. Keine Hirndruckzeichen."
+Änderungen: "Hydrocephalus e vacuo"
+Ergebnis: "Hydrocephalus e vacuo. Keine Mittellinienverlagerung. Keine Hirndruckzeichen."
+(Hier wurde "Normalweite Liquorräume" entfernt, da dies dem Hydrocephalus widerspricht!)
 
-Beispiel 3 - Änderung ZWISCHEN Sätzen einfügen:
+Beispiel 3 - Teilweise Änderung mit Widerspruch:
+Textbaustein: "Gallenblase unauffällig, kein Steinnachweis. Gallenwege nicht erweitert."
+Änderungen: "multiple Gallensteine"
+Ergebnis: "Gallenblase mit multiplen Gallensteinen. Gallenwege nicht erweitert."
+(Hier wurde "unauffällig, kein Steinnachweis" durch die pathologische Angabe ersetzt)
+
+Beispiel 4 - Änderung ohne Widerspruch, passende Stelle:
 Textbaustein: "Nieren beidseits orthotop und normal groß. Keine Harnstauung. Nebennieren unauffällig."
 Änderungen: "rechts eine kleine 12mm Zyste"
 Ergebnis: "Nieren beidseits orthotop und normal groß. Rechts eine kleine 12 mm große Zyste. Keine Harnstauung. Nebennieren unauffällig."
 
 KRITISCH - NIEMALS:
-- Änderungen MITTEN in einen Satz einfügen und den Satz dadurch grammatisch zerstören
-- Die Satzstruktur des Originaltextes beschädigen
+- Änderungen MITTEN in einen Satz einfügen und den Satz grammatisch zerstören
+- Widersprüchliche Aussagen im Text belassen (z.B. "normalweite Liquorräume" UND "Hydrocephalus")
 - Einen Satz aufspalten und die Änderung dazwischen setzen
 
 AUSGABEFORMAT:

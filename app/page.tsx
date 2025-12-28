@@ -14,8 +14,16 @@ const TRANSCRIPTION_INTERVAL = 3000;
 // Steuerbefehle für Befund-Felder
 type BefundField = 'methodik' | 'befund' | 'beurteilung';
 
+// Template-Interface
+interface Template {
+  id: number;
+  name: string;
+  content: string;
+  field: BefundField;
+}
+
 export default function HomePage() {
-  const { username, autoCorrect } = useAuth();
+  const { username, autoCorrect, getAuthHeader, getDbTokenHeader } = useAuth();
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [correcting, setCorrecting] = useState(false);
@@ -83,6 +91,41 @@ export default function HomePage() {
     befund: number;
     beurteilung: number;
   } | null>(null);
+
+  // Template-Modus: Textbaustein mit diktierten Änderungen kombinieren
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
+  const [templateMode, setTemplateMode] = useState(false);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+
+  // Templates laden
+  const fetchTemplates = useCallback(async () => {
+    if (!username) return;
+    setLoadingTemplates(true);
+    try {
+      const response = await fetch('/api/templates', {
+        headers: { 
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        }
+      });
+      const data = await response.json();
+      if (data.templates) {
+        setTemplates(data.templates);
+      }
+    } catch (error) {
+      console.error('[Templates] Load error:', error);
+    } finally {
+      setLoadingTemplates(false);
+    }
+  }, [username, getAuthHeader, getDbTokenHeader]);
+
+  // Templates beim Start laden
+  useEffect(() => {
+    if (username && mode === 'befund') {
+      fetchTemplates();
+    }
+  }, [username, mode, fetchTemplates]);
 
   // Funktion zum Transkribieren eines Blobs
   const transcribeChunk = useCallback(async (blob: Blob, isLive: boolean = false): Promise<string> => {
@@ -552,28 +595,92 @@ export default function HomePage() {
           // Formatierung auf den Text anwenden (um Steuerwörter sofort zu ersetzen)
           const formattedTranscript = applyFormattingControlWords(sessionTranscript);
           
-          // Verarbeite Transkript und setze Text in Felder
-          if (mode === 'befund') {
-            // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
-            const parsed = parseFieldCommands(formattedTranscript);
-            
-            // Aktualisiere die Felder basierend auf parsed results
-            let currentMethodik = methodik;
-            let currentBefund = transcript;
-            let currentBeurteilung = beurteilung;
-            
-            if (parsed.lastField) {
-              // Steuerbefehle erkannt - verteile auf entsprechende Felder
-              if (parsed.methodik !== null) {
-                currentMethodik = combineTexts(existingMethodikRef.current, parsed.methodik);
+          // TEMPLATE-MODUS: Textbaustein mit diktierten Änderungen kombinieren
+          if (templateMode && selectedTemplate) {
+            setCorrecting(true);
+            try {
+              console.log('[Template] Adapting template:', selectedTemplate.name);
+              console.log('[Template] Changes:', formattedTranscript);
+              
+              const res = await fetch('/api/templates/adapt', {
+                method: 'POST',
+                headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': getAuthHeader(),
+                  ...getDbTokenHeader()
+                },
+                body: JSON.stringify({
+                  template: selectedTemplate.content,
+                  changes: formattedTranscript,
+                  field: selectedTemplate.field,
+                  username
+                }),
+              });
+              
+              if (res.ok) {
+                const data = await res.json();
+                if (data.adaptedText) {
+                  // Speichere aktuellen Zustand für Revert
+                  setPreCorrectionState({
+                    methodik: methodik,
+                    befund: transcript,
+                    beurteilung: beurteilung,
+                    transcript: ''
+                  });
+                  
+                  // Setze den angepassten Text ins entsprechende Feld
+                  switch (selectedTemplate.field) {
+                    case 'methodik':
+                      setMethodik(data.adaptedText);
+                      break;
+                    case 'beurteilung':
+                      setBeurteilung(data.adaptedText);
+                      break;
+                    case 'befund':
+                    default:
+                      setTranscript(data.adaptedText);
+                      break;
+                  }
+                  setCanRevert(true);
+                  setIsReverted(false);
+                }
+              } else {
+                const errorData = await res.json();
+                setError(errorData.error || 'Template-Anpassung fehlgeschlagen');
               }
-              if (parsed.befund !== null) {
-                currentBefund = combineTexts(existingTextRef.current, parsed.befund);
-              }
-              if (parsed.beurteilung !== null) {
-                currentBeurteilung = combineTexts(existingBeurteilungRef.current, parsed.beurteilung);
-              }
-            } else {
+            } catch (err: any) {
+              console.error('[Template] Adapt error:', err);
+              setError(err.message || 'Fehler bei Template-Anpassung');
+            } finally {
+              setCorrecting(false);
+              // Template-Modus nach Anwendung zurücksetzen
+              setSelectedTemplate(null);
+              setTemplateMode(false);
+            }
+          } else {
+            // STANDARD-MODUS: Normale Verarbeitung
+            // Verarbeite Transkript und setze Text in Felder
+            if (mode === 'befund') {
+              // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
+              const parsed = parseFieldCommands(formattedTranscript);
+              
+              // Aktualisiere die Felder basierend auf parsed results
+              let currentMethodik = methodik;
+              let currentBefund = transcript;
+              let currentBeurteilung = beurteilung;
+              
+              if (parsed.lastField) {
+                // Steuerbefehle erkannt - verteile auf entsprechende Felder
+                if (parsed.methodik !== null) {
+                  currentMethodik = combineTexts(existingMethodikRef.current, parsed.methodik);
+                }
+                if (parsed.befund !== null) {
+                  currentBefund = combineTexts(existingTextRef.current, parsed.befund);
+                }
+                if (parsed.beurteilung !== null) {
+                  currentBeurteilung = combineTexts(existingBeurteilungRef.current, parsed.beurteilung);
+                }
+              } else {
               // Kein Steuerbefehl - Text geht ins aktive Feld
               switch (activeField) {
                 case 'methodik':
@@ -724,6 +831,7 @@ export default function HomePage() {
               }
             }
           }
+          } // Ende STANDARD-MODUS (else vom Template-Modus)
         }
       } finally {
         setBusy(false);
@@ -1169,9 +1277,63 @@ export default function HomePage() {
               <option value="befund">Befund</option>
               <option value="arztbrief">Arztbrief</option>
             </select>
+            
+            {/* Textbaustein-Auswahl (nur im Befund-Modus) */}
+            {mode === 'befund' && templates.length > 0 && (
+              <div className="flex items-center gap-1">
+                <select 
+                  className={`select text-sm py-1.5 w-auto ${templateMode ? 'border-orange-400 ring-1 ring-orange-300' : ''}`}
+                  value={selectedTemplate?.id || ''}
+                  onChange={(e) => {
+                    const id = parseInt(e.target.value);
+                    const template = templates.find(t => t.id === id);
+                    setSelectedTemplate(template || null);
+                    setTemplateMode(!!template);
+                  }}
+                  title="Textbaustein auswählen - diktieren Sie nur die Änderungen"
+                >
+                  <option value="">📝 Baustein...</option>
+                  {templates.map(t => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.field === 'methodik' ? 'M' : t.field === 'befund' ? 'B' : 'U'})
+                    </option>
+                  ))}
+                </select>
+                {templateMode && selectedTemplate && (
+                  <button
+                    onClick={() => {
+                      setSelectedTemplate(null);
+                      setTemplateMode(false);
+                    }}
+                    className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 px-1"
+                    title="Textbaustein-Modus beenden"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Textbaustein-Hinweis wenn aktiv */}
+      {templateMode && selectedTemplate && !recording && (
+        <div className="text-sm bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 px-3 py-2 rounded-lg">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-orange-600 dark:text-orange-400 font-medium">📝 Baustein: {selectedTemplate.name}</span>
+            <span className="text-xs px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 rounded">
+              {selectedTemplate.field}
+            </span>
+          </div>
+          <p className="text-xs text-orange-700 dark:text-orange-300 line-clamp-2">
+            {selectedTemplate.content.substring(0, 150)}...
+          </p>
+          <p className="text-xs text-orange-600 dark:text-orange-400 mt-1 italic">
+            💡 Diktieren Sie nur die Änderungen, z.B. "Zeichen einer Mikroangiopathie, sonst keine Änderungen"
+          </p>
+        </div>
+      )}
 
       {/* Sprachbefehle-Hinweis (kompakt) */}
       {recording && (

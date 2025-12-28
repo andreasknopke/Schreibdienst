@@ -55,8 +55,11 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
   return result;
 }
 
+// Replacement function type for control words
+type ReplacementFn = (match: string, p1: string) => string;
+
 // Control word replacements - order matters for multi-word phrases first
-const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string }> = [
+const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | ReplacementFn }> = [
   // Paragraph/line breaks (must come before simpler patterns)
   { pattern: /\bneuer\s+absatz\b/gi, replacement: '\n\n' },
   { pattern: /\bnächster\s+absatz\b/gi, replacement: '\n\n' },
@@ -69,14 +72,33 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string }>
   { pattern: /\bklammer\s+zu\b/gi, replacement: ')' },
   { pattern: /\bin\s+klammern\s+/gi, replacement: '(' }, // "in Klammern XYZ" - opening only, closing handled separately
   
-  // Punctuation (standalone words only)
+  // Punctuation - FIRST handle compound words ending with punctuation command
+  // e.g., "Diagnosedoppelpunkt" → "Diagnose:", "Behandlungkomma" → "Behandlung,"
+  { pattern: /\b(\w+?)doppelpunkt\b/gi, replacement: (_: string, word: string) => `${word}:` },
+  { pattern: /\b(\w+?)semikolon\b/gi, replacement: (_: string, word: string) => `${word};` },
+  { pattern: /\b(\w+?)fragezeichen\b/gi, replacement: (_: string, word: string) => `${word}?` },
+  { pattern: /\b(\w+?)ausrufezeichen\b/gi, replacement: (_: string, word: string) => `${word}!` },
+  // Punkt/Komma at end of compound word - only if it looks like a control word
+  // (at least 3 chars before to avoid false positives like "Endpunkt")
+  { pattern: /\b(\w{3,}?)punkt\b(?!\w)/gi, replacement: (match: string, word: string) => {
+    // Exclude common medical terms ending with "punkt"
+    const excluded = ['end', 'zeit', 'brenn', 'schwer', 'stand', 'start', 'schluss', 'aus', 'an', 'um', 'zwischen', 'kern', 'fix', 'höhe', 'tief', 'null', 'dreh', 'wende', 'angel', 'schnitt', 'mess', 'stütz', 'krist', 'eck'];
+    if (!word || excluded.some(e => word.toLowerCase() === e)) return match;
+    return `${word}.`;
+  }},
+  { pattern: /\b(\w{3,}?)komma\b(?!\w)/gi, replacement: (match: string, word: string) => {
+    // Exclude words that naturally end with "komma" (rare but possible)
+    if (!word || word.toLowerCase() === 'sto') return match; // Strichkomma etc.
+    return `${word},`;
+  }},
+  
+  // Punctuation (standalone words only) - these come AFTER compound handling
   { pattern: /\bdoppelpunkt\b/gi, replacement: ':' },
   { pattern: /\bsemikolon\b/gi, replacement: ';' },
   { pattern: /\bfragezeichen\b/gi, replacement: '?' },
   { pattern: /\bausrufezeichen\b/gi, replacement: '!' },
   
-  // Punkt and Komma - more careful matching to avoid replacing parts of words
-  // Match "Punkt" only when it's standalone (not part of a compound word like "Endpunkt")
+  // Punkt and Komma as standalone words
   { pattern: /(?<![A-ZÄÖÜa-zäöüß])\bpunkt\b(?![A-ZÄÖÜa-zäöüß])/gi, replacement: '.' },
   { pattern: /(?<![A-ZÄÖÜa-zäöüß])\bkomma\b(?![A-ZÄÖÜa-zäöüß])/gi, replacement: ',' },
   
@@ -165,7 +187,12 @@ export function applyFormattingControlWordsWithStats(text: string): ControlWordR
         stats.punctuation += count;
       }
     }
-    result = result.replace(pattern, replacement);
+    // Handle both string and function replacements
+    if (typeof replacement === 'function') {
+      result = result.replace(pattern, replacement as (...args: string[]) => string);
+    } else {
+      result = result.replace(pattern, replacement);
+    }
   }
   
   // Step 2: Handle delete commands

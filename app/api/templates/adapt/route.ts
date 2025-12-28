@@ -91,24 +91,47 @@ async function callLLM(
   }
 }
 
-const TEMPLATE_ADAPT_PROMPT = `Du bist ein medizinischer Befund-Assistent. Deine Aufgabe ist es, einen Textbaustein basierend auf diktierten Änderungen anzupassen.
+const TEMPLATE_ADAPT_PROMPT = `Du bist ein medizinischer Befund-Assistent. Deine Aufgabe ist es, einen Textbaustein basierend auf diktierten Änderungen/Ergänzungen anzupassen.
 
 EINGABE:
-1. Ein medizinischer Textbaustein (Vorlage)
+1. Ein VOLLSTÄNDIGER medizinischer Textbaustein (Vorlage) - dieser Text ist bereits strukturiert und formatiert
 2. Diktierte Änderungen/Ergänzungen vom Arzt
 
-DEINE AUFGABE:
-- Übernimm den Textbaustein als Grundlage
-- Füge die genannten Änderungen an der passenden Stelle ein
-- Wenn "sonst keine Änderungen" oder ähnliches gesagt wird, behalte den Rest unverändert
-- Wenn etwas "nicht vorhanden" oder "unauffällig" ist, entferne es NICHT - passe nur den beschriebenen Teil an
-- Behalte den professionellen medizinischen Schreibstil bei
-- Die Ausgabe soll ein vollständiger, kohärenter Befundtext sein
+DEINE AUFGABE - SEMANTISCH PASSENDE INTEGRATION:
+1. Analysiere den Textbaustein und verstehe seine Struktur und den inhaltlichen Aufbau
+2. Identifiziere, WO die diktierten Änderungen inhaltlich hingehören
+3. Füge die Änderungen an der SEMANTISCH PASSENDEN Stelle ein, NICHT einfach am Anfang oder Ende
+4. Wenn die Änderung sich auf einen bestimmten anatomischen Bereich oder Befund bezieht, füge sie dort ein
+5. Behalte den Rest des Textbausteins UNVERÄNDERT bei
 
-BEISPIEL:
-Textbaustein: "Normalweite innere und äußere Liquorräume, keine Mittellinienverlagerung, keine Hirndruckzeichen."
+WICHTIGE REGELN:
+- Wenn "sonst keine Änderungen" oder ähnliches gesagt wird, behalte den Rest EXAKT unverändert
+- Wenn etwas als "nicht vorhanden" oder "unauffällig" beschrieben wird, entferne NICHTS
+- Behalte die Formatierung (Absätze, Zeilenumbrüche) des Originals bei
+- Behalte den professionellen medizinischen Schreibstil bei
+- Die Ausgabe muss ein vollständiger, kohärenter Befundtext sein
+
+BEISPIELE FÜR KORREKTES EINFÜGEN:
+
+Beispiel 1 - Änderung am Anfang:
+Textbaustein: "Normalweite innere und äußere Liquorräume. Keine Mittellinienverlagerung. Keine Hirndruckzeichen."
 Änderungen: "Zeichen einer diffusen Mikroangiopathie"
-Ergebnis: "Zeichen einer diffusen Mikroangiopathie. Normalweite innere und äußere Liquorräume, keine Mittellinienverlagerung, keine Hirndruckzeichen."
+Ergebnis: "Zeichen einer diffusen Mikroangiopathie. Normalweite innere und äußere Liquorräume. Keine Mittellinienverlagerung. Keine Hirndruckzeichen."
+
+Beispiel 2 - Änderung an passender Stelle (NICHT mitten im Satz!):
+Textbaustein: "Leber normal groß, glatt begrenzt, homogenes Parenchym. Gallenblase unauffällig, kein Steinnachweis. Pankreas gut beurteilbar, keine fokale Läsion."
+Änderungen: "In der Gallenblase ein einzelner 8mm großer Konkrement"
+Ergebnis: "Leber normal groß, glatt begrenzt, homogenes Parenchym. Gallenblase mit solitärem 8 mm großen Konkrement. Pankreas gut beurteilbar, keine fokale Läsion."
+
+Beispiel 3 - Änderung ZWISCHEN Sätzen einfügen:
+Textbaustein: "Nieren beidseits orthotop und normal groß. Keine Harnstauung. Nebennieren unauffällig."
+Änderungen: "rechts eine kleine 12mm Zyste"
+Ergebnis: "Nieren beidseits orthotop und normal groß. Rechts eine kleine 12 mm große Zyste. Keine Harnstauung. Nebennieren unauffällig."
+
+KRITISCH - NIEMALS:
+- Änderungen MITTEN in einen Satz einfügen und den Satz dadurch grammatisch zerstören
+- Die Satzstruktur des Originaltextes beschädigen
+- Einen Satz aufspalten und die Änderung dazwischen setzen
 
 AUSGABEFORMAT:
 - Gib NUR den angepassten Text zurück
@@ -154,20 +177,20 @@ export async function POST(req: NextRequest) {
       ? `${TEMPLATE_ADAPT_PROMPT}\n${dictionarySuffix}`
       : TEMPLATE_ADAPT_PROMPT;
     
-    const userMessage = `TEXTBAUSTEIN:
+    const userMessage = `VOLLSTÄNDIGER TEXTBAUSTEIN (behalte die Struktur bei):
 ${template}
 
-DIKTIERTE ÄNDERUNGEN:
+DIKTIERTE ÄNDERUNGEN (füge diese an der semantisch passenden Stelle ein, NICHT mitten in einen Satz):
 ${changes}
 
-Gib den angepassten Text zurück:`;
+Gib den vollständigen angepassten Text zurück:`;
 
     const result = await callLLM(llmConfig, 
       [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage }
       ],
-      { temperature: 0.3, maxTokens: 2000 }
+      { temperature: 0.2, maxTokens: 4000 }  // Lower temperature for more precise edits, higher token limit for complete templates
     );
     
     let adaptedText = result.content || template;

@@ -1320,17 +1320,54 @@ export default function HomePage() {
       {/* Textbaustein-Hinweis wenn aktiv */}
       {templateMode && selectedTemplate && !recording && (
         <div className="text-sm bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 px-3 py-2 rounded-lg">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-orange-600 dark:text-orange-400 font-medium">📝 Baustein: {selectedTemplate.name}</span>
-            <span className="text-xs px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 rounded">
-              {selectedTemplate.field}
-            </span>
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-2">
+              <span className="text-orange-600 dark:text-orange-400 font-medium">📝 Baustein: {selectedTemplate.name}</span>
+              <span className="text-xs px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 rounded">
+                {selectedTemplate.field}
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                // Speichere aktuellen Zustand für Revert
+                setPreCorrectionState({
+                  methodik: methodik,
+                  befund: transcript,
+                  beurteilung: beurteilung,
+                  transcript: ''
+                });
+                
+                // Setze den Textbaustein direkt ins entsprechende Feld
+                switch (selectedTemplate.field) {
+                  case 'methodik':
+                    setMethodik(selectedTemplate.content);
+                    break;
+                  case 'beurteilung':
+                    setBeurteilung(selectedTemplate.content);
+                    break;
+                  case 'befund':
+                  default:
+                    setTranscript(selectedTemplate.content);
+                    break;
+                }
+                setCanRevert(true);
+                setIsReverted(false);
+                
+                // Template-Modus zurücksetzen
+                setSelectedTemplate(null);
+                setTemplateMode(false);
+              }}
+              className="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors"
+              title="Textbaustein ohne Änderungen einfügen"
+            >
+              Einfügen
+            </button>
           </div>
           <p className="text-xs text-orange-700 dark:text-orange-300 line-clamp-2">
             {selectedTemplate.content.substring(0, 150)}...
           </p>
           <p className="text-xs text-orange-600 dark:text-orange-400 mt-1 italic">
-            💡 Diktieren Sie nur die Änderungen, z.B. "Zeichen einer Mikroangiopathie, sonst keine Änderungen"
+            💡 Diktieren Sie nur die Änderungen, oder klicken Sie "Einfügen" um den Baustein unverändert zu übernehmen
           </p>
         </div>
       )}

@@ -234,6 +234,15 @@ async function callLLM(
   
   console.log(`[LLM] Request: ${config.baseUrl}/v1/chat/completions, Temperature: ${temperature}${jsonMode ? ', JSON mode' : ''}`);
   
+  // Log the exact prompt being sent
+  console.log(`[LLM] === PROMPT START ===`);
+  for (const msg of messages) {
+    console.log(`[LLM] [${msg.role.toUpperCase()}]:`);
+    console.log(msg.content);
+    console.log(`[LLM] ---`);
+  }
+  console.log(`[LLM] === PROMPT END ===`);
+  
   try {
     const res = await fetch(`${config.baseUrl}/v1/chat/completions`, {
       method: 'POST',

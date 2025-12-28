@@ -35,24 +35,49 @@ async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; 
 function splitTextIntoChunks(text: string, maxSentences: number = 5): string[] {
   if (!text || text.trim().length === 0) return [''];
   
-  // Split by sentence-ending punctuation while keeping the punctuation
-  // This regex handles: . ! ? and their combinations with quotes/parentheses
-  const sentenceRegex = /([^.!?]*[.!?]+[\s"')\]]*)/g;
+  // Better sentence splitting that doesn't break on dates like "18.09.2025"
+  // or abbreviations like "Dr." or "z.B."
   const sentences: string[] = [];
-  let match;
-  let lastIndex = 0;
+  let currentSentence = '';
+  let i = 0;
   
-  while ((match = sentenceRegex.exec(text)) !== null) {
-    sentences.push(match[1]);
-    lastIndex = sentenceRegex.lastIndex;
+  while (i < text.length) {
+    const char = text[i];
+    currentSentence += char;
+    
+    // Check if this might be end of sentence
+    if (char === '.' || char === '!' || char === '?') {
+      // Look ahead to see if this is actually end of sentence
+      const nextChar = text[i + 1] || '';
+      const prevChars = currentSentence.slice(-4, -1); // 3 chars before the punctuation
+      
+      // NOT end of sentence if:
+      // 1. Followed by a digit (date like "18.09" or "18.09.2025")
+      // 2. Previous chars are digits (part of date)
+      // 3. It's a common abbreviation
+      const isDate = /\d$/.test(prevChars) || /^\d/.test(nextChar);
+      const isAbbreviation = /\b(Dr|Mr|Fr|Hr|Prof|bzw|z\.B|u\.a|d\.h|etc|ca|vs|Nr|Tel|Str|inkl|ggf|evtl|usw|etc)\.$/.test(currentSentence);
+      
+      if (!isDate && !isAbbreviation) {
+        // Include trailing whitespace/quotes in the sentence
+        while (i + 1 < text.length && /[\s"')\]]/.test(text[i + 1])) {
+          i++;
+          currentSentence += text[i];
+        }
+        
+        // This is end of sentence
+        if (currentSentence.trim()) {
+          sentences.push(currentSentence);
+        }
+        currentSentence = '';
+      }
+    }
+    i++;
   }
   
-  // Add any remaining text that doesn't end with punctuation
-  if (lastIndex < text.length) {
-    const remaining = text.slice(lastIndex).trim();
-    if (remaining) {
-      sentences.push(remaining);
-    }
+  // Add any remaining text
+  if (currentSentence.trim()) {
+    sentences.push(currentSentence);
   }
   
   // If no sentences were found, return the original text as one chunk

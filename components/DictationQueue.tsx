@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Spinner from './Spinner';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
+import { useAuth } from './AuthProvider';
 import { ChangeIndicator, ChangeIndicatorDot, ChangeWarningBanner } from './ChangeIndicator';
 
 interface Dictation {
@@ -34,6 +35,7 @@ interface DictationQueueProps {
 }
 
 export default function DictationQueue({ username, canViewAll = false, isSecretariat = false, onRefreshNeeded }: DictationQueueProps) {
+  const { getAuthHeader } = useAuth();
   const [dictations, setDictations] = useState<Dictation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +69,9 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   
   // Fullscreen mode for better readability of long texts
   const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  // Text selection for dictionary feature
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   
   // Audio player state for fullscreen mode
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -295,7 +300,20 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     setTimeout(() => setCopyFeedback(null), 1500);
   };
 
-  // Add word to user's dictionary (for secretariat)
+  // Open dictionary form and pre-fill with selected text if any
+  const handleOpenDictForm = () => {
+    // Get selected text from textarea
+    const textarea = textareaRef.current;
+    if (textarea) {
+      const selectedText = textarea.value.substring(textarea.selectionStart, textarea.selectionEnd).trim();
+      if (selectedText) {
+        setDictWrong(selectedText);
+      }
+    }
+    setShowDictForm(true);
+  };
+
+  // Add word to user's dictionary (for secretariat or own dictations)
   const handleAddToDictionary = async (targetUsername: string) => {
     if (!dictWrong.trim() || !dictCorrect.trim()) {
       setDictFeedback({ type: 'error', message: 'Beide Felder müssen ausgefüllt sein' });
@@ -305,7 +323,10 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     try {
       const res = await fetchWithDbToken('/api/dictionary', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': getAuthHeader(),
+        },
         body: JSON.stringify({
           username: targetUsername,
           wrong: dictWrong.trim(),
@@ -898,6 +919,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                         </div>
                       </div>
                       <textarea
+                        ref={textareaRef}
                         className={`mt-1 w-full p-2 rounded text-sm font-mono resize-y ${
                           isFullscreen ? 'min-h-[60vh]' : 'min-h-[200px]'
                         } ${
@@ -983,10 +1005,10 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                       {(isSecretariat || selectedDictation.username === username) && (
                         <button
                           className="btn btn-sm btn-outline"
-                          onClick={() => setShowDictForm(!showDictForm)}
+                          onClick={() => showDictForm ? setShowDictForm(false) : handleOpenDictForm()}
                           title={isSecretariat && selectedDictation.username !== username 
-                            ? `Wort zu ${selectedDictation.username}s Wörterbuch hinzufügen`
-                            : "Wort zu meinem Wörterbuch hinzufügen"
+                            ? `Wort zu ${selectedDictation.username}s Wörterbuch hinzufügen (Text markieren!)`
+                            : "Wort zu meinem Wörterbuch hinzufügen (Text markieren!)"
                           }
                         >
                           📖+

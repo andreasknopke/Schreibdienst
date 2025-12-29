@@ -109,10 +109,21 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   { pattern: /\bneue\s+zeile\b/gi, replacement: '\n' },
   { pattern: /\bnächste\s+zeile\b/gi, replacement: '\n' },
   
+  // NOTE: "Punkt eins", "Punkt zwei", etc. are handled in handleEnumerationCommands()
+  // which is called BEFORE these replacements
+  
   // Brackets/parentheses
   { pattern: /\bklammer\s+auf\b/gi, replacement: '(' },
   { pattern: /\bklammer\s+zu\b/gi, replacement: ')' },
   { pattern: /\bin\s+klammern\s+/gi, replacement: '(' }, // "in Klammern XYZ" - opening only, closing handled separately
+  
+  // Punctuation with preceding comma removal - ",[ ]Doppelpunkt" → ":"
+  // Handle cases like "Hauptdiagnose, Doppelpunkt" → "Hauptdiagnose:"
+  { pattern: /,\s*doppelpunkt\b/gi, replacement: ':' },
+  { pattern: /,\s*semikolon\b/gi, replacement: ';' },
+  { pattern: /,\s*fragezeichen\b/gi, replacement: '?' },
+  { pattern: /,\s*ausrufezeichen\b/gi, replacement: '!' },
+  { pattern: /,\s*punkt\b(?!\s*(eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|\d))/gi, replacement: '.' },
   
   // Punctuation - FIRST handle compound words ending with punctuation command
   // e.g., "Diagnosedoppelpunkt" → "Diagnose:"
@@ -323,6 +334,7 @@ function handleEnumerationCommands(text: string): { text: string; count: number 
   const numberWordPattern = Object.keys(NUMBER_WORDS).join('|');
   
   // Pattern for "Punkt [number word]" or "Punkt [digit]" or "Nächster Punkt" etc.
+  // Using 'gi' flags for global case-insensitive matching
   const allEnumPatterns = new RegExp(
     `\\bpunkt\\s+(${numberWordPattern}|\\d+)\\b[.,;:\\s]*` +
     `|\\bnächster\\s+punkt\\b[.,;:\\s]*` +
@@ -355,7 +367,8 @@ function handleEnumerationCommands(text: string): { text: string; count: number 
     count++;
     
     // Check if it's "Punkt [number]"
-    const punktMatch = match.match(/\bpunkt\s+(\S+)/i);
+    // Use \w+ instead of \S+ to avoid capturing trailing punctuation like commas
+    const punktMatch = match.match(/\bpunkt\s+(\w+)/i);
     if (punktMatch) {
       const numPart = punktMatch[1].toLowerCase();
       // Try as number word

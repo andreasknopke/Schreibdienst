@@ -339,12 +339,15 @@ export default function HomePage() {
       if (currentTranscript && currentTranscript !== lastTranscriptRef.current) {
         lastTranscriptRef.current = currentTranscript;
         
-        // Formatierung auf den transkribierten Text anwenden (um Steuerwörter sofort zu ersetzen)
-        const formattedTranscript = applyFormattingControlWords(currentTranscript);
+        // HINWEIS: Während der Live-Transkription wird KEINE Formatierung angewendet,
+        // um Hin-und-Her-Springen des Textes zu vermeiden (Whisper arbeitet in Chunks
+        // und kann sich wiederholen). Die Formatierung wird erst nach Aufnahmeende
+        // in stopRecording() angewendet.
         
         if (mode === 'befund') {
           // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
-          const parsed = parseFieldCommands(formattedTranscript);
+          // Hier nur grob nach Feldwechsel-Kommandos schauen, ohne Formatierung
+          const parsed = parseFieldCommands(currentTranscript);
           
           if (parsed.lastField) {
             setActiveField(parsed.lastField);
@@ -365,22 +368,22 @@ export default function HomePage() {
             // Kein Steuerbefehl - Text geht ins aktive Feld
             switch (activeField) {
               case 'methodik':
-                lastMethodikRef.current = formattedTranscript;
-                setMethodik(combineTexts(existingMethodikRef.current, formattedTranscript));
+                lastMethodikRef.current = currentTranscript;
+                setMethodik(combineTexts(existingMethodikRef.current, currentTranscript));
                 break;
               case 'beurteilung':
-                lastBeurteilungRef.current = formattedTranscript;
-                setBeurteilung(combineTexts(existingBeurteilungRef.current, formattedTranscript));
+                lastBeurteilungRef.current = currentTranscript;
+                setBeurteilung(combineTexts(existingBeurteilungRef.current, currentTranscript));
                 break;
               case 'befund':
               default:
-                setTranscript(combineTexts(existingTextRef.current, formattedTranscript));
+                setTranscript(combineTexts(existingTextRef.current, currentTranscript));
                 break;
             }
           }
         } else {
           // Im Arztbrief-Modus: Normales Verhalten
-          const fullText = combineTexts(existingTextRef.current, formattedTranscript);
+          const fullText = combineTexts(existingTextRef.current, currentTranscript);
           setTranscript(fullText);
         }
       }

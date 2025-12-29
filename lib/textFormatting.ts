@@ -153,6 +153,8 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
 
 // Delete command patterns
 const DELETE_PATTERNS = [
+  { pattern: /\bwort\s*streichen\b/gi, type: 'word' as const },  // "Wort streichen" or "Wortstreichen"
+  { pattern: /\bstreiche\s+wort\b/gi, type: 'word' as const },   // "streiche Wort"
   { pattern: /lösche\s+das\s+letzte\s+wort\b/gi, type: 'word' as const },
   { pattern: /letztes\s+wort\s+löschen\b/gi, type: 'word' as const },
   { pattern: /lösche\s+den\s+letzten\s+satz\b/gi, type: 'sentence' as const },

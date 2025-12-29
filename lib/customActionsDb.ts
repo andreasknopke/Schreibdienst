@@ -45,10 +45,36 @@ export async function getCustomActions(username: string): Promise<CustomAction[]
   }
 }
 
+// Ensure custom_actions table exists
+async function ensureTableExists(pool: any): Promise<void> {
+  try {
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS custom_actions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(100) NOT NULL,
+        name VARCHAR(200) NOT NULL,
+        icon VARCHAR(20) DEFAULT '⚡',
+        prompt TEXT NOT NULL,
+        target_field ENUM('current', 'methodik', 'befund', 'beurteilung', 'all') DEFAULT 'current',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_user_action (username, name)
+      )
+    `);
+  } catch (error) {
+    // Table might already exist, ignore errors
+    console.log('[CustomActions] Table check:', error);
+  }
+}
+
 // Get custom actions with dynamic DB pool
 export async function getCustomActionsWithRequest(request: NextRequest, username: string): Promise<CustomAction[]> {
   try {
     const pool = await getPoolForRequest(request);
+    
+    // Auto-create table if not exists
+    await ensureTableExists(pool);
+    
     const [rows] = await pool.query<any[]>(
       'SELECT id, name, icon, prompt, target_field, created_at, updated_at FROM custom_actions WHERE LOWER(username) = LOWER(?) ORDER BY name ASC',
       [username]

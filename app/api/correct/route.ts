@@ -147,6 +147,8 @@ KRITISCH - AUSGABEFORMAT:
 - Gib AUSSCHLIESSLICH den korrigierten Text zurück - NICHTS ANDERES!
 - VERBOTEN: "Der korrigierte Text lautet:", "Hier ist...", "Korrektur:", etc.
 - VERBOTEN: Erklärungen warum etwas geändert oder nicht geändert wurde
+- VERBOTEN: "Korrekturhinweise:", "Anmerkungen:", Listen mit Änderungen
+- VERBOTEN: Bullet Points (*, -, •) mit Erklärungen was geändert wurde
 - VERBOTEN: Anführungszeichen um den gesamten Text
 - VERBOTEN: Einleitungen, Kommentare, Meta-Text jeglicher Art
 - Wenn keine Korrekturen nötig sind, gib den Originaltext zurück - OHNE Kommentar
@@ -219,6 +221,24 @@ function cleanLLMOutput(text: string, originalChunk?: string): string | null {
     .replace(/^\s*\*\*Korrektur:?\*\*\s*/i, '')
     .replace(/^\s*Korrigiere den folgenden diktierten Text:?\s*/i, '')
     .replace(/korrigieren Sie bitte den Text entsprechend der vorgegebenen Regeln und geben Sie das Ergebnis zurück\.?\s*/gi, '')
+    .trim();
+  
+  // Remove "Korrekturhinweise:" blocks with bullet points that LLM sometimes adds
+  // Pattern: "Korrekturhinweise:" followed by bullet points (*, -, •) until end or next sentence
+  cleaned = cleaned
+    .replace(/Korrekturhinweise:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '')
+    .replace(/Anmerkungen:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '')
+    .replace(/Hinweise:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '')
+    .replace(/Änderungen:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '')
+    .replace(/Korrekturen:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '')
+    // Also handle inline bullet point lists
+    .replace(/\s*\*\s*"[^"]*"\s*wurde durch\s*"[^"]*"\s*ersetzt[^.]*\.\s*/gi, '')
+    .replace(/\s*\*\s*Keine weiteren Korrekturen[^.]*\.\s*/gi, '')
+    .replace(/\s*[-•]\s*"[^"]*"\s*wurde durch\s*"[^"]*"\s*ersetzt[^.]*\.\s*/gi, '')
+    .replace(/\s*[-•]\s*Keine weiteren Korrekturen[^.]*\.\s*/gi, '')
+    // Remove any remaining meta-comment patterns
+    .replace(/\s*\*\s*[^*\n]*wurde[^*\n]*ersetzt[^*\n]*\n?/gi, '')
+    .replace(/\s*\*\s*[^*\n]*korrekt[^*\n]*\n?/gi, '')
     .trim();
   
   // Remove surrounding quotes if the LLM wrapped the text in quotes
@@ -364,6 +384,8 @@ KRITISCH - AUSGABEFORMAT:
 - Gib AUSSCHLIESSLICH den korrigierten Text zurück - NICHTS ANDERES!
 - VERBOTEN: "Der korrigierte Text lautet:", "Hier ist...", "Korrektur:", etc.
 - VERBOTEN: Erklärungen warum etwas geändert oder nicht geändert wurde
+- VERBOTEN: "Korrekturhinweise:", "Anmerkungen:", Listen mit Änderungen
+- VERBOTEN: Bullet Points (*, -, •) mit Erklärungen was geändert wurde
 - VERBOTEN: Anführungszeichen um den gesamten Text
 - VERBOTEN: Einleitungen, Kommentare, Meta-Text jeglicher Art
 - Wenn keine Korrekturen nötig sind, gib den Originaltext zurück - OHNE Kommentar

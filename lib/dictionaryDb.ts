@@ -260,10 +260,43 @@ export function cleanupText(text: string, entries: DictionaryEntry[]): string {
 // Request-basierte Funktionen (für dynamische DB über Token)
 // ============================================================
 
+// Ensure new columns exist (on-demand migration)
+async function ensureColumnsExist(db: any): Promise<void> {
+  try {
+    // Try to add use_in_prompt column if it doesn't exist
+    await db.execute(`
+      ALTER TABLE dictionary_entries ADD COLUMN use_in_prompt BOOLEAN DEFAULT FALSE
+    `);
+    console.log('[Dictionary] Added use_in_prompt column on-demand');
+  } catch (e: any) {
+    // Column already exists - that's fine
+  }
+  
+  try {
+    // Try to add match_stem column if it doesn't exist
+    await db.execute(`
+      ALTER TABLE dictionary_entries ADD COLUMN match_stem BOOLEAN DEFAULT FALSE
+    `);
+    console.log('[Dictionary] Added match_stem column on-demand');
+  } catch (e: any) {
+    // Column already exists - that's fine
+  }
+}
+
+// Track if we've already checked columns in this process
+let columnsChecked = false;
+
 // Get entries with Request context
 export async function getEntriesWithRequest(request: NextRequest, username: string): Promise<DictionaryEntry[]> {
   try {
     const db = await getPoolForRequest(request);
+    
+    // On-demand migration: ensure new columns exist (only check once per process)
+    if (!columnsChecked) {
+      await ensureColumnsExist(db);
+      columnsChecked = true;
+    }
+    
     const [rows] = await db.execute<any[]>(
       'SELECT wrong_word, correct_word, added_at, COALESCE(use_in_prompt, 0) as use_in_prompt, COALESCE(match_stem, 0) as match_stem FROM dictionary_entries WHERE LOWER(username) = LOWER(?) ORDER BY added_at DESC',
       [username]

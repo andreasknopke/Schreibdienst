@@ -1,17 +1,19 @@
 import { NextResponse } from 'next/server';
 import { getRuntimeConfig } from '@/lib/configDb';
-import { loadDictionary } from '@/lib/dictionaryDb';
+import { loadDictionary, DictionaryEntry } from '@/lib/dictionaryDb';
 
 export const runtime = 'nodejs';
 
 // Extrahiere eindeutige korrekte Wörter aus dem Wörterbuch für initial_prompt
-function getUniqueCorrectWords(dictionary: { entries: { wrong: string; correct: string }[] }): string {
+// Nur Einträge mit useInPrompt=true werden berücksichtigt
+function getUniqueCorrectWords(dictionary: { entries: DictionaryEntry[] }): string {
   if (!dictionary?.entries || dictionary.entries.length === 0) return '';
   
-  // Sammle alle korrekten Wörter, entferne Doubletten
+  // Sammle alle korrekten Wörter von Einträgen mit useInPrompt=true
   const uniqueWords = new Set<string>();
   for (const entry of dictionary.entries) {
-    if (entry.correct) {
+    // Nur Einträge mit useInPrompt flag verwenden
+    if (entry.correct && entry.useInPrompt) {
       // Füge das gesamte korrekte Wort/Phrase hinzu
       uniqueWords.add(entry.correct.trim());
     }

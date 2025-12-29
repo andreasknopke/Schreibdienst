@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addEntryWithRequest, removeEntryWithRequest, getEntriesWithRequest } from '@/lib/dictionaryDb';
+import { addEntryWithRequest, removeEntryWithRequest, getEntriesWithRequest, updateEntryOptionsWithRequest } from '@/lib/dictionaryDb';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
 
 interface AuthResult {
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { wrong, correct, username: targetUsername } = body;
+    const { wrong, correct, username: targetUsername, useInPrompt = false, matchStem = false } = body;
     
     if (!wrong || !correct) {
       return NextResponse.json({ success: false, error: 'Beide Felder müssen ausgefüllt sein' }, { status: 400 });
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
     // Secretariat users can add to other users' dictionaries
     const username = (auth.canViewAllDictations && targetUsername) ? targetUsername : auth.username;
     
-    const result = await addEntryWithRequest(request, username, wrong, correct);
+    const result = await addEntryWithRequest(request, username, wrong, correct, useInPrompt, matchStem);
     
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Eintrag hinzugefügt' });
@@ -82,6 +82,42 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: result.error }, { status: 400 });
   } catch (error) {
     console.error('Dictionary POST error:', error);
+    return NextResponse.json({ success: false, error: 'Ungültige Anfrage' }, { status: 400 });
+  }
+}
+
+// PATCH /api/dictionary - Update entry options
+export async function PATCH(request: NextRequest) {
+  try {
+    const auth = await getAuthenticatedUser(request);
+    
+    if (!auth) {
+      return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { wrong, username: targetUsername, useInPrompt, matchStem } = body;
+    
+    if (!wrong) {
+      return NextResponse.json({ success: false, error: 'Kein Wort angegeben' }, { status: 400 });
+    }
+    
+    if (useInPrompt === undefined && matchStem === undefined) {
+      return NextResponse.json({ success: false, error: 'Keine Änderungen angegeben' }, { status: 400 });
+    }
+    
+    // Secretariat users can update other users' dictionaries
+    const username = (auth.canViewAllDictations && targetUsername) ? targetUsername : auth.username;
+    
+    const result = await updateEntryOptionsWithRequest(request, username, wrong, useInPrompt ?? false, matchStem ?? false);
+    
+    if (result.success) {
+      return NextResponse.json({ success: true, message: 'Eintrag aktualisiert' });
+    }
+    
+    return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+  } catch (error) {
+    console.error('Dictionary PATCH error:', error);
     return NextResponse.json({ success: false, error: 'Ungültige Anfrage' }, { status: 400 });
   }
 }

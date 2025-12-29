@@ -5,6 +5,8 @@ export interface DictionaryEntry {
   wrong: string;
   correct: string;
   addedAt: string;
+  useInPrompt?: boolean;  // Wort wird im Whisper initial_prompt verwendet
+  matchStem?: boolean;    // Wortstamm-Matching aktivieren (z.B. "Schole" -> "Chole" korrigiert auch "Scholezystitis" -> "Cholezystitis")
 }
 
 interface DbDictionaryEntry {
@@ -13,20 +15,24 @@ interface DbDictionaryEntry {
   wrong_word: string;
   correct_word: string;
   added_at: Date;
+  use_in_prompt: boolean;
+  match_stem: boolean;
 }
 
 // Get all entries for a user
 export async function getEntries(username: string): Promise<DictionaryEntry[]> {
   try {
     const entries = await query<DbDictionaryEntry>(
-      'SELECT wrong_word, correct_word, added_at FROM dictionary_entries WHERE LOWER(username) = LOWER(?) ORDER BY added_at DESC',
+      'SELECT wrong_word, correct_word, added_at, COALESCE(use_in_prompt, 0) as use_in_prompt, COALESCE(match_stem, 0) as match_stem FROM dictionary_entries WHERE LOWER(username) = LOWER(?) ORDER BY added_at DESC',
       [username]
     );
     
     return entries.map(e => ({
       wrong: e.wrong_word,
       correct: e.correct_word,
-      addedAt: e.added_at?.toISOString() || new Date().toISOString()
+      addedAt: e.added_at?.toISOString() || new Date().toISOString(),
+      useInPrompt: Boolean(e.use_in_prompt),
+      matchStem: Boolean(e.match_stem)
     }));
   } catch (error) {
     console.error('[Dictionary] Get entries error:', error);
@@ -35,7 +41,13 @@ export async function getEntries(username: string): Promise<DictionaryEntry[]> {
 }
 
 // Add or update entry
-export async function addEntry(username: string, wrong: string, correct: string): Promise<{ success: boolean; error?: string }> {
+export async function addEntry(
+  username: string, 
+  wrong: string, 
+  correct: string,
+  useInPrompt: boolean = false,
+  matchStem: boolean = false
+): Promise<{ success: boolean; error?: string }> {
   if (!wrong?.trim() || !correct?.trim()) {
     return { success: false, error: 'Beide Felder müssen ausgefüllt sein' };
   }
@@ -50,16 +62,41 @@ export async function addEntry(username: string, wrong: string, correct: string)
   try {
     // Use INSERT ... ON DUPLICATE KEY UPDATE for upsert
     await execute(
-      `INSERT INTO dictionary_entries (username, wrong_word, correct_word) 
-       VALUES (?, ?, ?) 
-       ON DUPLICATE KEY UPDATE correct_word = ?, added_at = CURRENT_TIMESTAMP`,
-      [username.toLowerCase(), wrongTrimmed, correctTrimmed, correctTrimmed]
+      `INSERT INTO dictionary_entries (username, wrong_word, correct_word, use_in_prompt, match_stem) 
+       VALUES (?, ?, ?, ?, ?) 
+       ON DUPLICATE KEY UPDATE correct_word = ?, use_in_prompt = ?, match_stem = ?, added_at = CURRENT_TIMESTAMP`,
+      [username.toLowerCase(), wrongTrimmed, correctTrimmed, useInPrompt ? 1 : 0, matchStem ? 1 : 0, correctTrimmed, useInPrompt ? 1 : 0, matchStem ? 1 : 0]
     );
     
-    console.log('[Dictionary] Added/updated entry for', username, ':', wrongTrimmed, '->', correctTrimmed);
+    console.log('[Dictionary] Added/updated entry for', username, ':', wrongTrimmed, '->', correctTrimmed, `(prompt: ${useInPrompt}, stem: ${matchStem})`);
     return { success: true };
   } catch (error) {
     console.error('[Dictionary] Add entry error:', error);
+    return { success: false, error: 'Datenbankfehler' };
+  }
+}
+
+// Update entry options (useInPrompt, matchStem)
+export async function updateEntryOptions(
+  username: string, 
+  wrong: string, 
+  useInPrompt: boolean,
+  matchStem: boolean
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const result = await execute(
+      'UPDATE dictionary_entries SET use_in_prompt = ?, match_stem = ? WHERE LOWER(username) = LOWER(?) AND LOWER(wrong_word) = LOWER(?)',
+      [useInPrompt ? 1 : 0, matchStem ? 1 : 0, username, wrong]
+    );
+    
+    if (result.affectedRows === 0) {
+      return { success: false, error: 'Eintrag nicht gefunden' };
+    }
+    
+    console.log('[Dictionary] Updated options for', username, ':', wrong, `(prompt: ${useInPrompt}, stem: ${matchStem})`);
+    return { success: true };
+  } catch (error) {
+    console.error('[Dictionary] Update options error:', error);
     return { success: false, error: 'Datenbankfehler' };
   }
 }
@@ -228,14 +265,16 @@ export async function getEntriesWithRequest(request: NextRequest, username: stri
   try {
     const db = await getPoolForRequest(request);
     const [rows] = await db.execute<any[]>(
-      'SELECT wrong_word, correct_word, added_at FROM dictionary_entries WHERE LOWER(username) = LOWER(?) ORDER BY added_at DESC',
+      'SELECT wrong_word, correct_word, added_at, COALESCE(use_in_prompt, 0) as use_in_prompt, COALESCE(match_stem, 0) as match_stem FROM dictionary_entries WHERE LOWER(username) = LOWER(?) ORDER BY added_at DESC',
       [username]
     );
     
     return (rows as DbDictionaryEntry[]).map(e => ({
       wrong: e.wrong_word,
       correct: e.correct_word,
-      addedAt: e.added_at?.toISOString() || new Date().toISOString()
+      addedAt: e.added_at?.toISOString() || new Date().toISOString(),
+      useInPrompt: Boolean(e.use_in_prompt),
+      matchStem: Boolean(e.match_stem)
     }));
   } catch (error) {
     console.error('[Dictionary] Get entries error (with request):', error);
@@ -248,7 +287,9 @@ export async function addEntryWithRequest(
   request: NextRequest,
   username: string, 
   wrong: string, 
-  correct: string
+  correct: string,
+  useInPrompt: boolean = false,
+  matchStem: boolean = false
 ): Promise<{ success: boolean; error?: string }> {
   if (!wrong?.trim() || !correct?.trim()) {
     return { success: false, error: 'Beide Felder müssen ausgefüllt sein' };
@@ -264,16 +305,43 @@ export async function addEntryWithRequest(
   try {
     const db = await getPoolForRequest(request);
     await db.execute(
-      `INSERT INTO dictionary_entries (username, wrong_word, correct_word) 
-       VALUES (?, ?, ?) 
-       ON DUPLICATE KEY UPDATE correct_word = ?, added_at = CURRENT_TIMESTAMP`,
-      [username.toLowerCase(), wrongTrimmed, correctTrimmed, correctTrimmed]
+      `INSERT INTO dictionary_entries (username, wrong_word, correct_word, use_in_prompt, match_stem) 
+       VALUES (?, ?, ?, ?, ?) 
+       ON DUPLICATE KEY UPDATE correct_word = ?, use_in_prompt = ?, match_stem = ?, added_at = CURRENT_TIMESTAMP`,
+      [username.toLowerCase(), wrongTrimmed, correctTrimmed, useInPrompt ? 1 : 0, matchStem ? 1 : 0, correctTrimmed, useInPrompt ? 1 : 0, matchStem ? 1 : 0]
     );
     
-    console.log('[Dictionary] Added/updated entry (with request) for', username, ':', wrongTrimmed, '->', correctTrimmed);
+    console.log('[Dictionary] Added/updated entry (with request) for', username, ':', wrongTrimmed, '->', correctTrimmed, `(prompt: ${useInPrompt}, stem: ${matchStem})`);
     return { success: true };
   } catch (error) {
     console.error('[Dictionary] Add entry error (with request):', error);
+    return { success: false, error: 'Datenbankfehler' };
+  }
+}
+
+// Update entry options with Request context
+export async function updateEntryOptionsWithRequest(
+  request: NextRequest,
+  username: string, 
+  wrong: string, 
+  useInPrompt: boolean,
+  matchStem: boolean
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const db = await getPoolForRequest(request);
+    const [result] = await db.execute(
+      'UPDATE dictionary_entries SET use_in_prompt = ?, match_stem = ? WHERE LOWER(username) = LOWER(?) AND LOWER(wrong_word) = LOWER(?)',
+      [useInPrompt ? 1 : 0, matchStem ? 1 : 0, username, wrong]
+    );
+    
+    if ((result as any).affectedRows === 0) {
+      return { success: false, error: 'Eintrag nicht gefunden' };
+    }
+    
+    console.log('[Dictionary] Updated options (with request) for', username, ':', wrong, `(prompt: ${useInPrompt}, stem: ${matchStem})`);
+    return { success: true };
+  } catch (error) {
+    console.error('[Dictionary] Update options error (with request):', error);
     return { success: false, error: 'Datenbankfehler' };
   }
 }

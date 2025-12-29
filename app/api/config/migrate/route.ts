@@ -86,15 +86,42 @@ export async function POST(request: NextRequest) {
           wrong_word VARCHAR(500) NOT NULL,
           correct_word VARCHAR(500) NOT NULL,
           added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          use_in_prompt BOOLEAN DEFAULT FALSE,
+          match_stem BOOLEAN DEFAULT FALSE,
           UNIQUE KEY unique_user_word (username, wrong_word(191))
         )
       `);
+      
+      // Migration: use_in_prompt Spalte hinzufügen falls nicht vorhanden
+      try {
+        await pool.execute(`
+          ALTER TABLE dictionary_entries ADD COLUMN use_in_prompt BOOLEAN DEFAULT FALSE
+        `);
+        console.log('[Migration] dictionary_entries table: added use_in_prompt column');
+      } catch (alterError: any) {
+        if (!alterError.message.includes('Duplicate column')) {
+          console.log('[Migration] dictionary_entries table: use_in_prompt column already exists');
+        }
+      }
+      
+      // Migration: match_stem Spalte hinzufügen falls nicht vorhanden
+      try {
+        await pool.execute(`
+          ALTER TABLE dictionary_entries ADD COLUMN match_stem BOOLEAN DEFAULT FALSE
+        `);
+        console.log('[Migration] dictionary_entries table: added match_stem column');
+      } catch (alterError: any) {
+        if (!alterError.message.includes('Duplicate column')) {
+          console.log('[Migration] dictionary_entries table: match_stem column already exists');
+        }
+      }
+      
       status.dictionary = true;
       console.log('[Migration] dictionary_entries table: OK');
     } catch (error: any) {
       console.error('[Migration] dictionary_entries table error:', error.message);
     }
-    
+
     // 3. Templates-Tabelle (NEU)
     try {
       await pool.execute(`

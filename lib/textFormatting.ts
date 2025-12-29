@@ -8,12 +8,18 @@ export interface DictionaryEntry {
   wrong: string;
   correct: string;
   addedAt?: string;
+  useInPrompt?: boolean;  // Wort wird im Whisper initial_prompt verwendet
+  matchStem?: boolean;    // Wortstamm-Matching aktivieren
 }
 
 /**
  * Apply dictionary corrections to text.
  * Replaces all occurrences of wrong words with their correct versions.
  * Uses word boundaries for more precise matching.
+ * 
+ * If matchStem is enabled for an entry, it also replaces the wrong word
+ * when it appears as a prefix in compound words (e.g., "Schole" -> "Chole"
+ * will also correct "Scholezystitis" -> "Cholezystitis").
  */
 export function applyDictionaryCorrections(text: string, entries: DictionaryEntry[]): string {
   if (!text || !entries || entries.length === 0) {
@@ -22,6 +28,7 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
 
   let result = text;
   let replacementCount = 0;
+  let stemReplacementCount = 0;
 
   // Sort entries by length of wrong word (longest first) to avoid partial replacements
   const sortedEntries = [...entries].sort((a, b) => b.wrong.length - a.wrong.length);
@@ -31,28 +38,63 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
     
     // Escape special regex characters in the wrong word
     const escapedWrong = entry.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedCorrect = entry.correct;
     
-    // Use word boundary matching for better precision
-    // But also handle cases where the word might be at start/end or surrounded by punctuation
-    const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapedWrong}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
-    
-    result = result.replace(regex, (match) => {
-      replacementCount++;
-      // Preserve case pattern of original match where possible
-      if (match === match.toUpperCase() && entry.correct.length > 0) {
-        return entry.correct.toUpperCase();
-      } else if (match[0] === match[0].toUpperCase() && entry.correct.length > 0) {
-        return entry.correct.charAt(0).toUpperCase() + entry.correct.slice(1);
-      }
-      return entry.correct;
-    });
+    if (entry.matchStem) {
+      // STEM MATCHING: Also match when wrong word appears as prefix in compound words
+      // Match: "Schole" in "Scholezystitis", "Scholedochus", "Scholestase"
+      // Pattern: word boundary at start, then the wrong word, followed by more letters
+      
+      // First: Match standalone words (exact match)
+      const standaloneRegex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapedWrong}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
+      result = result.replace(standaloneRegex, (match) => {
+        replacementCount++;
+        return preserveCase(match, escapedCorrect);
+      });
+      
+      // Second: Match as prefix in compound words (wrong word followed by more letters)
+      // This matches "Scholezystitis" and replaces "Schole" with "Chole" -> "Cholezystitis"
+      const stemRegex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapedWrong}([A-ZÄÖÜa-zäöüß]+)`, 'gi');
+      result = result.replace(stemRegex, (match, suffix) => {
+        stemReplacementCount++;
+        // Preserve case of the original stem
+        const correctedStem = preserveCase(match.slice(0, entry.wrong.length), escapedCorrect);
+        return correctedStem + suffix;
+      });
+    } else {
+      // Standard word boundary matching (no stem matching)
+      const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapedWrong}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
+      
+      result = result.replace(regex, (match) => {
+        replacementCount++;
+        return preserveCase(match, escapedCorrect);
+      });
+    }
   }
 
-  if (replacementCount > 0) {
-    console.log(`[Dictionary] Applied ${replacementCount} corrections`);
+  if (replacementCount > 0 || stemReplacementCount > 0) {
+    console.log(`[Dictionary] Applied ${replacementCount} direct + ${stemReplacementCount} stem corrections`);
   }
 
   return result;
+}
+
+/**
+ * Preserve case pattern from original match when replacing.
+ */
+function preserveCase(original: string, replacement: string): string {
+  if (!original || !replacement) return replacement;
+  
+  // All uppercase -> make replacement uppercase
+  if (original === original.toUpperCase() && replacement.length > 0) {
+    return replacement.toUpperCase();
+  }
+  // First letter uppercase -> capitalize replacement
+  if (original[0] === original[0].toUpperCase() && replacement.length > 0) {
+    return replacement.charAt(0).toUpperCase() + replacement.slice(1);
+  }
+  // Default: return as-is
+  return replacement;
 }
 
 // Replacement function type for control words

@@ -94,20 +94,21 @@ async function transcribeAudio(audioBlob: Blob, username?: string): Promise<{ te
   const provider = runtimeConfig.transcriptionProvider;
   
   // Lade Wörterbuch für initial_prompt bei WhisperX
+  // Nur Einträge mit useInPrompt=true werden verwendet
   let initialPrompt: string | undefined;
   if (username && provider !== 'elevenlabs') {
     try {
       const dictionary = await loadDictionary(username);
-      // Extrahiere einzigartige korrekte Wörter
+      // Extrahiere einzigartige korrekte Wörter nur von Einträgen mit useInPrompt=true
       const correctWords = new Set<string>();
       for (const entry of dictionary.entries) {
-        if (entry.correct) {
+        if (entry.correct && entry.useInPrompt) {
           correctWords.add(entry.correct);
         }
       }
       if (correctWords.size > 0) {
         initialPrompt = Array.from(correctWords).join(', ');
-        console.log(`[Worker] Using ${correctWords.size} dictionary words as initial_prompt`);
+        console.log(`[Worker] Using ${correctWords.size} dictionary words (with useInPrompt) as initial_prompt`);
       }
     } catch (err) {
       console.warn('[Worker] Failed to load dictionary:', err);

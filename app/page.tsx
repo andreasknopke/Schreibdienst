@@ -7,6 +7,8 @@ import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
 import { applyFormattingControlWords } from '@/lib/textFormatting';
+import CustomActionButtons from '@/components/CustomActionButtons';
+import CustomActionsManager from '@/components/CustomActionsManager';
 
 // Intervall für kontinuierliche Transkription (in ms)
 const TRANSCRIPTION_INTERVAL = 3000;
@@ -91,6 +93,9 @@ export default function HomePage() {
     befund: number;
     beurteilung: number;
   } | null>(null);
+
+  // Custom Actions Manager
+  const [showCustomActionsManager, setShowCustomActionsManager] = useState(false);
 
   // Template-Modus: Textbaustein mit diktierten Änderungen kombinieren
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -1435,73 +1440,99 @@ export default function HomePage() {
       {/* Befund-Modus: Drei separate Felder */}
       {mode === 'befund' ? (
         <div className="space-y-3">
-          {/* Methodik-Feld */}
-          <div className="card">
-            <div className="card-body py-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium flex items-center gap-2">
-                  Methodik
-                  {activeField === 'methodik' && recording && (
-                    <span className="px-1.5 py-0.5 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded text-xs">
-                      ●
-                    </span>
-                  )}
-                </label>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400">{methodik ? `${methodik.length}` : ''}</span>
-                  <button 
-                    className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                    onClick={() => navigator.clipboard.writeText(methodik)}
-                    disabled={!methodik}
-                    title="Kopieren"
-                  >
-                    📋
-                  </button>
+          {/* Methodik-Feld mit Action-Buttons */}
+          <div className="flex gap-2">
+            <div className="card flex-1">
+              <div className="card-body py-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium flex items-center gap-2">
+                    Methodik
+                    {activeField === 'methodik' && recording && (
+                      <span className="px-1.5 py-0.5 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded text-xs">
+                        ●
+                      </span>
+                    )}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">{methodik ? `${methodik.length}` : ''}</span>
+                    <button 
+                      className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
+                      onClick={() => navigator.clipboard.writeText(methodik)}
+                      disabled={!methodik}
+                      title="Kopieren"
+                    >
+                      📋
+                    </button>
+                  </div>
                 </div>
+                <textarea
+                  className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  value={methodik}
+                  onChange={(e) => { setMethodik(e.target.value); setPendingCorrection(true); }}
+                  onFocus={() => setActiveField('methodik')}
+                  placeholder="Methodik..."
+                  rows={2}
+                  readOnly={isProcessing}
+                />
               </div>
-              <textarea
-                className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                value={methodik}
-                onChange={(e) => { setMethodik(e.target.value); setPendingCorrection(true); }}
-                onFocus={() => setActiveField('methodik')}
-                placeholder="Methodik..."
-                rows={2}
-                readOnly={isProcessing}
+            </div>
+            {/* Action Buttons für Methodik */}
+            <div className="w-24 flex-shrink-0">
+              <CustomActionButtons
+                currentField="methodik"
+                getText={() => methodik}
+                getAllTexts={() => ({ methodik, befund: transcript, beurteilung })}
+                onResult={(result) => setMethodik(result)}
+                disabled={isProcessing}
+                onManageClick={() => setShowCustomActionsManager(true)}
               />
             </div>
           </div>
 
-          {/* Befund-Feld (Hauptfeld) */}
-          <div className="card">
-            <div className="card-body py-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium flex items-center gap-2">
-                  Befund
-                  {activeField === 'befund' && recording && (
-                    <span className="px-1.5 py-0.5 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded text-xs">
-                      ●
-                    </span>
-                  )}
-                </label>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400">{transcript ? `${transcript.length}` : ''}</span>
-                  <button 
-                    className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                    onClick={() => navigator.clipboard.writeText(transcript)}
-                    disabled={!transcript}
-                    title="Kopieren"
-                  >
-                    📋
-                  </button>
+          {/* Befund-Feld (Hauptfeld) mit Action-Buttons */}
+          <div className="flex gap-2">
+            <div className="card flex-1">
+              <div className="card-body py-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium flex items-center gap-2">
+                    Befund
+                    {activeField === 'befund' && recording && (
+                      <span className="px-1.5 py-0.5 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded text-xs">
+                        ●
+                      </span>
+                    )}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">{transcript ? `${transcript.length}` : ''}</span>
+                    <button 
+                      className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
+                      onClick={() => navigator.clipboard.writeText(transcript)}
+                      disabled={!transcript}
+                      title="Kopieren"
+                    >
+                      📋
+                    </button>
+                  </div>
                 </div>
+                <textarea
+                  className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  value={transcript}
+                  onChange={(e) => { setTranscript(e.target.value); setPendingCorrection(true); }}
+                  onFocus={() => setActiveField('befund')}
+                  placeholder="Befund..."
+                  readOnly={isProcessing}
+                />
               </div>
-              <textarea
-                className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                value={transcript}
-                onChange={(e) => { setTranscript(e.target.value); setPendingCorrection(true); }}
-                onFocus={() => setActiveField('befund')}
-                placeholder="Befund..."
-                readOnly={isProcessing}
+            </div>
+            {/* Action Buttons für Befund */}
+            <div className="w-24 flex-shrink-0">
+              <CustomActionButtons
+                currentField="befund"
+                getText={() => transcript}
+                getAllTexts={() => ({ methodik, befund: transcript, beurteilung })}
+                onResult={(result) => setTranscript(result)}
+                disabled={isProcessing}
+                onManageClick={() => setShowCustomActionsManager(true)}
               />
             </div>
           </div>
@@ -1511,55 +1542,68 @@ export default function HomePage() {
             <ChangeWarningBanner score={changeScore} />
           )}
 
-          {/* Beurteilung-Feld */}
-          <div className="card">
-            <div className="card-body py-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <label className="text-xs font-medium flex items-center gap-2">
-                    Zusammenfassung
-                    {activeField === 'beurteilung' && recording && (
-                      <span className="px-1.5 py-0.5 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded text-xs">
-                        ●
-                      </span>
-                  )}
-                  </label>
-                  {changeScore !== null && !isProcessing && (
-                    <ChangeIndicator score={changeScore} size="sm" />
-                  )}
+          {/* Beurteilung-Feld mit Action-Buttons */}
+          <div className="flex gap-2">
+            <div className="card flex-1">
+              <div className="card-body py-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-medium flex items-center gap-2">
+                      Zusammenfassung
+                      {activeField === 'beurteilung' && recording && (
+                        <span className="px-1.5 py-0.5 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded text-xs">
+                          ●
+                        </span>
+                    )}
+                    </label>
+                    {changeScore !== null && !isProcessing && (
+                      <ChangeIndicator score={changeScore} size="sm" />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">{beurteilung ? `${beurteilung.length}` : ''}</span>
+                    <button 
+                      className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
+                      onClick={() => navigator.clipboard.writeText(beurteilung)}
+                      disabled={!beurteilung}
+                      title="Kopieren"
+                    >
+                      📋
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400">{beurteilung ? `${beurteilung.length}` : ''}</span>
-                  <button 
-                    className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                    onClick={() => navigator.clipboard.writeText(beurteilung)}
-                    disabled={!beurteilung}
-                    title="Kopieren"
-                  >
-                    📋
-                  </button>
-                </div>
+                <textarea
+                  className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  value={beurteilung}
+                  onChange={(e) => { setBeurteilung(e.target.value); setPendingCorrection(true); }}
+                  onFocus={() => setActiveField('beurteilung')}
+                  placeholder="Zusammenfassung..."
+                  rows={2}
+                  readOnly={isProcessing}
+                />
+                <button 
+                  className="btn btn-primary w-full text-sm py-2" 
+                  onClick={handleSuggestBeurteilung} 
+                  disabled={!transcript.trim() || suggestingBeurteilung}
+                >
+                  {suggestingBeurteilung ? (
+                    <><Spinner className="mr-2" size={14} /> Generiere...</>
+                  ) : (
+                    '✨ Zusammenfassung erstellen'
+                  )}
+                </button>
               </div>
-              <textarea
-                className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                value={beurteilung}
-                onChange={(e) => { setBeurteilung(e.target.value); setPendingCorrection(true); }}
-                onFocus={() => setActiveField('beurteilung')}
-                placeholder="Zusammenfassung..."
-                rows={2}
-                readOnly={isProcessing}
+            </div>
+            {/* Action Buttons für Beurteilung */}
+            <div className="w-24 flex-shrink-0">
+              <CustomActionButtons
+                currentField="beurteilung"
+                getText={() => beurteilung}
+                getAllTexts={() => ({ methodik, befund: transcript, beurteilung })}
+                onResult={(result) => setBeurteilung(result)}
+                disabled={isProcessing}
+                onManageClick={() => setShowCustomActionsManager(true)}
               />
-              <button 
-                className="btn btn-primary w-full text-sm py-2" 
-                onClick={handleSuggestBeurteilung} 
-                disabled={!transcript.trim() || suggestingBeurteilung}
-              >
-                {suggestingBeurteilung ? (
-                  <><Spinner className="mr-2" size={14} /> Generiere...</>
-                ) : (
-                  '✨ Zusammenfassung erstellen'
-                )}
-              </button>
             </div>
           </div>
         </div>
@@ -1590,21 +1634,40 @@ export default function HomePage() {
             {/* Warnbanner bei signifikanten Änderungen */}
             <ChangeWarningBanner score={changeScore} />
             
-            <textarea
-              className={`textarea font-mono text-sm min-h-40 ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
-              value={transcript}
-              onChange={(e) => { setTranscript(e.target.value); setPendingCorrection(true); }}
-              placeholder="Text erscheint hier..."
-              readOnly={isProcessing}
-            />
             <div className="flex gap-2">
-              <button className="btn btn-primary flex-1 text-sm py-2" onClick={handleFormat} disabled={busy || !transcript}>
-                {busy && <Spinner className="mr-2" size={14} />} Formatieren
-              </button>
-              <button className="btn btn-outline text-sm py-2" onClick={handleExportDocx} disabled={!transcript}>.docx</button>
+              <div className="flex-1">
+                <textarea
+                  className={`textarea font-mono text-sm min-h-40 w-full ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  value={transcript}
+                  onChange={(e) => { setTranscript(e.target.value); setPendingCorrection(true); }}
+                  placeholder="Text erscheint hier..."
+                  readOnly={isProcessing}
+                />
+                <div className="flex gap-2 mt-2">
+                  <button className="btn btn-primary flex-1 text-sm py-2" onClick={handleFormat} disabled={busy || !transcript}>
+                    {busy && <Spinner className="mr-2" size={14} />} Formatieren
+                  </button>
+                  <button className="btn btn-outline text-sm py-2" onClick={handleExportDocx} disabled={!transcript}>.docx</button>
+                </div>
+              </div>
+              {/* Action Buttons für Arztbrief */}
+              <div className="w-24 flex-shrink-0">
+                <CustomActionButtons
+                  currentField="transcript"
+                  getText={() => transcript}
+                  onResult={(result) => setTranscript(result)}
+                  disabled={isProcessing}
+                  onManageClick={() => setShowCustomActionsManager(true)}
+                />
+              </div>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Custom Actions Manager Modal */}
+      {showCustomActionsManager && (
+        <CustomActionsManager onClose={() => setShowCustomActionsManager(false)} />
       )}
     </div>
   );

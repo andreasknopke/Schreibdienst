@@ -36,7 +36,8 @@ export async function POST(request: NextRequest) {
     dictionary: false,
     users: false,
     config: false,
-    offlineDictations: false
+    offlineDictations: false,
+    customActions: false
   };
   
   try {
@@ -157,6 +158,27 @@ export async function POST(request: NextRequest) {
       console.log('[Migration] offline_dictations table: OK');
     } catch (error: any) {
       console.error('[Migration] offline_dictations table error:', error.message);
+    }
+    
+    // 6. Custom Actions-Tabelle (für benutzerdefinierte LLM-Aktionen)
+    try {
+      await pool.execute(`
+        CREATE TABLE IF NOT EXISTS custom_actions (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          username VARCHAR(100) NOT NULL,
+          name VARCHAR(200) NOT NULL,
+          icon VARCHAR(20) DEFAULT '⚡',
+          prompt TEXT NOT NULL,
+          target_field ENUM('current', 'methodik', 'befund', 'beurteilung', 'all') DEFAULT 'current',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY unique_user_action (username, name)
+        )
+      `);
+      status.customActions = true;
+      console.log('[Migration] custom_actions table: OK');
+    } catch (error: any) {
+      console.error('[Migration] custom_actions table error:', error.message);
     }
     
     // Prüfe ob root-User existiert (nur Hinweis, keine automatische Erstellung)

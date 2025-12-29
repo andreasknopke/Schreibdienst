@@ -108,6 +108,22 @@ const DELETE_PATTERNS = [
   { pattern: /letzten\s+absatz\s+löschen\b/gi, type: 'paragraph' as const },
 ];
 
+// Number word to digit mapping for enumeration
+const NUMBER_WORDS: Record<string, number> = {
+  'eins': 1, 'ein': 1, 'erste': 1, 'erster': 1, 'erstes': 1,
+  'zwei': 2, 'zweite': 2, 'zweiter': 2, 'zweites': 2,
+  'drei': 3, 'dritte': 3, 'dritter': 3, 'drittes': 3,
+  'vier': 4, 'vierte': 4, 'vierter': 4, 'viertes': 4,
+  'fünf': 5, 'fünfte': 5, 'fünfter': 5, 'fünftes': 5,
+  'sechs': 6, 'sechste': 6, 'sechster': 6, 'sechstes': 6,
+  'sieben': 7, 'siebte': 7, 'siebter': 7, 'siebtes': 7,
+  'acht': 8, 'achte': 8, 'achter': 8, 'achtes': 8,
+  'neun': 9, 'neunte': 9, 'neunter': 9, 'neuntes': 9,
+  'zehn': 10, 'zehnte': 10, 'zehnter': 10, 'zehntes': 10,
+  'elf': 11, 'elfte': 11, 'elfter': 11, 'elftes': 11,
+  'zwölf': 12, 'zwölfte': 12, 'zwölfter': 12, 'zwölftes': 12,
+};
+
 /**
  * Apply formatting control words programmatically.
  * This should be called BEFORE sending text to LLM for correction.
@@ -126,6 +142,7 @@ export interface ControlWordResult {
     punctuation: number; // "Punkt", "Komma", "Doppelpunkt" etc.
     brackets: number;    // "Klammer auf/zu"
     deletions: number;   // "lösche das letzte Wort" etc.
+    enumerations: number; // "Punkt eins", "Nächster Punkt" etc.
     total: number;
   };
 }
@@ -147,10 +164,16 @@ export function applyFormattingControlWords(text: string): string {
  * Use this version when you need to log/display the results.
  */
 export function applyFormattingControlWordsWithStats(text: string): ControlWordResult {
-  if (!text) return { text, stats: { paragraphs: 0, lineBreaks: 0, punctuation: 0, brackets: 0, deletions: 0, total: 0 } };
+  if (!text) return { text, stats: { paragraphs: 0, lineBreaks: 0, punctuation: 0, brackets: 0, deletions: 0, enumerations: 0, total: 0 } };
   
   let result = text;
-  const stats = { paragraphs: 0, lineBreaks: 0, punctuation: 0, brackets: 0, deletions: 0, total: 0 };
+  const stats = { paragraphs: 0, lineBreaks: 0, punctuation: 0, brackets: 0, deletions: 0, enumerations: 0, total: 0 };
+  
+  // Step 0: Handle enumeration commands first (before other replacements)
+  const enumResult = handleEnumerationCommands(result);
+  result = enumResult.text;
+  stats.enumerations = enumResult.count;
+  stats.total += enumResult.count;
   
   // Step 1: Apply simple replacements and count
   for (const { pattern, replacement } of CONTROL_WORD_REPLACEMENTS) {
@@ -200,10 +223,131 @@ export function applyFormattingControlWordsWithStats(text: string): ControlWordR
     if (stats.punctuation > 0) details.push(`${stats.punctuation}x Satzzeichen`);
     if (stats.brackets > 0) details.push(`${stats.brackets}x Klammer`);
     if (stats.deletions > 0) details.push(`${stats.deletions}x Löschung`);
+    if (stats.enumerations > 0) details.push(`${stats.enumerations}x Aufzählung`);
     console.log(`[ControlWords] ${stats.total} Steuerbefehle erkannt: ${details.join(', ')}`);
   }
   
   return { text: result, stats };
+}
+
+/**
+ * Handle enumeration/list commands
+ * Patterns:
+ * - "Aufzählung beginnen/starten" (optional start marker, removed)
+ * - "Punkt eins/zwei/drei..." → "1./2./3. ..."
+ * - "Nächster Punkt" → next number in sequence
+ * - "Aufzählung beenden" (end marker, removed)
+ */
+function handleEnumerationCommands(text: string): { text: string; count: number } {
+  if (!text) return { text, count: 0 };
+  
+  let result = text;
+  let count = 0;
+  
+  // Step 1: Remove optional start markers
+  const startPatterns = [
+    /\baufzählung\s+beginnen\b[.,;:\s]*/gi,
+    /\baufzählung\s+starten\b[.,;:\s]*/gi,
+    /\bliste\s+beginnen\b[.,;:\s]*/gi,
+    /\bliste\s+starten\b[.,;:\s]*/gi,
+  ];
+  
+  for (const pattern of startPatterns) {
+    if (pattern.test(result)) {
+      result = result.replace(pattern, '\n');
+      count++;
+    }
+  }
+  
+  // Step 2: Remove end markers
+  const endPatterns = [
+    /\baufzählung\s+beenden\b[.,;:\s]*/gi,
+    /\baufzählung\s+ende\b[.,;:\s]*/gi,
+    /\bliste\s+beenden\b[.,;:\s]*/gi,
+    /\bliste\s+ende\b[.,;:\s]*/gi,
+  ];
+  
+  for (const pattern of endPatterns) {
+    if (pattern.test(result)) {
+      result = result.replace(pattern, '\n');
+      count++;
+    }
+  }
+  
+  // Step 3: Process all enumeration commands sequentially from left to right
+  // This ensures "Nächster Punkt" correctly follows previous numbered items
+  
+  // Build combined pattern to find all enumeration commands
+  const numberWordPattern = Object.keys(NUMBER_WORDS).join('|');
+  
+  // Pattern for "Punkt [number word]" or "Punkt [digit]" or "Nächster Punkt" etc.
+  const allEnumPatterns = new RegExp(
+    `\\bpunkt\\s+(${numberWordPattern}|\\d+)\\b[.,;:\\s]*` +
+    `|\\bnächster\\s+punkt\\b[.,;:\\s]*` +
+    `|\\bnächster\\s+listenpunkt\\b[.,;:\\s]*` +
+    `|\\bweiterer\\s+punkt\\b[.,;:\\s]*` +
+    `|\\berstens\\b[.,;:\\s]*` +
+    `|\\bzweitens\\b[.,;:\\s]*` +
+    `|\\bdrittens\\b[.,;:\\s]*` +
+    `|\\bviertens\\b[.,;:\\s]*` +
+    `|\\bfünftens\\b[.,;:\\s]*` +
+    `|\\bsechstens\\b[.,;:\\s]*` +
+    `|\\bsiebentens\\b[.,;:\\s]*` +
+    `|\\bsiebtens\\b[.,;:\\s]*` +
+    `|\\bachtens\\b[.,;:\\s]*` +
+    `|\\bneuntens\\b[.,;:\\s]*` +
+    `|\\bzehntens\\b[.,;:\\s]*`,
+    'gi'
+  );
+  
+  // Ordinal word to number mapping
+  const ordinalToNumber: Record<string, number> = {
+    'erstens': 1, 'zweitens': 2, 'drittens': 3, 'viertens': 4, 'fünftens': 5,
+    'sechstens': 6, 'siebentens': 7, 'siebtens': 7, 'achtens': 8, 'neuntens': 9, 'zehntens': 10,
+  };
+  
+  let currentNumber = 0;
+  
+  result = result.replace(allEnumPatterns, (match) => {
+    const matchLower = match.toLowerCase().trim();
+    count++;
+    
+    // Check if it's "Punkt [number]"
+    const punktMatch = match.match(/\bpunkt\s+(\S+)/i);
+    if (punktMatch) {
+      const numPart = punktMatch[1].toLowerCase();
+      // Try as number word
+      if (NUMBER_WORDS[numPart]) {
+        currentNumber = NUMBER_WORDS[numPart];
+        return `\n${currentNumber}. `;
+      }
+      // Try as digit
+      const digit = parseInt(numPart, 10);
+      if (!isNaN(digit)) {
+        currentNumber = digit;
+        return `\n${currentNumber}. `;
+      }
+    }
+    
+    // Check if it's an ordinal (erstens, zweitens, etc.)
+    for (const [ordinal, num] of Object.entries(ordinalToNumber)) {
+      if (matchLower.startsWith(ordinal)) {
+        currentNumber = num;
+        return `\n${currentNumber}. `;
+      }
+    }
+    
+    // Check if it's "Nächster Punkt" or similar
+    if (/nächster\s+punkt|nächster\s+listenpunkt|weiterer\s+punkt/i.test(match)) {
+      currentNumber++;
+      return `\n${currentNumber}. `;
+    }
+    
+    // Fallback - shouldn't happen
+    return match;
+  });
+  
+  return { text: result, count };
 }
 
 /**

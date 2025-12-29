@@ -6,7 +6,7 @@ import Spinner from '@/components/Spinner';
 import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
-import { applyFormattingControlWords } from '@/lib/textFormatting';
+import { applyFormattingControlWords, preprocessTranscription } from '@/lib/textFormatting';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
 
@@ -93,6 +93,7 @@ export default function HomePage() {
   } | null>(null);
   const [canRevert, setCanRevert] = useState(false);
   const [isReverted, setIsReverted] = useState(false); // Zeigt an ob gerade der unkorrigierte Text angezeigt wird
+  const [applyFormatting, setApplyFormatting] = useState(false); // Formatierung auf unkorrigierten Text anwenden
   
   // Änderungsscore für Ampelsystem
   const [changeScore, setChangeScore] = useState<number | null>(null);
@@ -432,6 +433,33 @@ export default function HomePage() {
     }
     setCanRevert(false);
     setIsReverted(true); // Jetzt zeigen wir den unkorrigierten Text
+    setApplyFormatting(false); // Reset Formatierungs-Toggle
+  }, [preCorrectionState, mode]);
+
+  // Formatierung auf den unkorrigierten Text anwenden/entfernen
+  const handleApplyFormattingToggle = useCallback((apply: boolean) => {
+    if (!preCorrectionState) return;
+    setApplyFormatting(apply);
+    
+    if (apply) {
+      // Formatierung anwenden
+      if (mode === 'befund') {
+        setMethodik(preprocessTranscription(preCorrectionState.methodik));
+        setTranscript(preprocessTranscription(preCorrectionState.befund));
+        setBeurteilung(preprocessTranscription(preCorrectionState.beurteilung));
+      } else {
+        setTranscript(preprocessTranscription(preCorrectionState.transcript));
+      }
+    } else {
+      // Zurück zum Original (ohne Formatierung)
+      if (mode === 'befund') {
+        setMethodik(preCorrectionState.methodik);
+        setTranscript(preCorrectionState.befund);
+        setBeurteilung(preCorrectionState.beurteilung);
+      } else {
+        setTranscript(preCorrectionState.transcript);
+      }
+    }
   }, [preCorrectionState, mode]);
 
   // Re-Correct-Funktion: Führt die Korrektur erneut durch
@@ -1293,14 +1321,28 @@ export default function HomePage() {
               </button>
             )}
             {isReverted && preCorrectionState && (
-              <button 
-                className="btn btn-outline text-sm py-1.5 px-3 text-purple-600 border-purple-300 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-600 dark:hover:bg-purple-900/20" 
-                onClick={handleReCorrect}
-                title="Korrektur erneut durchführen"
-                disabled={correcting}
-              >
-                {correcting ? <Spinner size={14} /> : '🔄 Neu korrigieren'}
-              </button>
+              <>
+                <button 
+                  className="btn btn-outline text-sm py-1.5 px-3 text-purple-600 border-purple-300 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-600 dark:hover:bg-purple-900/20" 
+                  onClick={handleReCorrect}
+                  title="Korrektur erneut durchführen"
+                  disabled={correcting}
+                >
+                  {correcting ? <Spinner size={14} /> : '🔄 Neu korrigieren'}
+                </button>
+                <label 
+                  className="flex items-center gap-1.5 text-xs cursor-pointer select-none px-2 py-1 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  title="Sprachbefehle wie 'Punkt eins', 'Nächster Punkt', 'Absatz' anwenden"
+                >
+                  <input
+                    type="checkbox"
+                    checked={applyFormatting}
+                    onChange={(e) => handleApplyFormattingToggle(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-gray-600 dark:text-gray-400">Formatierung</span>
+                </label>
+              </>
             )}
             {/* Manueller Korrektur-Button wenn Änderungen vorliegen */}
             {pendingCorrection && (

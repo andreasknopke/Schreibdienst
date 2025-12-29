@@ -4,6 +4,7 @@ import Spinner from './Spinner';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { useAuth } from './AuthProvider';
 import { ChangeIndicator, ChangeIndicatorDot, ChangeWarningBanner } from './ChangeIndicator';
+import { preprocessTranscription } from '@/lib/textFormatting';
 
 interface Dictation {
   id: number;
@@ -58,6 +59,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [isReverted, setIsReverted] = useState(false);
   const [isReCorrecting, setIsReCorrecting] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [applyFormatting, setApplyFormatting] = useState(false); // Formatierung auf unkorrigierten Text anwenden
   
   // Editable text state for completed dictations
   const [editedTexts, setEditedTexts] = useState<{
@@ -365,6 +367,29 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       corrected_text: selected.raw_transcript || ''
     }));
     setIsReverted(true);
+    setApplyFormatting(false); // Reset Formatierungs-Toggle
+  }, [selectedId, dictations]);
+
+  // Formatierung auf den unkorrigierten Text anwenden/entfernen
+  const handleApplyFormattingToggle = useCallback((apply: boolean) => {
+    const selected = dictations.find(d => d.id === selectedId);
+    if (!selected?.raw_transcript) return;
+    
+    setApplyFormatting(apply);
+    
+    if (apply) {
+      // Formatierung anwenden
+      setEditedTexts(prev => ({
+        ...prev,
+        corrected_text: preprocessTranscription(selected.raw_transcript || '')
+      }));
+    } else {
+      // Zurück zum Original (ohne Formatierung)
+      setEditedTexts(prev => ({
+        ...prev,
+        corrected_text: selected.raw_transcript || ''
+      }));
+    }
   }, [selectedId, dictations]);
 
   // Re-correct with LLM
@@ -507,6 +532,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
         corrected_text: selected.corrected_text || selected.transcript || ''
       });
       setIsReverted(false); // Reset revert state when selection changes
+      setApplyFormatting(false); // Reset formatting toggle when selection changes
       setHasUnsavedChanges(false); // Reset unsaved changes when selection changes
     }
   }, [selectedId, dictations]);
@@ -966,6 +992,20 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                               '✨ Neu korrigieren'
                             )}
                           </button>
+                        )}
+                        {isReverted && (
+                          <label 
+                            className="flex items-center gap-1.5 text-xs cursor-pointer select-none px-2 py-1 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                            title="Sprachbefehle wie 'Punkt eins', 'Nächster Punkt', 'Absatz' anwenden"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={applyFormatting}
+                              onChange={(e) => handleApplyFormattingToggle(e.target.checked)}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-gray-600 dark:text-gray-400">Formatierung</span>
+                          </label>
                         )}
                       </div>
                     )}

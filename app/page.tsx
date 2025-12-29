@@ -91,9 +91,16 @@ export default function HomePage() {
     beurteilung: string;
     transcript: string; // Für Arztbrief-Modus
   } | null>(null);
+  // Roher Whisper-Text (vor Formatierung) für Toggle zwischen roh und formatiert
+  const [rawWhisperState, setRawWhisperState] = useState<{
+    methodik: string;
+    befund: string;
+    beurteilung: string;
+    transcript: string;
+  } | null>(null);
   const [canRevert, setCanRevert] = useState(false);
   const [isReverted, setIsReverted] = useState(false); // Zeigt an ob gerade der unkorrigierte Text angezeigt wird
-  const [applyFormatting, setApplyFormatting] = useState(false); // Formatierung auf unkorrigierten Text anwenden
+  const [applyFormatting, setApplyFormatting] = useState(true); // Formatierung standardmäßig an
   
   // Änderungsscore für Ampelsystem
   const [changeScore, setChangeScore] = useState<number | null>(null);
@@ -417,10 +424,12 @@ export default function HomePage() {
     setActiveField('befund');
     setError(null);
     setPreCorrectionState(null);
+    setRawWhisperState(null);
     setCanRevert(false);
     setPendingCorrection(false);
     setChangeScore(null);
     setBefundChangeScores({ methodik: 0, befund: 0, beurteilung: 0 });
+    setApplyFormatting(true); // Reset auf Standard
   }, []);
 
   // Revert-Funktion: Stellt den Text vor der letzten Korrektur wieder her
@@ -436,25 +445,17 @@ export default function HomePage() {
     }
     setCanRevert(false);
     setIsReverted(true); // Jetzt zeigen wir den unkorrigierten Text
-    setApplyFormatting(false); // Reset Formatierungs-Toggle
+    // Formatierung bleibt wie sie war (standardmäßig true = formatiert)
   }, [preCorrectionState, mode]);
 
   // Formatierung auf den unkorrigierten Text anwenden/entfernen
+  // Toggle zwischen rohem Whisper-Text und formatiertem Text
   const handleApplyFormattingToggle = useCallback((apply: boolean) => {
-    if (!preCorrectionState) return;
+    if (!rawWhisperState || !preCorrectionState) return;
     setApplyFormatting(apply);
     
     if (apply) {
-      // Formatierung anwenden
-      if (mode === 'befund') {
-        setMethodik(preprocessTranscription(preCorrectionState.methodik));
-        setTranscript(preprocessTranscription(preCorrectionState.befund));
-        setBeurteilung(preprocessTranscription(preCorrectionState.beurteilung));
-      } else {
-        setTranscript(preprocessTranscription(preCorrectionState.transcript));
-      }
-    } else {
-      // Zurück zum Original (ohne Formatierung)
+      // Formatierung anwenden (preCorrectionState enthält bereits den formatierten Text)
       if (mode === 'befund') {
         setMethodik(preCorrectionState.methodik);
         setTranscript(preCorrectionState.befund);
@@ -462,8 +463,17 @@ export default function HomePage() {
       } else {
         setTranscript(preCorrectionState.transcript);
       }
+    } else {
+      // Zurück zum rohen Whisper-Text (ohne Formatierung)
+      if (mode === 'befund') {
+        setMethodik(rawWhisperState.methodik);
+        setTranscript(rawWhisperState.befund);
+        setBeurteilung(rawWhisperState.beurteilung);
+      } else {
+        setTranscript(rawWhisperState.transcript);
+      }
     }
-  }, [preCorrectionState, mode]);
+  }, [rawWhisperState, preCorrectionState, mode]);
 
   // Re-Correct-Funktion: Führt die Korrektur erneut durch
   const handleReCorrect = useCallback(async () => {
@@ -734,11 +744,18 @@ export default function HomePage() {
             if (mode === 'befund') {
               // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
               const parsed = parseFieldCommands(formattedTranscript);
+              // Parse auch den rohen Text für rawWhisperState
+              const rawParsed = parseFieldCommands(sessionTranscript);
               
               // Aktualisiere die Felder basierend auf parsed results
               let currentMethodik = methodik;
               let currentBefund = transcript;
               let currentBeurteilung = beurteilung;
+              
+              // Rohe Whisper-Werte (vor Formatierung)
+              let rawMethodik = methodik;
+              let rawBefund = transcript;
+              let rawBeurteilung = beurteilung;
               
               if (parsed.lastField) {
                 // Steuerbefehle erkannt - verteile auf entsprechende Felder
@@ -751,27 +768,48 @@ export default function HomePage() {
                 if (parsed.beurteilung !== null) {
                   currentBeurteilung = combineTexts(existingBeurteilungRef.current, parsed.beurteilung);
                 }
+                // Rohe Version
+                if (rawParsed.methodik !== null) {
+                  rawMethodik = combineTexts(existingMethodikRef.current, rawParsed.methodik);
+                }
+                if (rawParsed.befund !== null) {
+                  rawBefund = combineTexts(existingTextRef.current, rawParsed.befund);
+                }
+                if (rawParsed.beurteilung !== null) {
+                  rawBeurteilung = combineTexts(existingBeurteilungRef.current, rawParsed.beurteilung);
+                }
               } else {
               // Kein Steuerbefehl - Text geht ins aktive Feld
               switch (activeField) {
                 case 'methodik':
                   currentMethodik = combineTexts(existingMethodikRef.current, formattedTranscript);
+                  rawMethodik = combineTexts(existingMethodikRef.current, sessionTranscript);
                   break;
                 case 'beurteilung':
                   currentBeurteilung = combineTexts(existingBeurteilungRef.current, formattedTranscript);
+                  rawBeurteilung = combineTexts(existingBeurteilungRef.current, sessionTranscript);
                   break;
                 case 'befund':
                 default:
                   currentBefund = combineTexts(existingTextRef.current, formattedTranscript);
+                  rawBefund = combineTexts(existingTextRef.current, sessionTranscript);
                   break;
               }
             }
             
-            // Speichere Text VOR der Korrektur für Revert-Funktion
+            // Speichere Text VOR der Korrektur für Revert-Funktion (formatierte Version)
             setPreCorrectionState({
               methodik: currentMethodik,
               befund: currentBefund,
               beurteilung: currentBeurteilung,
+              transcript: ''
+            });
+            
+            // Speichere rohen Whisper-Text (ohne Formatierung)
+            setRawWhisperState({
+              methodik: rawMethodik,
+              befund: rawBefund,
+              beurteilung: rawBeurteilung,
               transcript: ''
             });
             
@@ -864,13 +902,22 @@ export default function HomePage() {
           } else {
             // Im Arztbrief-Modus: Normales Verhalten
             const fullText = combineTexts(existingTextRef.current, formattedTranscript);
+            const rawFullText = combineTexts(existingTextRef.current, sessionTranscript);
             
-            // Speichere Text VOR der Korrektur für Revert-Funktion
+            // Speichere Text VOR der Korrektur für Revert-Funktion (formatierte Version)
             setPreCorrectionState({
               methodik: '',
               befund: '',
               beurteilung: '',
               transcript: fullText
+            });
+            
+            // Speichere rohen Whisper-Text (ohne Formatierung)
+            setRawWhisperState({
+              methodik: '',
+              befund: '',
+              beurteilung: '',
+              transcript: rawFullText
             });
             
             // Wenn autoCorrect deaktiviert: Nur Text setzen, keine Korrektur

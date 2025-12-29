@@ -25,6 +25,9 @@ COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8"
 MODEL_NAME = os.environ.get("WHISPER_MODEL", "large-v2")
 LANGUAGE = "de"
 
+# Format-Hinweis für bessere Transkription (immer im initial_prompt enthalten)
+FORMAT_PROMPT = "Klammern (so wie diese) und Satzzeichen wie Punkt, Komma, Doppelpunkt und Semikolon sind wichtig."
+
 # Modell beim Start laden
 logger.info(f"Loading WhisperX model {MODEL_NAME} on {DEVICE}...")
 model = whisperx.load_model(MODEL_NAME, DEVICE, compute_type=COMPUTE_TYPE, language=LANGUAGE)
@@ -75,8 +78,16 @@ def transcribe():
         # Optionale Parameter
         language = request.form.get('language', LANGUAGE)
         do_align = request.form.get('align', 'true').lower() == 'true'
+        user_prompt = request.form.get('initial_prompt', '')  # Wörterbuch-Wörter vom Frontend
+        
+        # Initial Prompt zusammenbauen: Format-Hinweis + Benutzer-Wörter
+        if user_prompt:
+            initial_prompt = f"{FORMAT_PROMPT} {user_prompt}"
+        else:
+            initial_prompt = FORMAT_PROMPT
         
         logger.info(f"Transcribing file: {file.filename}, language: {language}, align: {do_align}")
+        logger.info(f"Initial prompt: {initial_prompt[:100]}..." if len(initial_prompt) > 100 else f"Initial prompt: {initial_prompt}")
         
         # Temporäre Datei erstellen
         with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp_file:
@@ -89,7 +100,7 @@ def transcribe():
             audio = whisperx.load_audio(tmp_path)
             
             logger.info("Transcribing with WhisperX...")
-            result = model.transcribe(audio, batch_size=16, language=language)
+            result = model.transcribe(audio, batch_size=16, language=language, initial_prompt=initial_prompt)
             
             # Alignment für bessere Zeitstempel (optional)
             if do_align and model_a is not None:

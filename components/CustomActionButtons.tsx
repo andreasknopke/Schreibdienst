@@ -3,6 +3,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthProvider';
 import Spinner from './Spinner';
 
+// Identifier für PowerShell Clipboard-Listener (RadCentre Integration)
+const CLIPBOARD_IDENTIFIER = '##RAD##';
+
 interface CustomAction {
   id: number;
   name: string;
@@ -133,7 +136,7 @@ export default function CustomActionButtons({
 
   const handleCopyResult = () => {
     if (resultModal) {
-      navigator.clipboard.writeText(resultModal.result);
+      navigator.clipboard.writeText(CLIPBOARD_IDENTIFIER + resultModal.result);
     }
   };
 

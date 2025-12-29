@@ -10,6 +10,14 @@ import { applyFormattingControlWords } from '@/lib/textFormatting';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
 
+// Identifier für PowerShell Clipboard-Listener (RadCentre Integration)
+const CLIPBOARD_IDENTIFIER = '##RAD##';
+
+// Hilfsfunktion zum Kopieren in Zwischenablage mit Identifier
+async function copyToClipboard(text: string): Promise<void> {
+  await navigator.clipboard.writeText(CLIPBOARD_IDENTIFIER + text);
+}
+
 // Intervall für kontinuierliche Transkription (in ms)
 const TRANSCRIPTION_INTERVAL = 3000;
 
@@ -1014,7 +1022,7 @@ export default function HomePage() {
       transcript ? `Befund:\n${transcript}` : '',
       beurteilung ? `Beurteilung:\n${beurteilung}` : ''
     ].filter(Boolean).join('\n\n');
-    navigator.clipboard.writeText(combinedText);
+    copyToClipboard(combinedText);
   }
 
   async function handleExportDocxBefund() {
@@ -1061,7 +1069,7 @@ export default function HomePage() {
   }
 
   function handleCopy() {
-    navigator.clipboard.writeText(transcript);
+    copyToClipboard(transcript);
   }
 
   async function handleExportDocx() {
@@ -1457,7 +1465,7 @@ export default function HomePage() {
                     <span className="text-xs text-gray-400">{methodik ? `${methodik.length}` : ''}</span>
                     <button 
                       className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => navigator.clipboard.writeText(methodik)}
+                      onClick={() => copyToClipboard(methodik)}
                       disabled={!methodik}
                       title="Kopieren"
                     >
@@ -1506,7 +1514,7 @@ export default function HomePage() {
                     <span className="text-xs text-gray-400">{transcript ? `${transcript.length}` : ''}</span>
                     <button 
                       className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => navigator.clipboard.writeText(transcript)}
+                      onClick={() => copyToClipboard(transcript)}
                       disabled={!transcript}
                       title="Kopieren"
                     >
@@ -1564,7 +1572,7 @@ export default function HomePage() {
                     <span className="text-xs text-gray-400">{beurteilung ? `${beurteilung.length}` : ''}</span>
                     <button 
                       className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => navigator.clipboard.writeText(beurteilung)}
+                      onClick={() => copyToClipboard(beurteilung)}
                       disabled={!beurteilung}
                       title="Kopieren"
                     >

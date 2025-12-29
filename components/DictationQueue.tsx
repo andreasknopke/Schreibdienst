@@ -293,9 +293,12 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     }
   };
 
+  // Identifier für PowerShell Clipboard-Listener (RadCentre Integration)
+  const CLIPBOARD_IDENTIFIER = '##RAD##';
+
   // Copy text to clipboard
   const handleCopy = async (text: string, id: number) => {
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(CLIPBOARD_IDENTIFIER + text);
     setCopyFeedback(id);
     setTimeout(() => setCopyFeedback(null), 1500);
   };

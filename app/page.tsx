@@ -143,7 +143,16 @@ export default function HomePage() {
     
     window.addEventListener('templates-changed', handleTemplatesChanged);
     return () => window.removeEventListener('templates-changed', handleTemplatesChanged);
+
+  // Reset template selection when active field changes and template doesn't match
   }, [fetchTemplates]);
+
+  useEffect(() => {
+    if (selectedTemplate && selectedTemplate.field !== activeField) {
+      setSelectedTemplate(null);
+      setTemplateMode(false);
+    }
+  }, [activeField, selectedTemplate]);
 
   // Funktion zum Transkribieren eines Blobs
   const transcribeChunk = useCallback(async (blob: Blob, isLive: boolean = false): Promise<string> => {
@@ -1280,8 +1289,8 @@ export default function HomePage() {
                 {correcting ? <Spinner size={14} /> : '🔄 Neu korrigieren'}
               </button>
             )}
-            {/* Manueller Korrektur-Button wenn autoCorrect deaktiviert */}
-            {pendingCorrection && !autoCorrect && (
+            {/* Manueller Korrektur-Button wenn Änderungen vorliegen */}
+            {pendingCorrection && (
               <button 
                 className="btn btn-primary text-sm py-1.5 px-3 animate-pulse" 
                 onClick={mode === 'befund' ? handleFormatBefund : handleManualCorrect}
@@ -1293,7 +1302,7 @@ export default function HomePage() {
             )}
             
             {/* Textbaustein-Auswahl (nur im Befund-Modus) */}
-            {mode === 'befund' && templates.length > 0 && (
+            {mode === 'befund' && templates.filter(t => t.field === activeField).length > 0 && (
               <div className="flex items-center gap-1">
                 <select 
                   className={`select text-sm py-1.5 w-auto ${templateMode ? 'border-orange-400 ring-1 ring-orange-300' : ''}`}
@@ -1307,9 +1316,9 @@ export default function HomePage() {
                   title="Textbaustein auswählen - diktieren Sie nur die Änderungen"
                 >
                   <option value="">📝 Baustein...</option>
-                  {templates.map(t => (
+                  {templates.filter(t => t.field === activeField).map(t => (
                     <option key={t.id} value={t.id}>
-                      {t.name} ({t.field === 'methodik' ? 'M' : t.field === 'befund' ? 'B' : 'U'})
+                      {t.name}
                     </option>
                   ))}
                 </select>
@@ -1453,7 +1462,7 @@ export default function HomePage() {
               <textarea
                 className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                 value={methodik}
-                onChange={(e) => setMethodik(e.target.value)}
+                onChange={(e) => { setMethodik(e.target.value); setPendingCorrection(true); }}
                 onFocus={() => setActiveField('methodik')}
                 placeholder="Methodik..."
                 rows={2}
@@ -1489,7 +1498,7 @@ export default function HomePage() {
               <textarea
                 className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                 value={transcript}
-                onChange={(e) => setTranscript(e.target.value)}
+                onChange={(e) => { setTranscript(e.target.value); setPendingCorrection(true); }}
                 onFocus={() => setActiveField('befund')}
                 placeholder="Befund..."
                 readOnly={isProcessing}
@@ -1534,7 +1543,7 @@ export default function HomePage() {
               <textarea
                 className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                 value={beurteilung}
-                onChange={(e) => setBeurteilung(e.target.value)}
+                onChange={(e) => { setBeurteilung(e.target.value); setPendingCorrection(true); }}
                 onFocus={() => setActiveField('beurteilung')}
                 placeholder="Zusammenfassung..."
                 rows={2}
@@ -1584,7 +1593,7 @@ export default function HomePage() {
             <textarea
               className={`textarea font-mono text-sm min-h-40 ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
               value={transcript}
-              onChange={(e) => setTranscript(e.target.value)}
+              onChange={(e) => { setTranscript(e.target.value); setPendingCorrection(true); }}
               placeholder="Text erscheint hier..."
               readOnly={isProcessing}
             />

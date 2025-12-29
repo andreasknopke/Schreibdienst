@@ -98,7 +98,7 @@ function splitTextIntoChunks(text: string, maxSentences: number = 5): string[] {
 }
 
 // Configuration for chunked processing
-const LM_STUDIO_MAX_SENTENCES = 10; // Process max 10 sentences at a time for small models
+const LM_STUDIO_MAX_SENTENCES = 8; // Process max 7-8 sentences at a time for small models
 
 // Simplified system prompt for chunk processing (no examples to avoid leaking into output)
 const CHUNK_SYSTEM_PROMPT = `Du bist ein medizinischer Diktat-Korrektur-Assistent.
@@ -122,10 +122,6 @@ REGELN:
 1. Korrigiere offensichtliche Grammatik- und Rechtschreibfehler
 2. Korrigiere falsch transkribierte medizinische Fachbegriffe:
    - "Scholecystitis" → "Cholecystitis"
-   - "Schole-Docholithiasis" → "Choledocholithiasis"  
-   - "Scholangitis" → "Cholangitis"
-   - "Scholistase" / "Scholastase" → "Cholestase"
-   - "Sektiocesaris" → "Sectio caesarea"
    - "labarchemisch" → "laborchemisch"
 3. FORMATIERUNGSBEFEHLE SOFORT UMSETZEN - diese Wörter durch Formatierung ersetzen:
    - "Neuer Absatz" oder "neuer Absatz" → zwei Zeilenumbrüche (Leerzeile einfügen)
@@ -162,6 +158,20 @@ const PROMPT_EXAMPLE_PATTERNS = [
   /Die Diagnose lautet lösche das letzte Wort ergibt/i,
 ];
 
+// Helper function to safely apply a regex replacement only if the pattern is NOT in the original text
+// This preserves words like "Ergebnis:", "Korrektur:" etc. if they were part of the dictation
+function safeReplace(text: string, pattern: RegExp, replacement: string, original?: string): string {
+  // If no original provided, apply replacement unconditionally
+  if (!original) {
+    return text.replace(pattern, replacement);
+  }
+  // Check if the pattern matches in the original text - if so, don't remove it
+  if (pattern.test(original)) {
+    return text; // Keep the text unchanged, the pattern was in the original dictation
+  }
+  return text.replace(pattern, replacement);
+}
+
 // Function to clean LLM output from prompt artifacts
 // Returns null if the output appears to be example text from the prompt (LLM malfunction)
 function cleanLLMOutput(text: string, originalChunk?: string): string | null {
@@ -176,7 +186,7 @@ function cleanLLMOutput(text: string, originalChunk?: string): string | null {
   }
   
   let cleaned = text
-    // Remove marker tags
+    // Remove marker tags (these are never part of original text)
     .replace(/<<<DIKTAT_START>>>/g, '')
     .replace(/<<<DIKTAT_ENDE>>>/g, '')
     .replace(/<<<DIKTAT>>>/g, '')
@@ -186,9 +196,8 @@ function cleanLLMOutput(text: string, originalChunk?: string): string | null {
   
   // Remove complete LLM meta-sentences that explain what it's doing
   // These are full sentences the LLM adds instead of just returning the corrected text
-  // Remove from ANYWHERE in the text (not just beginning)
+  // These patterns are very specific and unlikely to appear in medical dictations
   cleaned = cleaned
-    // Meta-sentences about no errors/no corrections needed
     .replace(/Der (diktierte )?Text enthält keine Fehler[^.]*\.\s*/gi, '')
     .replace(/Es wurden keine Fehler gefunden[^.]*\.\s*/gi, '')
     .replace(/Der Text ist bereits korrekt[^.]*\.\s*/gi, '')
@@ -205,51 +214,50 @@ function cleanLLMOutput(text: string, originalChunk?: string): string | null {
     .replace(/Der Text wurde nicht verändert[^.]*\.\s*/gi, '')
     .trim();
   
-  // Remove prefix patterns followed by colon (with optional content after colon)
+  // Remove prefix patterns followed by colon - BUT only if not in original text
+  // These could legitimately appear in medical dictations (e.g. "Ergebnis: negativ")
+  cleaned = safeReplace(cleaned, /^\s*Der korrigierte Text lautet:?\s*/i, '', originalChunk);
+  cleaned = safeReplace(cleaned, /^\s*Der korrigierte Text:?\s*/i, '', originalChunk);
+  cleaned = safeReplace(cleaned, /^\s*Hier ist der korrigierte Text:?\s*/i, '', originalChunk);
+  cleaned = safeReplace(cleaned, /^\s*Hier ist die Korrektur:?\s*/i, '', originalChunk);
+  cleaned = safeReplace(cleaned, /^\s*Korrigierte[r]? Text:?\s*/i, '', originalChunk);
+  cleaned = safeReplace(cleaned, /^\s*Korrektur:?\s*/i, '', originalChunk);
+  cleaned = safeReplace(cleaned, /^\s*Output:?\s*/i, '', originalChunk);
+  cleaned = safeReplace(cleaned, /^\s*Input:?\s*/i, '', originalChunk);
+  cleaned = safeReplace(cleaned, /^\s*Ergebnis:?\s*/i, '', originalChunk);
+  cleaned = safeReplace(cleaned, /^\s*Antwort:?\s*/i, '', originalChunk);
+  cleaned = safeReplace(cleaned, /^\s*\*\*Korrigierter Text:?\*\*\s*/i, '', originalChunk);
+  cleaned = safeReplace(cleaned, /^\s*\*\*Korrektur:?\*\*\s*/i, '', originalChunk);
   cleaned = cleaned
-    .replace(/^\s*Der korrigierte Text lautet:?\s*/i, '')
-    .replace(/^\s*Der korrigierte Text:?\s*/i, '')
-    .replace(/^\s*Hier ist der korrigierte Text:?\s*/i, '')
-    .replace(/^\s*Hier ist die Korrektur:?\s*/i, '')
-    .replace(/^\s*Korrigierte[r]? Text:?\s*/i, '')
-    .replace(/^\s*Korrektur:?\s*/i, '')
-    .replace(/^\s*Output:?\s*/i, '')
-    .replace(/^\s*Input:?\s*/i, '')
-    .replace(/^\s*Ergebnis:?\s*/i, '')
-    .replace(/^\s*Antwort:?\s*/i, '')
-    .replace(/^\s*\*\*Korrigierter Text:?\*\*\s*/i, '')
-    .replace(/^\s*\*\*Korrektur:?\*\*\s*/i, '')
     .replace(/^\s*Korrigiere den folgenden diktierten Text:?\s*/i, '')
     .replace(/korrigieren Sie bitte den Text entsprechend der vorgegebenen Regeln und geben Sie das Ergebnis zurück\.?\s*/gi, '')
     .trim();
   
   // Remove "Korrekturhinweise:" blocks with bullet points that LLM sometimes adds
   // Pattern: "Korrekturhinweise:" followed by bullet points (*, -, •) until end or next sentence
+  // Use safeReplace to preserve if these were in the original dictation
+  cleaned = safeReplace(cleaned, /Korrekturhinweise:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '', originalChunk);
+  cleaned = safeReplace(cleaned, /Anmerkungen:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '', originalChunk);
+  cleaned = safeReplace(cleaned, /Hinweise:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '', originalChunk);
+  cleaned = safeReplace(cleaned, /Änderungen:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '', originalChunk);
+  cleaned = safeReplace(cleaned, /Korrekturen:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '', originalChunk);
+  
+  // Handle inline bullet point lists (LLM meta-comments, unlikely in dictation)
   cleaned = cleaned
-    .replace(/Korrekturhinweise:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '')
-    .replace(/Anmerkungen:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '')
-    .replace(/Hinweise:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '')
-    .replace(/Änderungen:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '')
-    .replace(/Korrekturen:[\s\S]*?(?=\n\n[A-ZÄÖÜ]|\n[A-ZÄÖÜ][a-zäöüß]|$)/gi, '')
-    // Also handle inline bullet point lists
     .replace(/\s*\*\s*"[^"]*"\s*wurde durch\s*"[^"]*"\s*ersetzt[^.]*\.\s*/gi, '')
     .replace(/\s*\*\s*Keine weiteren Korrekturen[^.]*\.\s*/gi, '')
     .replace(/\s*[-•]\s*"[^"]*"\s*wurde durch\s*"[^"]*"\s*ersetzt[^.]*\.\s*/gi, '')
     .replace(/\s*[-•]\s*Keine weiteren Korrekturen[^.]*\.\s*/gi, '')
-    // Remove any remaining meta-comment patterns
     .replace(/\s*\*\s*[^*\n]*wurde[^*\n]*ersetzt[^*\n]*\n?/gi, '')
-    .replace(/\s*\*\s*[^*\n]*korrekt[^*\n]*\n?/gi, '')
-    // Remove "Korrektur: X zu Y geändert, da..." pattern at end of text
-    .replace(/\s*Korrektur:\s*"[^"]*"\s*zu\s*"[^"]*"\s*geändert[^.]*\.?\s*$/gi, '')
-    // Also catch variations without quotes
-    .replace(/\s*Korrektur:\s*\S+\s*zu\s*\S+\s*geändert[^.]*\.?\s*$/gi, '')
-    // Catch any trailing "Korrektur:" sentence
-    .replace(/\s*Korrektur:[^.]*\.?\s*$/gi, '')
-    // Catch "Anmerkung:" at end
-    .replace(/\s*Anmerkung:[^.]*\.?\s*$/gi, '')
-    // Catch "Hinweis:" at end
-    .replace(/\s*Hinweis:[^.]*\.?\s*$/gi, '')
-    .trim();
+    .replace(/\s*\*\s*[^*\n]*korrekt[^*\n]*\n?/gi, '');
+  
+  // Remove trailing LLM meta-comments - BUT only if not in original text
+  cleaned = safeReplace(cleaned, /\s*Korrektur:\s*"[^"]*"\s*zu\s*"[^"]*"\s*geändert[^.]*\.?\s*$/gi, '', originalChunk);
+  cleaned = safeReplace(cleaned, /\s*Korrektur:\s*\S+\s*zu\s*\S+\s*geändert[^.]*\.?\s*$/gi, '', originalChunk);
+  cleaned = safeReplace(cleaned, /\s*Korrektur:[^.]*\.?\s*$/gi, '', originalChunk);
+  cleaned = safeReplace(cleaned, /\s*Anmerkung:[^.]*\.?\s*$/gi, '', originalChunk);
+  cleaned = safeReplace(cleaned, /\s*Hinweis:[^.]*\.?\s*$/gi, '', originalChunk);
+  cleaned = cleaned.trim();
   
   // Remove surrounding quotes if the LLM wrapped the text in quotes
   if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || 

@@ -184,17 +184,24 @@ function cleanLLMOutput(text: string, originalChunk?: string): string | null {
   
   // Remove complete LLM meta-sentences that explain what it's doing
   // These are full sentences the LLM adds instead of just returning the corrected text
+  // Remove from ANYWHERE in the text (not just beginning)
   cleaned = cleaned
-    // Match entire meta-sentences about no errors/no corrections needed
-    .replace(/^\s*Der (diktierte )?Text enthält keine Fehler[^.]*\.\s*/gi, '')
-    .replace(/^\s*Es wurden keine Fehler gefunden[^.]*\.\s*/gi, '')
-    .replace(/^\s*Der Text ist bereits korrekt[^.]*\.\s*/gi, '')
-    .replace(/^\s*Keine Korrekturen (sind )?erforderlich[^.]*\.\s*/gi, '')
-    .replace(/^\s*Der Text (wurde |wird )?unverändert zurückgegeben[^.]*\.\s*/gi, '')
-    .replace(/^\s*Hier ist der unveränderte Text[^.]*\.\s*/gi, '')
-    .replace(/^\s*Der Text muss nicht korrigiert werden[^.]*\.\s*/gi, '')
-    .replace(/^\s*Es gibt keine Fehler[^.]*\.\s*/gi, '')
-    .replace(/^\s*Der Text braucht keine Korrektur[^.]*\.\s*/gi, '');
+    // Meta-sentences about no errors/no corrections needed
+    .replace(/Der (diktierte )?Text enthält keine Fehler[^.]*\.\s*/gi, '')
+    .replace(/Es wurden keine Fehler gefunden[^.]*\.\s*/gi, '')
+    .replace(/Der Text ist bereits korrekt[^.]*\.\s*/gi, '')
+    .replace(/Keine Korrekturen (sind )?erforderlich[^.]*\.\s*/gi, '')
+    .replace(/Der Text (wurde |wird )?unverändert zurückgegeben[^.]*\.\s*/gi, '')
+    .replace(/Hier ist der unveränderte Text[^.]*\.\s*/gi, '')
+    .replace(/Der Text muss nicht korrigiert werden[^.]*\.\s*/gi, '')
+    .replace(/Es gibt keine Fehler[^.]*\.\s*/gi, '')
+    .replace(/Der Text braucht keine Korrektur[^.]*\.\s*/gi, '')
+    .replace(/Es sind keine Korrekturen notwendig[^.]*\.\s*/gi, '')
+    .replace(/Der Text ist fehlerfrei[^.]*\.\s*/gi, '')
+    .replace(/Ich habe keine Fehler gefunden[^.]*\.\s*/gi, '')
+    .replace(/Es wurden keine Änderungen vorgenommen[^.]*\.\s*/gi, '')
+    .replace(/Der Text wurde nicht verändert[^.]*\.\s*/gi, '')
+    .trim();
   
   // Remove prefix patterns followed by colon (with optional content after colon)
   cleaned = cleaned
@@ -685,7 +692,15 @@ export async function POST(req: NextRequest) {
         const responseText = result.content || '{}';
         
         try {
-          const correctedFields = JSON.parse(responseText) as BefundFields;
+          const rawFields = JSON.parse(responseText) as BefundFields;
+          
+          // Clean each field from LLM meta-comments
+          const correctedFields: BefundFields = {
+            methodik: cleanLLMOutput(rawFields.methodik || '', befundFields.methodik) || rawFields.methodik || '',
+            befund: cleanLLMOutput(rawFields.befund || '', befundFields.befund) || rawFields.befund || '',
+            beurteilung: cleanLLMOutput(rawFields.beurteilung || '', befundFields.beurteilung) || rawFields.beurteilung || ''
+          };
+          
           const duration = ((Date.now() - startTime) / 1000).toFixed(2);
           const tokens = result.tokens ? `${result.tokens.input}/${result.tokens.output}` : 'unknown';
           const outputLengths = {

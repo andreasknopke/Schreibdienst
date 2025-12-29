@@ -28,6 +28,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 const AUTH_STORAGE_KEY = "schreibdienst_auth";
+const AUTO_CORRECT_KEY = "schreibdienst_autocorrect"; // Separate storage for autoCorrect per user
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -101,10 +102,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await response.json();
       
       if (data.success) {
+        // Check for locally saved autoCorrect setting for this user
+        const localAutoCorrectKey = `${AUTO_CORRECT_KEY}_${data.username?.toLowerCase()}`;
+        const localAutoCorrect = localStorage.getItem(localAutoCorrectKey);
+        const effectiveAutoCorrect = localAutoCorrect !== null 
+          ? localAutoCorrect === 'true' 
+          : data.autoCorrect !== false;
+        
         setUsername(data.username);
         setIsAdmin(data.isAdmin || false);
         setCanViewAllDictations(data.canViewAllDictations || data.isAdmin || false);
-        setAutoCorrectState(data.autoCorrect !== false);
+        setAutoCorrectState(effectiveAutoCorrect);
         setDefaultMode(data.defaultMode || 'befund');
         setPassword(pass);
         setIsLoggedIn(true);
@@ -112,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           username: data.username, 
           isAdmin: data.isAdmin || false,
           canViewAllDictations: data.canViewAllDictations || data.isAdmin || false,
-          autoCorrect: data.autoCorrect !== false,
+          autoCorrect: effectiveAutoCorrect,
           defaultMode: data.defaultMode || 'befund',
           password: pass
         }));
@@ -138,34 +146,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Funktion um autoCorrect-Einstellung zu ändern und zu speichern
   const setAutoCorrect = async (value: boolean): Promise<boolean> => {
-    try {
-      const response = await fetch('/api/users/settings', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': getAuthHeader(),
-          ...getDbTokenHeader()
-        },
-        body: JSON.stringify({ autoCorrect: value })
-      });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        setAutoCorrectState(value);
-        // Update localStorage
-        const stored = localStorage.getItem(AUTH_STORAGE_KEY);
-        if (stored) {
-          const authData = JSON.parse(stored);
-          authData.autoCorrect = value;
-          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
-        }
-        return true;
-      }
-      return false;
-    } catch {
-      return false;
+    // Always save locally first (per-user key)
+    if (username) {
+      const localAutoCorrectKey = `${AUTO_CORRECT_KEY}_${username.toLowerCase()}`;
+      localStorage.setItem(localAutoCorrectKey, String(value));
     }
+    setAutoCorrectState(value);
+    
+    // Update auth storage
+    const stored = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (stored) {
+      try {
+        const authData = JSON.parse(stored);
+        authData.autoCorrect = value;
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
+      } catch { /* ignore */ }
+    }
+    
+    // Also try to save to database (best effort, for non-root users)
+    if (username?.toLowerCase() !== 'root') {
+      try {
+        await fetch('/api/users/settings', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': getAuthHeader(),
+            ...getDbTokenHeader()
+          },
+          body: JSON.stringify({ autoCorrect: value })
+        });
+      } catch { /* ignore DB errors, local save is already done */ }
+    }
+    
+    return true;
   };
 
   const getAuthHeader = (): string => {

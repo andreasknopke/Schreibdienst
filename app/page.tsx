@@ -1295,7 +1295,7 @@ export default function HomePage() {
                 className="btn btn-primary text-sm py-1.5 px-3 animate-pulse" 
                 onClick={mode === 'befund' ? handleFormatBefund : handleManualCorrect}
                 title="KI-Korrektur durchführen"
-                disabled={correcting || busy}
+                disabled={correcting || busy || (mode === 'befund' ? !methodik.trim() && !transcript.trim() && !beurteilung.trim() : !transcript.trim())}
               >
                 {correcting ? <Spinner size={14} /> : '🤖 Korrigieren'}
               </button>

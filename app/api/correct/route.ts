@@ -239,6 +239,16 @@ function cleanLLMOutput(text: string, originalChunk?: string): string | null {
     // Remove any remaining meta-comment patterns
     .replace(/\s*\*\s*[^*\n]*wurde[^*\n]*ersetzt[^*\n]*\n?/gi, '')
     .replace(/\s*\*\s*[^*\n]*korrekt[^*\n]*\n?/gi, '')
+    // Remove "Korrektur: X zu Y geändert, da..." pattern at end of text
+    .replace(/\s*Korrektur:\s*"[^"]*"\s*zu\s*"[^"]*"\s*geändert[^.]*\.?\s*$/gi, '')
+    // Also catch variations without quotes
+    .replace(/\s*Korrektur:\s*\S+\s*zu\s*\S+\s*geändert[^.]*\.?\s*$/gi, '')
+    // Catch any trailing "Korrektur:" sentence
+    .replace(/\s*Korrektur:[^.]*\.?\s*$/gi, '')
+    // Catch "Anmerkung:" at end
+    .replace(/\s*Anmerkung:[^.]*\.?\s*$/gi, '')
+    // Catch "Hinweis:" at end
+    .replace(/\s*Hinweis:[^.]*\.?\s*$/gi, '')
     .trim();
   
   // Remove surrounding quotes if the LLM wrapped the text in quotes

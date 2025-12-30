@@ -245,13 +245,19 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
 
   // Handle file upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('[OfflineRecorder] File upload triggered');
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file) {
+      console.log('[OfflineRecorder] No file selected');
+      return;
+    }
     
+    console.log(`[OfflineRecorder] File selected: ${file.name}, type: ${file.type}, size: ${file.size}`);
     setError(null);
     
     // Validate file type
     if (!ALLOWED_AUDIO_TYPES.includes(file.type) && !file.name.match(/\.(mp3|wav|aiff?|webm|ogg)$/i)) {
+      console.log(`[OfflineRecorder] Invalid file type: ${file.type}`);
       setError('Ungültiges Dateiformat. Erlaubt: MP3, WAV, AIFF, WebM, OGG');
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
@@ -260,42 +266,57 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
     // Validate file size (max 100MB)
     const maxSize = 100 * 1024 * 1024;
     if (file.size > maxSize) {
+      console.log(`[OfflineRecorder] File too large: ${file.size}`);
       setError('Datei zu groß. Maximal 100MB erlaubt.');
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
     
     try {
-      // Create blob and URL
-      const blob = new Blob([file], { type: file.type });
+      // Read file as ArrayBuffer to properly handle binary data
+      console.log('[OfflineRecorder] Reading file...');
+      const arrayBuffer = await file.arrayBuffer();
+      const blob = new Blob([arrayBuffer], { type: file.type || 'audio/mpeg' });
       const url = URL.createObjectURL(blob);
+      console.log(`[OfflineRecorder] Blob created: ${blob.size} bytes, URL: ${url}`);
       
       // Get audio duration
       const audio = new Audio(url);
       
       await new Promise<void>((resolve, reject) => {
         audio.onloadedmetadata = () => {
+          console.log(`[OfflineRecorder] Audio metadata loaded, duration: ${audio.duration}`);
           if (audio.duration && isFinite(audio.duration)) {
             setDuration(Math.round(audio.duration));
             resolve();
           } else {
             // Fallback for files without metadata
+            console.log('[OfflineRecorder] Duration not available, using 0');
             setDuration(0);
             resolve();
           }
         };
-        audio.onerror = () => reject(new Error('Audio-Datei konnte nicht gelesen werden'));
+        audio.onerror = (e) => {
+          console.error('[OfflineRecorder] Audio error:', e);
+          reject(new Error('Audio-Datei konnte nicht gelesen werden'));
+        };
         
         // Timeout for files without proper metadata
-        setTimeout(() => resolve(), 3000);
+        setTimeout(() => {
+          console.log('[OfflineRecorder] Metadata timeout, resolving anyway');
+          resolve();
+        }, 3000);
       });
       
+      console.log('[OfflineRecorder] Setting audio state...');
       setAudioBlob(blob);
       setAudioUrl(url);
       setIsUploadedFile(true);
       setUploadFileName(file.name);
+      console.log('[OfflineRecorder] File upload complete!');
       
     } catch (err: any) {
+      console.error('[OfflineRecorder] Upload error:', err);
       setError(err.message || 'Fehler beim Laden der Audiodatei');
       if (fileInputRef.current) fileInputRef.current.value = '';
     }

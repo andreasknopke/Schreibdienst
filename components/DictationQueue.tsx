@@ -965,19 +965,27 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                       </button>
                     )}
                     
-                    {/* Mitlesen toggle button */}
-                    {audioUrl && parsedSegments.length > 0 && (
+                    {/* Mitlesen toggle button - show even without segments for info */}
+                    {audioUrl && (
                       <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                        <button
-                          className={`btn btn-sm ${showMitlesen ? 'btn-primary' : 'btn-outline'}`}
-                          onClick={() => setShowMitlesen(!showMitlesen)}
-                          title="Zeigt die originale Transkription mit Wort-Highlighting während der Wiedergabe"
-                        >
-                          {showMitlesen ? '📖 Mitlesen aus' : '📖 Mitlesen an'}
-                        </button>
-                        {showMitlesen && (
-                          <span className="ml-2 text-xs text-gray-500">
-                            Original-Transkription mit Wort-Zeitstempeln
+                        {parsedSegments.length > 0 ? (
+                          <>
+                            <button
+                              className={`btn btn-sm ${showMitlesen ? 'btn-primary' : 'btn-outline'}`}
+                              onClick={() => setShowMitlesen(!showMitlesen)}
+                              title="Zeigt die originale Transkription mit Wort-Highlighting während der Wiedergabe"
+                            >
+                              {showMitlesen ? '📖 Mitlesen aus' : '📖 Mitlesen an'}
+                            </button>
+                            {showMitlesen && (
+                              <span className="ml-2 text-xs text-gray-500">
+                                Original-Transkription mit Wort-Zeitstempeln
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-xs text-gray-400">
+                            📖 Mitlesen nicht verfügbar (Diktat wurde vor dem Update erstellt)
                           </span>
                         )}
                       </div>
@@ -1085,12 +1093,12 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                         </div>
                         <textarea
                           ref={textareaRef}
-                          className={`mt-1 w-full p-2 rounded text-sm font-mono resize-y ${
+                          className={`mt-1 w-full p-3 rounded-lg text-sm font-mono resize-y border ${
                             isFullscreen ? 'min-h-[60vh]' : 'min-h-[200px]'
                           } ${
                             isReverted 
-                              ? 'bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800' 
-                              : 'bg-gray-50 dark:bg-gray-800'
+                              ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800' 
+                              : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700'
                           }`}
                           value={editedTexts.corrected_text}
                           onChange={(e) => {

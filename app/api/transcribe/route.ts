@@ -113,6 +113,11 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
       whisperModel = 'cstr/whisper-large-v3-turbo-german-int8_float32';
     }
     
+    // Log initial_prompt usage for medical terminology
+    if (initialPrompt) {
+      console.log(`[WhisperX Gradio] Using initial_prompt with ${initialPrompt.split(', ').length} medical terms`);
+    }
+
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
       method: 'POST',
       headers: {
@@ -124,7 +129,8 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
           fileDataObj,   // file
           "German",      // language
           whisperModel,  // model_name (from env or default large-v3)
-          "cuda"         // device
+          "cuda",        // device
+          initialPrompt || "" // medical dictionary terms for better recognition
         ]
       }),
     });
@@ -162,11 +168,18 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
     const resultData = JSON.parse(dataMatch[1]);
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     
-    // Gradio returns array of results or update objects
-    // Index 0 is TXT transcription - can be string or {value: string, __type__: "update"}
-    let transcriptionText = '';
-    const firstResult = resultData[0];
+    // Gradio returns array of results:
+    // resultData[0] = TXT transcription (string or {value: string})
+    // resultData[1] = VTT format
+    // resultData[2] = SRT format  
+    // resultData[3] = JSON with segments/timestamps
+    // resultData[4] = time message
     
+    let transcriptionText = '';
+    let segments: any[] = [];
+    
+    // Extract transcription text from first result
+    const firstResult = resultData[0];
     if (typeof firstResult === 'string') {
       transcriptionText = firstResult;
     } else if (firstResult && typeof firstResult === 'object') {
@@ -180,8 +193,25 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
       }
     }
     
+    // Extract segments with timestamps from JSON result (index 3)
+    // This enables word-level highlighting in the frontend
+    try {
+      if (resultData[3]) {
+        const rawJson = typeof resultData[3] === 'string' ? resultData[3] : resultData[3]?.value;
+        if (rawJson) {
+          const parsedSegments = JSON.parse(rawJson);
+          if (Array.isArray(parsedSegments)) {
+            segments = parsedSegments;
+            console.log(`[WhisperX Gradio] Extracted ${segments.length} segments with timestamps`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[WhisperX Gradio] Could not parse segment metadata:', e);
+    }
+    
     const textLength = transcriptionText.length;
-    console.log(`[WhisperX Gradio] ✓ Transcription complete - Duration: ${duration}s, Text length: ${textLength} chars`);
+    console.log(`[WhisperX Gradio] ✓ Transcription complete - Duration: ${duration}s, Text length: ${textLength} chars, Segments: ${segments.length}`);
     
     if (!transcriptionText || textLength === 0) {
       console.warn(`[WhisperX Gradio] Warning: Empty transcription returned`);
@@ -189,7 +219,7 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
     
     return {
       text: transcriptionText,
-      segments: [],
+      segments: segments, // Now includes word-level timestamps for frontend highlighting
       language: 'de',
       provider: 'whisperx' as const
     };
@@ -336,9 +366,15 @@ export async function POST(request: NextRequest) {
     }
 
     const totalDuration = ((Date.now() - requestStart) / 1000).toFixed(2);
-    console.log(`[Success] Provider: ${result.provider}, Total duration: ${totalDuration}s`);
+    console.log(`[Success] Provider: ${result.provider}, Total duration: ${totalDuration}s, Segments: ${result.segments?.length || 0}`);
     console.log('=== Transcription Request Complete ===\n');
-    return NextResponse.json(result);
+    return NextResponse.json({
+      text: result.text,
+      segments: result.segments, // Word-level timestamps for frontend highlighting
+      language: result.language,
+      provider: result.provider,
+      duration: parseFloat(totalDuration)
+    });
     
   } catch (err: any) {
     console.error('[Error] Transcription failed:', err.message);

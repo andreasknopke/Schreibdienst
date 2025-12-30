@@ -54,6 +54,13 @@ async function processDictation(request: NextRequest, dictationId: number): Prom
     
     console.log(`[Worker] Transcription complete for #${dictationId}: ${transcriptionResult.text.length} chars, ${transcriptionResult.segments?.length || 0} segments`);
     
+    // DEBUG: Log segment details
+    if (transcriptionResult.segments && transcriptionResult.segments.length > 0) {
+      console.log(`[Worker] First segment sample:`, JSON.stringify(transcriptionResult.segments[0]).substring(0, 200));
+    } else {
+      console.warn(`[Worker] WARNING: No segments returned from transcription!`);
+    }
+    
     // Step 2: Correct with LLM - ALWAYS use Arztbrief mode (no Methodik/Beurteilung sections)
     console.log(`[Worker] Correcting dictation #${dictationId} as Arztbrief...`);
     
@@ -78,6 +85,12 @@ async function processDictation(request: NextRequest, dictationId: number): Prom
     // Berechne Änderungsscore für Ampelsystem (compare with raw transcript)
     const changeScore = calculateChangeScore(rawTranscript, correctedText);
     console.log(`[Worker] Change score for #${dictationId}: ${changeScore}%`);
+    
+    // DEBUG: Log what we're saving to DB
+    console.log(`[Worker] Saving to DB: rawTranscript=${rawTranscript?.length || 0} chars, segments=${segments?.length || 0} items, correctedText=${correctedText?.length || 0} chars`);
+    if (segments && segments.length > 0) {
+      console.log(`[Worker] Segments JSON preview: ${JSON.stringify(segments).substring(0, 300)}...`);
+    }
     
     await completeDictationWithRequest(request, dictationId, {
       rawTranscript: rawTranscript,
@@ -297,6 +310,11 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     }
     
     const resultData = JSON.parse(dataMatch[1]);
+    
+    // DEBUG: Log the entire resultData structure
+    console.log(`[Worker] Gradio resultData length: ${resultData.length}`);
+    console.log(`[Worker] resultData[0] type: ${typeof resultData[0]}, value: ${JSON.stringify(resultData[0]).substring(0, 100)}`);
+    console.log(`[Worker] resultData[3] type: ${typeof resultData[3]}, value: ${JSON.stringify(resultData[3]).substring(0, 300)}`);
     
     // Gradio returns array of results:
     // resultData[0] = TXT transcription (string or {value: string})

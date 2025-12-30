@@ -637,6 +637,9 @@ export async function completeDictationWithRequest(
   // Serialize segments to JSON string for storage
   const segmentsJson = results.segments ? JSON.stringify(results.segments) : null;
   
+  // DEBUG: Log what we're saving
+  console.log(`[DB] completeDictationWithRequest: id=${id}, segments=${results.segments?.length || 0} items, segmentsJson length=${segmentsJson?.length || 0} chars`);
+  
   await db.execute(
     `UPDATE offline_dictations 
      SET status = 'completed',

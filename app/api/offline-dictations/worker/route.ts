@@ -8,7 +8,7 @@ import {
   initOfflineDictationTableWithRequest,
   updateAudioDataWithRequest,
 } from '@/lib/offlineDictationDb';
-import { getRuntimeConfigWithRequest, WHISPER_OFFLINE_MODELS } from '@/lib/configDb';
+import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { loadDictionaryWithRequest } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription } from '@/lib/textFormatting';
@@ -205,12 +205,14 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     const filePath = uploadData[0]?.path || uploadData[0];
     console.log(`[Worker] Gradio file path: ${filePath}`);
     
-    // Process - use configured offline model
-    const runtimeConfig = await getRuntimeConfigWithRequest(request);
-    const offlineModelId = runtimeConfig.whisperOfflineModel || 'large-v3-turbo-german';
-    const offlineModelConfig = WHISPER_OFFLINE_MODELS.find(m => m.id === offlineModelId);
-    const whisperModel = offlineModelConfig?.modelPath || 'primeline/whisper-large-v3-turbo-german';
-    console.log(`[Worker] Using offline model: ${offlineModelId} (${whisperModel})`);
+    // Use same model as online transcription for Gradio compatibility
+    // The Gradio interface may only support certain models
+    let whisperModel = process.env.WHISPER_MODEL || 'large-v3';
+    // Use optimized German model for large-v3 (same as transcribe route)
+    if (whisperModel === 'large-v3') {
+      whisperModel = 'cstr/whisper-large-v3-turbo-german-int8_float32';
+    }
+    console.log(`[Worker] Using Gradio model: ${whisperModel}`);
     
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
       method: 'POST',

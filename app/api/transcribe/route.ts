@@ -107,11 +107,7 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
       meta: { _type: 'gradio.FileData' }
     };
     
-    let whisperModel = process.env.WHISPER_MODEL || 'large-v3';
-    // Use optimized German model for large-v3
-    if (whisperModel === 'large-v3') {
-      whisperModel = 'cstr/whisper-large-v3-turbo-german-int8_float32';
-    }
+    const whisperModel = process.env.WHISPER_MODEL || 'large-v3';
     
     // Log initial_prompt usage for medical terminology
     if (initialPrompt) {

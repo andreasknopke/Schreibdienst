@@ -114,8 +114,8 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
       console.log(`[WhisperX Gradio] Using initial_prompt with ${initialPrompt.split(', ').length} medical terms`);
     }
     
-    // Language code for WhisperX - use ISO code "de" instead of "German"
-    const languageCode = 'de';
+    // Language for WhisperX Gradio - must match dropdown options (full name, not ISO code)
+    const languageCode = 'German';
     console.log(`[WhisperX Gradio] Using model: ${modelToUse}, language: ${languageCode}`);
 
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {

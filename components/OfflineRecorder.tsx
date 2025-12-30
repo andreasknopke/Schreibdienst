@@ -27,9 +27,13 @@ const ALLOWED_AUDIO_TYPES = [
   'audio/x-aiff',    // AIFF alternative
   'audio/webm',      // WebM (für Konsistenz mit Aufnahmen)
   'audio/ogg',       // OGG
+  'audio/opus',      // Opus
+  'audio/mp4',       // M4A
+  'audio/x-m4a',     // M4A alternative
 ];
 
-const ALLOWED_EXTENSIONS = '.mp3,.wav,.aiff,.aif,.webm,.ogg';
+// Accept all common audio extensions - server can handle various codecs
+const ALLOWED_EXTENSIONS = '.mp3,.wav,.aiff,.aif,.webm,.ogg,.opus,.m4a';
 
 export default function OfflineRecorder({ username, onSubmit, onCancel }: OfflineRecorderProps) {
   // Recording state
@@ -255,10 +259,16 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
     console.log(`[OfflineRecorder] File selected: ${file.name}, type: ${file.type}, size: ${file.size}`);
     setError(null);
     
-    // Validate file type
-    if (!ALLOWED_AUDIO_TYPES.includes(file.type) && !file.name.match(/\.(mp3|wav|aiff?|webm|ogg)$/i)) {
-      console.log(`[OfflineRecorder] Invalid file type: ${file.type}`);
-      setError('Ungültiges Dateiformat. Erlaubt: MP3, WAV, AIFF, WebM, OGG');
+    // Validate file type - be more lenient, check extension if type is empty
+    const hasValidExtension = file.name.match(/\.(mp3|wav|aiff?|webm|ogg|opus|m4a)$/i);
+    const hasValidType = ALLOWED_AUDIO_TYPES.includes(file.type) || 
+                         file.type.startsWith('audio/') ||
+                         file.type === '' || // Some files have no MIME type
+                         file.type === 'application/octet-stream'; // Generic binary
+    
+    if (!hasValidType && !hasValidExtension) {
+      console.log(`[OfflineRecorder] Invalid file type: ${file.type}, extension check also failed`);
+      setError('Ungültiges Dateiformat. Erlaubt: MP3, WAV, AIFF, WebM, OGG, Opus, M4A');
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
@@ -276,44 +286,71 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
       // Read file as ArrayBuffer to properly handle binary data
       console.log('[OfflineRecorder] Reading file...');
       const arrayBuffer = await file.arrayBuffer();
-      const blob = new Blob([arrayBuffer], { type: file.type || 'audio/mpeg' });
+      
+      // Determine MIME type - use file type or infer from extension
+      let mimeType = file.type;
+      if (!mimeType || mimeType === 'application/octet-stream') {
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        const mimeMap: Record<string, string> = {
+          'mp3': 'audio/mpeg',
+          'wav': 'audio/wav',
+          'webm': 'audio/webm',
+          'ogg': 'audio/ogg',
+          'opus': 'audio/opus',
+          'aiff': 'audio/aiff',
+          'aif': 'audio/aiff',
+          'm4a': 'audio/mp4',
+        };
+        mimeType = mimeMap[ext || ''] || 'audio/wav';
+        console.log(`[OfflineRecorder] Inferred MIME type from extension: ${mimeType}`);
+      }
+      
+      const blob = new Blob([arrayBuffer], { type: mimeType });
       const url = URL.createObjectURL(blob);
-      console.log(`[OfflineRecorder] Blob created: ${blob.size} bytes, URL: ${url}`);
+      console.log(`[OfflineRecorder] Blob created: ${blob.size} bytes, type: ${blob.type}, URL: ${url}`);
       
-      // Get audio duration
-      const audio = new Audio(url);
-      
-      await new Promise<void>((resolve, reject) => {
-        audio.onloadedmetadata = () => {
-          console.log(`[OfflineRecorder] Audio metadata loaded, duration: ${audio.duration}`);
-          if (audio.duration && isFinite(audio.duration)) {
-            setDuration(Math.round(audio.duration));
-            resolve();
-          } else {
-            // Fallback for files without metadata
-            console.log('[OfflineRecorder] Duration not available, using 0');
-            setDuration(0);
-            resolve();
-          }
-        };
-        audio.onerror = (e) => {
-          console.error('[OfflineRecorder] Audio error:', e);
-          reject(new Error('Audio-Datei konnte nicht gelesen werden'));
-        };
+      // Try to get audio duration, but don't fail if it doesn't work
+      // (Some codecs like Opus in WAV container can't be decoded by browser)
+      let audioDuration = 0;
+      try {
+        const audio = new Audio(url);
         
-        // Timeout for files without proper metadata
-        setTimeout(() => {
-          console.log('[OfflineRecorder] Metadata timeout, resolving anyway');
-          resolve();
-        }, 3000);
-      });
+        audioDuration = await new Promise<number>((resolve) => {
+          const timeout = setTimeout(() => {
+            console.log('[OfflineRecorder] Duration detection timeout - using 0 (will be calculated server-side)');
+            resolve(0);
+          }, 2000);
+          
+          audio.onloadedmetadata = () => {
+            clearTimeout(timeout);
+            if (audio.duration && isFinite(audio.duration)) {
+              console.log(`[OfflineRecorder] Audio duration detected: ${audio.duration}s`);
+              resolve(Math.round(audio.duration));
+            } else {
+              console.log('[OfflineRecorder] Duration not available from metadata');
+              resolve(0);
+            }
+          };
+          
+          audio.onerror = () => {
+            clearTimeout(timeout);
+            // This is expected for some formats - browser can't decode but Whisper can
+            console.log('[OfflineRecorder] Browser cannot decode audio (expected for Opus-in-WAV, etc.) - proceeding anyway');
+            resolve(0);
+          };
+        });
+      } catch (audioErr) {
+        console.log('[OfflineRecorder] Audio metadata extraction failed, proceeding without duration');
+      }
+      
+      setDuration(audioDuration);
       
       console.log('[OfflineRecorder] Setting audio state...');
       setAudioBlob(blob);
       setAudioUrl(url);
       setIsUploadedFile(true);
       setUploadFileName(file.name);
-      console.log('[OfflineRecorder] File upload complete!');
+      console.log(`[OfflineRecorder] File upload complete! Duration: ${audioDuration}s (0 = will be calculated server-side)`);
       
     } catch (err: any) {
       console.error('[OfflineRecorder] Upload error:', err);

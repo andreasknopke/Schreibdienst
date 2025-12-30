@@ -1,10 +1,23 @@
 import { NextRequest } from 'next/server';
 import { query, execute, getPoolForRequest } from './db';
 
+// Verfügbare Offline-Modelle für WhisperX
+export type WhisperOfflineModel = 
+  | 'large-v3-turbo-german'    // primeline/whisper-large-v3-turbo-german
+  | 'large-v3-german'          // primeline/whisper-large-v3-german
+  | 'medium-germanmed';        // Hanhpt23/whisper-medium-GermanMed-full
+
+export const WHISPER_OFFLINE_MODELS: { id: WhisperOfflineModel; name: string; modelPath: string }[] = [
+  { id: 'large-v3-turbo-german', name: 'Large-v3 German Turbo (empfohlen)', modelPath: 'primeline/whisper-large-v3-turbo-german' },
+  { id: 'large-v3-german', name: 'Large-v3 German', modelPath: 'primeline/whisper-large-v3-german' },
+  { id: 'medium-germanmed', name: 'Medium GermanMed (medizinisch)', modelPath: 'Hanhpt23/whisper-medium-GermanMed-full' },
+];
+
 export interface RuntimeConfig {
   transcriptionProvider: 'whisperx' | 'elevenlabs';
   llmProvider: 'openai' | 'lmstudio';
   whisperModel?: string;
+  whisperOfflineModel?: WhisperOfflineModel;
   openaiModel?: string;
   llmPromptAddition?: string;
 }
@@ -13,6 +26,7 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   transcriptionProvider: (process.env.TRANSCRIPTION_PROVIDER as any) || 'whisperx',
   llmProvider: (process.env.LLM_PROVIDER as any) || 'openai',
   whisperModel: process.env.WHISPER_MODEL || 'medium',
+  whisperOfflineModel: (process.env.WHISPER_OFFLINE_MODEL as WhisperOfflineModel) || 'large-v3-turbo-german',
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
 };
 
@@ -42,6 +56,11 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
           break;
         case 'openaiModel':
           config.openaiModel = row.config_value;
+          break;
+        case 'whisperOfflineModel':
+          if (WHISPER_OFFLINE_MODELS.some(m => m.id === row.config_value)) {
+            config.whisperOfflineModel = row.config_value as WhisperOfflineModel;
+          }
           break;
         case 'llmPromptAddition':
           config.llmPromptAddition = row.config_value;
@@ -105,6 +124,11 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
           break;
         case 'openaiModel':
           config.openaiModel = row.config_value;
+          break;
+        case 'whisperOfflineModel':
+          if (WHISPER_OFFLINE_MODELS.some(m => m.id === row.config_value)) {
+            config.whisperOfflineModel = row.config_value as WhisperOfflineModel;
+          }
           break;
         case 'llmPromptAddition':
           config.llmPromptAddition = row.config_value;

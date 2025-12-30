@@ -14,6 +14,7 @@ interface RuntimeConfig {
   transcriptionProvider: 'whisperx' | 'elevenlabs';
   llmProvider: 'openai' | 'lmstudio';
   whisperModel?: string;
+  whisperOfflineModel?: string;
   openaiModel?: string;
   llmPromptAddition?: string;
 }
@@ -168,6 +169,13 @@ export default function ConfigPanel() {
     { id: 'large-v3', name: 'Large v3 (neueste)' },
   ];
 
+  // Whisper Offline-Modelle für Offline-Transkription
+  const whisperOfflineModels = [
+    { id: 'large-v3-turbo-german', name: 'Large-v3 German Turbo (empfohlen)' },
+    { id: 'large-v3-german', name: 'Large-v3 German' },
+    { id: 'medium-germanmed', name: 'Medium GermanMed (medizinisch)' },
+  ];
+
   const openaiModels = [
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini (schnell, günstig)' },
     { id: 'gpt-4o', name: 'GPT-4o (beste Qualität)' },
@@ -251,6 +259,31 @@ export default function ConfigPanel() {
                 </option>
               ))}
             </select>
+          </div>
+        )}
+
+        {/* Whisper Offline Model Selection */}
+        {config.transcriptionProvider === 'whisperx' && (
+          <div className="ml-6 mt-3">
+            <label className="text-xs text-gray-500 block mb-1">
+              Offline-Transkription Modell
+              <span className="ml-1 text-gray-400">(für Diktate ohne Internetverbindung)</span>
+            </label>
+            <select
+              value={config.whisperOfflineModel || 'large-v3-turbo-german'}
+              onChange={(e) => updateConfig({ whisperOfflineModel: e.target.value as any })}
+              disabled={!isRoot || saving}
+              className="input text-sm w-full max-w-xs"
+            >
+              {whisperOfflineModels.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400 mt-1">
+              Diese Modelle werden lokal ausgeführt, wenn keine Online-Verbindung besteht.
+            </p>
           </div>
         )}
       </div>

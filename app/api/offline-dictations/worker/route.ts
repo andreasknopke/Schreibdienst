@@ -7,7 +7,7 @@ import {
   getDictationById,
   initOfflineDictationTable,
 } from '@/lib/offlineDictationDb';
-import { getRuntimeConfig } from '@/lib/configDb';
+import { getRuntimeConfig, WHISPER_OFFLINE_MODELS } from '@/lib/configDb';
 import { loadDictionary } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription } from '@/lib/textFormatting';
@@ -172,11 +172,12 @@ async function transcribeWithWhisperX(file: Blob, initialPrompt?: string): Promi
     const uploadData = await uploadRes.json();
     const filePath = uploadData[0].path || uploadData[0];
     
-    // Process
-    let whisperModel = process.env.WHISPER_MODEL || 'large-v3';
-    if (whisperModel === 'large-v3') {
-      whisperModel = 'cstr/whisper-large-v3-turbo-german-int8_float32';
-    }
+    // Process - use configured offline model
+    const runtimeConfig = await getRuntimeConfig();
+    const offlineModelId = runtimeConfig.whisperOfflineModel || 'large-v3-turbo-german';
+    const offlineModelConfig = WHISPER_OFFLINE_MODELS.find(m => m.id === offlineModelId);
+    const whisperModel = offlineModelConfig?.modelPath || 'primeline/whisper-large-v3-turbo-german';
+    console.log(`[Worker] Using offline model: ${offlineModelId} (${whisperModel})`);
     
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
       method: 'POST',

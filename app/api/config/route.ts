@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
-import { getRuntimeConfigWithRequest, saveRuntimeConfigWithRequest, type RuntimeConfig } from '@/lib/configDb';
+import { getRuntimeConfigWithRequest, saveRuntimeConfigWithRequest, WHISPER_OFFLINE_MODELS, type RuntimeConfig } from '@/lib/configDb';
 
 // Authenticate root user only
 async function getAuthenticatedRoot(request: NextRequest): Promise<boolean> {
@@ -114,6 +114,14 @@ export async function POST(request: NextRequest) {
     
     if (body.openaiModel) {
       newConfig.openaiModel = body.openaiModel;
+    }
+    
+    // Validate whisperOfflineModel
+    if (body.whisperOfflineModel) {
+      const validOfflineModels = WHISPER_OFFLINE_MODELS.map(m => m.id);
+      if (validOfflineModels.includes(body.whisperOfflineModel)) {
+        newConfig.whisperOfflineModel = body.whisperOfflineModel;
+      }
     }
     
     if (typeof body.llmPromptAddition === 'string') {

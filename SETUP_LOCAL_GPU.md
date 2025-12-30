@@ -144,7 +144,8 @@ Pascal unterstützt das nicht, aber die Performance ist auch so gut.
 
 ### Option 3: Quantisierung
 
-Bereits aktiviert mit `float16` für GPU (siehe `app.py` Zeile 18).
+Verwendet `int8` für optimale Performance auf Pascal-GPUs wie TitanX (siehe `app.py` Zeile 27).
+int8 ist stabiler und schneller auf Pascal-Architektur als float16.
 
 ## Kosten
 

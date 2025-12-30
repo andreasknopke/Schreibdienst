@@ -21,7 +21,9 @@ CORS(app)
 
 # WhisperX Modell-Konfiguration
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8"
+# Verwende int8 für TitanX Pascal und andere ältere GPUs (Pascal-Architektur)
+# int8 ist stabiler und schneller auf Pascal-GPUs als float16
+COMPUTE_TYPE = "int8"
 MODEL_NAME = os.environ.get("WHISPER_MODEL", "large-v2")
 LANGUAGE = "de"
 

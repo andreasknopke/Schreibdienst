@@ -282,13 +282,13 @@ export function cleanupText(text: string, entries: DictionaryEntry[]): string {
 // ============================================================
 
 // Ensure new columns exist (on-demand migration)
-async function ensureColumnsExist(db: any): Promise<void> {
+async function ensureColumnsExist(db: any, poolKey: string): Promise<void> {
   try {
     // Try to add use_in_prompt column if it doesn't exist
     await db.execute(`
       ALTER TABLE dictionary_entries ADD COLUMN use_in_prompt BOOLEAN DEFAULT FALSE
     `);
-    console.log('[Dictionary] Added use_in_prompt column on-demand');
+    console.log(`[Dictionary] Added use_in_prompt column on-demand (${poolKey})`);
   } catch (e: any) {
     // Column already exists - that's fine
   }
@@ -298,24 +298,43 @@ async function ensureColumnsExist(db: any): Promise<void> {
     await db.execute(`
       ALTER TABLE dictionary_entries ADD COLUMN match_stem BOOLEAN DEFAULT FALSE
     `);
-    console.log('[Dictionary] Added match_stem column on-demand');
+    console.log(`[Dictionary] Added match_stem column on-demand (${poolKey})`);
   } catch (e: any) {
     // Column already exists - that's fine
   }
 }
 
-// Track if we've already checked columns in this process
-let columnsChecked = false;
+// Track if we've already checked columns PER DATABASE (not global!)
+// Key: poolKey (host:port:database:user or "default"), Value: true if checked
+const columnsCheckedPerPool = new Map<string, boolean>();
+
+// Helper to get pool key for tracking
+function getPoolKeyFromRequest(request: NextRequest): string {
+  const dbToken = request.headers.get('x-db-token');
+  if (dbToken) {
+    try {
+      const decoded = Buffer.from(dbToken, 'base64').toString('utf8');
+      const parsed = JSON.parse(decoded);
+      return `${parsed.host}:${parsed.port || 3306}:${parsed.database}:${parsed.user}`;
+    } catch {
+      // Invalid token, fall through to default
+    }
+  }
+  return 'default';
+}
 
 // Get entries with Request context
 export async function getEntriesWithRequest(request: NextRequest, username: string): Promise<DictionaryEntry[]> {
+  const poolKey = getPoolKeyFromRequest(request);
+  
   try {
     const db = await getPoolForRequest(request);
     
-    // On-demand migration: ensure new columns exist (only check once per process)
-    if (!columnsChecked) {
-      await ensureColumnsExist(db);
-      columnsChecked = true;
+    // On-demand migration: ensure new columns exist (only check once per database pool)
+    if (!columnsCheckedPerPool.get(poolKey)) {
+      console.log(`[Dictionary] Checking columns for pool: ${poolKey}`);
+      await ensureColumnsExist(db, poolKey);
+      columnsCheckedPerPool.set(poolKey, true);
     }
     
     const [rows] = await db.execute<any[]>(
@@ -333,7 +352,9 @@ export async function getEntriesWithRequest(request: NextRequest, username: stri
   } catch (error: any) {
     // If columns don't exist yet (migration failed or didn't run), fall back to basic query
     if (error?.code === 'ER_BAD_FIELD_ERROR') {
-      console.log('[Dictionary] New columns not found (with request), using basic query');
+      console.log(`[Dictionary] New columns not found for pool "${poolKey}", using basic query`);
+      // Reset the checked flag so next request tries migration again
+      columnsCheckedPerPool.delete(poolKey);
       try {
         const db = await getPoolForRequest(request);
         const [rows] = await db.execute<any[]>(
@@ -349,11 +370,11 @@ export async function getEntriesWithRequest(request: NextRequest, username: stri
           matchStem: false
         }));
       } catch (fallbackError) {
-        console.error('[Dictionary] Fallback query also failed (with request):', fallbackError);
+        console.error(`[Dictionary] Fallback query also failed for pool "${poolKey}":`, fallbackError);
         return [];
       }
     }
-    console.error('[Dictionary] Get entries error (with request):', error);
+    console.error(`[Dictionary] Get entries error for pool "${poolKey}":`, error);
     return [];
   }
 }

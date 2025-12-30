@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath } from '@/lib/configDb';
+import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 
 export const runtime = 'nodejs';
@@ -406,10 +406,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Get whisper offline model from runtime config (for Gradio - German optimized models)
-    // This uses the full HuggingFace model path
-    const whisperModel = getWhisperOfflineModelPath(runtimeConfig.whisperOfflineModel);
-    console.log(`[Config] WhisperX Offline Model: ${whisperModel} (from config: ${runtimeConfig.whisperOfflineModel || 'default'})`);
+    // Get whisper model from runtime config (Online-Transkription)
+    // For online mode, use whisperModel directly (full HuggingFace path)
+    const whisperModel = runtimeConfig.whisperModel || 'deepdml/faster-whisper-large-v3-german-2';
+    console.log(`[Config] WhisperX Online Model: ${whisperModel} (from config)`);
 
     // Transkription mit gewähltem Provider
     let result;

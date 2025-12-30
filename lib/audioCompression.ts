@@ -198,3 +198,67 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
+
+/**
+ * Normalize audio to a format that WhisperX can handle
+ * Converts problematic formats (like Opus-in-WAV) to standard WAV PCM
+ * 
+ * @param audioBuffer - Original audio data as Buffer
+ * @param mimeType - Original MIME type
+ * @returns Normalized audio data and MIME type (WAV PCM), or original if FFmpeg unavailable
+ */
+export async function normalizeAudioForWhisper(
+  audioBuffer: Buffer,
+  mimeType: string
+): Promise<{ data: Buffer; mimeType: string; normalized: boolean }> {
+  // Check if FFmpeg is available
+  const hasFfmpeg = await checkFfmpegAvailable();
+  if (!hasFfmpeg) {
+    console.log('[AudioNormalize] FFmpeg not available, returning original');
+    return { data: audioBuffer, mimeType, normalized: false };
+  }
+  
+  // Generate temp file paths
+  const tempId = randomUUID();
+  const inputExt = getExtensionFromMime(mimeType);
+  const inputPath = join(tmpdir(), `audio_norm_in_${tempId}.${inputExt}`);
+  const outputPath = join(tmpdir(), `audio_norm_out_${tempId}.wav`);
+  
+  try {
+    // Write input file
+    await writeFile(inputPath, audioBuffer);
+    
+    // Convert to standard WAV PCM format
+    // This handles any codec (including Opus-in-WAV) and outputs standard PCM WAV
+    console.log(`[AudioNormalize] Converting ${inputExt} to WAV PCM...`);
+    await runFfmpeg([
+      '-i', inputPath,
+      '-vn',                    // No video
+      '-acodec', 'pcm_s16le',   // Standard PCM 16-bit signed little-endian
+      '-ar', '16000',           // 16kHz sample rate (standard for Whisper)
+      '-ac', '1',               // Mono
+      '-y',                     // Overwrite output
+      outputPath
+    ]);
+    
+    // Read normalized file
+    const normalizedBuffer = await readFile(outputPath);
+    console.log(`[AudioNormalize] Converted: ${formatBytes(audioBuffer.length)} → ${formatBytes(normalizedBuffer.length)}`);
+    
+    return { 
+      data: normalizedBuffer, 
+      mimeType: 'audio/wav', 
+      normalized: true 
+    };
+    
+  } catch (error: any) {
+    console.error(`[AudioNormalize] Conversion failed: ${error.message}`);
+    // Return original on failure - let server try to handle it
+    return { data: audioBuffer, mimeType, normalized: false };
+    
+  } finally {
+    // Cleanup temp files
+    await safeUnlink(inputPath);
+    await safeUnlink(outputPath);
+  }
+}

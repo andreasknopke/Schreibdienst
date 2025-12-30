@@ -12,7 +12,7 @@ import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { loadDictionaryWithRequest } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription } from '@/lib/textFormatting';
-import { compressAudioForSpeech } from '@/lib/audioCompression';
+import { compressAudioForSpeech, normalizeAudioForWhisper } from '@/lib/audioCompression';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes max for processing
@@ -159,6 +159,23 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
   const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:5000';
   const isGradio = whisperUrl.includes(':7860');
   
+  // Normalize audio to WAV PCM to handle problematic formats (Opus-in-WAV, etc.)
+  // This ensures WhisperX can process any audio format
+  let normalizedFile = file;
+  let normalizedMimeType = file.type || 'audio/webm';
+  
+  try {
+    const audioBuffer = Buffer.from(await file.arrayBuffer());
+    const normalized = await normalizeAudioForWhisper(audioBuffer, file.type || 'audio/webm');
+    if (normalized.normalized) {
+      normalizedFile = new Blob([normalized.data], { type: normalized.mimeType });
+      normalizedMimeType = normalized.mimeType;
+      console.log(`[Worker] Audio normalized to ${normalizedMimeType} (${normalized.data.length} bytes)`);
+    }
+  } catch (normError: any) {
+    console.warn(`[Worker] Audio normalization failed, using original: ${normError.message}`);
+  }
+  
   if (isGradio) {
     // Get auth credentials
     const authUser = process.env.WHISPER_AUTH_USERNAME;
@@ -172,8 +189,7 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
         }
       }
     }
-    
-    // Login
+        // Login
     const loginRes = await fetch(`${whisperUrl}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -183,11 +199,30 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     if (!loginRes.ok) throw new Error(`Gradio login failed (${loginRes.status})`);
     const sessionCookie = loginRes.headers.get('set-cookie')?.split(';')[0] || '';
     
-    // Upload file
-    const uploadFormData = new FormData();
-    uploadFormData.append('files', file, 'audio.webm');
+    // Determine the correct file extension based on MIME type
+    const mimeToExt: Record<string, string> = {
+      'audio/webm': 'webm',
+      'audio/wav': 'wav',
+      'audio/wave': 'wav',
+      'audio/x-wav': 'wav',
+      'audio/mpeg': 'mp3',
+      'audio/mp3': 'mp3',
+      'audio/ogg': 'ogg',
+      'audio/opus': 'opus',
+      'audio/aiff': 'aiff',
+      'audio/x-aiff': 'aiff',
+      'audio/mp4': 'm4a',
+      'audio/x-m4a': 'm4a',
+    };
+    const fileExt = mimeToExt[normalizedMimeType] || 'webm';
+    const fileName = `audio.${fileExt}`;
+    console.log(`[Worker] Using filename: ${fileName} for MIME type: ${normalizedMimeType}`);
     
-    console.log(`[Worker] Uploading audio to Gradio: size=${file.size}, type=${file.type}`);
+    // Upload file (use normalized version)
+    const uploadFormData = new FormData();
+    uploadFormData.append('files', normalizedFile, fileName);
+    
+    console.log(`[Worker] Uploading audio to Gradio: size=${normalizedFile.size}, type=${normalizedMimeType}`);
     
     const uploadRes = await fetch(`${whisperUrl}/gradio_api/upload?upload_id=${Date.now()}`, {
       method: 'POST',
@@ -219,7 +254,7 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
       headers: { 'Content-Type': 'application/json', 'Cookie': sessionCookie },
       body: JSON.stringify({
         data: [
-          { path: filePath, orig_name: 'audio.webm', size: file.size, mime_type: file.type || 'audio/webm', meta: { _type: 'gradio.FileData' } },
+          { path: filePath, orig_name: fileName, size: normalizedFile.size, mime_type: normalizedMimeType, meta: { _type: 'gradio.FileData' } },
           "German",
           whisperModel,
           "cuda"
@@ -279,9 +314,10 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     return { text: transcriptionText };
   }
   
-  // FastAPI implementation
+  // FastAPI implementation - use normalized file
   const formData = new FormData();
-  formData.append('file', file, 'audio.webm');
+  const fastApiExt = normalizedMimeType === 'audio/wav' ? 'wav' : 'webm';
+  formData.append('file', normalizedFile, `audio.${fastApiExt}`);
   formData.append('language', 'de');
   formData.append('align', 'true');
   

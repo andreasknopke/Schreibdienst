@@ -185,7 +185,8 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
     }
     
     let transcriptionText = '';
-    let segments: any[] = [];
+    // Online-Modus: Keine Segmente extrahieren (Mitlesen nicht benötigt, spart Zeit)
+    const segments: any[] = [];
     
     // Extract transcription text from first result
     const firstResult = resultData[0];
@@ -202,82 +203,8 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
       }
     }
     
-    // Extract segments with timestamps
-    // Gradio may return JSON directly OR as a file reference that needs to be downloaded
-    try {
-      for (let i = 0; i < resultData.length; i++) {
-        const item = resultData[i];
-        
-        // Skip if already found segments
-        if (segments.length > 0) break;
-        
-        // Case 1: Direct JSON string with segment data
-        if (typeof item === 'string' && item.startsWith('[') && item.includes('"start"')) {
-          try {
-            const parsed = JSON.parse(item);
-            if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].start !== undefined) {
-              segments = parsed;
-              console.log(`[WhisperX Gradio] Found segments as JSON string at index ${i}: ${segments.length} segments`);
-              break;
-            }
-          } catch (e) { /* not valid JSON */ }
-        }
-        
-        // Case 2: Object with 'value' property containing JSON
-        if (item && typeof item === 'object' && item.value) {
-          const val = item.value;
-          if (typeof val === 'string' && val.startsWith('[')) {
-            try {
-              const parsed = JSON.parse(val);
-              if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].start !== undefined) {
-                segments = parsed;
-                console.log(`[WhisperX Gradio] Found segments in object.value at index ${i}: ${segments.length} segments`);
-                break;
-              }
-            } catch (e) { /* not valid JSON */ }
-          }
-        }
-        
-        // Case 3: File reference object - need to download
-        if (item && typeof item === 'object' && (item.path || item.url)) {
-          const filePath = item.path || '';
-          const fileUrl = item.url || '';
-          
-          // Check if it's a JSON file with segments
-          if (filePath.endsWith('.json') || filePath.includes('segment') || filePath.includes('output.json')) {
-            console.log(`[WhisperX Gradio] Found potential segments file at index ${i}: ${filePath}`);
-            
-            if (fileUrl) {
-              try {
-                const fileRes = await fetch(fileUrl, {
-                  headers: { 'Cookie': sessionCookie },
-                });
-                if (fileRes.ok) {
-                  const fileContent = await fileRes.text();
-                  const parsed = JSON.parse(fileContent);
-                  if (Array.isArray(parsed) && parsed.length > 0) {
-                    segments = parsed;
-                    console.log(`[WhisperX Gradio] Downloaded segments from file: ${segments.length} segments`);
-                    break;
-                  }
-                }
-              } catch (e) {
-                console.warn(`[WhisperX Gradio] Failed to download segments file: ${e}`);
-              }
-            }
-          }
-        }
-      }
-      
-      if (segments.length === 0) {
-        console.warn('[WhisperX Gradio] Could not find segments in any resultData index');
-      }
-    } catch (e) {
-      console.warn('[WhisperX Gradio] Error extracting segments:', e);
-    }
-    
     const textLength = transcriptionText.length;
-    console.log(`[WhisperX Gradio] ✓ Transcription complete - Duration: ${duration}s, Text length: ${textLength} chars, Segments: ${segments.length}`);
+    console.log(`[WhisperX Gradio] ✓ Transcription complete - Duration: ${duration}s, Text length: ${textLength} chars`);
     
     if (!transcriptionText || textLength === 0) {
       console.warn(`[WhisperX Gradio] Warning: Empty transcription returned`);

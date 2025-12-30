@@ -34,7 +34,28 @@ export async function getEntries(username: string): Promise<DictionaryEntry[]> {
       useInPrompt: Boolean(e.use_in_prompt),
       matchStem: Boolean(e.match_stem)
     }));
-  } catch (error) {
+  } catch (error: any) {
+    // If columns don't exist yet, fall back to basic query
+    if (error?.code === 'ER_BAD_FIELD_ERROR') {
+      console.log('[Dictionary] New columns not found, using basic query');
+      try {
+        const entries = await query<DbDictionaryEntry>(
+          'SELECT wrong_word, correct_word, added_at FROM dictionary_entries WHERE LOWER(username) = LOWER(?) ORDER BY added_at DESC',
+          [username]
+        );
+        
+        return entries.map(e => ({
+          wrong: e.wrong_word,
+          correct: e.correct_word,
+          addedAt: e.added_at?.toISOString() || new Date().toISOString(),
+          useInPrompt: false,
+          matchStem: false
+        }));
+      } catch (fallbackError) {
+        console.error('[Dictionary] Fallback query also failed:', fallbackError);
+        return [];
+      }
+    }
     console.error('[Dictionary] Get entries error:', error);
     return [];
   }
@@ -309,7 +330,29 @@ export async function getEntriesWithRequest(request: NextRequest, username: stri
       useInPrompt: Boolean(e.use_in_prompt),
       matchStem: Boolean(e.match_stem)
     }));
-  } catch (error) {
+  } catch (error: any) {
+    // If columns don't exist yet (migration failed or didn't run), fall back to basic query
+    if (error?.code === 'ER_BAD_FIELD_ERROR') {
+      console.log('[Dictionary] New columns not found (with request), using basic query');
+      try {
+        const db = await getPoolForRequest(request);
+        const [rows] = await db.execute<any[]>(
+          'SELECT wrong_word, correct_word, added_at FROM dictionary_entries WHERE LOWER(username) = LOWER(?) ORDER BY added_at DESC',
+          [username]
+        );
+        
+        return (rows as DbDictionaryEntry[]).map(e => ({
+          wrong: e.wrong_word,
+          correct: e.correct_word,
+          addedAt: e.added_at?.toISOString() || new Date().toISOString(),
+          useInPrompt: false,
+          matchStem: false
+        }));
+      } catch (fallbackError) {
+        console.error('[Dictionary] Fallback query also failed (with request):', fallbackError);
+        return [];
+      }
+    }
     console.error('[Dictionary] Get entries error (with request):', error);
     return [];
   }

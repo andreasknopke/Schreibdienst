@@ -108,7 +108,14 @@ export async function POST(request: NextRequest) {
       newConfig.llmProvider = body.llmProvider;
     }
     
-    if (body.whisperModel && ['tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3'].includes(body.whisperModel)) {
+    // Validate whisperModel - accepts both short IDs and full HuggingFace paths
+    const validWhisperModels = [
+      'large-v3',
+      'deepdml/faster-whisper-large-v3-german-2',
+      'systran/faster-whisper-large-v3',
+      'cstr/whisper-large-v3-turbo-german-int8_float32',
+    ];
+    if (body.whisperModel && validWhisperModels.includes(body.whisperModel)) {
       newConfig.whisperModel = body.whisperModel;
     }
     

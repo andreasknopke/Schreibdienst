@@ -6,11 +6,13 @@ import {
   markDictationError,
   getDictationById,
   initOfflineDictationTable,
+  updateAudioData,
 } from '@/lib/offlineDictationDb';
 import { getRuntimeConfig, WHISPER_OFFLINE_MODELS } from '@/lib/configDb';
 import { loadDictionary } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription } from '@/lib/textFormatting';
+import { compressAudioForSpeech } from '@/lib/audioCompression';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes max for processing
@@ -78,6 +80,26 @@ async function processDictation(dictationId: number): Promise<void> {
       correctedText: correctedText,
       changeScore: changeScore,
     });
+    
+    // Step 3: Compress audio for storage efficiency (after successful transcription)
+    // Uses Opus codec which is highly efficient for speech
+    console.log(`[Worker] Compressing audio for #${dictationId}...`);
+    try {
+      const compressionResult = await compressAudioForSpeech(
+        Buffer.from(dictation.audio_data),
+        dictation.audio_mime_type
+      );
+      
+      if (compressionResult.compressed) {
+        await updateAudioData(dictationId, compressionResult.data, compressionResult.mimeType);
+        console.log(`[Worker] Audio compressed for #${dictationId}`);
+      } else {
+        console.log(`[Worker] Audio compression skipped for #${dictationId} (not available or not beneficial)`);
+      }
+    } catch (compressionError: any) {
+      // Don't fail the whole process if compression fails - audio is still usable
+      console.warn(`[Worker] Audio compression failed for #${dictationId}:`, compressionError.message);
+    }
     
     console.log(`[Worker] ✓ Dictation #${dictationId} completed successfully`);
     

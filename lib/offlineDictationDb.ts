@@ -336,3 +336,17 @@ export async function retryDictation(id: number): Promise<void> {
     [id]
   );
 }
+
+// Update audio data with compressed version
+export async function updateAudioData(
+  id: number,
+  audioData: Buffer,
+  mimeType: string
+): Promise<void> {
+  await execute(
+    `UPDATE offline_dictations 
+     SET audio_data = ?, audio_mime_type = ?
+     WHERE id = ?`,
+    [audioData, mimeType, id]
+  );
+}

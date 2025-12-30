@@ -223,14 +223,42 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     });
     
     if (!resultRes.ok) throw new Error(`Gradio result failed (${resultRes.status})`);
+    
+    // Parse SSE response
     const resultText = await resultRes.text();
+    
+    // SSE format: "event: complete\ndata: [...]"
     const dataMatch = resultText.match(/data:\s*(\[.*\])/s);
-    if (!dataMatch) throw new Error('Could not parse Gradio response');
+    if (!dataMatch) {
+      console.error(`[Worker] Gradio response parsing failed. Raw response: ${resultText.substring(0, 500)}`);
+      throw new Error(`Could not parse Gradio response: ${resultText.substring(0, 200)}`);
+    }
     
     const resultData = JSON.parse(dataMatch[1]);
-    let text = typeof resultData[0] === 'string' ? resultData[0] : resultData[0]?.value || '';
     
-    return { text };
+    // Gradio returns array of results or update objects
+    // Index 0 is TXT transcription - can be string or {value: string, __type__: "update"}
+    let transcriptionText = '';
+    const firstResult = resultData[0];
+    
+    if (typeof firstResult === 'string') {
+      transcriptionText = firstResult;
+    } else if (firstResult && typeof firstResult === 'object') {
+      if (firstResult.value) {
+        // Check if it's an error message
+        if (firstResult.value.toString().startsWith('Error')) {
+          console.error(`[Worker] WhisperX server error: ${firstResult.value}`);
+          throw new Error(`WhisperX server error: ${firstResult.value}`);
+        }
+        transcriptionText = firstResult.value;
+      }
+    }
+    
+    if (!transcriptionText || transcriptionText.length === 0) {
+      console.warn(`[Worker] Warning: Empty transcription returned from WhisperX`);
+    }
+    
+    return { text: transcriptionText };
   }
   
   // FastAPI implementation

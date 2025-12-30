@@ -123,7 +123,14 @@ REGELN:
 2. Korrigiere falsch transkribierte medizinische Fachbegriffe:
    - "Scholecystitis" → "Cholecystitis"
    - "labarchemisch" → "laborchemisch"
-3. FORMATIERUNGSBEFEHLE SOFORT UMSETZEN - diese Wörter durch Formatierung ersetzen:
+3. ZAHLEN, EINHEITEN UND JAHRESZAHLEN IN ZIFFERN UMWANDELN:
+   - Ausgeschriebene Zahlen → Ziffern: "acht" → "8", "zwölf" → "12"
+   - Maßeinheiten abkürzen: "acht Millimeter" → "8 mm", "zehn Zentimeter" → "10 cm"
+   - Dezimalzahlen: "acht Komma sechs Prozent" → "8,6%", "drei Komma fünf" → "3,5"
+   - Größenangaben: "sechzehn mal zehn Millimeter" → "16 x 10 mm"
+   - Jahreszahlen: "neunzehnhunderteinundneunzig" → "1991", "zweitausend" → "2000"
+   - Scores/Grade: "G2-Score sechs" → "G2-Score 6", "Fazekas zwei" → "Fazekas 2"
+4. FORMATIERUNGSBEFEHLE SOFORT UMSETZEN - diese Wörter durch Formatierung ersetzen:
    - "Neuer Absatz" oder "neuer Absatz" → zwei Zeilenumbrüche (Leerzeile einfügen)
    - "Neue Zeile" oder "neue Zeile" → ein Zeilenumbruch
    - "Doppelpunkt" → ":"
@@ -375,6 +382,14 @@ WICHTIG - DATUMSFORMATE NICHT ÄNDERN:
 - NIEMALS Punkte in Datumsangaben ändern oder Zeilenumbrüche einfügen
 - Nur ausgeschriebene Daten umwandeln: "achtzehnter September" → "18.09."
 
+WICHTIG - ZAHLEN, EINHEITEN UND JAHRESZAHLEN IN ZIFFERN:
+- Ausgeschriebene Zahlen in Ziffern umwandeln: "acht" → "8", "zwölf" → "12"
+- Maßeinheiten abkürzen: "acht Millimeter" → "8 mm", "zehn Zentimeter" → "10 cm"
+- Dezimalzahlen korrekt formatieren: "acht Komma sechs Prozent" → "8,6%"
+- Größenangaben: "sechzehn mal zehn Millimeter" → "16 x 10 mm"
+- Jahreszahlen umwandeln: "neunzehnhunderteinundneunzig" → "1991", "zweitausend" → "2000"
+- Medizinische Scores: "G2-Score sechs" → "G2-Score 6", "Fazekas zwei" → "Fazekas 2"
+
 WICHTIG - MEDIZINISCHE FACHBEGRIFFE:
 - KORRIGIERE falsch transkribierte medizinische Begriffe zum korrekten Fachbegriff
 - Beispiele: "Scholecystitis" → "Cholecystitis", "Scholangitis" → "Cholangitis"
@@ -435,6 +450,14 @@ WICHTIG - DATUMSFORMATE NICHT ÄNDERN:
 - Datumsangaben wie "18.09.2025" sind bereits korrekt - NICHT ändern!
 - NIEMALS Punkte in Datumsangaben ändern oder Zeilenumbrüche einfügen
 - Nur ausgeschriebene Daten umwandeln: "achtzehnter September" → "18.09."
+
+WICHTIG - ZAHLEN, EINHEITEN UND JAHRESZAHLEN IN ZIFFERN:
+- Ausgeschriebene Zahlen in Ziffern umwandeln: "acht" → "8", "zwölf" → "12"
+- Maßeinheiten abkürzen: "acht Millimeter" → "8 mm", "zehn Zentimeter" → "10 cm"
+- Dezimalzahlen korrekt formatieren: "acht Komma sechs Prozent" → "8,6%"
+- Größenangaben: "sechzehn mal zehn Millimeter" → "16 x 10 mm"
+- Jahreszahlen umwandeln: "neunzehnhunderteinundneunzig" → "1991", "zweitausend" → "2000"
+- Medizinische Scores: "Fazekas zwei" → "Fazekas 2", "Grad eins" → "Grad 1"
 
 WICHTIG - MEDIZINISCHE FACHBEGRIFFE:
 - KORRIGIERE falsch transkribierte medizinische Begriffe zum korrekten Fachbegriff

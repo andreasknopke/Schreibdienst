@@ -13,6 +13,16 @@ export const WHISPER_OFFLINE_MODELS: { id: WhisperOfflineModel; name: string; mo
   { id: 'medium-germanmed', name: 'Medium GermanMed (medizinisch)', modelPath: 'Hanhpt23/whisper-medium-GermanMed-full' },
 ];
 
+// Get the HuggingFace model path from the offline model ID
+export function getWhisperOfflineModelPath(modelId: WhisperOfflineModel | string | undefined): string {
+  if (!modelId) {
+    // Default to the first model
+    return WHISPER_OFFLINE_MODELS[0].modelPath;
+  }
+  const model = WHISPER_OFFLINE_MODELS.find(m => m.id === modelId);
+  return model?.modelPath || WHISPER_OFFLINE_MODELS[0].modelPath;
+}
+
 export interface RuntimeConfig {
   transcriptionProvider: 'whisperx' | 'elevenlabs';
   llmProvider: 'openai' | 'lmstudio';

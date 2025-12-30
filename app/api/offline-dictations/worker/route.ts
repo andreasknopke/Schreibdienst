@@ -8,7 +8,7 @@ import {
   initOfflineDictationTableWithRequest,
   updateAudioDataWithRequest,
 } from '@/lib/offlineDictationDb';
-import { getRuntimeConfigWithRequest } from '@/lib/configDb';
+import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath } from '@/lib/configDb';
 import { loadDictionaryWithRequest } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription } from '@/lib/textFormatting';
@@ -256,11 +256,11 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     const filePath = uploadData[0]?.path || uploadData[0];
     console.log(`[Worker] Gradio file path: ${filePath}`);
     
-    // Use same model as online transcription for Gradio compatibility
-    // Load from runtime config (which reads from DB), fallback to env, then default
+    // Use whisperOfflineModel (German-optimized) for Gradio, with full HuggingFace path
+    // Load from runtime config (which reads from DB)
     const runtimeConfig = await getRuntimeConfigWithRequest(request);
-    let whisperModel = runtimeConfig.whisperModel || process.env.WHISPER_MODEL || 'large-v3';
-    console.log(`[Worker] Using Gradio model from config: ${whisperModel}`);
+    const whisperModel = getWhisperOfflineModelPath(runtimeConfig.whisperOfflineModel);
+    console.log(`[Worker] Using Gradio model: ${whisperModel} (from offline config: ${runtimeConfig.whisperOfflineModel || 'default'})`);
     
     // Log initial_prompt usage for medical terminology
     if (initialPrompt) {

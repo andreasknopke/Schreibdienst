@@ -103,18 +103,20 @@ type ReplacementFn = (match: string, p1: string) => string;
 // Control word replacements - order matters for multi-word phrases first
 const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | ReplacementFn }> = [
   // Paragraph/line breaks (must come before simpler patterns)
-  { pattern: /\bneuer\s+absatz\b/gi, replacement: '\n\n' },
-  { pattern: /\bnächster\s+absatz\b/gi, replacement: '\n\n' },
-  { pattern: /\babsatz\b/gi, replacement: '\n\n' },
-  { pattern: /\bneue\s+zeile\b/gi, replacement: '\n' },
-  { pattern: /\bnächste\s+zeile\b/gi, replacement: '\n' },
+  // Capture surrounding punctuation (. , ;) and whitespace that Whisper often adds
+  { pattern: /[.,;\s]*\bneuer\s+absatz\b[.,;\s]*/gi, replacement: '\n\n' },
+  { pattern: /[.,;\s]*\bnächster\s+absatz\b[.,;\s]*/gi, replacement: '\n\n' },
+  { pattern: /[.,;\s]*\babsatz\b[.,;\s]*/gi, replacement: '\n\n' },
+  { pattern: /[.,;\s]*\bneue\s+zeile\b[.,;\s]*/gi, replacement: '\n' },
+  { pattern: /[.,;\s]*\bnächste\s+zeile\b[.,;\s]*/gi, replacement: '\n' },
   
   // NOTE: "Punkt eins", "Punkt zwei", etc. are handled in handleEnumerationCommands()
   // which is called BEFORE these replacements
   
-  // Brackets/parentheses
-  { pattern: /\bklammer\s+auf\b/gi, replacement: '(' },
-  { pattern: /\bklammer\s+zu\b/gi, replacement: ')' },
+  // Brackets/parentheses - capture surrounding commas/spaces that Whisper often adds
+  // ", Klammer auf, " → " ("  and  ", Klammer zu, " → ") "
+  { pattern: /[,\s]*\bklammer\s+auf\b[,\s]*/gi, replacement: ' (' },
+  { pattern: /[,\s]*\bklammer\s+zu\b[,\s]*/gi, replacement: ') ' },
   { pattern: /\bin\s+klammern\s+/gi, replacement: '(' }, // "in Klammern XYZ" - opening only, closing handled separately
   
   // Punctuation with preceding comma removal - ",[ ]Doppelpunkt" → ":"
@@ -471,12 +473,18 @@ function cleanupFormatting(text: string): string {
     .replace(/[^\S\n]+/g, ' ')
     // Remove space before punctuation
     .replace(/\s+([.,;:!?)])/g, '$1')
-    // Add space after punctuation if missing (but not before newline)
+    // Add space after punctuation if missing (but not before newline or opening bracket)
     .replace(/([.,;:!?])(?=[A-ZÄÖÜa-zäöüß])/g, '$1 ')
     // Remove space after opening parenthesis
     .replace(/\(\s+/g, '(')
     // Remove space before closing parenthesis
     .replace(/\s+\)/g, ')')
+    // Add space after closing parenthesis if followed by letter
+    .replace(/\)(?=[A-ZÄÖÜa-zäöüß])/g, ') ')
+    // Remove comma before opening parenthesis: ", (" → " ("
+    .replace(/,\s*\(/g, ' (')
+    // Remove comma after closing parenthesis if followed by comma: "), " → ") " - no double comma
+    .replace(/\),\s*,/g, '),')
     // Max 2 newlines (one empty line)
     .replace(/\n{3,}/g, '\n\n')
     // Remove trailing whitespace from lines

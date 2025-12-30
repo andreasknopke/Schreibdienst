@@ -164,12 +164,21 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
     const resultData = JSON.parse(dataMatch[1]);
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     
-    // Gradio returns array of results:
-    // resultData[0] = TXT transcription (string or {value: string})
-    // resultData[1] = VTT format
-    // resultData[2] = SRT format  
-    // resultData[3] = JSON with segments/timestamps
-    // resultData[4] = time message
+    // DEBUG: Log structure to understand Gradio output format
+    console.log(`[WhisperX Gradio] resultData length: ${resultData.length}`);
+    for (let i = 0; i < Math.min(resultData.length, 6); i++) {
+      const item = resultData[i];
+      const itemType = typeof item;
+      let preview = '';
+      if (itemType === 'string') {
+        preview = item.substring(0, 80);
+      } else if (item && itemType === 'object') {
+        preview = JSON.stringify(item).substring(0, 120);
+      } else {
+        preview = String(item);
+      }
+      console.log(`[WhisperX Gradio] resultData[${i}]: ${itemType} = ${preview}`);
+    }
     
     let transcriptionText = '';
     let segments: any[] = [];
@@ -189,21 +198,78 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
       }
     }
     
-    // Extract segments with timestamps from JSON result (index 3)
-    // This enables word-level highlighting in the frontend
+    // Extract segments with timestamps
+    // Gradio may return JSON directly OR as a file reference that needs to be downloaded
     try {
-      if (resultData[3]) {
-        const rawJson = typeof resultData[3] === 'string' ? resultData[3] : resultData[3]?.value;
-        if (rawJson) {
-          const parsedSegments = JSON.parse(rawJson);
-          if (Array.isArray(parsedSegments)) {
-            segments = parsedSegments;
-            console.log(`[WhisperX Gradio] Extracted ${segments.length} segments with timestamps`);
+      for (let i = 0; i < resultData.length; i++) {
+        const item = resultData[i];
+        
+        // Skip if already found segments
+        if (segments.length > 0) break;
+        
+        // Case 1: Direct JSON string with segment data
+        if (typeof item === 'string' && item.startsWith('[') && item.includes('"start"')) {
+          try {
+            const parsed = JSON.parse(item);
+            if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].start !== undefined) {
+              segments = parsed;
+              console.log(`[WhisperX Gradio] Found segments as JSON string at index ${i}: ${segments.length} segments`);
+              break;
+            }
+          } catch (e) { /* not valid JSON */ }
+        }
+        
+        // Case 2: Object with 'value' property containing JSON
+        if (item && typeof item === 'object' && item.value) {
+          const val = item.value;
+          if (typeof val === 'string' && val.startsWith('[')) {
+            try {
+              const parsed = JSON.parse(val);
+              if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].start !== undefined) {
+                segments = parsed;
+                console.log(`[WhisperX Gradio] Found segments in object.value at index ${i}: ${segments.length} segments`);
+                break;
+              }
+            } catch (e) { /* not valid JSON */ }
+          }
+        }
+        
+        // Case 3: File reference object - need to download
+        if (item && typeof item === 'object' && (item.path || item.url)) {
+          const filePath = item.path || '';
+          const fileUrl = item.url || '';
+          
+          // Check if it's a JSON file with segments
+          if (filePath.endsWith('.json') || filePath.includes('segment') || filePath.includes('output.json')) {
+            console.log(`[WhisperX Gradio] Found potential segments file at index ${i}: ${filePath}`);
+            
+            if (fileUrl) {
+              try {
+                const fileRes = await fetch(fileUrl, {
+                  headers: { 'Cookie': sessionCookie },
+                });
+                if (fileRes.ok) {
+                  const fileContent = await fileRes.text();
+                  const parsed = JSON.parse(fileContent);
+                  if (Array.isArray(parsed) && parsed.length > 0) {
+                    segments = parsed;
+                    console.log(`[WhisperX Gradio] Downloaded segments from file: ${segments.length} segments`);
+                    break;
+                  }
+                }
+              } catch (e) {
+                console.warn(`[WhisperX Gradio] Failed to download segments file: ${e}`);
+              }
+            }
           }
         }
       }
+      
+      if (segments.length === 0) {
+        console.warn('[WhisperX Gradio] Could not find segments in any resultData index');
+      }
     } catch (e) {
-      console.warn('[WhisperX Gradio] Could not parse segment metadata:', e);
+      console.warn('[WhisperX Gradio] Error extracting segments:', e);
     }
     
     const textLength = transcriptionText.length;

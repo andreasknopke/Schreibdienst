@@ -311,22 +311,30 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     
     const resultData = JSON.parse(dataMatch[1]);
     
-    // DEBUG: Log the entire resultData structure
+    // DEBUG: Log the entire resultData structure to understand Gradio's output format
     console.log(`[Worker] Gradio resultData length: ${resultData.length}`);
-    console.log(`[Worker] resultData[0] type: ${typeof resultData[0]}, value: ${JSON.stringify(resultData[0]).substring(0, 100)}`);
-    console.log(`[Worker] resultData[3] type: ${typeof resultData[3]}, value: ${JSON.stringify(resultData[3]).substring(0, 300)}`);
+    for (let i = 0; i < resultData.length; i++) {
+      const item = resultData[i];
+      const itemType = typeof item;
+      let preview = '';
+      if (itemType === 'string') {
+        preview = item.substring(0, 100);
+      } else if (item && itemType === 'object') {
+        preview = JSON.stringify(item).substring(0, 150);
+      } else {
+        preview = String(item);
+      }
+      console.log(`[Worker] resultData[${i}] type: ${itemType}, preview: ${preview}`);
+    }
     
-    // Gradio returns array of results:
-    // resultData[0] = TXT transcription (string or {value: string})
-    // resultData[1] = VTT format
-    // resultData[2] = SRT format  
-    // resultData[3] = JSON with segments/timestamps
-    // resultData[4] = time message
+    // Gradio returns array of results - the structure may vary:
+    // Some indices contain file objects with {path, url} for downloadable files
+    // We need to find the JSON segments file and download it
     
     let transcriptionText = '';
     let segments: any[] = [];
     
-    // Extract transcription text
+    // Extract transcription text from first result
     const firstResult = resultData[0];
     
     if (typeof firstResult === 'string') {
@@ -342,21 +350,81 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
       }
     }
     
-    // Extract segments with timestamps from JSON result (index 3)
-    // This enables word-level highlighting in the frontend
+    // Extract segments with timestamps
+    // Gradio may return JSON directly OR as a file reference that needs to be downloaded
+    // Look through all result items to find the JSON segments
     try {
-      if (resultData[3]) {
-        const rawJson = typeof resultData[3] === 'string' ? resultData[3] : resultData[3]?.value;
-        if (rawJson) {
-          const parsedSegments = JSON.parse(rawJson);
-          if (Array.isArray(parsedSegments)) {
-            segments = parsedSegments;
-            console.log(`[Worker] Extracted ${segments.length} segments with timestamps`);
+      for (let i = 0; i < resultData.length; i++) {
+        const item = resultData[i];
+        
+        // Skip if already found segments
+        if (segments.length > 0) break;
+        
+        // Case 1: Direct JSON string
+        if (typeof item === 'string' && item.startsWith('[') && item.includes('"start"')) {
+          try {
+            const parsed = JSON.parse(item);
+            if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].start !== undefined) {
+              segments = parsed;
+              console.log(`[Worker] Found segments as direct JSON string at index ${i}: ${segments.length} segments`);
+              break;
+            }
+          } catch (e) { /* not valid JSON */ }
+        }
+        
+        // Case 2: Object with 'value' property containing JSON
+        if (item && typeof item === 'object' && item.value) {
+          const val = item.value;
+          if (typeof val === 'string' && val.startsWith('[')) {
+            try {
+              const parsed = JSON.parse(val);
+              if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].start !== undefined) {
+                segments = parsed;
+                console.log(`[Worker] Found segments in object.value at index ${i}: ${segments.length} segments`);
+                break;
+              }
+            } catch (e) { /* not valid JSON */ }
+          }
+        }
+        
+        // Case 3: File reference object - need to download the file
+        // Look for JSON file (not VTT or SRT)
+        if (item && typeof item === 'object' && (item.path || item.url)) {
+          const filePath = item.path || '';
+          const fileUrl = item.url || '';
+          
+          // Check if it's a JSON file with segments
+          if (filePath.endsWith('.json') || filePath.includes('segment') || filePath.includes('output.json')) {
+            console.log(`[Worker] Found potential segments file at index ${i}: ${filePath}`);
+            
+            // Download the file using the Gradio file API
+            if (fileUrl) {
+              try {
+                const fileRes = await fetch(fileUrl, {
+                  headers: { 'Cookie': sessionCookie },
+                });
+                if (fileRes.ok) {
+                  const fileContent = await fileRes.text();
+                  const parsed = JSON.parse(fileContent);
+                  if (Array.isArray(parsed) && parsed.length > 0) {
+                    segments = parsed;
+                    console.log(`[Worker] Downloaded segments from ${fileUrl}: ${segments.length} segments`);
+                    break;
+                  }
+                }
+              } catch (e) {
+                console.warn(`[Worker] Failed to download segments file: ${e}`);
+              }
+            }
           }
         }
       }
+      
+      if (segments.length === 0) {
+        console.warn('[Worker] Could not find segments in any resultData index');
+      }
     } catch (e) {
-      console.warn('[Worker] Could not parse segment metadata:', e);
+      console.warn('[Worker] Error extracting segments:', e);
     }
     
     if (!transcriptionText || transcriptionText.length === 0) {

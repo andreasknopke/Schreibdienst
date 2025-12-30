@@ -1,6 +1,6 @@
-import { NextResponse } from 'next/server';
-import { getRuntimeConfig } from '@/lib/configDb';
-import { loadDictionary, DictionaryEntry } from '@/lib/dictionaryDb';
+import { NextRequest, NextResponse } from 'next/server';
+import { getRuntimeConfigWithRequest } from '@/lib/configDb';
+import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 
 export const runtime = 'nodejs';
 
@@ -273,13 +273,13 @@ async function transcribeWithElevenLabs(file: Blob, filename: string) {
   };
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     console.log('\n=== Transcription Request Started ===')
     const requestStart = Date.now();
 
     // Provider-Auswahl aus Runtime-Konfiguration
-    const runtimeConfig = await getRuntimeConfig();
+    const runtimeConfig = await getRuntimeConfigWithRequest(request);
     const provider = runtimeConfig.transcriptionProvider;
     console.log(`[Config] Provider: ${provider} (from runtime config)`);
     
@@ -300,7 +300,7 @@ export async function POST(request: Request) {
     let initialPrompt: string | undefined;
     if (username && provider !== 'elevenlabs') {
       try {
-        const dictionary = await loadDictionary(username);
+        const dictionary = await loadDictionaryWithRequest(request, username);
         initialPrompt = getUniqueCorrectWords(dictionary);
         if (initialPrompt) {
           console.log(`[Dictionary] Loaded ${initialPrompt.split(', ').length} unique words for initial_prompt`);

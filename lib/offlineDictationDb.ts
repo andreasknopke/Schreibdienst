@@ -1,4 +1,5 @@
-import { getPool, query, execute } from './db';
+import { NextRequest } from 'next/server';
+import { getPool, query, execute, getPoolForRequest } from './db';
 
 // Offline Dictation Status
 export type DictationStatus = 'pending' | 'processing' | 'completed' | 'error';
@@ -344,6 +345,398 @@ export async function updateAudioData(
   mimeType: string
 ): Promise<void> {
   await execute(
+    `UPDATE offline_dictations 
+     SET audio_data = ?, audio_mime_type = ?
+     WHERE id = ?`,
+    [audioData, mimeType, id]
+  );
+}
+
+// ============================================================
+// Request-basierte Funktionen (für dynamische DB über Token)
+// ============================================================
+
+// Track if we've initialized the table per database pool
+const tableInitializedPerPool = new Map<string, boolean>();
+
+// Helper to get pool key for tracking
+function getPoolKeyFromRequest(request: NextRequest): string {
+  const dbToken = request.headers.get('x-db-token');
+  if (dbToken) {
+    try {
+      const decoded = Buffer.from(dbToken, 'base64').toString('utf8');
+      const parsed = JSON.parse(decoded);
+      return `${parsed.host}:${parsed.port || 3306}:${parsed.database}:${parsed.user}`;
+    } catch {
+      // Invalid token, fall through to default
+    }
+  }
+  return 'default';
+}
+
+// Initialize offline dictation tables with Request context
+export async function initOfflineDictationTableWithRequest(request: NextRequest): Promise<void> {
+  const poolKey = getPoolKeyFromRequest(request);
+  
+  // Only initialize once per pool
+  if (tableInitializedPerPool.get(poolKey)) {
+    return;
+  }
+  
+  const db = await getPoolForRequest(request);
+  
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS offline_dictations (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      username VARCHAR(255) NOT NULL,
+      audio_data LONGBLOB,
+      audio_mime_type VARCHAR(100) DEFAULT 'audio/webm',
+      audio_duration_seconds FLOAT DEFAULT 0,
+      order_number VARCHAR(255) NOT NULL,
+      patient_name VARCHAR(255),
+      patient_dob DATE,
+      priority ENUM('normal', 'urgent', 'stat') DEFAULT 'normal',
+      status ENUM('pending', 'processing', 'completed', 'error') DEFAULT 'pending',
+      mode ENUM('befund', 'arztbrief') DEFAULT 'befund',
+      raw_transcript TEXT,
+      transcript TEXT,
+      methodik TEXT,
+      befund TEXT,
+      beurteilung TEXT,
+      corrected_text TEXT,
+      error_message TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      processing_started_at TIMESTAMP NULL,
+      completed_at TIMESTAMP NULL,
+      INDEX idx_username (username),
+      INDEX idx_status (status),
+      INDEX idx_priority (priority),
+      INDEX idx_created_at (created_at)
+    )
+  `);
+  
+  // Migrate existing tables to add raw_transcript column if missing
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN raw_transcript TEXT AFTER mode`);
+    console.log(`[DB] ✓ Added raw_transcript column (${poolKey})`);
+  } catch (e: any) {
+    // Column already exists - ignore error
+  }
+  
+  // Migrate existing tables to add change_score column if missing
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN change_score INT DEFAULT NULL AFTER corrected_text`);
+    console.log(`[DB] ✓ Added change_score column (${poolKey})`);
+  } catch (e: any) {
+    // Column already exists - ignore error
+  }
+  
+  tableInitializedPerPool.set(poolKey, true);
+  console.log(`[DB] ✓ Offline dictations table ready (${poolKey})`);
+}
+
+// Create a new offline dictation with Request context
+export async function createOfflineDictationWithRequest(
+  request: NextRequest,
+  data: {
+    username: string;
+    audioData: Buffer;
+    audioMimeType: string;
+    audioDuration: number;
+    orderNumber: string;
+    patientName?: string;
+    patientDob?: string;
+    priority: DictationPriority;
+    mode: 'befund' | 'arztbrief';
+  }
+): Promise<number> {
+  const db = await getPoolForRequest(request);
+  const [result] = await db.execute(
+    `INSERT INTO offline_dictations 
+      (username, audio_data, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob, priority, mode, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+    [
+      data.username,
+      data.audioData,
+      data.audioMimeType,
+      data.audioDuration,
+      data.orderNumber,
+      data.patientName || null,
+      data.patientDob || null,
+      data.priority,
+      data.mode
+    ]
+  );
+  return (result as any).insertId;
+}
+
+// Get dictations for a user with Request context
+export async function getUserDictationsWithRequest(
+  request: NextRequest,
+  username: string
+): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
+  const db = await getPoolForRequest(request);
+  const [rows] = await db.execute(
+    `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
+            priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
+            created_at, processing_started_at, completed_at
+     FROM offline_dictations 
+     WHERE username = ?
+     ORDER BY 
+       CASE priority 
+         WHEN 'stat' THEN 1 
+         WHEN 'urgent' THEN 2 
+         ELSE 3 
+       END,
+       created_at DESC`,
+    [username]
+  );
+  return rows as Omit<OfflineDictation, 'audio_data'>[];
+}
+
+// Get all dictations with Request context
+export async function getAllDictationsWithRequest(
+  request: NextRequest,
+  statusFilter?: DictationStatus,
+  userFilter?: string
+): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
+  const db = await getPoolForRequest(request);
+  const conditions: string[] = [];
+  const params: string[] = [];
+  
+  if (statusFilter) {
+    conditions.push('status = ?');
+    params.push(statusFilter);
+  }
+  if (userFilter) {
+    conditions.push('username = ?');
+    params.push(userFilter);
+  }
+  
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  
+  const [rows] = await db.execute(
+    `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
+            priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
+            created_at, processing_started_at, completed_at
+     FROM offline_dictations 
+     ${whereClause}
+     ORDER BY 
+       CASE priority 
+         WHEN 'stat' THEN 1 
+         WHEN 'urgent' THEN 2 
+         ELSE 3 
+       END,
+       created_at DESC`,
+    params
+  );
+  return rows as Omit<OfflineDictation, 'audio_data'>[];
+}
+
+// Get list of unique usernames with Request context
+export async function getDictationUsersWithRequest(request: NextRequest): Promise<string[]> {
+  const db = await getPoolForRequest(request);
+  const [rows] = await db.execute<any[]>(
+    `SELECT DISTINCT username FROM offline_dictations ORDER BY username`
+  );
+  return rows.map((r: any) => r.username);
+}
+
+// Get pending dictations with Request context
+export async function getPendingDictationsWithRequest(
+  request: NextRequest,
+  limit: number = 10
+): Promise<OfflineDictation[]> {
+  const db = await getPoolForRequest(request);
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const [rows] = await db.execute(
+    `SELECT * FROM offline_dictations 
+     WHERE status = 'pending'
+     ORDER BY 
+       CASE priority 
+         WHEN 'stat' THEN 1 
+         WHEN 'urgent' THEN 2 
+         ELSE 3 
+       END,
+       created_at ASC
+     LIMIT ${safeLimit}`
+  );
+  return rows as OfflineDictation[];
+}
+
+// Get a single dictation by ID with Request context
+export async function getDictationByIdWithRequest(
+  request: NextRequest,
+  id: number,
+  includeAudio: boolean = false
+): Promise<OfflineDictation | null> {
+  const db = await getPoolForRequest(request);
+  const fields = includeAudio 
+    ? '*' 
+    : `id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
+       priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
+       created_at, processing_started_at, completed_at`;
+  
+  const [rows] = await db.execute<any[]>(
+    `SELECT ${fields} FROM offline_dictations WHERE id = ?`,
+    [id]
+  );
+  return rows[0] || null;
+}
+
+// Mark dictation as processing with Request context
+export async function markDictationProcessingWithRequest(
+  request: NextRequest,
+  id: number
+): Promise<void> {
+  const db = await getPoolForRequest(request);
+  await db.execute(
+    `UPDATE offline_dictations 
+     SET status = 'processing', processing_started_at = NOW()
+     WHERE id = ?`,
+    [id]
+  );
+}
+
+// Complete dictation with Request context
+export async function completeDictationWithRequest(
+  request: NextRequest,
+  id: number,
+  results: {
+    rawTranscript?: string;
+    transcript?: string;
+    methodik?: string;
+    befund?: string;
+    beurteilung?: string;
+    correctedText?: string;
+    changeScore?: number;
+  }
+): Promise<void> {
+  const db = await getPoolForRequest(request);
+  await db.execute(
+    `UPDATE offline_dictations 
+     SET status = 'completed',
+         raw_transcript = ?,
+         transcript = ?,
+         methodik = ?,
+         befund = ?,
+         beurteilung = ?,
+         corrected_text = ?,
+         change_score = ?,
+         completed_at = NOW()
+     WHERE id = ?`,
+    [
+      results.rawTranscript || null,
+      results.transcript || null,
+      results.methodik || null,
+      results.befund || null,
+      results.beurteilung || null,
+      results.correctedText || null,
+      results.changeScore ?? null,
+      id
+    ]
+  );
+}
+
+// Mark dictation as error with Request context
+export async function markDictationErrorWithRequest(
+  request: NextRequest,
+  id: number,
+  errorMessage: string
+): Promise<void> {
+  const db = await getPoolForRequest(request);
+  await db.execute(
+    `UPDATE offline_dictations 
+     SET status = 'error', error_message = ?, completed_at = NOW()
+     WHERE id = ?`,
+    [errorMessage, id]
+  );
+}
+
+// Delete audio data with Request context
+export async function deleteAudioDataWithRequest(
+  request: NextRequest,
+  id: number
+): Promise<void> {
+  const db = await getPoolForRequest(request);
+  await db.execute(
+    `UPDATE offline_dictations SET audio_data = NULL WHERE id = ?`,
+    [id]
+  );
+}
+
+// Update corrected text with Request context
+export async function updateCorrectedTextWithRequest(
+  request: NextRequest,
+  id: number,
+  correctedText: string,
+  changeScore?: number
+): Promise<void> {
+  const db = await getPoolForRequest(request);
+  await db.execute(
+    `UPDATE offline_dictations 
+     SET corrected_text = ?, change_score = ?
+     WHERE id = ?`,
+    [correctedText, changeScore ?? null, id]
+  );
+}
+
+// Delete dictation with Request context
+export async function deleteDictationWithRequest(
+  request: NextRequest,
+  id: number
+): Promise<void> {
+  const db = await getPoolForRequest(request);
+  await db.execute(`DELETE FROM offline_dictations WHERE id = ?`, [id]);
+}
+
+// Get queue stats with Request context
+export async function getQueueStatsWithRequest(
+  request: NextRequest
+): Promise<{
+  pending: number;
+  processing: number;
+  completed: number;
+  error: number;
+}> {
+  const db = await getPoolForRequest(request);
+  const [rows] = await db.execute<any[]>(
+    `SELECT status, COUNT(*) as count FROM offline_dictations GROUP BY status`
+  );
+  
+  const stats = { pending: 0, processing: 0, completed: 0, error: 0 };
+  for (const row of rows) {
+    stats[row.status as DictationStatus] = row.count;
+  }
+  return stats;
+}
+
+// Retry dictation with Request context
+export async function retryDictationWithRequest(
+  request: NextRequest,
+  id: number
+): Promise<void> {
+  const db = await getPoolForRequest(request);
+  await db.execute(
+    `UPDATE offline_dictations 
+     SET status = 'pending', 
+         error_message = NULL, 
+         processing_started_at = NULL, 
+         completed_at = NULL
+     WHERE id = ? AND status = 'error'`,
+    [id]
+  );
+}
+
+// Update audio data with Request context
+export async function updateAudioDataWithRequest(
+  request: NextRequest,
+  id: number,
+  audioData: Buffer,
+  mimeType: string
+): Promise<void> {
+  const db = await getPoolForRequest(request);
+  await db.execute(
     `UPDATE offline_dictations 
      SET audio_data = ?, audio_mime_type = ?
      WHERE id = ?`,

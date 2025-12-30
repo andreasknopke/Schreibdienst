@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  getPendingDictations,
-  markDictationProcessing,
-  completeDictation,
-  markDictationError,
-  getDictationById,
-  initOfflineDictationTable,
-  updateAudioData,
+  getPendingDictationsWithRequest,
+  markDictationProcessingWithRequest,
+  completeDictationWithRequest,
+  markDictationErrorWithRequest,
+  getDictationByIdWithRequest,
+  initOfflineDictationTableWithRequest,
+  updateAudioDataWithRequest,
 } from '@/lib/offlineDictationDb';
-import { getRuntimeConfig, WHISPER_OFFLINE_MODELS } from '@/lib/configDb';
-import { loadDictionary } from '@/lib/dictionaryDb';
+import { getRuntimeConfigWithRequest, WHISPER_OFFLINE_MODELS } from '@/lib/configDb';
+import { loadDictionaryWithRequest } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription } from '@/lib/textFormatting';
 import { compressAudioForSpeech } from '@/lib/audioCompression';
@@ -22,10 +22,10 @@ let isProcessing = false;
 let lastProcessTime = 0;
 
 // Process a single dictation
-async function processDictation(dictationId: number): Promise<void> {
+async function processDictation(request: NextRequest, dictationId: number): Promise<void> {
   console.log(`[Worker] Processing dictation #${dictationId}`);
   
-  const dictation = await getDictationById(dictationId, true);
+  const dictation = await getDictationByIdWithRequest(request, dictationId, true);
   if (!dictation) {
     throw new Error(`Dictation #${dictationId} not found`);
   }
@@ -35,7 +35,7 @@ async function processDictation(dictationId: number): Promise<void> {
   }
   
   // Mark as processing
-  await markDictationProcessing(dictationId);
+  await markDictationProcessingWithRequest(request, dictationId);
   
   try {
     // Step 1: Transcribe audio
@@ -43,7 +43,7 @@ async function processDictation(dictationId: number): Promise<void> {
     // Convert Buffer to Uint8Array for Blob compatibility
     const audioData = new Uint8Array(dictation.audio_data);
     const audioBlob = new Blob([audioData], { type: dictation.audio_mime_type });
-    const transcriptionResult = await transcribeAudio(audioBlob, dictation.username);
+    const transcriptionResult = await transcribeAudio(request, audioBlob, dictation.username);
     
     if (!transcriptionResult.text) {
       throw new Error('Transcription returned empty text');
@@ -58,7 +58,7 @@ async function processDictation(dictationId: number): Promise<void> {
     const rawTranscript = transcriptionResult.text;
     
     // Load user dictionary for preprocessing
-    const dictionary = dictation.username ? await loadDictionary(dictation.username) : { entries: [] };
+    const dictionary = dictation.username ? await loadDictionaryWithRequest(request, dictation.username) : { entries: [] };
     const dictionaryEntries = dictionary.entries;
     
     // Preprocess: apply formatting control words AND dictionary corrections BEFORE LLM
@@ -68,13 +68,13 @@ async function processDictation(dictationId: number): Promise<void> {
     console.log(`[Worker] Preprocessed text: ${rawTranscript.length} → ${preprocessedText.length} chars${dictionaryEntries.length > 0 ? ` (dictionary: ${dictionaryEntries.length} entries applied)` : ''}`);
     
     // Always use Arztbrief mode - no field parsing
-    const correctedText = await correctText(preprocessedText, dictation.username);
+    const correctedText = await correctText(request, preprocessedText, dictation.username);
     
     // Berechne Änderungsscore für Ampelsystem (compare with raw transcript)
     const changeScore = calculateChangeScore(rawTranscript, correctedText);
     console.log(`[Worker] Change score for #${dictationId}: ${changeScore}%`);
     
-    await completeDictation(dictationId, {
+    await completeDictationWithRequest(request, dictationId, {
       rawTranscript: rawTranscript,
       transcript: rawTranscript, // Keep for backwards compatibility
       correctedText: correctedText,
@@ -91,7 +91,7 @@ async function processDictation(dictationId: number): Promise<void> {
       );
       
       if (compressionResult.compressed) {
-        await updateAudioData(dictationId, compressionResult.data, compressionResult.mimeType);
+        await updateAudioDataWithRequest(request, dictationId, compressionResult.data, compressionResult.mimeType);
         console.log(`[Worker] Audio compressed for #${dictationId}`);
       } else {
         console.log(`[Worker] Audio compression skipped for #${dictationId} (not available or not beneficial)`);
@@ -105,14 +105,14 @@ async function processDictation(dictationId: number): Promise<void> {
     
   } catch (error: any) {
     console.error(`[Worker] ✗ Error processing dictation #${dictationId}:`, error.message);
-    await markDictationError(dictationId, error.message);
+    await markDictationErrorWithRequest(request, dictationId, error.message);
     throw error;
   }
 }
 
 // Transcribe audio using the same logic as the transcribe API
-async function transcribeAudio(audioBlob: Blob, username?: string): Promise<{ text: string }> {
-  const runtimeConfig = await getRuntimeConfig();
+async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?: string): Promise<{ text: string }> {
+  const runtimeConfig = await getRuntimeConfigWithRequest(request);
   const provider = runtimeConfig.transcriptionProvider;
   
   // Lade Wörterbuch für initial_prompt bei WhisperX
@@ -120,7 +120,7 @@ async function transcribeAudio(audioBlob: Blob, username?: string): Promise<{ te
   let initialPrompt: string | undefined;
   if (username && provider !== 'elevenlabs') {
     try {
-      const dictionary = await loadDictionary(username);
+      const dictionary = await loadDictionaryWithRequest(request, username);
       // Extrahiere einzigartige korrekte Wörter nur von Einträgen mit useInPrompt=true
       const correctWords = new Set<string>();
       for (const entry of dictionary.entries) {
@@ -142,7 +142,7 @@ async function transcribeAudio(audioBlob: Blob, username?: string): Promise<{ te
   }
   
   try {
-    return await transcribeWithWhisperX(audioBlob, initialPrompt);
+    return await transcribeWithWhisperX(request, audioBlob, initialPrompt);
   } catch (error: any) {
     console.warn('[Worker] WhisperX failed, trying ElevenLabs fallback:', error.message);
     if (process.env.ELEVENLABS_API_KEY) {
@@ -152,7 +152,7 @@ async function transcribeAudio(audioBlob: Blob, username?: string): Promise<{ te
   }
 }
 
-async function transcribeWithWhisperX(file: Blob, initialPrompt?: string): Promise<{ text: string }> {
+async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialPrompt?: string): Promise<{ text: string }> {
   const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:5000';
   const isGradio = whisperUrl.includes(':7860');
   
@@ -195,7 +195,7 @@ async function transcribeWithWhisperX(file: Blob, initialPrompt?: string): Promi
     const filePath = uploadData[0].path || uploadData[0];
     
     // Process - use configured offline model
-    const runtimeConfig = await getRuntimeConfig();
+    const runtimeConfig = await getRuntimeConfigWithRequest(request);
     const offlineModelId = runtimeConfig.whisperOfflineModel || 'large-v3-turbo-german';
     const offlineModelConfig = WHISPER_OFFLINE_MODELS.find(m => m.id === offlineModelId);
     const whisperModel = offlineModelConfig?.modelPath || 'primeline/whisper-large-v3-turbo-german';
@@ -274,11 +274,11 @@ async function transcribeWithElevenLabs(file: Blob): Promise<{ text: string }> {
 }
 
 // Correct text using LLM
-async function correctText(text: string, username: string): Promise<string> {
-  const llmConfig = await getLLMConfig();
+async function correctText(request: NextRequest, text: string, username: string): Promise<string> {
+  const llmConfig = await getLLMConfig(request);
   
   // Load runtime config to get custom prompt addition
-  const runtimeConfig = await getRuntimeConfig();
+  const runtimeConfig = await getRuntimeConfigWithRequest(request);
   const promptAddition = runtimeConfig.llmPromptAddition?.trim();
   
   // Note: Dictionary corrections are now applied programmatically in preprocessTranscription()
@@ -454,8 +454,8 @@ KRITISCH - AUSGABEFORMAT:
 }
 
 // LLM helper
-async function getLLMConfig() {
-  const runtimeConfig = await getRuntimeConfig();
+async function getLLMConfig(request: NextRequest) {
+  const runtimeConfig = await getRuntimeConfigWithRequest(request);
   const provider = runtimeConfig.llmProvider;
   
   if (provider === 'lmstudio') {
@@ -609,7 +609,7 @@ async function callLLM(
 // POST: Trigger worker to process pending dictations
 export async function POST(req: NextRequest) {
   try {
-    await initOfflineDictationTable();
+    await initOfflineDictationTableWithRequest(req);
     
     // Check if already processing
     if (isProcessing) {
@@ -623,7 +623,7 @@ export async function POST(req: NextRequest) {
     lastProcessTime = Date.now();
     
     try {
-      const pending = await getPendingDictations(5);
+      const pending = await getPendingDictationsWithRequest(req, 5);
       
       if (pending.length === 0) {
         return NextResponse.json({ message: 'No pending dictations', processed: 0 });
@@ -636,7 +636,7 @@ export async function POST(req: NextRequest) {
       
       for (const dictation of pending) {
         try {
-          await processDictation(dictation.id);
+          await processDictation(req, dictation.id);
           processed++;
         } catch (error: any) {
           console.error(`[Worker] Failed to process #${dictation.id}:`, error.message);

@@ -1,36 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  createOfflineDictation,
-  getUserDictations,
-  getAllDictations,
-  getDictationById,
-  deleteDictation,
-  deleteAudioData,
-  retryDictation,
-  updateCorrectedText,
-  initOfflineDictationTable,
-  getQueueStats,
-  getDictationUsers,
+  createOfflineDictationWithRequest,
+  getUserDictationsWithRequest,
+  getAllDictationsWithRequest,
+  getDictationByIdWithRequest,
+  deleteDictationWithRequest,
+  deleteAudioDataWithRequest,
+  retryDictationWithRequest,
+  updateCorrectedTextWithRequest,
+  initOfflineDictationTableWithRequest,
+  getQueueStatsWithRequest,
+  getDictationUsersWithRequest,
   DictationPriority,
   DictationStatus,
 } from '@/lib/offlineDictationDb';
 
 export const runtime = 'nodejs';
 
-// Initialize table on first request
-let tableInitialized = false;
-
-async function ensureTable() {
-  if (!tableInitialized) {
-    await initOfflineDictationTable();
-    tableInitialized = true;
-  }
-}
-
 // GET: List dictations for user or get single dictation
 export async function GET(req: NextRequest) {
   try {
-    await ensureTable();
+    await initOfflineDictationTableWithRequest(req);
     
     const { searchParams } = new URL(req.url);
     const username = searchParams.get('username');
@@ -43,20 +33,20 @@ export async function GET(req: NextRequest) {
     
     // Get list of users with dictations
     if (listUsers === 'true') {
-      const users = await getDictationUsers();
+      const users = await getDictationUsersWithRequest(req);
       return NextResponse.json(users);
     }
     
     // Get queue statistics
     if (stats === 'true') {
-      const queueStats = await getQueueStats();
+      const queueStats = await getQueueStatsWithRequest(req);
       return NextResponse.json(queueStats);
     }
     
     // Get single dictation
     if (id) {
       const includeAudio = searchParams.get('audio') === 'true';
-      const dictation = await getDictationById(parseInt(id), includeAudio);
+      const dictation = await getDictationByIdWithRequest(req, parseInt(id), includeAudio);
       if (!dictation) {
         return NextResponse.json({ error: 'Dictation not found' }, { status: 404 });
       }
@@ -78,7 +68,7 @@ export async function GET(req: NextRequest) {
     
     // Get all dictations (for users with permission)
     if (all === 'true') {
-      const dictations = await getAllDictations(statusFilter || undefined, userFilter || undefined);
+      const dictations = await getAllDictationsWithRequest(req, statusFilter || undefined, userFilter || undefined);
       return NextResponse.json(dictations);
     }
     
@@ -87,7 +77,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Username required' }, { status: 400 });
     }
     
-    const dictations = await getUserDictations(username);
+    const dictations = await getUserDictationsWithRequest(req, username);
     return NextResponse.json(dictations);
   } catch (error: any) {
     console.error('[Offline Dictations] GET error:', error);
@@ -98,7 +88,7 @@ export async function GET(req: NextRequest) {
 // POST: Create new offline dictation
 export async function POST(req: NextRequest) {
   try {
-    await ensureTable();
+    await initOfflineDictationTableWithRequest(req);
     
     const formData = await req.formData();
     
@@ -122,7 +112,7 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await audioFile.arrayBuffer();
     const audioBuffer = Buffer.from(arrayBuffer);
     
-    const id = await createOfflineDictation({
+    const id = await createOfflineDictationWithRequest(req, {
       username,
       audioData: audioBuffer,
       audioMimeType: audioFile.type || 'audio/webm',
@@ -146,7 +136,7 @@ export async function POST(req: NextRequest) {
 // DELETE: Remove dictation or just audio
 export async function DELETE(req: NextRequest) {
   try {
-    await ensureTable();
+    await initOfflineDictationTableWithRequest(req);
     
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
@@ -159,12 +149,12 @@ export async function DELETE(req: NextRequest) {
     const dictationId = parseInt(id);
     
     if (audioOnly) {
-      await deleteAudioData(dictationId);
+      await deleteAudioDataWithRequest(req, dictationId);
       console.log(`[Offline Dictations] Deleted audio for dictation #${dictationId}`);
       return NextResponse.json({ message: 'Audio deleted' });
     }
     
-    await deleteDictation(dictationId);
+    await deleteDictationWithRequest(req, dictationId);
     console.log(`[Offline Dictations] Deleted dictation #${dictationId}`);
     return NextResponse.json({ message: 'Dictation deleted' });
   } catch (error: any) {
@@ -176,7 +166,7 @@ export async function DELETE(req: NextRequest) {
 // PATCH: Retry failed dictation or save corrected text
 export async function PATCH(req: NextRequest) {
   try {
-    await ensureTable();
+    await initOfflineDictationTableWithRequest(req);
     
     const { id, action, correctedText, changeScore } = await req.json();
     
@@ -185,7 +175,7 @@ export async function PATCH(req: NextRequest) {
     }
     
     if (action === 'retry') {
-      await retryDictation(id);
+      await retryDictationWithRequest(req, id);
       console.log(`[Offline Dictations] Retry queued for dictation #${id}`);
       return NextResponse.json({ message: 'Dictation queued for retry' });
     }
@@ -194,7 +184,7 @@ export async function PATCH(req: NextRequest) {
       if (correctedText === undefined) {
         return NextResponse.json({ error: 'correctedText required for save action' }, { status: 400 });
       }
-      await updateCorrectedText(id, correctedText, changeScore);
+      await updateCorrectedTextWithRequest(req, id, correctedText, changeScore);
       console.log(`[Offline Dictations] Saved corrected text for dictation #${id}`);
       return NextResponse.json({ message: 'Corrected text saved' });
     }

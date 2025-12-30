@@ -5,6 +5,8 @@ import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { useAuth } from './AuthProvider';
 import { ChangeIndicator, ChangeIndicatorDot, ChangeWarningBanner } from './ChangeIndicator';
 import { preprocessTranscription } from '@/lib/textFormatting';
+import CustomActionButtons from './CustomActionButtons';
+import CustomActionsManager from './CustomActionsManager';
 
 interface Dictation {
   id: number;
@@ -71,6 +73,9 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   
   // Fullscreen mode for better readability of long texts
   const [isFullscreen, setIsFullscreen] = useState(false);
+  
+  // Custom Actions Manager modal
+  const [showCustomActionsManager, setShowCustomActionsManager] = useState(false);
   
   // Text selection for dictionary feature
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -924,45 +929,67 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                 {/* Results - always Arztbrief mode */}
                 {selectedDictation.status === 'completed' && (
                   <div className="space-y-3">
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2">
-                          <label className="text-xs font-medium text-gray-500">
-                            {isReverted ? 'Reine Transkription (vor Korrektur)' : 'Korrigiertes Ergebnis'}
-                          </label>
-                          {!isReverted && selectedDictation.change_score !== undefined && (
-                            <ChangeIndicator score={selectedDictation.change_score} size="sm" />
-                          )}
+                    {/* Textarea with Action Buttons */}
+                    <div className="flex gap-2">
+                      {/* Textarea section */}
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs font-medium text-gray-500">
+                              {isReverted ? 'Reine Transkription (vor Korrektur)' : 'Korrigiertes Ergebnis'}
+                            </label>
+                            {!isReverted && selectedDictation.change_score !== undefined && (
+                              <ChangeIndicator score={selectedDictation.change_score} size="sm" />
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {isReverted && (
+                              <span className="text-xs text-orange-600 dark:text-orange-400">⚠️ Unkorrigiert</span>
+                            )}
+                            <button
+                              className="btn btn-xs btn-ghost"
+                              onClick={() => setIsFullscreen(!isFullscreen)}
+                              title={isFullscreen ? 'Vollbild beenden (Esc)' : 'Vollbild anzeigen'}
+                            >
+                              {isFullscreen ? '🗗 Verkleinern' : '🗖 Vollbild'}
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          {isReverted && (
-                            <span className="text-xs text-orange-600 dark:text-orange-400">⚠️ Unkorrigiert</span>
-                          )}
-                          <button
-                            className="btn btn-xs btn-ghost"
-                            onClick={() => setIsFullscreen(!isFullscreen)}
-                            title={isFullscreen ? 'Vollbild beenden (Esc)' : 'Vollbild anzeigen'}
-                          >
-                            {isFullscreen ? '🗗 Verkleinern' : '🗖 Vollbild'}
-                          </button>
-                        </div>
+                        <textarea
+                          ref={textareaRef}
+                          className={`mt-1 w-full p-2 rounded text-sm font-mono resize-y ${
+                            isFullscreen ? 'min-h-[60vh]' : 'min-h-[200px]'
+                          } ${
+                            isReverted 
+                              ? 'bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800' 
+                              : 'bg-gray-50 dark:bg-gray-800'
+                          }`}
+                          value={editedTexts.corrected_text}
+                          onChange={(e) => {
+                            setEditedTexts(prev => ({ ...prev, corrected_text: e.target.value }));
+                            setHasUnsavedChanges(true);
+                          }}
+                          placeholder="(leer)"
+                        />
                       </div>
-                      <textarea
-                        ref={textareaRef}
-                        className={`mt-1 w-full p-2 rounded text-sm font-mono resize-y ${
-                          isFullscreen ? 'min-h-[60vh]' : 'min-h-[200px]'
-                        } ${
-                          isReverted 
-                            ? 'bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800' 
-                            : 'bg-gray-50 dark:bg-gray-800'
-                        }`}
-                        value={editedTexts.corrected_text}
-                        onChange={(e) => {
-                          setEditedTexts(prev => ({ ...prev, corrected_text: e.target.value }));
-                          setHasUnsavedChanges(true);
-                        }}
-                        placeholder="(leer)"
-                      />
+                      
+                      {/* Custom Action Buttons - right side */}
+                      {isFullscreen && (
+                        <div className="w-28 flex-shrink-0">
+                          <div className="sticky top-4">
+                            <CustomActionButtons
+                              currentField="transcript"
+                              getText={() => editedTexts.corrected_text}
+                              onResult={(result) => {
+                                setEditedTexts(prev => ({ ...prev, corrected_text: result }));
+                                setHasUnsavedChanges(true);
+                              }}
+                              disabled={isReCorrecting}
+                              onManageClick={() => setShowCustomActionsManager(true)}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                     
                     {/* Revert/Re-Correct Buttons */}
@@ -1135,6 +1162,11 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
             </div>
           )}
         </div>
+      )}
+      
+      {/* Custom Actions Manager Modal */}
+      {showCustomActionsManager && (
+        <CustomActionsManager onClose={() => setShowCustomActionsManager(false)} />
       )}
     </div>
   );

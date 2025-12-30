@@ -30,6 +30,8 @@ async function processDictation(request: NextRequest, dictationId: number): Prom
     throw new Error(`Dictation #${dictationId} not found`);
   }
   
+  console.log(`[Worker] Dictation #${dictationId} loaded: audio_data=${dictation.audio_data ? dictation.audio_data.length + ' bytes' : 'NULL'}, mime=${dictation.audio_mime_type}`);
+  
   if (!dictation.audio_data) {
     throw new Error(`Dictation #${dictationId} has no audio data`);
   }
@@ -43,6 +45,7 @@ async function processDictation(request: NextRequest, dictationId: number): Prom
     // Convert Buffer to Uint8Array for Blob compatibility
     const audioData = new Uint8Array(dictation.audio_data);
     const audioBlob = new Blob([audioData], { type: dictation.audio_mime_type });
+    console.log(`[Worker] Audio blob created: size=${audioBlob.size}, type=${audioBlob.type}, originalMime=${dictation.audio_mime_type}`);
     const transcriptionResult = await transcribeAudio(request, audioBlob, dictation.username);
     
     if (!transcriptionResult.text) {
@@ -184,15 +187,23 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     const uploadFormData = new FormData();
     uploadFormData.append('files', file, 'audio.webm');
     
+    console.log(`[Worker] Uploading audio to Gradio: size=${file.size}, type=${file.type}`);
+    
     const uploadRes = await fetch(`${whisperUrl}/gradio_api/upload?upload_id=${Date.now()}`, {
       method: 'POST',
       headers: { 'Cookie': sessionCookie },
       body: uploadFormData,
     });
     
-    if (!uploadRes.ok) throw new Error(`Gradio upload failed (${uploadRes.status})`);
+    if (!uploadRes.ok) {
+      const errorText = await uploadRes.text();
+      console.error(`[Worker] Gradio upload failed: ${uploadRes.status} - ${errorText.substring(0, 200)}`);
+      throw new Error(`Gradio upload failed (${uploadRes.status}): ${errorText.substring(0, 100)}`);
+    }
     const uploadData = await uploadRes.json();
-    const filePath = uploadData[0].path || uploadData[0];
+    console.log(`[Worker] Gradio upload response:`, JSON.stringify(uploadData).substring(0, 200));
+    const filePath = uploadData[0]?.path || uploadData[0];
+    console.log(`[Worker] Gradio file path: ${filePath}`);
     
     // Process - use configured offline model
     const runtimeConfig = await getRuntimeConfigWithRequest(request);
@@ -214,8 +225,13 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
       }),
     });
     
-    if (!processRes.ok) throw new Error(`Gradio process failed (${processRes.status})`);
+    if (!processRes.ok) {
+      const errorText = await processRes.text();
+      console.error(`[Worker] Gradio process start failed: ${processRes.status} - ${errorText.substring(0, 200)}`);
+      throw new Error(`Gradio process failed (${processRes.status}): ${errorText.substring(0, 100)}`);
+    }
     const processData = await processRes.json();
+    console.log(`[Worker] Gradio process started: event_id=${processData.event_id}`);
     
     // Get result
     const resultRes = await fetch(`${whisperUrl}/gradio_api/call/start_process/${processData.event_id}`, {

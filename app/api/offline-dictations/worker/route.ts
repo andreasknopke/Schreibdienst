@@ -257,18 +257,18 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     console.log(`[Worker] Gradio file path: ${filePath}`);
     
     // Use same model as online transcription for Gradio compatibility
-    // The Gradio interface may only support certain models
-    let whisperModel = process.env.WHISPER_MODEL || 'large-v3';
-    // Use optimized German model for large-v3 (same as transcribe route)
-    if (whisperModel === 'large-v3') {
-      whisperModel = 'cstr/whisper-large-v3-turbo-german-int8_float32';
-    }
-    console.log(`[Worker] Using Gradio model: ${whisperModel}`);
+    // Load from runtime config (which reads from DB), fallback to env, then default
+    const runtimeConfig = await getRuntimeConfigWithRequest(request);
+    let whisperModel = runtimeConfig.whisperModel || process.env.WHISPER_MODEL || 'large-v3';
+    console.log(`[Worker] Using Gradio model from config: ${whisperModel}`);
     
     // Log initial_prompt usage for medical terminology
     if (initialPrompt) {
       console.log(`[Worker] Using initial_prompt with ${initialPrompt.split(', ').length} medical terms for Gradio`);
     }
+    
+    // Language code for WhisperX - use ISO code "de" instead of "German"
+    const languageCode = 'de';
     
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
       method: 'POST',
@@ -276,7 +276,7 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
       body: JSON.stringify({
         data: [
           { path: filePath, orig_name: fileName, size: normalizedFile.size, mime_type: normalizedMimeType, meta: { _type: 'gradio.FileData' } },
-          "German",
+          languageCode,
           whisperModel,
           "cuda",
           initialPrompt || "" // medical dictionary terms for better recognition

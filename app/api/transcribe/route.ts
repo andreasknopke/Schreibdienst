@@ -26,10 +26,12 @@ function getUniqueCorrectWords(dictionary: { entries: DictionaryEntry[] }): stri
 // Transkriptions-Provider auswählen
 type TranscriptionProvider = 'whisperx' | 'elevenlabs';
 
-async function transcribeWithWhisperX(file: Blob, filename: string, initialPrompt?: string) {
+async function transcribeWithWhisperX(file: Blob, filename: string, initialPrompt?: string, whisperModel?: string) {
   const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:5000';
   const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
-  console.log(`[WhisperX] Starting transcription - File: ${filename}, Size: ${fileSizeMB}MB, URL: ${whisperUrl}${initialPrompt ? `, Initial prompt: ${initialPrompt.length} chars` : ''}`);
+  // Use provided model or fallback to env/default
+  const modelToUse = whisperModel || process.env.WHISPER_MODEL || 'large-v3';
+  console.log(`[WhisperX] Starting transcription - File: ${filename}, Size: ${fileSizeMB}MB, URL: ${whisperUrl}, Model: ${modelToUse}${initialPrompt ? `, Initial prompt: ${initialPrompt.length} chars` : ''}`);
 
   const startTime = Date.now();
   
@@ -107,12 +109,14 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
       meta: { _type: 'gradio.FileData' }
     };
     
-    const whisperModel = process.env.WHISPER_MODEL || 'large-v3';
-    
     // Log initial_prompt usage for medical terminology
     if (initialPrompt) {
       console.log(`[WhisperX Gradio] Using initial_prompt with ${initialPrompt.split(', ').length} medical terms`);
     }
+    
+    // Language code for WhisperX - use ISO code "de" instead of "German"
+    const languageCode = 'de';
+    console.log(`[WhisperX Gradio] Using model: ${modelToUse}, language: ${languageCode}`);
 
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
       method: 'POST',
@@ -123,8 +127,8 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
       body: JSON.stringify({
         data: [
           fileDataObj,   // file
-          "German",      // language
-          whisperModel,  // model_name (from env or default large-v3)
+          languageCode,  // language (ISO code)
+          modelToUse,    // model_name (from runtime config)
           "cuda",        // device
           initialPrompt || "" // medical dictionary terms for better recognition
         ]
@@ -402,6 +406,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Get whisper model from runtime config
+    const whisperModel = runtimeConfig.whisperModel;
+    console.log(`[Config] WhisperX Model: ${whisperModel} (from runtime config)`);
+
     // Transkription mit gewähltem Provider
     let result;
     
@@ -412,7 +420,7 @@ export async function POST(request: NextRequest) {
       // WhisperX ist Standard, mit Fallback zu ElevenLabs
       console.log('Using WhisperX as primary provider');
       try {
-        result = await transcribeWithWhisperX(file, filename, initialPrompt);
+        result = await transcribeWithWhisperX(file, filename, initialPrompt, whisperModel);
       } catch (whisperError: any) {
         console.warn('WhisperX failed, trying ElevenLabs fallback:', whisperError.message);
         

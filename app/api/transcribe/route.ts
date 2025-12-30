@@ -393,18 +393,20 @@ export async function POST(request: NextRequest) {
     console.log(`[Input] File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type || 'unknown'}, User: ${username || 'unknown'}`);
 
     // Lade Wörterbuch für initial_prompt bei WhisperX
+    // TEMPORÄR DEAKTIVIERT: initial_prompt verursacht Halluzinationen
     let initialPrompt: string | undefined;
-    if (username && provider !== 'elevenlabs') {
-      try {
-        const dictionary = await loadDictionaryWithRequest(request, username);
-        initialPrompt = getUniqueCorrectWords(dictionary);
-        if (initialPrompt) {
-          console.log(`[Dictionary] Loaded ${initialPrompt.split(', ').length} unique words for initial_prompt`);
-        }
-      } catch (err) {
-        console.warn('[Dictionary] Failed to load dictionary:', err);
-      }
-    }
+    // if (username && provider !== 'elevenlabs') {
+    //   try {
+    //     const dictionary = await loadDictionaryWithRequest(request, username);
+    //     initialPrompt = getUniqueCorrectWords(dictionary);
+    //     if (initialPrompt) {
+    //       console.log(`[Dictionary] Loaded ${initialPrompt.split(', ').length} unique words for initial_prompt`);
+    //     }
+    //   } catch (err) {
+    //     console.warn('[Dictionary] Failed to load dictionary:', err);
+    //   }
+    // }
+    console.log(`[Dictionary] initial_prompt deaktiviert (Halluzinationsproblem)`);
 
     // Get whisper model from runtime config (Online-Transkription)
     // For online mode, use whisperModel directly (full HuggingFace path)
@@ -422,6 +424,25 @@ export async function POST(request: NextRequest) {
       console.log('Using WhisperX as primary provider');
       try {
         result = await transcribeWithWhisperX(file, filename, initialPrompt, whisperModel);
+        
+        // Detect if Whisper is hallucinating/repeating the initial_prompt
+        // This is a known Whisper bug where it repeats prompt words instead of transcribing
+        if (initialPrompt && result.text) {
+          const promptWords = initialPrompt.split(',').map(w => w.trim().toLowerCase());
+          const transcriptionWords = result.text.toLowerCase().split(/\s+/);
+          
+          // Check if transcription is just repeating prompt words
+          const uniqueTranscriptionWords = [...new Set(transcriptionWords)] as string[];
+          const allWordsFromPrompt = uniqueTranscriptionWords.every((word: string) => 
+            promptWords.some(promptWord => promptWord.includes(word) || word.includes(promptWord))
+          );
+          
+          // If transcription only contains prompt words and is repetitive, retry without prompt
+          if (allWordsFromPrompt && transcriptionWords.length > 2 && uniqueTranscriptionWords.length <= 3) {
+            console.warn(`[WhisperX] Detected Whisper hallucination (repeating prompt words). Retrying without initial_prompt...`);
+            result = await transcribeWithWhisperX(file, filename, undefined, whisperModel);
+          }
+        }
       } catch (whisperError: any) {
         console.warn('WhisperX failed, trying ElevenLabs fallback:', whisperError.message);
         

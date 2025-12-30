@@ -161,7 +161,29 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?:
   }
   
   try {
-    return await transcribeWithWhisperX(request, audioBlob, initialPrompt);
+    const result = await transcribeWithWhisperX(request, audioBlob, initialPrompt);
+    
+    // Detect if Whisper is hallucinating/repeating the initial_prompt
+    // This is a known Whisper bug where it repeats prompt words instead of transcribing
+    if (initialPrompt && result.text) {
+      const promptWords = initialPrompt.split(',').map(w => w.trim().toLowerCase());
+      const transcriptionWords = result.text.toLowerCase().split(/\s+/);
+      
+      // Check if transcription is just repeating prompt words
+      const uniqueTranscriptionWords = [...new Set(transcriptionWords)] as string[];
+      const allWordsFromPrompt = uniqueTranscriptionWords.every((word: string) => 
+        promptWords.some(promptWord => promptWord.includes(word) || word.includes(promptWord))
+      );
+      
+      // If transcription only contains prompt words and is repetitive, retry without prompt
+      if (allWordsFromPrompt && transcriptionWords.length > 2 && uniqueTranscriptionWords.length <= 3) {
+        console.warn(`[Worker] Detected Whisper hallucination (repeating prompt words). Retrying without initial_prompt...`);
+        const retryResult = await transcribeWithWhisperX(request, audioBlob, undefined);
+        return retryResult;
+      }
+    }
+    
+    return result;
   } catch (error: any) {
     console.warn('[Worker] WhisperX failed, trying ElevenLabs fallback:', error.message);
     if (process.env.ELEVENLABS_API_KEY) {

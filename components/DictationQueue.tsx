@@ -1030,6 +1030,10 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                           {segment.words ? (
                             // Word-level highlighting
                             segment.words.map((word, wordIdx) => {
+                              // Skip words without valid timestamps
+                              if (word.start === undefined || word.end === undefined) {
+                                return <span key={`${segIdx}-${wordIdx}`}>{word.word}{' '}</span>;
+                              }
                               const isCurrentWord = audioCurrentTime >= word.start && audioCurrentTime < word.end;
                               return (
                                 <span
@@ -1055,23 +1059,27 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             })
                           ) : (
                             // Segment-level highlighting (fallback if no words)
-                            <span
-                              className={`transition-colors duration-100 ${
-                                audioCurrentTime >= segment.start && audioCurrentTime < segment.end
-                                  ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold rounded px-0.5'
-                                  : audioCurrentTime > segment.end
-                                    ? 'text-gray-500 dark:text-gray-500'
-                                    : ''
-                              }`}
-                              onClick={() => {
-                                if (audioRef.current) {
-                                  audioRef.current.currentTime = segment.start;
-                                }
-                              }}
-                              style={{ cursor: 'pointer' }}
-                            >
-                              {segment.text}{' '}
-                            </span>
+                            segment.start !== undefined && segment.end !== undefined ? (
+                              <span
+                                className={`transition-colors duration-100 ${
+                                  audioCurrentTime >= segment.start && audioCurrentTime < segment.end
+                                    ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold rounded px-0.5'
+                                    : audioCurrentTime > segment.end
+                                      ? 'text-gray-500 dark:text-gray-500'
+                                      : ''
+                                }`}
+                                onClick={() => {
+                                  if (audioRef.current) {
+                                    audioRef.current.currentTime = segment.start;
+                                  }
+                                }}
+                                style={{ cursor: 'pointer' }}
+                              >
+                                {segment.text}{' '}
+                              </span>
+                            ) : (
+                              <span>{segment.text}{' '}</span>
+                            )
                           )}
                         </span>
                       ))}

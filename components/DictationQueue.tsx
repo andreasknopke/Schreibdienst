@@ -253,6 +253,19 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
   
+  // Download audio file
+  const downloadAudio = () => {
+    if (!audioUrl || !selectedDictation) return;
+    const link = document.createElement('a');
+    link.href = audioUrl;
+    // Use dictation ID and timestamp for filename
+    const date = new Date(selectedDictation.created_at).toISOString().split('T')[0];
+    link.download = `diktat_${selectedDictation.id}_${date}.webm`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+  
   // Auto-scroll to current word in Mitlesen panel
   useEffect(() => {
     if (!showMitlesen || !mitlesenRef.current || !isPlaying) return;
@@ -952,6 +965,15 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             }}
                             className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-gray-300 dark:bg-gray-600"
                           />
+                          
+                          {/* Download button */}
+                          <button
+                            className="btn btn-sm btn-outline ml-2"
+                            onClick={downloadAudio}
+                            title="Audio herunterladen"
+                          >
+                            ⬇️
+                          </button>
                         </div>
                       </>
                     )}

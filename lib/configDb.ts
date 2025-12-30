@@ -37,7 +37,7 @@ export interface RuntimeConfig {
 const DEFAULT_CONFIG: RuntimeConfig = {
   transcriptionProvider: (process.env.TRANSCRIPTION_PROVIDER as any) || 'whisperx',
   llmProvider: (process.env.LLM_PROVIDER as any) || 'openai',
-  whisperModel: process.env.WHISPER_MODEL || 'medium',
+  whisperModel: process.env.WHISPER_MODEL || 'deepdml/faster-whisper-large-v3-german-2',
   whisperOfflineModel: (process.env.WHISPER_OFFLINE_MODEL as WhisperOfflineModel) || 'large-v3-german-2',
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
 };

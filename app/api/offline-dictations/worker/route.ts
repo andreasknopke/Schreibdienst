@@ -52,13 +52,15 @@ async function processDictation(request: NextRequest, dictationId: number): Prom
       throw new Error('Transcription returned empty text');
     }
     
-    console.log(`[Worker] Transcription complete for #${dictationId}: ${transcriptionResult.text.length} chars`);
+    console.log(`[Worker] Transcription complete for #${dictationId}: ${transcriptionResult.text.length} chars, ${transcriptionResult.segments?.length || 0} segments`);
     
     // Step 2: Correct with LLM - ALWAYS use Arztbrief mode (no Methodik/Beurteilung sections)
     console.log(`[Worker] Correcting dictation #${dictationId} as Arztbrief...`);
     
     // Store raw transcription before any processing
     const rawTranscript = transcriptionResult.text;
+    // Store segments for word-level highlighting during audio playback
+    const segments = transcriptionResult.segments;
     
     // Load user dictionary for preprocessing
     const dictionary = dictation.username ? await loadDictionaryWithRequest(request, dictation.username) : { entries: [] };
@@ -79,6 +81,7 @@ async function processDictation(request: NextRequest, dictationId: number): Prom
     
     await completeDictationWithRequest(request, dictationId, {
       rawTranscript: rawTranscript,
+      segments: segments, // Word-level timestamps for "Mitlesen" highlighting
       transcript: rawTranscript, // Keep for backwards compatibility
       correctedText: correctedText,
       changeScore: changeScore,
@@ -114,7 +117,7 @@ async function processDictation(request: NextRequest, dictationId: number): Prom
 }
 
 // Transcribe audio using the same logic as the transcribe API
-async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?: string): Promise<{ text: string }> {
+async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?: string): Promise<{ text: string; segments?: any[] }> {
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
   const provider = runtimeConfig.transcriptionProvider;
   
@@ -155,7 +158,7 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?:
   }
 }
 
-async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialPrompt?: string): Promise<{ text: string }> {
+async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialPrompt?: string): Promise<{ text: string; segments?: any[] }> {
   const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:5000';
   const isGradio = whisperUrl.includes(':7860');
   
@@ -249,6 +252,11 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     }
     console.log(`[Worker] Using Gradio model: ${whisperModel}`);
     
+    // Log initial_prompt usage for medical terminology
+    if (initialPrompt) {
+      console.log(`[Worker] Using initial_prompt with ${initialPrompt.split(', ').length} medical terms for Gradio`);
+    }
+    
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Cookie': sessionCookie },
@@ -257,7 +265,8 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
           { path: filePath, orig_name: fileName, size: normalizedFile.size, mime_type: normalizedMimeType, meta: { _type: 'gradio.FileData' } },
           "German",
           whisperModel,
-          "cuda"
+          "cuda",
+          initialPrompt || "" // medical dictionary terms for better recognition
         ]
       }),
     });
@@ -289,9 +298,17 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     
     const resultData = JSON.parse(dataMatch[1]);
     
-    // Gradio returns array of results or update objects
-    // Index 0 is TXT transcription - can be string or {value: string, __type__: "update"}
+    // Gradio returns array of results:
+    // resultData[0] = TXT transcription (string or {value: string})
+    // resultData[1] = VTT format
+    // resultData[2] = SRT format  
+    // resultData[3] = JSON with segments/timestamps
+    // resultData[4] = time message
+    
     let transcriptionText = '';
+    let segments: any[] = [];
+    
+    // Extract transcription text
     const firstResult = resultData[0];
     
     if (typeof firstResult === 'string') {
@@ -307,11 +324,28 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
       }
     }
     
+    // Extract segments with timestamps from JSON result (index 3)
+    // This enables word-level highlighting in the frontend
+    try {
+      if (resultData[3]) {
+        const rawJson = typeof resultData[3] === 'string' ? resultData[3] : resultData[3]?.value;
+        if (rawJson) {
+          const parsedSegments = JSON.parse(rawJson);
+          if (Array.isArray(parsedSegments)) {
+            segments = parsedSegments;
+            console.log(`[Worker] Extracted ${segments.length} segments with timestamps`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Worker] Could not parse segment metadata:', e);
+    }
+    
     if (!transcriptionText || transcriptionText.length === 0) {
       console.warn(`[Worker] Warning: Empty transcription returned from WhisperX`);
     }
     
-    return { text: transcriptionText };
+    return { text: transcriptionText, segments };
   }
   
   // FastAPI implementation - use normalized file
@@ -331,10 +365,10 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
   if (!res.ok) throw new Error(`WhisperX API error (${res.status})`);
   
   const data = await res.json();
-  return { text: data.text ?? '' };
+  return { text: data.text ?? '', segments: data.segments || [] };
 }
 
-async function transcribeWithElevenLabs(file: Blob): Promise<{ text: string }> {
+async function transcribeWithElevenLabs(file: Blob): Promise<{ text: string; segments?: any[] }> {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) throw new Error('ELEVENLABS_API_KEY not configured');
   

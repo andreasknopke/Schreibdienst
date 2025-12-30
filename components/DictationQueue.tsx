@@ -19,6 +19,7 @@ interface Dictation {
   status: 'pending' | 'processing' | 'completed' | 'error';
   mode: 'befund' | 'arztbrief';
   raw_transcript?: string; // Pure Transkription vor LLM-Korrektur
+  segments?: string; // JSON with word-level timestamps for highlighting
   transcript?: string;
   methodik?: string;
   befund?: string;
@@ -28,6 +29,18 @@ interface Dictation {
   error_message?: string;
   created_at: string;
   completed_at?: string;
+}
+
+// Segment interface for word-level highlighting
+interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+  words?: {
+    word: string;
+    start: number;
+    end: number;
+  }[];
 }
 
 interface DictationQueueProps {
@@ -88,6 +101,11 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [audioDuration, setAudioDuration] = useState(0);
   const [audioLoading, setAudioLoading] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
+  
+  // "Mitlesen" mode - show original transcript with word highlighting
+  const [showMitlesen, setShowMitlesen] = useState(false);
+  const [parsedSegments, setParsedSegments] = useState<TranscriptSegment[]>([]);
+  const mitlesenRef = useRef<HTMLDivElement>(null);
 
   // Load available users for filter
   const loadUsers = useCallback(async () => {
@@ -234,6 +252,16 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
+  
+  // Auto-scroll to current word in Mitlesen panel
+  useEffect(() => {
+    if (!showMitlesen || !mitlesenRef.current || !isPlaying) return;
+    
+    const currentWordEl = mitlesenRef.current.querySelector('.bg-yellow-300, .dark\\:bg-yellow-600');
+    if (currentWordEl) {
+      currentWordEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [audioCurrentTime, showMitlesen, isPlaying]);
   
   // Load audio when entering fullscreen
   useEffect(() => {
@@ -539,6 +567,24 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       setIsReverted(false); // Reset revert state when selection changes
       setApplyFormatting(false); // Reset formatting toggle when selection changes
       setHasUnsavedChanges(false); // Reset unsaved changes when selection changes
+      setShowMitlesen(false); // Reset Mitlesen mode when selection changes
+      
+      // Parse segments for word-level highlighting
+      if (selected.segments) {
+        try {
+          const segments = JSON.parse(selected.segments);
+          if (Array.isArray(segments)) {
+            setParsedSegments(segments);
+          } else {
+            setParsedSegments([]);
+          }
+        } catch (e) {
+          console.warn('Could not parse segments:', e);
+          setParsedSegments([]);
+        }
+      } else {
+        setParsedSegments([]);
+      }
     }
   }, [selectedId, dictations]);
 
@@ -918,6 +964,88 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                         🔄 Audio laden
                       </button>
                     )}
+                    
+                    {/* Mitlesen toggle button */}
+                    {audioUrl && parsedSegments.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                        <button
+                          className={`btn btn-sm ${showMitlesen ? 'btn-primary' : 'btn-outline'}`}
+                          onClick={() => setShowMitlesen(!showMitlesen)}
+                          title="Zeigt die originale Transkription mit Wort-Highlighting während der Wiedergabe"
+                        >
+                          {showMitlesen ? '📖 Mitlesen aus' : '📖 Mitlesen an'}
+                        </button>
+                        {showMitlesen && (
+                          <span className="ml-2 text-xs text-gray-500">
+                            Original-Transkription mit Wort-Zeitstempeln
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* Mitlesen Panel - Word-level highlighting of original transcription */}
+                {isFullscreen && showMitlesen && parsedSegments.length > 0 && (
+                  <div 
+                    ref={mitlesenRef}
+                    className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 max-h-48 overflow-y-auto"
+                  >
+                    <div className="text-xs text-blue-600 dark:text-blue-400 mb-2 font-medium">
+                      📖 Original Whisper-Transkription (Mitlesen)
+                    </div>
+                    <div className="text-sm leading-relaxed">
+                      {parsedSegments.map((segment, segIdx) => (
+                        <span key={segIdx}>
+                          {segment.words ? (
+                            // Word-level highlighting
+                            segment.words.map((word, wordIdx) => {
+                              const isCurrentWord = audioCurrentTime >= word.start && audioCurrentTime < word.end;
+                              return (
+                                <span
+                                  key={`${segIdx}-${wordIdx}`}
+                                  className={`transition-colors duration-100 ${
+                                    isCurrentWord 
+                                      ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold rounded px-0.5' 
+                                      : audioCurrentTime > word.end 
+                                        ? 'text-gray-500 dark:text-gray-500' 
+                                        : ''
+                                  }`}
+                                  onClick={() => {
+                                    if (audioRef.current) {
+                                      audioRef.current.currentTime = word.start;
+                                    }
+                                  }}
+                                  style={{ cursor: 'pointer' }}
+                                  title={`${word.start.toFixed(1)}s - ${word.end.toFixed(1)}s`}
+                                >
+                                  {word.word}{' '}
+                                </span>
+                              );
+                            })
+                          ) : (
+                            // Segment-level highlighting (fallback if no words)
+                            <span
+                              className={`transition-colors duration-100 ${
+                                audioCurrentTime >= segment.start && audioCurrentTime < segment.end
+                                  ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold rounded px-0.5'
+                                  : audioCurrentTime > segment.end
+                                    ? 'text-gray-500 dark:text-gray-500'
+                                    : ''
+                              }`}
+                              onClick={() => {
+                                if (audioRef.current) {
+                                  audioRef.current.currentTime = segment.start;
+                                }
+                              }}
+                              style={{ cursor: 'pointer' }}
+                            >
+                              {segment.text}{' '}
+                            </span>
+                          )}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
 

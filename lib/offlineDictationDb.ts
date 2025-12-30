@@ -22,6 +22,7 @@ export interface OfflineDictation {
   mode: 'befund' | 'arztbrief';
   // Results
   raw_transcript?: string; // Pure Transkription vor LLM-Korrektur
+  segments?: string; // JSON array with word-level timestamps for highlighting
   transcript?: string;
   methodik?: string;
   befund?: string;
@@ -91,6 +92,17 @@ export async function initOfflineDictationTable(): Promise<void> {
     }
   }
   
+  // Migrate existing tables to add segments column for word-level timestamps
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN segments LONGTEXT AFTER raw_transcript`);
+    console.log('[DB] ✓ Added segments column');
+  } catch (e: any) {
+    // Column already exists - ignore error
+    if (!e.message?.includes('Duplicate column')) {
+      console.log('[DB] segments column already exists');
+    }
+  }
+  
   console.log('[DB] ✓ Offline dictations table ready');
 }
 
@@ -131,7 +143,7 @@ export async function createOfflineDictation(
 export async function getUserDictations(username: string): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
   return query(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
+            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
      WHERE username = ?
@@ -164,7 +176,7 @@ export async function getAllDictations(statusFilter?: DictationStatus, userFilte
   
   return query(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
+            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
      ${whereClause}
@@ -212,7 +224,7 @@ export async function getDictationById(id: number, includeAudio: boolean = false
   const fields = includeAudio 
     ? '*' 
     : `id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-       priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
+       priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
        created_at, processing_started_at, completed_at`;
   
   const rows = await query<OfflineDictation>(
@@ -431,6 +443,14 @@ export async function initOfflineDictationTableWithRequest(request: NextRequest)
     // Column already exists - ignore error
   }
   
+  // Migrate existing tables to add segments column for word-level timestamps
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN segments LONGTEXT AFTER raw_transcript`);
+    console.log(`[DB] ✓ Added segments column (${poolKey})`);
+  } catch (e: any) {
+    // Column already exists - ignore error
+  }
+  
   tableInitializedPerPool.set(poolKey, true);
   console.log(`[DB] ✓ Offline dictations table ready (${poolKey})`);
 }
@@ -478,7 +498,7 @@ export async function getUserDictationsWithRequest(
   const db = await getPoolForRequest(request);
   const [rows] = await db.execute(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
+            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
      WHERE username = ?
@@ -517,7 +537,7 @@ export async function getAllDictationsWithRequest(
   
   const [rows] = await db.execute(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
+            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
      ${whereClause}
@@ -574,7 +594,7 @@ export async function getDictationByIdWithRequest(
   const fields = includeAudio 
     ? '*' 
     : `id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-       priority, status, mode, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
+       priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
        created_at, processing_started_at, completed_at`;
   
   const [rows] = await db.execute<any[]>(
@@ -604,6 +624,7 @@ export async function completeDictationWithRequest(
   id: number,
   results: {
     rawTranscript?: string;
+    segments?: any[]; // Word-level timestamps for highlighting
     transcript?: string;
     methodik?: string;
     befund?: string;
@@ -613,10 +634,14 @@ export async function completeDictationWithRequest(
   }
 ): Promise<void> {
   const db = await getPoolForRequest(request);
+  // Serialize segments to JSON string for storage
+  const segmentsJson = results.segments ? JSON.stringify(results.segments) : null;
+  
   await db.execute(
     `UPDATE offline_dictations 
      SET status = 'completed',
          raw_transcript = ?,
+         segments = ?,
          transcript = ?,
          methodik = ?,
          befund = ?,
@@ -627,6 +652,7 @@ export async function completeDictationWithRequest(
      WHERE id = ?`,
     [
       results.rawTranscript || null,
+      segmentsJson,
       results.transcript || null,
       results.methodik || null,
       results.befund || null,

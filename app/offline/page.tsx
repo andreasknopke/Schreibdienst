@@ -3,6 +3,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import OfflineRecorder from '@/components/OfflineRecorder';
 import DictationQueue from '@/components/DictationQueue';
+import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 
 export default function OfflineDictationPage() {
   const { username, canViewAllDictations } = useAuth();
@@ -39,7 +40,7 @@ export default function OfflineDictationPage() {
     if (data.patientName) formData.append('patientName', data.patientName);
     if (data.patientDob) formData.append('patientDob', data.patientDob);
 
-    const res = await fetch('/api/offline-dictations', {
+    const res = await fetchWithDbToken('/api/offline-dictations', {
       method: 'POST',
       body: formData,
     });
@@ -50,7 +51,7 @@ export default function OfflineDictationPage() {
     }
 
     // Trigger worker to process
-    fetch('/api/offline-dictations/worker', { method: 'POST' }).catch(() => {});
+    fetchWithDbToken('/api/offline-dictations/worker', { method: 'POST' }).catch(() => {});
 
     // Refresh queue and switch to queue tab
     setRefreshKey(k => k + 1);

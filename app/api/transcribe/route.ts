@@ -122,6 +122,14 @@ function getUniqueCorrectWords(dictionary: { entries: DictionaryEntry[] }): stri
 // Transkriptions-Provider auswählen
 type TranscriptionProvider = 'whisperx' | 'elevenlabs';
 
+// Session-Cache für Gradio (vermeidet wiederholtes Login)
+let gradioSessionCache: {
+  cookie: string;
+  timestamp: number;
+  url: string;
+} | null = null;
+const SESSION_MAX_AGE = 5 * 60 * 1000; // 5 Minuten
+
 async function transcribeWithWhisperX(file: Blob, filename: string, initialPrompt?: string, whisperModel?: string, speedMode: 'turbo' | 'precision' | 'auto' = 'turbo') {
   const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:5000';
   const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
@@ -135,53 +143,81 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
   const isGradio = whisperUrl.includes(':7860');
   
   if (isGradio) {
-    console.log(`[WhisperX] Detected Gradio interface`);
+    // Prüfe ob wir eine gültige gecachte Session haben
+    const now = Date.now();
+    let sessionCookie: string;
     
-    // Get auth credentials (with workaround for env var names with trailing newlines)
-    const authUser = process.env.WHISPER_AUTH_USERNAME;
-    let authPass = process.env.WHISPER_AUTH_PASSWORD;
-    
-    // Fallback: find password by iterating env vars (handles malformed var names)
-    if (!authPass) {
-      const whisperEnvVars = Object.keys(process.env).filter(k => k.includes('WHISPER'));
-      for (const key of whisperEnvVars) {
-        if (key.includes('PASSWORD')) {
-          authPass = process.env[key] || '';
+    if (gradioSessionCache && 
+        gradioSessionCache.url === whisperUrl && 
+        (now - gradioSessionCache.timestamp) < SESSION_MAX_AGE) {
+      // Nutze gecachte Session
+      sessionCookie = gradioSessionCache.cookie;
+      console.log(`[WhisperX] Using cached Gradio session`);
+    } else {
+      // Neue Session erstellen
+      console.log(`[WhisperX] Creating new Gradio session`);
+      
+      // Get auth credentials (with workaround for env var names with trailing newlines)
+      const authUser = process.env.WHISPER_AUTH_USERNAME;
+      let authPass = process.env.WHISPER_AUTH_PASSWORD;
+      
+      // Fallback: find password by iterating env vars (handles malformed var names)
+      if (!authPass) {
+        const whisperEnvVars = Object.keys(process.env).filter(k => k.includes('WHISPER'));
+        for (const key of whisperEnvVars) {
+          if (key.includes('PASSWORD')) {
+            authPass = process.env[key] || '';
+          }
         }
       }
+      
+      // Step 1: Login to get session cookie
+      const loginBody = `username=${encodeURIComponent(authUser || '')}&password=${encodeURIComponent(authPass || '')}`;
+      
+      const loginRes = await fetch(`${whisperUrl}/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: loginBody,
+      });
+      
+      if (!loginRes.ok) {
+        const errorText = await loginRes.text();
+        throw new Error(`Gradio login failed (${loginRes.status}): ${errorText}`);
+      }
+      
+      // Get session cookie from response
+      const setCookieHeader = loginRes.headers.get('set-cookie');
+      sessionCookie = setCookieHeader?.split(';')[0] || '';
+      
+      // Cache die Session
+      gradioSessionCache = {
+        cookie: sessionCookie,
+        timestamp: now,
+        url: whisperUrl
+      };
     }
-    
-    // Step 1: Login to get session cookie
-    const loginBody = `username=${encodeURIComponent(authUser || '')}&password=${encodeURIComponent(authPass || '')}`;
-    
-    const loginRes = await fetch(`${whisperUrl}/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: loginBody,
-    });
-    
-    if (!loginRes.ok) {
-      const errorText = await loginRes.text();
-      throw new Error(`Gradio login failed (${loginRes.status}): ${errorText}`);
-    }
-    
-    // Get session cookie from response
-    const setCookieHeader = loginRes.headers.get('set-cookie');
-    const sessionCookie = setCookieHeader?.split(';')[0] || '';
     
     // Step 2: Upload file
     const uploadFormData = new FormData();
     uploadFormData.append('files', file, filename);
     
-    const uploadRes = await fetch(`${whisperUrl}/gradio_api/upload?upload_id=${Date.now()}`, {
+    let uploadRes = await fetch(`${whisperUrl}/gradio_api/upload?upload_id=${Date.now()}`, {
       method: 'POST',
       headers: {
         'Cookie': sessionCookie,
       },
       body: uploadFormData,
     });
+    
+    // Bei 401/403: Session abgelaufen, Cache invalidieren und neu versuchen
+    if (uploadRes.status === 401 || uploadRes.status === 403) {
+      console.log(`[WhisperX] Session expired, re-authenticating...`);
+      gradioSessionCache = null;
+      // Rekursiver Aufruf mit frischer Session
+      return transcribeWithWhisperX(file, filename, initialPrompt, whisperModel, speedMode);
+    }
     
     if (!uploadRes.ok) {
       const text = await uploadRes.text();
@@ -205,14 +241,8 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
       meta: { _type: 'gradio.FileData' }
     };
     
-    // Log initial_prompt usage for medical terminology
-    if (initialPrompt) {
-      console.log(`[WhisperX Gradio] Using initial_prompt with ${initialPrompt.split(', ').length} medical terms`);
-    }
-    
     // Language for WhisperX Gradio - must match dropdown options (full name, not ISO code)
     const languageCode = 'German';
-    console.log(`[WhisperX Gradio] Using model: ${modelToUse}, language: ${languageCode}`);
 
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
       method: 'POST',
@@ -263,22 +293,6 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
     
     const resultData = JSON.parse(dataMatch[1]);
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-    
-    // DEBUG: Log structure to understand Gradio output format
-    console.log(`[WhisperX Gradio] resultData length: ${resultData.length}`);
-    for (let i = 0; i < Math.min(resultData.length, 6); i++) {
-      const item = resultData[i];
-      const itemType = typeof item;
-      let preview = '';
-      if (itemType === 'string') {
-        preview = item.substring(0, 80);
-      } else if (item && itemType === 'object') {
-        preview = JSON.stringify(item).substring(0, 120);
-      } else {
-        preview = String(item);
-      }
-      console.log(`[WhisperX Gradio] resultData[${i}]: ${itemType} = ${preview}`);
-    }
     
     let transcriptionText = '';
     // Online-Modus: Keine Segmente extrahieren (Mitlesen nicht benötigt, spart Zeit)

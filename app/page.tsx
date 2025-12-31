@@ -19,7 +19,8 @@ async function copyToClipboard(text: string): Promise<void> {
 }
 
 // Intervall für kontinuierliche Transkription (in ms)
-const TRANSCRIPTION_INTERVAL = 3000;
+// 2 Sekunden für schnelle Rückmeldung
+const TRANSCRIPTION_INTERVAL = 2000;
 
 // Steuerbefehle für Befund-Felder
 type BefundField = 'methodik' | 'befund' | 'beurteilung';

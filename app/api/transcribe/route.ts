@@ -4,6 +4,72 @@ import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 
 export const runtime = 'nodejs';
 
+/**
+ * Erkennt und entfernt Whisper-Halluzinationen (Wiederholungsmuster)
+ * z.B. "Das ist ein Test, das ist ein Test, das ist ein Test" -> "Das ist ein Test"
+ */
+function detectAndRemoveRepetition(text: string): string {
+  if (!text || text.length < 20) return text;
+  
+  // Normalisiere Text für Vergleich
+  const normalized = text.toLowerCase().trim();
+  
+  // Suche nach Wiederholungsmustern unterschiedlicher Längen
+  for (let patternLen = 5; patternLen <= Math.floor(normalized.length / 2); patternLen++) {
+    // Extrahiere potentielles Muster vom Anfang
+    const pattern = normalized.substring(0, patternLen);
+    
+    // Zähle wie oft das Muster vorkommt
+    let count = 0;
+    let pos = 0;
+    while (pos < normalized.length) {
+      const nextOccurrence = normalized.indexOf(pattern, pos);
+      if (nextOccurrence === -1) break;
+      count++;
+      pos = nextOccurrence + 1;
+    }
+    
+    // Wenn das Muster mehr als 2x vorkommt, ist es wahrscheinlich eine Halluzination
+    if (count >= 3) {
+      // Finde das erste vollständige Vorkommen und gib es zurück
+      // Suche nach einem sinnvollen Abschluss (Satzzeichen oder Wortgrenze)
+      const originalPattern = text.substring(0, patternLen);
+      
+      // Erweitere bis zum nächsten Satzzeichen oder Komma
+      let endPos = patternLen;
+      const punctuation = ['.', ',', '!', '?', ';', ':'];
+      for (let i = patternLen; i < text.length; i++) {
+        if (punctuation.includes(text[i])) {
+          endPos = i + 1;
+          break;
+        }
+        // Prüfe ob wir am Anfang einer Wiederholung sind
+        if (text.substring(i).toLowerCase().startsWith(pattern)) {
+          break;
+        }
+        endPos = i + 1;
+      }
+      
+      const cleaned = text.substring(0, endPos).trim();
+      // Entferne trailing Komma
+      return cleaned.replace(/,\s*$/, '');
+    }
+  }
+  
+  // Einfachere Erkennung: Komma-getrennte Wiederholungen
+  const parts = text.split(/[,،]+/).map(p => p.trim().toLowerCase());
+  if (parts.length >= 3) {
+    const firstPart = parts[0];
+    const allSame = parts.slice(1).every(p => p === firstPart || p.startsWith(firstPart) || firstPart.startsWith(p));
+    if (allSame && firstPart.length > 3) {
+      // Gib nur den ersten Teil zurück
+      return text.split(/[,،]+/)[0].trim();
+    }
+  }
+  
+  return text;
+}
+
 // Extrahiere eindeutige korrekte Wörter aus dem Wörterbuch für initial_prompt
 // Nur Einträge mit useInPrompt=true werden berücksichtigt
 function getUniqueCorrectWords(dictionary: { entries: DictionaryEntry[] }): string {
@@ -210,8 +276,15 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
       console.warn(`[WhisperX Gradio] Warning: Empty transcription returned`);
     }
     
+    // Halluzinations-Erkennung: Wiederholungsmuster erkennen
+    // z.B. "Das ist ein Test, das ist ein Test, das ist ein Test"
+    const cleanedText = detectAndRemoveRepetition(transcriptionText);
+    if (cleanedText !== transcriptionText) {
+      console.warn(`[WhisperX Gradio] ⚠ Repetition detected and cleaned: "${transcriptionText.substring(0, 50)}..." -> "${cleanedText}"`);
+    }
+    
     return {
-      text: transcriptionText,
+      text: cleanedText,
       segments: segments, // Now includes word-level timestamps for frontend highlighting
       language: 'de',
       provider: 'whisperx' as const

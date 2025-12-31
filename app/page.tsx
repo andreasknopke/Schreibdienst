@@ -19,7 +19,11 @@ async function copyToClipboard(text: string): Promise<void> {
 }
 
 // Intervall für kontinuierliche Transkription (in ms)
-const TRANSCRIPTION_INTERVAL = 3000;
+// 5 Sekunden für stabilere Audio-Chunks (weniger Halluzinationen)
+const TRANSCRIPTION_INTERVAL = 5000;
+
+// Minimale Audio-Größe in Bytes für Transkription (ca. 0.5s Audio)
+const MIN_AUDIO_SIZE = 10000;
 
 // Steuerbefehle für Befund-Felder
 type BefundField = 'methodik' | 'befund' | 'beurteilung';
@@ -365,9 +369,16 @@ export default function HomePage() {
   const processLiveTranscription = useCallback(async () => {
     if (allChunksRef.current.length === 0) return;
     
+    const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
+    
+    // Überspringe zu kleine Audio-Chunks (verursachen Halluzinationen)
+    if (blob.size < MIN_AUDIO_SIZE) {
+      console.log(`[Live] Skipping small chunk: ${blob.size} bytes < ${MIN_AUDIO_SIZE} minimum`);
+      return;
+    }
+    
     setTranscribing(true);
     try {
-      const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
       const currentTranscript = await transcribeChunk(blob, true);
       
       // Nur aktualisieren wenn sich etwas geändert hat

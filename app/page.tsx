@@ -9,6 +9,7 @@ import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicat
 import { applyFormattingControlWords, preprocessTranscription } from '@/lib/textFormatting';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
+import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
 
 // Identifier für PowerShell Clipboard-Listener (RadCentre Integration)
 const CLIPBOARD_IDENTIFIER = '##RAD##';
@@ -110,6 +111,9 @@ export default function HomePage() {
     befund: number;
     beurteilung: number;
   } | null>(null);
+  
+  // Diff-Ansicht: Zeigt Unterschiede zwischen formatiertem Original und KI-korrigiertem Text
+  const [showDiffView, setShowDiffView] = useState(false);
 
   // Custom Actions Manager
   const [showCustomActionsManager, setShowCustomActionsManager] = useState(false);
@@ -459,6 +463,7 @@ export default function HomePage() {
     setChangeScore(null);
     setBefundChangeScores({ methodik: 0, befund: 0, beurteilung: 0 });
     setApplyFormatting(true); // Reset auf Standard
+    setShowDiffView(false); // Reset diff view
   }, []);
 
   // Revert-Funktion: Stellt den Text vor der letzten Korrektur wieder her
@@ -1390,14 +1395,24 @@ export default function HomePage() {
               ✨ Neu
             </button>
             {canRevert && preCorrectionState && (
-              <button 
-                className="btn btn-outline text-sm py-1.5 px-3 text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-600 dark:hover:bg-amber-900/20" 
-                onClick={handleRevert}
-                title="Korrektur rückgängig machen - zeigt den Originaltext"
-                disabled={correcting}
-              >
-                ↩ Revert
-              </button>
+              <>
+                <button 
+                  className="btn btn-outline text-sm py-1.5 px-3 text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-600 dark:hover:bg-amber-900/20" 
+                  onClick={handleRevert}
+                  title="Korrektur rückgängig machen - zeigt den Originaltext"
+                  disabled={correcting}
+                >
+                  ↩ Revert
+                </button>
+                <button 
+                  className={`btn text-sm py-1.5 px-3 ${showDiffView ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setShowDiffView(!showDiffView)}
+                  title="Zeigt Unterschiede zwischen Original und KI-Korrektur"
+                  disabled={correcting || isReverted}
+                >
+                  🔍 {showDiffView ? 'Diff aus' : 'Diff'}
+                </button>
+              </>
             )}
             {isReverted && preCorrectionState && (
               <>
@@ -1583,6 +1598,9 @@ export default function HomePage() {
                     )}
                   </label>
                   <div className="flex items-center gap-2">
+                    {showDiffView && preCorrectionState && (
+                      <DiffStats originalText={preCorrectionState.methodik} correctedText={methodik} />
+                    )}
                     <span className="text-xs text-gray-400">{methodik ? `${methodik.length}` : ''}</span>
                     <button 
                       className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
@@ -1594,6 +1612,16 @@ export default function HomePage() {
                     </button>
                   </div>
                 </div>
+                {/* Diff View für Methodik */}
+                {showDiffView && preCorrectionState && !isReverted && preCorrectionState.methodik && (
+                  <div className="p-2 rounded-lg border bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 max-h-32 overflow-auto text-xs">
+                    <DiffHighlight
+                      originalText={preCorrectionState.methodik}
+                      correctedText={methodik}
+                      showDiff={true}
+                    />
+                  </div>
+                )}
                 <textarea
                   className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                   value={methodik}
@@ -1632,6 +1660,9 @@ export default function HomePage() {
                     )}
                   </label>
                   <div className="flex items-center gap-2">
+                    {showDiffView && preCorrectionState && (
+                      <DiffStats originalText={preCorrectionState.befund} correctedText={transcript} />
+                    )}
                     <span className="text-xs text-gray-400">{transcript ? `${transcript.length}` : ''}</span>
                     <button 
                       className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
@@ -1643,6 +1674,16 @@ export default function HomePage() {
                     </button>
                   </div>
                 </div>
+                {/* Diff View für Befund */}
+                {showDiffView && preCorrectionState && !isReverted && preCorrectionState.befund && (
+                  <div className="p-2 rounded-lg border bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 max-h-48 overflow-auto text-xs">
+                    <DiffHighlight
+                      originalText={preCorrectionState.befund}
+                      correctedText={transcript}
+                      showDiff={true}
+                    />
+                  </div>
+                )}
                 <textarea
                   className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                   value={transcript}
@@ -1690,6 +1731,9 @@ export default function HomePage() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
+                    {showDiffView && preCorrectionState && (
+                      <DiffStats originalText={preCorrectionState.beurteilung} correctedText={beurteilung} />
+                    )}
                     <span className="text-xs text-gray-400">{beurteilung ? `${beurteilung.length}` : ''}</span>
                     <button 
                       className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
@@ -1701,6 +1745,16 @@ export default function HomePage() {
                     </button>
                   </div>
                 </div>
+                {/* Diff View für Beurteilung */}
+                {showDiffView && preCorrectionState && !isReverted && preCorrectionState.beurteilung && (
+                  <div className="p-2 rounded-lg border bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 max-h-32 overflow-auto text-xs">
+                    <DiffHighlight
+                      originalText={preCorrectionState.beurteilung}
+                      correctedText={beurteilung}
+                      showDiff={true}
+                    />
+                  </div>
+                )}
                 <textarea
                   className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                   value={beurteilung}
@@ -1748,6 +1802,9 @@ export default function HomePage() {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {showDiffView && preCorrectionState && (
+                  <DiffStats originalText={preCorrectionState.transcript} correctedText={transcript} />
+                )}
                 <span className="text-xs text-gray-400">{transcript ? `${transcript.length}` : ''}</span>
                 <button 
                   className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
@@ -1762,6 +1819,17 @@ export default function HomePage() {
             
             {/* Warnbanner bei signifikanten Änderungen */}
             <ChangeWarningBanner score={changeScore} />
+            
+            {/* Diff View für Arztbrief */}
+            {showDiffView && preCorrectionState && !isReverted && preCorrectionState.transcript && (
+              <div className="p-3 rounded-lg border bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 max-h-64 overflow-auto">
+                <DiffHighlight
+                  originalText={preCorrectionState.transcript}
+                  correctedText={transcript}
+                  showDiff={true}
+                />
+              </div>
+            )}
             
             <div className="flex gap-2">
               <div className="flex-1">

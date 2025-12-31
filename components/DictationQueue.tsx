@@ -7,6 +7,7 @@ import { ChangeIndicator, ChangeIndicatorDot, ChangeWarningBanner } from './Chan
 import { preprocessTranscription } from '@/lib/textFormatting';
 import CustomActionButtons from './CustomActionButtons';
 import CustomActionsManager from './CustomActionsManager';
+import DiffHighlight, { DiffStats } from './DiffHighlight';
 
 interface Dictation {
   id: number;
@@ -75,6 +76,10 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [isReCorrecting, setIsReCorrecting] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [applyFormatting, setApplyFormatting] = useState(false); // Formatierung auf unkorrigierten Text anwenden
+  
+  // Diff view state - show differences between formatted raw and LLM corrected
+  const [showDiffView, setShowDiffView] = useState(false);
+  const [formattedRawText, setFormattedRawText] = useState<string>(''); // raw_transcript after textFormatting
   
   // Editable text state for completed dictations
   const [editedTexts, setEditedTexts] = useState<{
@@ -581,6 +586,15 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       setApplyFormatting(false); // Reset formatting toggle when selection changes
       setHasUnsavedChanges(false); // Reset unsaved changes when selection changes
       setShowMitlesen(false); // Reset Mitlesen mode when selection changes
+      setShowDiffView(false); // Reset diff view when selection changes
+      
+      // Calculate formatted raw text for diff comparison
+      if (selected.raw_transcript) {
+        const formatted = preprocessTranscription(selected.raw_transcript);
+        setFormattedRawText(formatted);
+      } else {
+        setFormattedRawText('');
+      }
       
       // Parse segments for word-level highlighting
       if (selected.segments) {
@@ -1121,10 +1135,42 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             </button>
                           </div>
                         </div>
+                        
+                        {/* Diff View Toggle - only show when not reverted and raw_transcript available */}
+                        {!isReverted && selectedDictation.raw_transcript && formattedRawText && (
+                          <div className="flex items-center gap-2 mb-2">
+                            <button
+                              className={`btn btn-xs ${showDiffView ? 'btn-primary' : 'btn-outline'}`}
+                              onClick={() => setShowDiffView(!showDiffView)}
+                              title="Zeigt Unterschiede zwischen formatiertem Original und KI-Korrektur"
+                            >
+                              {showDiffView ? '🔍 Diff aus' : '🔍 Änderungen anzeigen'}
+                            </button>
+                            {showDiffView && (
+                              <DiffStats originalText={formattedRawText} correctedText={editedTexts.corrected_text} />
+                            )}
+                          </div>
+                        )}
+                        
+                        {/* Diff View - read-only highlighted view */}
+                        {showDiffView && !isReverted && formattedRawText && (
+                          <div className={`mb-2 p-3 rounded-lg border bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 overflow-auto ${
+                            isFullscreen ? 'max-h-[50vh]' : 'max-h-[300px]'
+                          }`}>
+                            <DiffHighlight
+                              originalText={formattedRawText}
+                              correctedText={editedTexts.corrected_text}
+                              showDiff={true}
+                            />
+                          </div>
+                        )}
+                        
                         <textarea
                           ref={textareaRef}
                           className={`mt-1 w-full p-3 rounded-lg text-sm font-mono resize-y border ${
                             isFullscreen ? 'min-h-[60vh]' : 'min-h-[200px]'
+                          } ${
+                            showDiffView ? 'min-h-[100px] max-h-[200px]' : ''
                           } ${
                             isReverted 
                               ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800' 

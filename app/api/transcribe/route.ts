@@ -26,12 +26,12 @@ function getUniqueCorrectWords(dictionary: { entries: DictionaryEntry[] }): stri
 // Transkriptions-Provider auswählen
 type TranscriptionProvider = 'whisperx' | 'elevenlabs';
 
-async function transcribeWithWhisperX(file: Blob, filename: string, initialPrompt?: string, whisperModel?: string) {
+async function transcribeWithWhisperX(file: Blob, filename: string, initialPrompt?: string, whisperModel?: string, speedMode: 'turbo' | 'precision' | 'auto' = 'turbo') {
   const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:5000';
   const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
   // Use provided model or fallback to env/default
   const modelToUse = whisperModel || process.env.WHISPER_MODEL || 'large-v3';
-  console.log(`[WhisperX] Starting transcription - File: ${filename}, Size: ${fileSizeMB}MB, URL: ${whisperUrl}, Model: ${modelToUse}${initialPrompt ? `, Initial prompt: ${initialPrompt.length} chars` : ''}`);
+  console.log(`[WhisperX] Starting transcription - File: ${filename}, Size: ${fileSizeMB}MB, URL: ${whisperUrl}, Model: ${modelToUse}, Mode: ${speedMode}${initialPrompt ? `, Initial prompt: ${initialPrompt.length} chars` : ''}`);
 
   const startTime = Date.now();
   
@@ -222,7 +222,8 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
   const upstream = new FormData();
   upstream.append('file', file, filename);
   upstream.append('language', 'de');
-  upstream.append('align', 'true');
+  upstream.append('align', speedMode === 'precision' ? 'true' : 'false'); // Turbo: kein Alignment für Speed
+  upstream.append('speed_mode', speedMode); // turbo, precision, auto
   
   // Füge initial_prompt hinzu wenn Wörterbuch-Wörter vorhanden
   if (initialPrompt) {
@@ -340,6 +341,10 @@ export async function POST(request: NextRequest) {
     const whisperModel = runtimeConfig.whisperModel || 'deepdml/faster-whisper-large-v3-german-2';
     console.log(`[Config] WhisperX Online Model: ${whisperModel} (from config)`);
 
+    // Online-Transkription nutzt Turbo-Modus für minimale Latenz
+    const speedMode: 'turbo' | 'precision' | 'auto' = 'turbo';
+    console.log(`[Config] Speed Mode: ${speedMode} (optimized for live transcription)`);
+
     // Transkription mit gewähltem Provider
     let result;
     
@@ -350,7 +355,7 @@ export async function POST(request: NextRequest) {
       // WhisperX ist Standard, mit Fallback zu ElevenLabs
       console.log('Using WhisperX as primary provider');
       try {
-        result = await transcribeWithWhisperX(file, filename, initialPrompt, whisperModel);
+        result = await transcribeWithWhisperX(file, filename, initialPrompt, whisperModel, speedMode);
         
         // Detect if Whisper is hallucinating/repeating the initial_prompt
         // This is a known Whisper bug where it repeats prompt words instead of transcribing
@@ -367,7 +372,7 @@ export async function POST(request: NextRequest) {
           // If transcription only contains prompt words and is repetitive, retry without prompt
           if (allWordsFromPrompt && transcriptionWords.length > 2 && uniqueTranscriptionWords.length <= 3) {
             console.warn(`[WhisperX] Detected Whisper hallucination (repeating prompt words). Retrying without initial_prompt...`);
-            result = await transcribeWithWhisperX(file, filename, undefined, whisperModel);
+            result = await transcribeWithWhisperX(file, filename, undefined, whisperModel, speedMode);
           }
         }
       } catch (whisperError: any) {

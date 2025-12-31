@@ -148,6 +148,34 @@ export default function HomePage() {
     }
   }, [defaultMode]);
 
+  // WhisperX Warmup beim Start - lädt Modell vor für minimale Latenz
+  useEffect(() => {
+    const warmupWhisper = async () => {
+      try {
+        console.log('[Warmup] Triggering WhisperX model preload...');
+        const res = await fetch('/api/warmup', {
+          method: 'POST',
+        });
+        const data = await res.json();
+        
+        if (data.status === 'warmed_up' || data.status === 'already_warmed_up') {
+          console.log(`[Warmup] ✓ WhisperX ready - Device: ${data.device}, Model: ${data.model}`);
+        } else if (data.status === 'service_unavailable') {
+          console.log('[Warmup] WhisperX service not available (may be external)');
+        } else {
+          console.warn('[Warmup] Warmup status:', data.status, data.message);
+        }
+      } catch (err) {
+        // Warmup-Fehler sind nicht kritisch - Service läuft möglicherweise extern
+        console.log('[Warmup] Could not reach warmup endpoint (service may be external)');
+      }
+    };
+    
+    // Warmup nach kurzem Delay starten (UI nicht blockieren)
+    const timer = setTimeout(warmupWhisper, 500);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Templates beim Start laden
   useEffect(() => {
     if (username && mode === 'befund') {

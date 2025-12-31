@@ -43,6 +43,7 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [isUploadedFile, setIsUploadedFile] = useState(false); // Track if audio is from upload
+  const [audioSource, setAudioSource] = useState<'microphone' | 'system'>('microphone'); // Audio source selection
   
   // Form state
   const [orderNumber, setOrderNumber] = useState('');
@@ -145,6 +146,91 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
       
     } catch (err: any) {
       setError(`Mikrofon-Zugriff fehlgeschlagen: ${err.message}`);
+    }
+  };
+
+  // Start recording from system audio (tab/screen)
+  const startSystemAudioRecording = async () => {
+    setError(null);
+    
+    try {
+      // Request display media with audio
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true, // Required by browser, but we only use audio
+        audio: true  // System audio from tab/screen
+      });
+      
+      // Check if audio track is present
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        stream.getTracks().forEach(t => t.stop());
+        setError('Kein Audio ausgewählt. Bitte wählen Sie einen Tab und aktivieren Sie "Tab-Audio teilen".');
+        return;
+      }
+      
+      // Stop video track - we only need audio
+      stream.getVideoTracks().forEach(t => t.stop());
+      
+      // Create audio-only stream
+      const audioStream = new MediaStream(audioTracks);
+      streamRef.current = audioStream;
+      
+      // Setup audio visualization
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const analyser = audioContext.createAnalyser();
+      const source = audioContext.createMediaStreamSource(audioStream);
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      
+      audioContextRef.current = audioContext;
+      analyserRef.current = analyser;
+      updateAudioLevel();
+      
+      // Setup MediaRecorder
+      const mediaRecorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' });
+      chunksRef.current = [];
+      
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+      
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        setAudioBlob(blob);
+        const url = URL.createObjectURL(blob);
+        setAudioUrl(url);
+        
+        audioStream.getTracks().forEach(t => t.stop());
+        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+        if (audioContextRef.current) audioContextRef.current.close();
+        setAudioLevel(0);
+      };
+      
+      // Handle when user stops sharing
+      audioTracks[0].onended = () => {
+        stopRecording();
+      };
+      
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start(1000);
+      setIsRecording(true);
+      setIsPaused(false);
+      setDuration(0);
+      setAudioSource('system');
+      
+      // Start timer
+      timerRef.current = setInterval(() => {
+        setDuration(d => d + 1);
+      }, 1000);
+      
+    } catch (err: any) {
+      if (err.name === 'NotAllowedError') {
+        setError('Bildschirmfreigabe abgebrochen.');
+      } else {
+        setError(`System-Audio Zugriff fehlgeschlagen: ${err.message}`);
+      }
     }
   };
 
@@ -446,15 +532,33 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
           <div className="flex items-center justify-center gap-4">
             {!isRecording && !audioUrl && (
               <>
+                {/* Microphone Recording */}
                 <button
-                  className="btn btn-primary flex items-center gap-2 px-6 py-3"
+                  className="btn btn-primary flex items-center gap-2 px-4 py-3"
                   onClick={startRecording}
+                  title="Mikrofon-Aufnahme starten"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
                     <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
                   </svg>
-                  Aufnahme starten
+                  Mikrofon
+                </button>
+                
+                {/* System Audio Recording */}
+                <button
+                  className="btn btn-secondary flex items-center gap-2 px-4 py-3"
+                  onClick={startSystemAudioRecording}
+                  title="System-Audio aufnehmen (Tab/Bildschirm)"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                    <line x1="8" y1="21" x2="16" y2="21"/>
+                    <line x1="12" y1="17" x2="12" y2="21"/>
+                    <path d="M6 10h.01M9 10h.01"/>
+                    <path d="M12 10l4 0"/>
+                  </svg>
+                  System-Audio
                 </button>
                 
                 <span className="text-gray-400 text-sm">oder</span>

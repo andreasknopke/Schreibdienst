@@ -7,6 +7,7 @@ export const runtime = 'nodejs';
 /**
  * Erkennt und entfernt Whisper-Halluzinationen (Wiederholungsmuster)
  * z.B. "Das ist ein Test, das ist ein Test, das ist ein Test" -> "Das ist ein Test"
+ * z.B. "keine Mittellinien, keine Mittellinne" -> "keine Mittellinienverschiebung"
  */
 function detectAndRemoveRepetition(text: string): string {
   if (!text || text.length < 20) return text;
@@ -14,7 +15,47 @@ function detectAndRemoveRepetition(text: string): string {
   // Normalisiere Text für Vergleich
   const normalized = text.toLowerCase().trim();
   
-  // Suche nach Wiederholungsmustern unterschiedlicher Längen
+  // 1. Erkenne ähnliche aufeinanderfolgende Phrasen (Levenshtein-ähnlich)
+  // z.B. "keine Mittellinien, keine Mittellinne" 
+  const parts = text.split(/[,،]+/).map(p => p.trim());
+  if (parts.length >= 2) {
+    const uniqueParts: string[] = [];
+    for (const part of parts) {
+      if (!part) continue;
+      // Prüfe ob dieser Teil sehr ähnlich zu einem bereits gesehenen ist
+      const isDuplicate = uniqueParts.some(existing => {
+        const existingLower = existing.toLowerCase();
+        const partLower = part.toLowerCase();
+        // Exakte Übereinstimmung
+        if (existingLower === partLower) return true;
+        // Eine ist Präfix der anderen (mind. 80% Überlappung)
+        const minLen = Math.min(existingLower.length, partLower.length);
+        const maxLen = Math.max(existingLower.length, partLower.length);
+        if (minLen > 5 && minLen / maxLen > 0.7) {
+          // Prüfe ob sie mit denselben Wörtern beginnen
+          const existingWords = existingLower.split(/\s+/);
+          const partWords = partLower.split(/\s+/);
+          const commonWords = existingWords.filter((w, i) => partWords[i] === w);
+          if (commonWords.length >= Math.min(existingWords.length, partWords.length) * 0.6) {
+            return true;
+          }
+        }
+        return false;
+      });
+      
+      if (!isDuplicate) {
+        uniqueParts.push(part);
+      }
+    }
+    
+    // Wenn wir Duplikate entfernt haben, rekonstruiere den Text
+    if (uniqueParts.length < parts.length) {
+      const cleaned = uniqueParts.join(', ');
+      return cleaned;
+    }
+  }
+  
+  // 2. Suche nach exakten Wiederholungsmustern unterschiedlicher Längen
   for (let patternLen = 5; patternLen <= Math.floor(normalized.length / 2); patternLen++) {
     // Extrahiere potentielles Muster vom Anfang
     const pattern = normalized.substring(0, patternLen);
@@ -53,17 +94,6 @@ function detectAndRemoveRepetition(text: string): string {
       const cleaned = text.substring(0, endPos).trim();
       // Entferne trailing Komma
       return cleaned.replace(/,\s*$/, '');
-    }
-  }
-  
-  // Einfachere Erkennung: Komma-getrennte Wiederholungen
-  const parts = text.split(/[,،]+/).map(p => p.trim().toLowerCase());
-  if (parts.length >= 3) {
-    const firstPart = parts[0];
-    const allSame = parts.slice(1).every(p => p === firstPart || p.startsWith(firstPart) || firstPart.startsWith(p));
-    if (allSame && firstPart.length > 3) {
-      // Gib nur den ersten Teil zurück
-      return text.split(/[,،]+/)[0].trim();
     }
   }
   
@@ -394,20 +424,31 @@ export async function POST(request: NextRequest) {
     console.log(`[Input] File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type || 'unknown'}, User: ${username || 'unknown'}`);
 
     // Lade Wörterbuch für initial_prompt bei WhisperX
-    // TEMPORÄR DEAKTIVIERT: initial_prompt verursacht Halluzinationen
+    // Begrenzt auf MAX_PROMPT_WORDS wichtigste Begriffe um Halluzinationen zu vermeiden
+    const MAX_PROMPT_WORDS = 30;
     let initialPrompt: string | undefined;
-    // if (username && provider !== 'elevenlabs') {
-    //   try {
-    //     const dictionary = await loadDictionaryWithRequest(request, username);
-    //     initialPrompt = getUniqueCorrectWords(dictionary);
-    //     if (initialPrompt) {
-    //       console.log(`[Dictionary] Loaded ${initialPrompt.split(', ').length} unique words for initial_prompt`);
-    //     }
-    //   } catch (err) {
-    //     console.warn('[Dictionary] Failed to load dictionary:', err);
-    //   }
-    // }
-    console.log(`[Dictionary] initial_prompt deaktiviert (Halluzinationsproblem)`);
+    if (username && provider !== 'elevenlabs') {
+      try {
+        const dictionary = await loadDictionaryWithRequest(request, username);
+        const allWords = getUniqueCorrectWords(dictionary);
+        if (allWords) {
+          // Begrenze auf die ersten MAX_PROMPT_WORDS Begriffe
+          const wordList = allWords.split(', ');
+          const limitedWords = wordList.slice(0, MAX_PROMPT_WORDS);
+          initialPrompt = limitedWords.join(', ');
+          console.log(`[Dictionary] Using ${limitedWords.length}/${wordList.length} words for initial_prompt (max ${MAX_PROMPT_WORDS})`);
+        }
+      } catch (err) {
+        console.warn('[Dictionary] Failed to load dictionary:', err);
+      }
+    }
+    
+    // Fallback: Medizinische Basis-Begriffe wenn kein Wörterbuch
+    if (!initialPrompt) {
+      // Häufige medizinische Begriffe die Whisper sonst falsch schreibt
+      initialPrompt = "Liquorräume, Mittellinie, Mittellinienverschiebung, parenchymatös, Hirnparenchym, periventrikulär, supratentoriell, infratentoriell, Basalganglien, Thalamus, Kleinhirn, Hirnstamm, Ventrikel, Sulci, Gyri, Marklager";
+      console.log(`[Dictionary] Using default medical terms (${initialPrompt.split(', ').length} words)`);
+    }
 
     // Get whisper model from runtime config (Online-Transkription)
     // For online mode, use whisperModel directly (full HuggingFace path)

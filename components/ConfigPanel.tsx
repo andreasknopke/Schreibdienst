@@ -11,11 +11,12 @@ interface ProviderOption {
 }
 
 interface RuntimeConfig {
-  transcriptionProvider: 'whisperx' | 'elevenlabs';
-  llmProvider: 'openai' | 'lmstudio';
+  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral';
+  llmProvider: 'openai' | 'lmstudio' | 'mistral';
   whisperModel?: string;
   whisperOfflineModel?: string;
   openaiModel?: string;
+  mistralModel?: string;
   llmPromptAddition?: string;
 }
 
@@ -24,6 +25,7 @@ interface EnvInfo {
   hasElevenLabsKey: boolean;
   hasWhisperUrl: boolean;
   hasLMStudioUrl: boolean;
+  hasMistralKey: boolean;
   whisperServiceUrl: string;
   lmStudioUrl: string;
 }
@@ -181,6 +183,12 @@ export default function ConfigPanel() {
     { id: 'gpt-4o', name: 'GPT-4o (beste Qualität)' },
     { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
     { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo (günstigste)' },
+  ];
+
+  const mistralModels = [
+    { id: 'mistral-large-latest', name: 'Mistral Large (beste Qualität)' },
+    { id: 'mistral-medium-latest', name: 'Mistral Medium (ausgewogen)' },
+    { id: 'mistral-small-latest', name: 'Mistral Small (schnell, günstig)' },
   ];
 
   return (
@@ -353,6 +361,25 @@ export default function ConfigPanel() {
           </div>
         )}
 
+        {/* Mistral Model Selection */}
+        {config.llmProvider === 'mistral' && (
+          <div className="ml-6 mt-2">
+            <label className="text-xs text-gray-500 block mb-1">Mistral-Modell</label>
+            <select
+              value={config.mistralModel || 'mistral-large-latest'}
+              onChange={(e) => updateConfig({ mistralModel: e.target.value })}
+              disabled={!isRoot || saving}
+              className="input text-sm w-full max-w-xs"
+            >
+              {mistralModels.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* LLM Prompt-Ergänzung */}
         <div className="mt-4">
           <label className="text-xs text-gray-500 block mb-1">
@@ -389,6 +416,10 @@ export default function ConfigPanel() {
         <div className="flex items-center gap-2">
           <span className={envInfo?.hasLMStudioUrl ? 'text-green-500' : 'text-gray-400'}>●</span>
           <span>LM Studio: {envInfo?.hasLMStudioUrl ? 'Konfiguriert' : 'Nicht konfiguriert'}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={envInfo?.hasMistralKey ? 'text-green-500' : 'text-gray-400'}>●</span>
+          <span>Mistral AI: {envInfo?.hasMistralKey ? 'Konfiguriert' : 'Nicht konfiguriert'}</span>
         </div>
       </div>
 

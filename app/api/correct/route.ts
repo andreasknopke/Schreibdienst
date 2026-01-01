@@ -7,7 +7,7 @@ import { preprocessTranscription } from '@/lib/textFormatting';
 export const runtime = 'nodejs';
 
 // LLM Provider configuration
-type LLMProvider = 'openai' | 'lmstudio';
+type LLMProvider = 'openai' | 'lmstudio' | 'mistral';
 
 async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; baseUrl: string; apiKey: string; model: string }> {
   const runtimeConfig = await getRuntimeConfigWithRequest(req);
@@ -19,6 +19,15 @@ async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; 
       baseUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
       apiKey: 'lm-studio', // LM Studio doesn't require a real API key
       model: process.env.LLM_STUDIO_MODEL || 'local-model'
+    };
+  }
+  
+  if (provider === 'mistral') {
+    return {
+      provider: 'mistral',
+      baseUrl: 'https://api.mistral.ai',
+      apiKey: process.env.MISTRAL_API_KEY || '',
+      model: runtimeConfig.mistralModel || process.env.MISTRAL_MODEL || 'mistral-large-latest'
     };
   }
   
@@ -296,12 +305,16 @@ async function callLLM(
     throw new Error('OPENAI_API_KEY not configured');
   }
   
+  if (config.provider === 'mistral' && !config.apiKey) {
+    throw new Error('MISTRAL_API_KEY not configured');
+  }
+  
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
   
-  // Only add Authorization header for OpenAI (LM Studio doesn't need it)
-  if (config.provider === 'openai') {
+  // Add Authorization header for OpenAI and Mistral (LM Studio doesn't need it)
+  if (config.provider === 'openai' || config.provider === 'mistral') {
     headers['Authorization'] = `Bearer ${config.apiKey}`;
   }
   
@@ -312,7 +325,7 @@ async function callLLM(
     max_tokens: maxTokens,
   };
   
-  // JSON mode only for OpenAI (LM Studio may not support it)
+  // JSON mode only for OpenAI (LM Studio and Mistral may not support it)
   if (jsonMode && config.provider === 'openai') {
     body.response_format = { type: 'json_object' };
   }

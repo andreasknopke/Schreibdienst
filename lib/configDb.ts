@@ -26,11 +26,12 @@ export function getWhisperOfflineModelPath(modelId: WhisperOfflineModel | string
 }
 
 export interface RuntimeConfig {
-  transcriptionProvider: 'whisperx' | 'elevenlabs';
-  llmProvider: 'openai' | 'lmstudio';
+  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral';
+  llmProvider: 'openai' | 'lmstudio' | 'mistral';
   whisperModel?: string;
   whisperOfflineModel?: WhisperOfflineModel;
   openaiModel?: string;
+  mistralModel?: string;
   llmPromptAddition?: string;
 }
 
@@ -40,6 +41,7 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   whisperModel: process.env.WHISPER_MODEL || 'deepdml/faster-whisper-large-v3-german-2',
   whisperOfflineModel: (process.env.WHISPER_OFFLINE_MODEL as WhisperOfflineModel) || 'large-v3-german-2',
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  mistralModel: process.env.MISTRAL_MODEL || 'mistral-large-latest',
 };
 
 // Get runtime config from database
@@ -54,12 +56,12 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
     for (const row of rows) {
       switch (row.config_key) {
         case 'transcriptionProvider':
-          if (['whisperx', 'elevenlabs'].includes(row.config_value)) {
+          if (['whisperx', 'elevenlabs', 'mistral'].includes(row.config_value)) {
             config.transcriptionProvider = row.config_value as any;
           }
           break;
         case 'llmProvider':
-          if (['openai', 'lmstudio'].includes(row.config_value)) {
+          if (['openai', 'lmstudio', 'mistral'].includes(row.config_value)) {
             config.llmProvider = row.config_value as any;
           }
           break;
@@ -68,6 +70,9 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
           break;
         case 'openaiModel':
           config.openaiModel = row.config_value;
+          break;
+        case 'mistralModel':
+          config.mistralModel = row.config_value;
           break;
         case 'whisperOfflineModel':
           if (WHISPER_OFFLINE_MODELS.some(m => m.id === row.config_value)) {
@@ -122,12 +127,12 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
     for (const row of rows as { config_key: string; config_value: string }[]) {
       switch (row.config_key) {
         case 'transcriptionProvider':
-          if (['whisperx', 'elevenlabs'].includes(row.config_value)) {
+          if (['whisperx', 'elevenlabs', 'mistral'].includes(row.config_value)) {
             config.transcriptionProvider = row.config_value as any;
           }
           break;
         case 'llmProvider':
-          if (['openai', 'lmstudio'].includes(row.config_value)) {
+          if (['openai', 'lmstudio', 'mistral'].includes(row.config_value)) {
             config.llmProvider = row.config_value as any;
           }
           break;
@@ -136,6 +141,9 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
           break;
         case 'openaiModel':
           config.openaiModel = row.config_value;
+          break;
+        case 'mistralModel':
+          config.mistralModel = row.config_value;
           break;
         case 'whisperOfflineModel':
           if (WHISPER_OFFLINE_MODELS.some(m => m.id === row.config_value)) {

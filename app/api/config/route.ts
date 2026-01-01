@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
     hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
     hasWhisperUrl: !!process.env.WHISPER_SERVICE_URL,
     hasLMStudioUrl: !!process.env.LLM_STUDIO_URL,
+    hasMistralKey: !!process.env.MISTRAL_API_KEY,
     whisperServiceUrl: process.env.WHISPER_SERVICE_URL || 'http://localhost:5000',
     lmStudioUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
   };
@@ -63,6 +64,12 @@ function getAvailableTranscriptionProviders(envInfo: any): { id: string; name: s
       available: envInfo.hasElevenLabsKey,
       reason: envInfo.hasElevenLabsKey ? undefined : 'ELEVENLABS_API_KEY nicht konfiguriert',
     },
+    {
+      id: 'mistral',
+      name: 'Mistral AI Voxtral (Cloud)',
+      available: envInfo.hasMistralKey,
+      reason: envInfo.hasMistralKey ? undefined : 'MISTRAL_API_KEY nicht konfiguriert',
+    },
   ];
 }
 
@@ -79,6 +86,12 @@ function getAvailableLLMProviders(envInfo: any): { id: string; name: string; ava
       name: 'LM Studio (Lokal)',
       available: envInfo.hasLMStudioUrl,
       reason: envInfo.hasLMStudioUrl ? undefined : 'LLM_STUDIO_URL nicht konfiguriert',
+    },
+    {
+      id: 'mistral',
+      name: 'Mistral AI',
+      available: envInfo.hasMistralKey,
+      reason: envInfo.hasMistralKey ? undefined : 'MISTRAL_API_KEY nicht konfiguriert',
     },
   ];
 }
@@ -100,11 +113,11 @@ export async function POST(request: NextRequest) {
       ...currentConfig,
     };
     
-    if (body.transcriptionProvider && ['whisperx', 'elevenlabs'].includes(body.transcriptionProvider)) {
+    if (body.transcriptionProvider && ['whisperx', 'elevenlabs', 'mistral'].includes(body.transcriptionProvider)) {
       newConfig.transcriptionProvider = body.transcriptionProvider;
     }
     
-    if (body.llmProvider && ['openai', 'lmstudio'].includes(body.llmProvider)) {
+    if (body.llmProvider && ['openai', 'lmstudio', 'mistral'].includes(body.llmProvider)) {
       newConfig.llmProvider = body.llmProvider;
     }
     
@@ -121,6 +134,10 @@ export async function POST(request: NextRequest) {
     
     if (body.openaiModel) {
       newConfig.openaiModel = body.openaiModel;
+    }
+    
+    if (body.mistralModel) {
+      newConfig.mistralModel = body.mistralModel;
     }
     
     // Validate whisperOfflineModel

@@ -120,7 +120,7 @@ function getUniqueCorrectWords(dictionary: { entries: DictionaryEntry[] }): stri
 }
 
 // Transkriptions-Provider auswählen
-type TranscriptionProvider = 'whisperx' | 'elevenlabs';
+type TranscriptionProvider = 'whisperx' | 'elevenlabs' | 'mistral';
 
 // Session-Cache für Gradio (vermeidet wiederholtes Login)
 let gradioSessionCache: {
@@ -414,6 +414,85 @@ async function transcribeWithElevenLabs(file: Blob, filename: string) {
   };
 }
 
+/**
+ * Transkription mit Mistral AI Voxtral Mini
+ * Verwendet den neuen Audio-Transkriptions-Endpunkt von Mistral
+ * API-Dokumentation: https://docs.mistral.ai/capabilities/audio_transcription
+ */
+async function transcribeWithMistral(file: Blob, filename: string) {
+  const apiKey = process.env.MISTRAL_API_KEY;
+  if (!apiKey) {
+    throw new Error('MISTRAL_API_KEY not configured');
+  }
+
+  const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+  console.log(`[Mistral] Starting transcription - File: ${filename}, Size: ${fileSizeMB}MB, Model: mistral-small-latest`);
+  const startTime = Date.now();
+
+  // Convert audio to base64
+  const arrayBuffer = await file.arrayBuffer();
+  const base64Audio = Buffer.from(arrayBuffer).toString('base64');
+  
+  // Determine MIME type
+  let mimeType = file.type || 'audio/webm';
+  // Mistral supports: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, webm
+  const supportedTypes = ['audio/flac', 'audio/mp3', 'audio/mpeg', 'audio/mp4', 'audio/m4a', 'audio/ogg', 'audio/wav', 'audio/webm'];
+  if (!supportedTypes.some(t => mimeType.includes(t.split('/')[1]))) {
+    mimeType = 'audio/webm'; // Default to webm
+  }
+
+  // Create data URL
+  const dataUrl = `data:${mimeType};base64,${base64Audio}`;
+
+  // Call Mistral API with audio input
+  const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'mistral-small-latest',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'audio_url',
+              audio_url: dataUrl,
+            },
+            {
+              type: 'text',
+              text: 'Bitte transkribiere diese Audioaufnahme auf Deutsch. Gib NUR die Transkription zurück, ohne Kommentare, Anführungszeichen oder Erklärungen.'
+            }
+          ]
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: 4096,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Mistral API error (${res.status}): ${text}`);
+  }
+
+  const data = await res.json();
+  const transcriptionText = data.choices?.[0]?.message?.content?.trim() || '';
+  
+  const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+  const textLength = transcriptionText.length;
+  console.log(`[Mistral] ✓ Transcription complete - Duration: ${duration}s, Text length: ${textLength} chars`);
+  
+  return {
+    text: transcriptionText,
+    segments: [],
+    language: 'de',
+    provider: 'mistral' as const
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
     console.log('\n=== Transcription Request Started ===')
@@ -479,6 +558,9 @@ export async function POST(request: NextRequest) {
     if (provider === 'elevenlabs') {
       console.log('Using ElevenLabs as primary provider');
       result = await transcribeWithElevenLabs(file, filename);
+    } else if (provider === 'mistral') {
+      console.log('Using Mistral AI Voxtral as primary provider');
+      result = await transcribeWithMistral(file, filename);
     } else {
       // WhisperX ist Standard, mit Fallback zu ElevenLabs
       console.log('Using WhisperX as primary provider');

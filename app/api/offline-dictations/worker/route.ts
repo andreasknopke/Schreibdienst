@@ -160,6 +160,10 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?:
     return transcribeWithElevenLabs(audioBlob);
   }
   
+  if (provider === 'mistral') {
+    return transcribeWithMistral(audioBlob);
+  }
+  
   try {
     const result = await transcribeWithWhisperX(request, audioBlob, initialPrompt);
     
@@ -495,6 +499,114 @@ async function transcribeWithElevenLabs(file: Blob): Promise<{ text: string; seg
   if (!res.ok) throw new Error(`ElevenLabs API error (${res.status})`);
   const data = await res.json();
   return { text: data.text ?? '' };
+}
+
+/**
+ * Transkription mit Mistral AI Voxtral Mini
+ * Verwendet den Audio-Transkriptions-Endpunkt mit Timestamps für die Mitlesefunktion
+ * API-Dokumentation: https://docs.mistral.ai/capabilities/audio_transcription
+ */
+async function transcribeWithMistral(file: Blob): Promise<{ text: string; segments?: any[] }> {
+  const apiKey = process.env.MISTRAL_API_KEY;
+  if (!apiKey) throw new Error('MISTRAL_API_KEY not configured');
+  
+  const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+  console.log(`[Worker Mistral] Starting transcription - Size: ${fileSizeMB}MB`);
+  const startTime = Date.now();
+  
+  // Convert audio to base64
+  const arrayBuffer = await file.arrayBuffer();
+  const base64Audio = Buffer.from(arrayBuffer).toString('base64');
+  
+  // Determine MIME type
+  let mimeType = file.type || 'audio/webm';
+  
+  // Create data URL
+  const dataUrl = `data:${mimeType};base64,${base64Audio}`;
+  
+  // Call Mistral API with audio input and request for timestamps
+  // We use a structured prompt to get word-level timestamps
+  const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'mistral-small-latest',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'audio_url',
+              audio_url: dataUrl,
+            },
+            {
+              type: 'text',
+              text: `Bitte transkribiere diese Audioaufnahme auf Deutsch.
+
+Gib das Ergebnis als JSON-Objekt im folgenden Format zurück:
+{
+  "text": "Der vollständige transkribierte Text",
+  "words": [
+    {"word": "Wort1", "start": 0.0, "end": 0.5},
+    {"word": "Wort2", "start": 0.5, "end": 1.0}
+  ]
+}
+
+Schätze die Zeitstempel (start/end in Sekunden) für jedes Wort basierend auf dem Audio-Tempo.
+Gib NUR das JSON zurück, ohne Markdown-Codeblocks oder andere Formatierung.`
+            }
+          ]
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: 8192,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Mistral API error (${res.status}): ${text}`);
+  }
+
+  const data = await res.json();
+  let responseContent = data.choices?.[0]?.message?.content?.trim() || '';
+  
+  const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+  console.log(`[Worker Mistral] API response received in ${duration}s`);
+  
+  // Try to parse as JSON with timestamps
+  let transcriptionText = '';
+  let segments: any[] = [];
+  
+  try {
+    // Remove potential markdown code blocks
+    responseContent = responseContent.replace(/```json\s*\n?/g, '').replace(/```\s*$/g, '').trim();
+    
+    const parsed = JSON.parse(responseContent);
+    transcriptionText = parsed.text || '';
+    
+    // Convert word-level timestamps to segment format
+    if (parsed.words && Array.isArray(parsed.words)) {
+      segments = parsed.words.map((w: any) => ({
+        text: w.word,
+        start: w.start,
+        end: w.end,
+        words: [{ word: w.word, start: w.start, end: w.end }]
+      }));
+      console.log(`[Worker Mistral] Parsed ${segments.length} word timestamps`);
+    }
+  } catch (e) {
+    // If JSON parsing fails, use the raw response as text
+    console.warn(`[Worker Mistral] Could not parse JSON response, using raw text`);
+    transcriptionText = responseContent;
+  }
+  
+  console.log(`[Worker Mistral] ✓ Transcription complete - Text length: ${transcriptionText.length} chars, Segments: ${segments.length}`);
+  
+  return { text: transcriptionText, segments };
 }
 
 // Correct text using LLM

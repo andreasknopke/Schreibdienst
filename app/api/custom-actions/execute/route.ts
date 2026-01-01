@@ -5,7 +5,7 @@ import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 export const runtime = 'nodejs';
 
 // LLM Provider configuration
-type LLMProvider = 'openai' | 'lmstudio';
+type LLMProvider = 'openai' | 'lmstudio' | 'mistral';
 
 async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; baseUrl: string; apiKey: string; model: string }> {
   const runtimeConfig = await getRuntimeConfigWithRequest(req);
@@ -17,6 +17,15 @@ async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; 
       baseUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
       apiKey: 'lm-studio',
       model: process.env.LLM_STUDIO_MODEL || 'local-model'
+    };
+  }
+  
+  if (provider === 'mistral') {
+    return {
+      provider: 'mistral',
+      baseUrl: 'https://api.mistral.ai',
+      apiKey: process.env.MISTRAL_API_KEY || '',
+      model: runtimeConfig.mistralModel || process.env.MISTRAL_MODEL || 'mistral-large-latest'
     };
   }
   
@@ -39,11 +48,15 @@ async function callLLM(
     throw new Error('OPENAI_API_KEY not configured');
   }
   
+  if (config.provider === 'mistral' && !config.apiKey) {
+    throw new Error('MISTRAL_API_KEY not configured');
+  }
+  
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
   
-  if (config.provider === 'openai') {
+  if (config.provider === 'openai' || config.provider === 'mistral') {
     headers['Authorization'] = `Bearer ${config.apiKey}`;
   }
   

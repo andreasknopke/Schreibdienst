@@ -152,6 +152,19 @@ export async function POST(request: NextRequest) {
       newConfig.llmPromptAddition = body.llmPromptAddition;
     }
     
+    // Double Precision Pipeline settings
+    if (typeof body.doublePrecisionEnabled === 'boolean') {
+      newConfig.doublePrecisionEnabled = body.doublePrecisionEnabled;
+    }
+    
+    if (body.doublePrecisionSecondProvider && ['whisperx', 'elevenlabs', 'mistral'].includes(body.doublePrecisionSecondProvider)) {
+      newConfig.doublePrecisionSecondProvider = body.doublePrecisionSecondProvider;
+    }
+    
+    if (body.doublePrecisionMode && ['parallel', 'sequential'].includes(body.doublePrecisionMode)) {
+      newConfig.doublePrecisionMode = body.doublePrecisionMode;
+    }
+    
     await saveRuntimeConfigWithRequest(request, newConfig);
     
     return NextResponse.json({ success: true, config: newConfig });

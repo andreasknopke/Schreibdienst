@@ -18,6 +18,10 @@ interface RuntimeConfig {
   openaiModel?: string;
   mistralModel?: string;
   llmPromptAddition?: string;
+  // Double Precision Pipeline
+  doublePrecisionEnabled?: boolean;
+  doublePrecisionSecondProvider?: 'whisperx' | 'elevenlabs' | 'mistral';
+  doublePrecisionMode?: 'parallel' | 'sequential';
 }
 
 interface EnvInfo {
@@ -294,6 +298,76 @@ export default function ConfigPanel() {
             </p>
           </div>
         )}
+        
+        {/* Double Precision Pipeline */}
+        <div className="mt-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50">
+          <div className="flex items-center gap-3 mb-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={config.doublePrecisionEnabled || false}
+                onChange={(e) => updateConfig({ doublePrecisionEnabled: e.target.checked })}
+                disabled={!isRoot || saving}
+                className="w-4 h-4 rounded border-gray-300"
+              />
+              <span className="font-medium text-sm">🎯 Double Precision Pipeline</span>
+            </label>
+          </div>
+          
+          <p className="text-xs text-gray-500 mb-3">
+            Führt die Transkription mit zwei verschiedenen Services durch und merged die Ergebnisse intelligent für höchste Genauigkeit.
+          </p>
+          
+          {config.doublePrecisionEnabled && (
+            <div className="space-y-3 pt-2 border-t border-gray-200 dark:border-gray-600">
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Zweiter Provider</label>
+                <select
+                  value={config.doublePrecisionSecondProvider || 'elevenlabs'}
+                  onChange={(e) => updateConfig({ doublePrecisionSecondProvider: e.target.value as any })}
+                  disabled={!isRoot || saving}
+                  className="input text-sm w-full max-w-xs"
+                >
+                  {transcriptionProviders
+                    .filter(p => p.available && p.id !== config.transcriptionProvider)
+                    .map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Ausführungsmodus</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="doublePrecisionMode"
+                      value="parallel"
+                      checked={(config.doublePrecisionMode || 'parallel') === 'parallel'}
+                      onChange={() => updateConfig({ doublePrecisionMode: 'parallel' })}
+                      disabled={!isRoot || saving}
+                    />
+                    <span className="text-sm">Parallel (schneller)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="doublePrecisionMode"
+                      value="sequential"
+                      checked={config.doublePrecisionMode === 'sequential'}
+                      onChange={() => updateConfig({ doublePrecisionMode: 'sequential' })}
+                      disabled={!isRoot || saving}
+                    />
+                    <span className="text-sm">Nacheinander (stabiler)</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* LLM Provider */}

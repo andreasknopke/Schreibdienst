@@ -8,11 +8,12 @@ import {
   initOfflineDictationTableWithRequest,
   updateAudioDataWithRequest,
 } from '@/lib/offlineDictationDb';
-import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath } from '@/lib/configDb';
+import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath, RuntimeConfig } from '@/lib/configDb';
 import { loadDictionaryWithRequest } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription } from '@/lib/textFormatting';
 import { compressAudioForSpeech, normalizeAudioForWhisper } from '@/lib/audioCompression';
+import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult } from '@/lib/doublePrecision';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes max for processing
@@ -129,6 +130,120 @@ async function processDictation(request: NextRequest, dictationId: number): Prom
   }
 }
 
+// Transcribe with a specific provider
+async function transcribeWithProvider(
+  request: NextRequest, 
+  audioBlob: Blob, 
+  provider: 'whisperx' | 'elevenlabs' | 'mistral',
+  initialPrompt?: string
+): Promise<TranscriptionResult> {
+  console.log(`[Worker] Transcribing with ${provider}...`);
+  
+  let result: { text: string; segments?: any[] };
+  
+  switch (provider) {
+    case 'elevenlabs':
+      result = await transcribeWithElevenLabs(audioBlob);
+      break;
+    case 'mistral':
+      result = await transcribeWithMistral(audioBlob);
+      break;
+    case 'whisperx':
+    default:
+      result = await transcribeWithWhisperX(request, audioBlob, initialPrompt);
+      break;
+  }
+  
+  return {
+    text: result.text,
+    segments: result.segments,
+    provider: provider,
+  };
+}
+
+// Double Precision Pipeline - merge two transcriptions using LLM
+async function doublePrecisionMerge(
+  request: NextRequest,
+  result1: TranscriptionResult,
+  result2: TranscriptionResult
+): Promise<{ text: string; segments?: any[] }> {
+  console.log(`[Worker DoublePrecision] Merging transcriptions from ${result1.provider} and ${result2.provider}`);
+  
+  const merged = mergeTranscriptionsWithMarkers(result1, result2);
+  
+  if (!merged.hasDifferences) {
+    console.log('[Worker DoublePrecision] No differences found, using first transcription');
+    return { text: result1.text, segments: result1.segments };
+  }
+  
+  console.log('[Worker DoublePrecision] Differences found, sending to LLM for resolution');
+  
+  // Get LLM config
+  const runtimeConfig = await getRuntimeConfigWithRequest(request);
+  const llmProvider = runtimeConfig.llmProvider;
+  
+  const mergePrompt = createMergePrompt(merged);
+  
+  let finalText: string;
+  
+  if (llmProvider === 'openai') {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
+    
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: runtimeConfig.openaiModel || 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: mergePrompt },
+          { role: 'user', content: 'Erstelle den finalen Text.' }
+        ],
+        temperature: 0.1,
+      }),
+    });
+    
+    if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
+    const data = await res.json();
+    finalText = data.choices?.[0]?.message?.content?.trim() || result1.text;
+  } else if (llmProvider === 'mistral') {
+    const apiKey = process.env.MISTRAL_API_KEY;
+    if (!apiKey) throw new Error('MISTRAL_API_KEY not configured');
+    
+    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: runtimeConfig.mistralModel || 'mistral-large-latest',
+        messages: [
+          { role: 'system', content: mergePrompt },
+          { role: 'user', content: 'Erstelle den finalen Text.' }
+        ],
+        temperature: 0.1,
+      }),
+    });
+    
+    if (!res.ok) throw new Error(`Mistral API error: ${res.status}`);
+    const data = await res.json();
+    finalText = data.choices?.[0]?.message?.content?.trim() || result1.text;
+  } else {
+    // LM Studio or fallback
+    console.warn('[Worker DoublePrecision] LM Studio not supported for merge, using first transcription');
+    finalText = result1.text;
+  }
+  
+  console.log(`[Worker DoublePrecision] ✓ Merged text length: ${finalText.length} chars`);
+  
+  // Use segments from the first transcription (or could interpolate)
+  return { text: finalText, segments: result1.segments };
+}
+
 // Transcribe audio using the same logic as the transcribe API
 async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?: string): Promise<{ text: string; segments?: any[] }> {
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
@@ -154,6 +269,36 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?:
     } catch (err) {
       console.warn('[Worker] Failed to load dictionary:', err);
     }
+  }
+  
+  // Double Precision Pipeline
+  if (runtimeConfig.doublePrecisionEnabled && runtimeConfig.doublePrecisionSecondProvider) {
+    const secondProvider = runtimeConfig.doublePrecisionSecondProvider;
+    const mode = runtimeConfig.doublePrecisionMode || 'parallel';
+    
+    console.log(`[Worker DoublePrecision] Enabled - Primary: ${provider}, Secondary: ${secondProvider}, Mode: ${mode}`);
+    
+    let result1: TranscriptionResult;
+    let result2: TranscriptionResult;
+    
+    if (mode === 'parallel') {
+      // Parallel execution
+      const [r1, r2] = await Promise.all([
+        transcribeWithProvider(request, audioBlob, provider, initialPrompt),
+        transcribeWithProvider(request, audioBlob, secondProvider, undefined),
+      ]);
+      result1 = r1;
+      result2 = r2;
+    } else {
+      // Sequential execution
+      result1 = await transcribeWithProvider(request, audioBlob, provider, initialPrompt);
+      result2 = await transcribeWithProvider(request, audioBlob, secondProvider, undefined);
+    }
+    
+    console.log(`[Worker DoublePrecision] Got transcriptions: ${provider}=${result1.text.length} chars, ${secondProvider}=${result2.text.length} chars`);
+    
+    // Merge the transcriptions
+    return doublePrecisionMerge(request, result1, result2);
   }
   
   // ElevenLabs jetzt im Offline-Modus unterstützt mit Word-Level Timestamps für Mitlesefunktion

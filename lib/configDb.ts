@@ -33,6 +33,10 @@ export interface RuntimeConfig {
   openaiModel?: string;
   mistralModel?: string;
   llmPromptAddition?: string;
+  // Double Precision Pipeline
+  doublePrecisionEnabled?: boolean;
+  doublePrecisionSecondProvider?: 'whisperx' | 'elevenlabs' | 'mistral';
+  doublePrecisionMode?: 'parallel' | 'sequential';
 }
 
 const DEFAULT_CONFIG: RuntimeConfig = {
@@ -42,6 +46,9 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   whisperOfflineModel: (process.env.WHISPER_OFFLINE_MODEL as WhisperOfflineModel) || 'large-v3-german-2',
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   mistralModel: process.env.MISTRAL_MODEL || 'mistral-large-latest',
+  doublePrecisionEnabled: false,
+  doublePrecisionSecondProvider: 'elevenlabs',
+  doublePrecisionMode: 'parallel',
 };
 
 // Get runtime config from database
@@ -81,6 +88,19 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
           break;
         case 'llmPromptAddition':
           config.llmPromptAddition = row.config_value;
+          break;
+        case 'doublePrecisionEnabled':
+          config.doublePrecisionEnabled = row.config_value === 'true';
+          break;
+        case 'doublePrecisionSecondProvider':
+          if (['whisperx', 'elevenlabs', 'mistral'].includes(row.config_value)) {
+            config.doublePrecisionSecondProvider = row.config_value as any;
+          }
+          break;
+        case 'doublePrecisionMode':
+          if (['parallel', 'sequential'].includes(row.config_value)) {
+            config.doublePrecisionMode = row.config_value as any;
+          }
           break;
       }
     }
@@ -152,6 +172,19 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
           break;
         case 'llmPromptAddition':
           config.llmPromptAddition = row.config_value;
+          break;
+        case 'doublePrecisionEnabled':
+          config.doublePrecisionEnabled = row.config_value === 'true';
+          break;
+        case 'doublePrecisionSecondProvider':
+          if (['whisperx', 'elevenlabs', 'mistral'].includes(row.config_value)) {
+            config.doublePrecisionSecondProvider = row.config_value as any;
+          }
+          break;
+        case 'doublePrecisionMode':
+          if (['parallel', 'sequential'].includes(row.config_value)) {
+            config.doublePrecisionMode = row.config_value as any;
+          }
           break;
       }
     }

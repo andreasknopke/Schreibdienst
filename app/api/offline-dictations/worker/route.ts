@@ -521,22 +521,36 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
   if (!apiKey) throw new Error('MISTRAL_API_KEY not configured');
   
   const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
-  console.log(`[Worker Mistral] Starting transcription - Size: ${fileSizeMB}MB`);
+  console.log(`[Worker Mistral] Starting transcription - Size: ${fileSizeMB}MB, Type: ${file.type}`);
   const startTime = Date.now();
   
-  // Convert audio to base64
+  // Convert audio to Buffer first
   const arrayBuffer = await file.arrayBuffer();
-  const base64Audio = Buffer.from(arrayBuffer).toString('base64');
-  
-  // Determine MIME type - extract format for Mistral
+  let audioBuffer = Buffer.from(arrayBuffer);
   let mimeType = file.type || 'audio/webm';
-  const supportedFormats = ['flac', 'mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'ogg', 'wav', 'webm'];
-  let audioFormat = mimeType.split('/')[1] || 'webm';
-  if (!supportedFormats.includes(audioFormat)) {
-    audioFormat = 'webm'; // Default to webm
+  
+  // Mistral Voxtral only accepts mp3 or wav - convert if needed
+  const mistralSupportedFormats = ['mp3', 'wav', 'mpeg'];
+  const currentFormat = mimeType.split('/')[1]?.replace('x-', '') || 'unknown';
+  
+  if (!mistralSupportedFormats.some(f => currentFormat.includes(f))) {
+    console.log(`[Worker Mistral] Converting ${currentFormat} to WAV for Mistral API...`);
+    const { data: normalizedData, mimeType: normalizedMime, normalized } = 
+      await normalizeAudioForWhisper(audioBuffer, mimeType);
+    if (normalized) {
+      audioBuffer = normalizedData;
+      mimeType = normalizedMime;
+      console.log(`[Worker Mistral] Converted to WAV: ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB`);
+    } else {
+      console.log(`[Worker Mistral] Warning: Could not convert audio, trying anyway...`);
+    }
   }
   
-  // Call Mistral API with input_audio format (not audio_url)
+  // Convert to base64
+  const base64Audio = audioBuffer.toString('base64');
+  const audioFormat = mimeType.includes('wav') ? 'wav' : 'mp3';
+  
+  // Call Mistral API with input_audio format
   // We use a structured prompt to get word-level timestamps
   const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
     method: 'POST',

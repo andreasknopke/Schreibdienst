@@ -417,8 +417,8 @@ async function transcribeWithElevenLabs(file: Blob, filename: string) {
 
 /**
  * Transkription mit Mistral AI Voxtral
- * Verwendet den Audio-Transkriptions-Endpunkt von Mistral
- * API-Dokumentation: https://docs.mistral.ai/api/#tag/audio
+ * Verwendet den dedizierten Audio-Transkriptions-Endpunkt von Mistral
+ * API-Dokumentation: https://docs.mistral.ai/capabilities/audio_transcription
  */
 async function transcribeWithMistral(file: Blob, filename: string) {
   const apiKey = process.env.MISTRAL_API_KEY;
@@ -435,8 +435,9 @@ async function transcribeWithMistral(file: Blob, filename: string) {
   let audioBuffer = Buffer.from(arrayBuffer);
   let mimeType = file.type || 'audio/webm';
   
-  // Mistral Voxtral only accepts mp3 or wav - convert if needed
-  const mistralSupportedFormats = ['mp3', 'wav', 'mpeg'];
+  // Mistral audio/transcriptions endpoint accepts: mp3, wav, flac, ogg, m4a
+  // Convert unsupported formats to WAV
+  const mistralSupportedFormats = ['mp3', 'wav', 'mpeg', 'flac', 'ogg', 'm4a'];
   const currentFormat = mimeType.split('/')[1]?.replace('x-', '') || 'unknown';
   
   if (!mistralSupportedFormats.some(f => currentFormat.includes(f))) {
@@ -452,40 +453,21 @@ async function transcribeWithMistral(file: Blob, filename: string) {
     }
   }
   
-  // Convert to base64
-  const base64Audio = audioBuffer.toString('base64');
-  const audioFormat = mimeType.includes('wav') ? 'wav' : 'mp3';
+  // Use the dedicated audio/transcriptions endpoint
+  const formData = new FormData();
+  
+  // Create a file-like blob with proper filename
+  const fileExtension = mimeType.includes('wav') ? 'wav' : mimeType.includes('mp3') ? 'mp3' : 'wav';
+  const audioFile = new Blob([audioBuffer], { type: mimeType });
+  formData.append('file', audioFile, `audio.${fileExtension}`);
+  formData.append('model', 'voxtral-mini-latest');
 
-  // Call Mistral API with input_audio format
-  const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+  const res = await fetch('https://api.mistral.ai/v1/audio/transcriptions', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: 'voxtral-small-latest',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'input_audio',
-              input_audio: {
-                data: base64Audio,
-                format: audioFormat,
-              },
-            },
-            {
-              type: 'text',
-              text: 'Bitte transkribiere diese Audioaufnahme auf Deutsch. Gib NUR die Transkription zurück, ohne Kommentare, Anführungszeichen oder Erklärungen.'
-            }
-          ]
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 4096,
-    }),
+    body: formData,
   });
 
   if (!res.ok) {
@@ -494,7 +476,7 @@ async function transcribeWithMistral(file: Blob, filename: string) {
   }
 
   const data = await res.json();
-  const transcriptionText = data.choices?.[0]?.message?.content?.trim() || '';
+  const transcriptionText = data.text || '';
   
   const duration = ((Date.now() - startTime) / 1000).toFixed(2);
   const textLength = transcriptionText.length;

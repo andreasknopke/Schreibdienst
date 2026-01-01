@@ -529,8 +529,9 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
   let audioBuffer = Buffer.from(arrayBuffer);
   let mimeType = file.type || 'audio/webm';
   
-  // Mistral Voxtral only accepts mp3 or wav - convert if needed
-  const mistralSupportedFormats = ['mp3', 'wav', 'mpeg'];
+  // Mistral audio/transcriptions endpoint accepts: mp3, wav, flac, ogg, m4a
+  // Convert unsupported formats to WAV
+  const mistralSupportedFormats = ['mp3', 'wav', 'mpeg', 'flac', 'ogg', 'm4a'];
   const currentFormat = mimeType.split('/')[1]?.replace('x-', '') || 'unknown';
   
   if (!mistralSupportedFormats.some(f => currentFormat.includes(f))) {
@@ -546,53 +547,24 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
     }
   }
   
-  // Convert to base64
-  const base64Audio = audioBuffer.toString('base64');
-  const audioFormat = mimeType.includes('wav') ? 'wav' : 'mp3';
+  // Use the dedicated audio/transcriptions endpoint with real timestamps
+  // This is the proper endpoint for transcription (not chat/completions)
+  const formData = new FormData();
   
-  // Call Mistral API with input_audio format
-  // We use a structured prompt to get word-level timestamps
-  const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+  // Create a file-like blob with proper filename
+  const fileExtension = mimeType.includes('wav') ? 'wav' : mimeType.includes('mp3') ? 'mp3' : 'wav';
+  const audioFile = new Blob([audioBuffer], { type: mimeType });
+  formData.append('file', audioFile, `audio.${fileExtension}`);
+  formData.append('model', 'voxtral-mini-latest');
+  // Request segment-level timestamps for "Mitlesen" feature
+  formData.append('timestamp_granularities[]', 'segment');
+  
+  const res = await fetch('https://api.mistral.ai/v1/audio/transcriptions', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: 'voxtral-small-latest',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'input_audio',
-              input_audio: {
-                data: base64Audio,
-                format: audioFormat,
-              },
-            },
-            {
-              type: 'text',
-              text: `Bitte transkribiere diese Audioaufnahme auf Deutsch.
-
-Gib das Ergebnis als JSON-Objekt im folgenden Format zurück:
-{
-  "text": "Der vollständige transkribierte Text",
-  "words": [
-    {"word": "Wort1", "start": 0.0, "end": 0.5},
-    {"word": "Wort2", "start": 0.5, "end": 1.0}
-  ]
-}
-
-Schätze die Zeitstempel (start/end in Sekunden) für jedes Wort basierend auf dem Audio-Tempo.
-Gib NUR das JSON zurück, ohne Markdown-Codeblocks oder andere Formatierung.`
-            }
-          ]
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 8192,
-    }),
+    body: formData,
   });
 
   if (!res.ok) {
@@ -601,36 +573,23 @@ Gib NUR das JSON zurück, ohne Markdown-Codeblocks oder andere Formatierung.`
   }
 
   const data = await res.json();
-  let responseContent = data.choices?.[0]?.message?.content?.trim() || '';
   
   const duration = ((Date.now() - startTime) / 1000).toFixed(2);
   console.log(`[Worker Mistral] API response received in ${duration}s`);
   
-  // Try to parse as JSON with timestamps
-  let transcriptionText = '';
+  // Extract transcription text and segments from API response
+  const transcriptionText = data.text || '';
   let segments: any[] = [];
   
-  try {
-    // Remove potential markdown code blocks
-    responseContent = responseContent.replace(/```json\s*\n?/g, '').replace(/```\s*$/g, '').trim();
-    
-    const parsed = JSON.parse(responseContent);
-    transcriptionText = parsed.text || '';
-    
-    // Convert word-level timestamps to segment format
-    if (parsed.words && Array.isArray(parsed.words)) {
-      segments = parsed.words.map((w: any) => ({
-        text: w.word,
-        start: w.start,
-        end: w.end,
-        words: [{ word: w.word, start: w.start, end: w.end }]
-      }));
-      console.log(`[Worker Mistral] Parsed ${segments.length} word timestamps`);
-    }
-  } catch (e) {
-    // If JSON parsing fails, use the raw response as text
-    console.warn(`[Worker Mistral] Could not parse JSON response, using raw text`);
-    transcriptionText = responseContent;
+  // Mistral returns segments with start/end timestamps
+  if (data.segments && Array.isArray(data.segments)) {
+    segments = data.segments.map((seg: any) => ({
+      text: seg.text,
+      start: seg.start,
+      end: seg.end,
+      words: seg.words || [{ word: seg.text, start: seg.start, end: seg.end }]
+    }));
+    console.log(`[Worker Mistral] Received ${segments.length} segments with real timestamps`);
   }
   
   console.log(`[Worker Mistral] ✓ Transcription complete - Text length: ${transcriptionText.length} chars, Segments: ${segments.length}`);

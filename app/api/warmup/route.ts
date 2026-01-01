@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 
 export const runtime = 'nodejs';
 
@@ -6,8 +7,21 @@ export const runtime = 'nodejs';
  * Warmup-Endpoint für WhisperX Service
  * Ruft den Whisper-Service auf, um das Modell vorzuladen und CUDA-Kernel zu initialisieren.
  * Sollte beim Frontend-Start aufgerufen werden für minimale Latenz bei der ersten Transkription.
+ * Wird nur ausgeführt wenn WhisperX als Transkriptions-Provider konfiguriert ist.
  */
-export async function POST() {
+export async function POST(request: NextRequest) {
+  // Prüfe ob WhisperX als Provider konfiguriert ist
+  const runtimeConfig = await getRuntimeConfigWithRequest(request);
+  const provider = runtimeConfig.transcriptionProvider || 'whisperx';
+  
+  if (provider !== 'whisperx') {
+    console.log(`[Warmup] Skipping WhisperX warmup - using ${provider} provider`);
+    return NextResponse.json({
+      status: 'skipped',
+      message: `WhisperX warmup not needed - using ${provider} provider`,
+    });
+  }
+  
   const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:5000';
   
   console.log('[Warmup] Triggering WhisperX warmup...');

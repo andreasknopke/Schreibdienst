@@ -59,6 +59,10 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
   const [currentTime, setCurrentTime] = useState(0);
   const [undoMessage, setUndoMessage] = useState<string | null>(null);
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  
+  // Playback speed options
+  const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
   
   // Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -460,6 +464,14 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
       setCurrentTime(time);
     }
   };
+  
+  // Change playback speed (preservesPitch is default true in modern browsers)
+  const changePlaybackSpeed = (speed: number) => {
+    setPlaybackSpeed(speed);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = speed;
+    }
+  };
 
   // Format time as MM:SS
   const formatTime = (seconds: number) => {
@@ -681,7 +693,10 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
                 ref={audioRef}
                 src={audioUrl}
                 onTimeUpdate={handleTimeUpdate}
-                onLoadedMetadata={handleTimeUpdate}
+                onLoadedMetadata={(e) => {
+                  handleTimeUpdate();
+                  e.currentTarget.playbackRate = playbackSpeed;
+                }}
                 className="hidden"
               />
               
@@ -713,6 +728,20 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
                 />
                 
                 <span className="text-sm font-mono">{formatTime(duration)}</span>
+                
+                {/* Speed control */}
+                <select
+                  value={playbackSpeed}
+                  onChange={(e) => changePlaybackSpeed(parseFloat(e.target.value))}
+                  className="select select-sm select-bordered text-xs w-16"
+                  title="Wiedergabegeschwindigkeit"
+                >
+                  {SPEED_OPTIONS.map(speed => (
+                    <option key={speed} value={speed}>
+                      {speed === 1 ? '1x' : `${speed}x`}
+                    </option>
+                  ))}
+                </select>
                 
                 <button
                   className="btn btn-outline btn-sm text-red-600"

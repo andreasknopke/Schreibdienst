@@ -111,6 +111,10 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [showMitlesen, setShowMitlesen] = useState(false);
   const [parsedSegments, setParsedSegments] = useState<TranscriptSegment[]>([]);
   const mitlesenRef = useRef<HTMLDivElement>(null);
+  
+  // Playback speed control
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
   // Load available users for filter
   const loadUsers = useCallback(async () => {
@@ -250,6 +254,14 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const seekRelative = (seconds: number) => {
     if (!audioRef.current) return;
     audioRef.current.currentTime = Math.max(0, Math.min(audioDuration, audioRef.current.currentTime + seconds));
+  };
+  
+  // Change playback speed (preservesPitch is default true in modern browsers)
+  const changePlaybackSpeed = (speed: number) => {
+    setPlaybackSpeed(speed);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = speed;
+    }
   };
   
   const formatTime = (seconds: number) => {
@@ -918,7 +930,10 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                           ref={audioRef}
                           src={audioUrl}
                           onTimeUpdate={(e) => setAudioCurrentTime(e.currentTarget.currentTime)}
-                          onLoadedMetadata={(e) => setAudioDuration(e.currentTarget.duration)}
+                          onLoadedMetadata={(e) => {
+                            setAudioDuration(e.currentTarget.duration);
+                            e.currentTarget.playbackRate = playbackSpeed;
+                          }}
                           onEnded={() => setIsPlaying(false)}
                           onPlay={() => setIsPlaying(true)}
                           onPause={() => setIsPlaying(false)}
@@ -988,6 +1003,23 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                           >
                             ⬇️
                           </button>
+                          
+                          {/* Speed control */}
+                          <div className="flex items-center gap-1 ml-2">
+                            <span className="text-xs text-gray-500 dark:text-gray-400">🏃</span>
+                            <select
+                              value={playbackSpeed}
+                              onChange={(e) => changePlaybackSpeed(parseFloat(e.target.value))}
+                              className="select select-sm select-bordered text-xs w-20"
+                              title="Wiedergabegeschwindigkeit"
+                            >
+                              {SPEED_OPTIONS.map(speed => (
+                                <option key={speed} value={speed}>
+                                  {speed === 1 ? '1x' : `${speed}x`}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
                       </>
                     )}

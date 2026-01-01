@@ -528,13 +528,15 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
   const arrayBuffer = await file.arrayBuffer();
   const base64Audio = Buffer.from(arrayBuffer).toString('base64');
   
-  // Determine MIME type
+  // Determine MIME type - extract format for Mistral
   let mimeType = file.type || 'audio/webm';
+  const supportedFormats = ['flac', 'mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'ogg', 'wav', 'webm'];
+  let audioFormat = mimeType.split('/')[1] || 'webm';
+  if (!supportedFormats.includes(audioFormat)) {
+    audioFormat = 'webm'; // Default to webm
+  }
   
-  // Create data URL
-  const dataUrl = `data:${mimeType};base64,${base64Audio}`;
-  
-  // Call Mistral API with audio input and request for timestamps
+  // Call Mistral API with input_audio format (not audio_url)
   // We use a structured prompt to get word-level timestamps
   const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
     method: 'POST',
@@ -549,8 +551,11 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
           role: 'user',
           content: [
             {
-              type: 'audio_url',
-              audio_url: dataUrl,
+              type: 'input_audio',
+              input_audio: {
+                data: base64Audio,
+                format: audioFormat,
+              },
             },
             {
               type: 'text',

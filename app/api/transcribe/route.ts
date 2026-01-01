@@ -415,9 +415,9 @@ async function transcribeWithElevenLabs(file: Blob, filename: string) {
 }
 
 /**
- * Transkription mit Mistral AI Voxtral Mini
- * Verwendet den neuen Audio-Transkriptions-Endpunkt von Mistral
- * API-Dokumentation: https://docs.mistral.ai/capabilities/audio_transcription
+ * Transkription mit Mistral AI Voxtral
+ * Verwendet den Audio-Transkriptions-Endpunkt von Mistral
+ * API-Dokumentation: https://docs.mistral.ai/api/#tag/audio
  */
 async function transcribeWithMistral(file: Blob, filename: string) {
   const apiKey = process.env.MISTRAL_API_KEY;
@@ -433,18 +433,16 @@ async function transcribeWithMistral(file: Blob, filename: string) {
   const arrayBuffer = await file.arrayBuffer();
   const base64Audio = Buffer.from(arrayBuffer).toString('base64');
   
-  // Determine MIME type
+  // Determine MIME type - extract format for Mistral
   let mimeType = file.type || 'audio/webm';
   // Mistral supports: flac, mp3, mp4, mpeg, mpga, m4a, ogg, wav, webm
-  const supportedTypes = ['audio/flac', 'audio/mp3', 'audio/mpeg', 'audio/mp4', 'audio/m4a', 'audio/ogg', 'audio/wav', 'audio/webm'];
-  if (!supportedTypes.some(t => mimeType.includes(t.split('/')[1]))) {
-    mimeType = 'audio/webm'; // Default to webm
+  const supportedFormats = ['flac', 'mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'ogg', 'wav', 'webm'];
+  let audioFormat = mimeType.split('/')[1] || 'webm';
+  if (!supportedFormats.includes(audioFormat)) {
+    audioFormat = 'webm'; // Default to webm
   }
 
-  // Create data URL
-  const dataUrl = `data:${mimeType};base64,${base64Audio}`;
-
-  // Call Mistral API with audio input
+  // Call Mistral API with input_audio format (not audio_url)
   const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -458,8 +456,11 @@ async function transcribeWithMistral(file: Blob, filename: string) {
           role: 'user',
           content: [
             {
-              type: 'audio_url',
-              audio_url: dataUrl,
+              type: 'input_audio',
+              input_audio: {
+                data: base64Audio,
+                format: audioFormat,
+              },
             },
             {
               type: 'text',

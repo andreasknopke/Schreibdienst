@@ -466,8 +466,10 @@ async function transcribeWithMistral(file: Blob, filename: string) {
   
   console.log(`[Mistral] Sending file as audio.${fileExtension} with mime ${mimeType}`);
   
-  const audioFile = new Blob([audioBuffer], { type: mimeType });
-  formData.append('file', audioFile, `audio.${fileExtension}`);
+  // Use File object instead of Blob for proper multipart/form-data handling in Node.js
+  const fileName = `audio.${fileExtension}`;
+  const audioFile = new File([audioBuffer], fileName, { type: mimeType });
+  formData.append('file', audioFile);
   formData.append('model', 'voxtral-mini-latest');
   formData.append('language', 'de'); // Force German to prevent hallucinations
 

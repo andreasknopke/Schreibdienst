@@ -435,40 +435,26 @@ async function transcribeWithMistral(file: Blob, filename: string) {
   let audioBuffer = Buffer.from(arrayBuffer);
   let mimeType = file.type || 'audio/webm';
   
-  // Mistral audio/transcriptions endpoint accepts: mp3, wav, flac, ogg, m4a
-  // Convert unsupported formats to WAV
-  const mistralSupportedFormats = ['mp3', 'wav', 'mpeg', 'flac', 'ogg', 'm4a'];
-  const currentFormat = mimeType.split('/')[1]?.replace('x-', '') || 'unknown';
-  
-  if (!mistralSupportedFormats.some(f => currentFormat.includes(f))) {
-    console.log(`[Mistral] Converting ${currentFormat} to WAV for Mistral API...`);
-    const { data: normalizedData, mimeType: normalizedMime, normalized } = 
-      await normalizeAudioForWhisper(audioBuffer, mimeType);
-    if (normalized) {
-      audioBuffer = normalizedData;
-      mimeType = normalizedMime;
-      console.log(`[Mistral] Converted to WAV: ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB`);
-    } else {
-      console.log(`[Mistral] Warning: Could not convert audio, trying anyway...`);
-    }
+  // ALWAYS convert to WAV for reliable Mistral API compatibility
+  // The /audio/transcriptions endpoint has issues with some formats like m4a
+  console.log(`[Mistral] Converting ${mimeType} to WAV for reliable Mistral API...`);
+  const { data: normalizedData, mimeType: normalizedMime, normalized } = 
+    await normalizeAudioForWhisper(audioBuffer, mimeType);
+  if (normalized) {
+    audioBuffer = normalizedData;
+    mimeType = normalizedMime;
+    console.log(`[Mistral] Converted to WAV: ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB`);
+  } else {
+    console.log(`[Mistral] Warning: Could not convert audio to WAV`);
   }
   
   // Use the dedicated audio/transcriptions endpoint
   const formData = new FormData();
   
-  // Determine correct file extension from mime type
-  let fileExtension = 'wav';
-  if (mimeType.includes('mp3') || mimeType.includes('mpeg')) fileExtension = 'mp3';
-  else if (mimeType.includes('wav')) fileExtension = 'wav';
-  else if (mimeType.includes('flac')) fileExtension = 'flac';
-  else if (mimeType.includes('ogg')) fileExtension = 'ogg';
-  else if (mimeType.includes('m4a')) fileExtension = 'm4a';
-  
-  console.log(`[Mistral] Sending file as audio.${fileExtension} with mime ${mimeType}`);
+  console.log(`[Mistral] Sending file as audio.wav with mime ${mimeType}`);
   
   // Use File object instead of Blob for proper multipart/form-data handling in Node.js
-  const fileName = `audio.${fileExtension}`;
-  const audioFile = new File([audioBuffer], fileName, { type: mimeType });
+  const audioFile = new File([audioBuffer], 'audio.wav', { type: mimeType });
   formData.append('file', audioFile);
   formData.append('model', 'voxtral-mini-latest');
   formData.append('language', 'de'); // Force German to prevent hallucinations

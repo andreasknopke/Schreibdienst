@@ -552,7 +552,8 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
   formData.append('file', audioFile);
   formData.append('model', 'voxtral-mini-transcribe-2507');
   formData.append('language', 'de'); // Force German to prevent hallucinations
-  // Request segment-level timestamps for "Mitlesen" feature
+  // Request word-level timestamps for "Mitlesen" feature
+  formData.append('timestamp_granularities[]', 'word');
   formData.append('timestamp_granularities[]', 'segment');
   
   const res = await fetch('https://api.mistral.ai/v1/audio/transcriptions', {
@@ -587,15 +588,31 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
   const transcriptionText = data.text || '';
   let segments: any[] = [];
   
-  // Mistral returns segments with start/end timestamps
+  // Mistral returns segments with start/end timestamps and words array
   if (data.segments && Array.isArray(data.segments)) {
-    segments = data.segments.map((seg: any) => ({
-      text: seg.text,
-      start: seg.start,
-      end: seg.end,
-      words: seg.words || [{ word: seg.text, start: seg.start, end: seg.end }]
-    }));
-    console.log(`[Worker Mistral] Received ${segments.length} segments with real timestamps`);
+    segments = data.segments.map((seg: any) => {
+      // Mistral returns words with 'word', 'start', 'end' properties
+      let words = seg.words;
+      if (!words || words.length === 0) {
+        // Fallback: split segment text into words and distribute timestamps
+        const segWords = seg.text.trim().split(/\s+/);
+        const segDuration = seg.end - seg.start;
+        const wordDuration = segDuration / segWords.length;
+        words = segWords.map((w: string, i: number) => ({
+          word: w,
+          start: seg.start + i * wordDuration,
+          end: seg.start + (i + 1) * wordDuration
+        }));
+      }
+      return {
+        text: seg.text,
+        start: seg.start,
+        end: seg.end,
+        words: words
+      };
+    });
+    const totalWords = segments.reduce((acc, seg) => acc + (seg.words?.length || 0), 0);
+    console.log(`[Worker Mistral] Received ${segments.length} segments with ${totalWords} words`);
   }
   
   console.log(`[Worker Mistral] ✓ Transcription complete - Text length: ${transcriptionText.length} chars, Segments: ${segments.length}`);

@@ -545,7 +545,7 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'mistral-small-latest',
+      model: 'voxtral-mini-transcribe-2507',
       messages: [
         {
           role: 'user',

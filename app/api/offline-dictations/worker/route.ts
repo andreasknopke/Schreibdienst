@@ -157,9 +157,14 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?:
   }
   
   // ElevenLabs nicht im Offline-Modus verwenden - keine Timestamp-Unterstützung für Mitlesefunktion
-  // Fallback auf WhisperX wenn ElevenLabs konfiguriert ist
+  // Fallback auf Mistral wenn ElevenLabs konfiguriert ist (Mistral unterstützt Timestamps)
   if (provider === 'elevenlabs') {
-    console.warn('[Worker] ElevenLabs not supported in offline mode (no timestamps). Using WhisperX instead.');
+    console.warn('[Worker] ElevenLabs not supported in offline mode (no timestamps). Using Mistral instead.');
+    if (process.env.MISTRAL_API_KEY) {
+      return transcribeWithMistral(audioBlob);
+    }
+    // Fallback auf WhisperX wenn kein Mistral-Key
+    console.warn('[Worker] MISTRAL_API_KEY not configured. Falling back to WhisperX.');
     return transcribeWithWhisperX(request, audioBlob, initialPrompt);
   }
   
@@ -193,7 +198,11 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?:
     return result;
   } catch (error: any) {
     console.warn('[Worker] WhisperX failed:', error.message);
-    // Kein ElevenLabs-Fallback im Offline-Modus wegen fehlender Timestamps
+    // Fallback auf Mistral wenn WhisperX fehlschlägt (Mistral unterstützt Timestamps)
+    if (process.env.MISTRAL_API_KEY) {
+      console.log('[Worker] Falling back to Mistral...');
+      return transcribeWithMistral(audioBlob);
+    }
     throw error;
   }
 }

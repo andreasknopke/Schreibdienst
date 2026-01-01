@@ -587,7 +587,7 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
   // Use File object instead of Blob for proper multipart/form-data handling in Node.js
   const audioFile = new File([audioBuffer], 'audio.wav', { type: mimeType });
   formData.append('file', audioFile);
-  formData.append('model', 'voxtral-mini-3b');
+  formData.append('model', 'Voxtral-Mini-3B-2507');
   formData.append('language', 'de'); // Force German to prevent hallucinations
   // Request word-level timestamps for "Mitlesen" feature
   formData.append('timestamp_granularities[]', 'word');

@@ -581,10 +581,20 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
     throw new Error(`Mistral API error (${res.status}): ${text}`);
   }
 
-  const data = await res.json();
-  
+  const responseText = await res.text();
   const duration = ((Date.now() - startTime) / 1000).toFixed(2);
   console.log(`[Worker Mistral] API response received in ${duration}s`);
+  console.log(`[Worker Mistral] Raw response (first 500 chars): ${responseText.substring(0, 500)}`);
+  
+  let data: any;
+  try {
+    data = JSON.parse(responseText);
+  } catch (e) {
+    console.error(`[Worker Mistral] JSON parse error: ${e}`);
+    throw new Error(`Failed to parse Mistral response: ${responseText.substring(0, 200)}`);
+  }
+  
+  console.log(`[Worker Mistral] Response keys: ${Object.keys(data).join(', ')}`);
   
   // Extract transcription text and segments from API response
   const transcriptionText = data.text || '';

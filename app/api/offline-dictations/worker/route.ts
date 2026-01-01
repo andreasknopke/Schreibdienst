@@ -137,7 +137,7 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?:
   // Lade Wörterbuch für initial_prompt bei WhisperX
   // Nur Einträge mit useInPrompt=true werden verwendet
   let initialPrompt: string | undefined;
-  if (username && provider !== 'elevenlabs') {
+  if (username && provider !== 'elevenlabs' && provider !== 'mistral') {
     try {
       const dictionary = await loadDictionaryWithRequest(request, username);
       // Extrahiere einzigartige korrekte Wörter nur von Einträgen mit useInPrompt=true
@@ -156,8 +156,11 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?:
     }
   }
   
+  // ElevenLabs nicht im Offline-Modus verwenden - keine Timestamp-Unterstützung für Mitlesefunktion
+  // Fallback auf WhisperX wenn ElevenLabs konfiguriert ist
   if (provider === 'elevenlabs') {
-    return transcribeWithElevenLabs(audioBlob);
+    console.warn('[Worker] ElevenLabs not supported in offline mode (no timestamps). Using WhisperX instead.');
+    return transcribeWithWhisperX(request, audioBlob, initialPrompt);
   }
   
   if (provider === 'mistral') {
@@ -189,10 +192,8 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?:
     
     return result;
   } catch (error: any) {
-    console.warn('[Worker] WhisperX failed, trying ElevenLabs fallback:', error.message);
-    if (process.env.ELEVENLABS_API_KEY) {
-      return transcribeWithElevenLabs(audioBlob);
-    }
+    console.warn('[Worker] WhisperX failed:', error.message);
+    // Kein ElevenLabs-Fallback im Offline-Modus wegen fehlender Timestamps
     throw error;
   }
 }

@@ -388,6 +388,8 @@ async function transcribeWithElevenLabs(file: Blob, filename: string) {
   upstream.append('model_id', 'scribe_v1');
   upstream.append('language_code', 'de');
   upstream.append('tag_audio_events', 'false');
+  // Request word-level timestamps for Mitlesen feature
+  upstream.append('timestamps_granularity', 'word');
 
   const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
     method: 'POST',
@@ -407,9 +409,31 @@ async function transcribeWithElevenLabs(file: Blob, filename: string) {
   const textLength = (data.text ?? '').length;
   console.log(`[ElevenLabs] ✓ Transcription complete - Duration: ${duration}s, Text length: ${textLength} chars`);
   
+  // Build segments from word timestamps
+  let segments: any[] = [];
+  if (data.words && Array.isArray(data.words)) {
+    const words = data.words
+      .filter((w: any) => w.type === 'word' || !w.type)
+      .map((w: any) => ({
+        word: w.text || w.word,
+        start: w.start_time ?? w.start,
+        end: w.end_time ?? w.end
+      }));
+    
+    if (words.length > 0) {
+      segments = [{
+        text: data.text ?? '',
+        start: words[0].start,
+        end: words[words.length - 1].end,
+        words: words
+      }];
+    }
+    console.log(`[ElevenLabs] Received ${words.length} words with timestamps`);
+  }
+  
   return {
     text: data.text ?? '',
-    segments: [],
+    segments: segments,
     language: 'de',
     provider: 'elevenlabs' as const
   };

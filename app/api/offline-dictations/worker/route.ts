@@ -156,16 +156,10 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?:
     }
   }
   
-  // ElevenLabs nicht im Offline-Modus verwenden - keine Timestamp-Unterstützung für Mitlesefunktion
-  // Fallback auf Mistral wenn ElevenLabs konfiguriert ist (Mistral unterstützt Timestamps)
+  // ElevenLabs jetzt im Offline-Modus unterstützt mit Word-Level Timestamps für Mitlesefunktion
   if (provider === 'elevenlabs') {
-    console.warn('[Worker] ElevenLabs not supported in offline mode (no timestamps). Using Mistral instead.');
-    if (process.env.MISTRAL_API_KEY) {
-      return transcribeWithMistral(audioBlob);
-    }
-    // Fallback auf WhisperX wenn kein Mistral-Key
-    console.warn('[Worker] MISTRAL_API_KEY not configured. Falling back to WhisperX.');
-    return transcribeWithWhisperX(request, audioBlob, initialPrompt);
+    console.log('[Worker] Using ElevenLabs Scribe with word-level timestamps');
+    return transcribeWithElevenLabs(audioBlob);
   }
   
   if (provider === 'mistral') {
@@ -494,11 +488,17 @@ async function transcribeWithElevenLabs(file: Blob): Promise<{ text: string; seg
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) throw new Error('ELEVENLABS_API_KEY not configured');
   
+  const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+  console.log(`[Worker ElevenLabs] Starting transcription - Size: ${fileSizeMB}MB, Type: ${file.type}`);
+  const startTime = Date.now();
+  
   const formData = new FormData();
   formData.append('file', file, 'audio.webm');
   formData.append('model_id', 'scribe_v1');
   formData.append('language_code', 'de');
   formData.append('tag_audio_events', 'false');
+  // Request word-level timestamps for Mitlesen feature
+  formData.append('timestamps_granularity', 'word');
   
   const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
     method: 'POST',
@@ -506,9 +506,46 @@ async function transcribeWithElevenLabs(file: Blob): Promise<{ text: string; seg
     body: formData,
   });
   
-  if (!res.ok) throw new Error(`ElevenLabs API error (${res.status})`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`ElevenLabs API error (${res.status}): ${text}`);
+  }
+  
   const data = await res.json();
-  return { text: data.text ?? '' };
+  const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+  console.log(`[Worker ElevenLabs] API response received in ${duration}s`);
+  console.log(`[Worker ElevenLabs] Response keys: ${Object.keys(data).join(', ')}`);
+  
+  // Extract text and build segments from ElevenLabs word timestamps
+  const transcriptionText = data.text || '';
+  let segments: any[] = [];
+  
+  // ElevenLabs returns words array with start_time, end_time, text, type
+  if (data.words && Array.isArray(data.words)) {
+    // Group words into segments (sentences/phrases)
+    // For simplicity, create one segment with all words
+    const words = data.words
+      .filter((w: any) => w.type === 'word' || !w.type) // Filter out spacing/punctuation if present
+      .map((w: any) => ({
+        word: w.text || w.word,
+        start: w.start_time ?? w.start,
+        end: w.end_time ?? w.end
+      }));
+    
+    if (words.length > 0) {
+      segments = [{
+        text: transcriptionText,
+        start: words[0].start,
+        end: words[words.length - 1].end,
+        words: words
+      }];
+    }
+    console.log(`[Worker ElevenLabs] Received ${words.length} words with timestamps`);
+  }
+  
+  console.log(`[Worker ElevenLabs] ✓ Transcription complete - Text length: ${transcriptionText.length} chars, Words: ${segments[0]?.words?.length || 0}`);
+  
+  return { text: transcriptionText, segments };
 }
 
 /**

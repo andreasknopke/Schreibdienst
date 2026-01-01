@@ -426,7 +426,7 @@ async function transcribeWithMistral(file: Blob, filename: string) {
   }
 
   const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
-  console.log(`[Mistral] Starting transcription - File: ${filename}, Size: ${fileSizeMB}MB, Model: voxtral-mini-transcribe-2507`);
+  console.log(`[Mistral] Starting transcription - File: ${filename}, Size: ${fileSizeMB}MB, Model: voxtral-small-latest`);
   const startTime = Date.now();
 
   // Convert audio to base64
@@ -450,7 +450,7 @@ async function transcribeWithMistral(file: Blob, filename: string) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'voxtral-mini-transcribe-2507',
+      model: 'voxtral-small-latest',
       messages: [
         {
           role: 'user',

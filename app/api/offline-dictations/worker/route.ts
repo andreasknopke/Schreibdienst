@@ -591,7 +591,6 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
   formData.append('language', 'de'); // Force German to prevent hallucinations
   // Request word-level timestamps for "Mitlesen" feature
   formData.append('timestamp_granularities[]', 'word');
-  formData.append('timestamp_granularities[]', 'segment');
   
   const res = await fetch('https://api.mistral.ai/v1/audio/transcriptions', {
     method: 'POST',

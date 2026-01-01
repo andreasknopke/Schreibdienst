@@ -551,8 +551,16 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
   // This is the proper endpoint for transcription (not chat/completions)
   const formData = new FormData();
   
-  // Create a file-like blob with proper filename
-  const fileExtension = mimeType.includes('wav') ? 'wav' : mimeType.includes('mp3') ? 'mp3' : 'wav';
+  // Determine correct file extension from mime type
+  let fileExtension = 'wav';
+  if (mimeType.includes('mp3') || mimeType.includes('mpeg')) fileExtension = 'mp3';
+  else if (mimeType.includes('wav')) fileExtension = 'wav';
+  else if (mimeType.includes('flac')) fileExtension = 'flac';
+  else if (mimeType.includes('ogg')) fileExtension = 'ogg';
+  else if (mimeType.includes('m4a')) fileExtension = 'm4a';
+  
+  console.log(`[Worker Mistral] Sending file as audio.${fileExtension} with mime ${mimeType}`);
+  
   const audioFile = new Blob([audioBuffer], { type: mimeType });
   formData.append('file', audioFile, `audio.${fileExtension}`);
   formData.append('model', 'voxtral-mini-latest');

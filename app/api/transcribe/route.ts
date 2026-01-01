@@ -461,6 +461,7 @@ async function transcribeWithMistral(file: Blob, filename: string) {
   const audioFile = new Blob([audioBuffer], { type: mimeType });
   formData.append('file', audioFile, `audio.${fileExtension}`);
   formData.append('model', 'voxtral-mini-latest');
+  formData.append('language', 'de'); // Force German to prevent hallucinations
 
   const res = await fetch('https://api.mistral.ai/v1/audio/transcriptions', {
     method: 'POST',

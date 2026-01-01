@@ -556,6 +556,7 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
   const audioFile = new Blob([audioBuffer], { type: mimeType });
   formData.append('file', audioFile, `audio.${fileExtension}`);
   formData.append('model', 'voxtral-mini-latest');
+  formData.append('language', 'de'); // Force German to prevent hallucinations
   // Request segment-level timestamps for "Mitlesen" feature
   formData.append('timestamp_granularities[]', 'segment');
   

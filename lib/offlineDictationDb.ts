@@ -103,6 +103,27 @@ export async function initOfflineDictationTable(): Promise<void> {
     }
   }
   
+  // Initialize correction log table
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS correction_log (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      dictation_id INT NOT NULL,
+      correction_type ENUM('textFormatting', 'llm', 'doublePrecision', 'manual') NOT NULL,
+      model_name VARCHAR(255) DEFAULT NULL,
+      model_provider VARCHAR(100) DEFAULT NULL,
+      username VARCHAR(255) DEFAULT NULL,
+      text_before LONGTEXT NOT NULL,
+      text_after LONGTEXT NOT NULL,
+      change_score INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_dictation_id (dictation_id),
+      INDEX idx_correction_type (correction_type),
+      INDEX idx_created_at (created_at),
+      FOREIGN KEY (dictation_id) REFERENCES offline_dictations(id) ON DELETE CASCADE
+    )
+  `);
+  console.log('[DB] ✓ Correction log table ready');
+  
   console.log('[DB] ✓ Offline dictations table ready');
 }
 
@@ -449,6 +470,31 @@ export async function initOfflineDictationTableWithRequest(request: NextRequest)
     console.log(`[DB] ✓ Added segments column (${poolKey})`);
   } catch (e: any) {
     // Column already exists - ignore error
+  }
+  
+  // Initialize correction log table
+  try {
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS correction_log (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        dictation_id INT NOT NULL,
+        correction_type ENUM('textFormatting', 'llm', 'doublePrecision', 'manual') NOT NULL,
+        model_name VARCHAR(255) DEFAULT NULL,
+        model_provider VARCHAR(100) DEFAULT NULL,
+        username VARCHAR(255) DEFAULT NULL,
+        text_before LONGTEXT NOT NULL,
+        text_after LONGTEXT NOT NULL,
+        change_score INT DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_dictation_id (dictation_id),
+        INDEX idx_correction_type (correction_type),
+        INDEX idx_created_at (created_at),
+        FOREIGN KEY (dictation_id) REFERENCES offline_dictations(id) ON DELETE CASCADE
+      )
+    `);
+    console.log(`[DB] ✓ Correction log table ready (${poolKey})`);
+  } catch (e: any) {
+    // Table already exists
   }
   
   tableInitializedPerPool.set(poolKey, true);

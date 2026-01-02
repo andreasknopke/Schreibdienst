@@ -14,6 +14,8 @@ import {
   DictationPriority,
   DictationStatus,
 } from '@/lib/offlineDictationDb';
+import { logManualCorrectionWithRequest } from '@/lib/correctionLogDb';
+import { calculateChangeScore } from '@/lib/changeScore';
 
 export const runtime = 'nodejs';
 
@@ -184,6 +186,32 @@ export async function PATCH(req: NextRequest) {
       if (correctedText === undefined) {
         return NextResponse.json({ error: 'correctedText required for save action' }, { status: 400 });
       }
+      
+      // Get username from request for logging
+      const { searchParams } = new URL(req.url);
+      const username = searchParams.get('username');
+      
+      // Get the dictation to compare texts
+      const dictation = await getDictationByIdWithRequest(req, id);
+      if (dictation && username) {
+        // Log manual correction
+        try {
+          const textBefore = dictation.corrected_text || dictation.transcript || '';
+          const manualChangeScore = calculateChangeScore(textBefore, correctedText);
+          await logManualCorrectionWithRequest(
+            req,
+            id,
+            textBefore,
+            correctedText,
+            username,
+            manualChangeScore
+          );
+          console.log(`[Offline Dictations] ✓ Manual correction logged for #${id} by ${username} (score: ${manualChangeScore}%)`);
+        } catch (logError: any) {
+          console.warn(`[Offline Dictations] Failed to log manual correction: ${logError.message}`);
+        }
+      }
+      
       await updateCorrectedTextWithRequest(req, id, correctedText, changeScore);
       console.log(`[Offline Dictations] Saved corrected text for dictation #${id}`);
       return NextResponse.json({ message: 'Corrected text saved' });

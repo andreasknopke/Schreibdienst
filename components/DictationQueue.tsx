@@ -10,7 +10,6 @@ import CustomActionsManager from './CustomActionsManager';
 import DiffHighlight, { DiffStats } from './DiffHighlight';
 import CorrectionLogViewer from './CorrectionLogViewer';
 import ArchiveView from './ArchiveView';
-import CorrectionLogViewer from './CorrectionLogViewer';
 
 interface Dictation {
   id: number;

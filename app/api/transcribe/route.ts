@@ -480,8 +480,10 @@ async function transcribeWithMistral(file: Blob, filename: string) {
   // Use File object instead of Blob for proper multipart/form-data handling in Node.js
   const audioFile = new File([audioBuffer], 'audio.wav', { type: mimeType });
   formData.append('file', audioFile);
-  formData.append('model', 'voxtral-mini-transcribe-2507');
+  formData.append('model', 'voxtral-mini-latest');
   formData.append('language', 'de'); // Force German to prevent hallucinations
+  // Request word-level timestamps for "Mitlesen" feature
+  formData.append('timestamp_granularities[]', 'word');
 
   const res = await fetch('https://api.mistral.ai/v1/audio/transcriptions', {
     method: 'POST',

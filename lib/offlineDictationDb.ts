@@ -30,6 +30,10 @@ export interface OfflineDictation {
   corrected_text?: string;
   change_score?: number; // Änderungsscore (0-100) für Ampelsystem
   error_message?: string;
+  // Archive status
+  archived?: boolean;
+  archived_at?: Date;
+  archived_by?: string;
   // Timestamps
   created_at: Date;
   processing_started_at?: Date;
@@ -103,6 +107,44 @@ export async function initOfflineDictationTable(): Promise<void> {
     }
   }
   
+  // Migrate existing tables to add archive fields
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN archived BOOLEAN DEFAULT FALSE AFTER error_message`);
+    console.log('[DB] ✓ Added archived column');
+  } catch (e: any) {
+    if (!e.message?.includes('Duplicate column')) {
+      console.log('[DB] archived column already exists');
+    }
+  }
+  
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN archived_at TIMESTAMP NULL AFTER archived`);
+    console.log('[DB] ✓ Added archived_at column');
+  } catch (e: any) {
+    if (!e.message?.includes('Duplicate column')) {
+      console.log('[DB] archived_at column already exists');
+    }
+  }
+  
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN archived_by VARCHAR(255) DEFAULT NULL AFTER archived_at`);
+    console.log('[DB] ✓ Added archived_by column');
+  } catch (e: any) {
+    if (!e.message?.includes('Duplicate column')) {
+      console.log('[DB] archived_by column already exists');
+    }
+  }
+  
+  // Add index for archived status
+  try {
+    await db.execute(`CREATE INDEX idx_archived ON offline_dictations(archived)`);
+    console.log('[DB] ✓ Added archived index');
+  } catch (e: any) {
+    if (!e.message?.includes('Duplicate key')) {
+      console.log('[DB] archived index already exists');
+    }
+  }
+  
   // Initialize correction log table
   await db.execute(`
     CREATE TABLE IF NOT EXISTS correction_log (
@@ -161,13 +203,15 @@ export async function createOfflineDictation(
 }
 
 // Get dictations for a user (without audio data for list view)
-export async function getUserDictations(username: string): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
+export async function getUserDictations(username: string, includeArchived: boolean = false): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
+  const archivedCondition = includeArchived ? '' : 'AND (archived IS NULL OR archived = FALSE)';
   return query(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
+            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
+            change_score, error_message, archived, archived_at, archived_by,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
-     WHERE username = ?
+     WHERE username = ? ${archivedCondition}
      ORDER BY 
        CASE priority 
          WHEN 'stat' THEN 1 
@@ -180,9 +224,13 @@ export async function getUserDictations(username: string): Promise<Omit<OfflineD
 }
 
 // Get all dictations (for users with view all permission)
-export async function getAllDictations(statusFilter?: DictationStatus, userFilter?: string): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
+export async function getAllDictations(statusFilter?: DictationStatus, userFilter?: string, includeArchived: boolean = false): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
   const conditions: string[] = [];
   const params: (string)[] = [];
+  
+  if (!includeArchived) {
+    conditions.push('(archived IS NULL OR archived = FALSE)');
+  }
   
   if (statusFilter) {
     conditions.push('status = ?');
@@ -197,7 +245,8 @@ export async function getAllDictations(statusFilter?: DictationStatus, userFilte
   
   return query(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
+            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
+            change_score, error_message, archived, archived_at, archived_by,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
      ${whereClause}
@@ -385,6 +434,72 @@ export async function updateAudioData(
   );
 }
 
+// Archive a dictation
+export async function archiveDictation(id: number, archivedBy: string): Promise<void> {
+  await execute(
+    `UPDATE offline_dictations 
+     SET archived = TRUE, archived_at = NOW(), archived_by = ?
+     WHERE id = ?`,
+    [archivedBy, id]
+  );
+}
+
+// Unarchive a dictation
+export async function unarchiveDictation(id: number): Promise<void> {
+  await execute(
+    `UPDATE offline_dictations 
+     SET archived = FALSE, archived_at = NULL, archived_by = NULL
+     WHERE id = ?`,
+    [id]
+  );
+}
+
+// Get archived dictations with filters
+export async function getArchivedDictations(filters?: {
+  username?: string;
+  archivedBy?: string;
+  patientName?: string;
+  fromDate?: string;
+  toDate?: string;
+}): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
+  const conditions: string[] = ['archived = TRUE'];
+  const params: any[] = [];
+  
+  if (filters?.username) {
+    conditions.push('username = ?');
+    params.push(filters.username);
+  }
+  if (filters?.archivedBy) {
+    conditions.push('archived_by = ?');
+    params.push(filters.archivedBy);
+  }
+  if (filters?.patientName) {
+    conditions.push('patient_name LIKE ?');
+    params.push(`%${filters.patientName}%`);
+  }
+  if (filters?.fromDate) {
+    conditions.push('created_at >= ?');
+    params.push(filters.fromDate);
+  }
+  if (filters?.toDate) {
+    conditions.push('created_at <= ?');
+    params.push(filters.toDate);
+  }
+  
+  const whereClause = conditions.join(' AND ');
+  
+  return query(
+    `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
+            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
+            change_score, error_message, archived, archived_at, archived_by,
+            created_at, processing_started_at, completed_at
+     FROM offline_dictations 
+     WHERE ${whereClause}
+     ORDER BY archived_at DESC`,
+    params
+  );
+}
+
 // ============================================================
 // Request-basierte Funktionen (für dynamische DB über Token)
 // ============================================================
@@ -472,6 +587,36 @@ export async function initOfflineDictationTableWithRequest(request: NextRequest)
     // Column already exists - ignore error
   }
   
+  // Migrate existing tables to add archive fields
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN archived BOOLEAN DEFAULT FALSE AFTER error_message`);
+    console.log(`[DB] ✓ Added archived column (${poolKey})`);
+  } catch (e: any) {
+    // Column already exists - ignore error
+  }
+  
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN archived_at TIMESTAMP NULL AFTER archived`);
+    console.log(`[DB] ✓ Added archived_at column (${poolKey})`);
+  } catch (e: any) {
+    // Column already exists - ignore error
+  }
+  
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN archived_by VARCHAR(255) DEFAULT NULL AFTER archived_at`);
+    console.log(`[DB] ✓ Added archived_by column (${poolKey})`);
+  } catch (e: any) {
+    // Column already exists - ignore error
+  }
+  
+  // Add index for archived status
+  try {
+    await db.execute(`CREATE INDEX idx_archived ON offline_dictations(archived)`);
+    console.log(`[DB] ✓ Added archived index (${poolKey})`);
+  } catch (e: any) {
+    // Index already exists - ignore error
+  }
+  
   // Initialize correction log table
   try {
     await db.execute(`
@@ -539,15 +684,18 @@ export async function createOfflineDictationWithRequest(
 // Get dictations for a user with Request context
 export async function getUserDictationsWithRequest(
   request: NextRequest,
-  username: string
+  username: string,
+  includeArchived: boolean = false
 ): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
   const db = await getPoolForRequest(request);
+  const archivedCondition = includeArchived ? '' : 'AND (archived IS NULL OR archived = FALSE)';
   const [rows] = await db.execute(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
+            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
+            change_score, error_message, archived, archived_at, archived_by,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
-     WHERE username = ?
+     WHERE username = ? ${archivedCondition}
      ORDER BY 
        CASE priority 
          WHEN 'stat' THEN 1 
@@ -564,11 +712,16 @@ export async function getUserDictationsWithRequest(
 export async function getAllDictationsWithRequest(
   request: NextRequest,
   statusFilter?: DictationStatus,
-  userFilter?: string
+  userFilter?: string,
+  includeArchived: boolean = false
 ): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
   const db = await getPoolForRequest(request);
   const conditions: string[] = [];
   const params: string[] = [];
+  
+  if (!includeArchived) {
+    conditions.push('(archived IS NULL OR archived = FALSE)');
+  }
   
   if (statusFilter) {
     conditions.push('status = ?');
@@ -583,7 +736,8 @@ export async function getAllDictationsWithRequest(
   
   const [rows] = await db.execute(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, change_score, error_message,
+            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
+            change_score, error_message, archived, archived_at, archived_by,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
      ${whereClause}
@@ -817,4 +971,84 @@ export async function updateAudioDataWithRequest(
      WHERE id = ?`,
     [audioData, mimeType, id]
   );
+}
+
+// Archive a dictation with Request context
+export async function archiveDictationWithRequest(
+  request: NextRequest,
+  id: number,
+  archivedBy: string
+): Promise<void> {
+  const db = await getPoolForRequest(request);
+  await db.execute(
+    `UPDATE offline_dictations 
+     SET archived = TRUE, archived_at = NOW(), archived_by = ?
+     WHERE id = ?`,
+    [archivedBy, id]
+  );
+}
+
+// Unarchive a dictation with Request context
+export async function unarchiveDictationWithRequest(
+  request: NextRequest,
+  id: number
+): Promise<void> {
+  const db = await getPoolForRequest(request);
+  await db.execute(
+    `UPDATE offline_dictations 
+     SET archived = FALSE, archived_at = NULL, archived_by = NULL
+     WHERE id = ?`,
+    [id]
+  );
+}
+
+// Get archived dictations with Request context
+export async function getArchivedDictationsWithRequest(
+  request: NextRequest,
+  filters?: {
+    username?: string;
+    archivedBy?: string;
+    patientName?: string;
+    fromDate?: string;
+    toDate?: string;
+  }
+): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
+  const db = await getPoolForRequest(request);
+  const conditions: string[] = ['archived = TRUE'];
+  const params: any[] = [];
+  
+  if (filters?.username) {
+    conditions.push('username = ?');
+    params.push(filters.username);
+  }
+  if (filters?.archivedBy) {
+    conditions.push('archived_by = ?');
+    params.push(filters.archivedBy);
+  }
+  if (filters?.patientName) {
+    conditions.push('patient_name LIKE ?');
+    params.push(`%${filters.patientName}%`);
+  }
+  if (filters?.fromDate) {
+    conditions.push('created_at >= ?');
+    params.push(filters.fromDate);
+  }
+  if (filters?.toDate) {
+    conditions.push('created_at <= ?');
+    params.push(filters.toDate);
+  }
+  
+  const whereClause = conditions.join(' AND ');
+  
+  const [rows] = await db.execute(
+    `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
+            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
+            change_score, error_message, archived, archived_at, archived_by,
+            created_at, processing_started_at, completed_at
+     FROM offline_dictations 
+     WHERE ${whereClause}
+     ORDER BY archived_at DESC`,
+    params
+  );
+  return rows as Omit<OfflineDictation, 'audio_data'>[];
 }

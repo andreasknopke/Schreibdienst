@@ -309,16 +309,104 @@ export default function EditableTextWithMitlesen({
     setLocalText(text);
   }, [text]);
   
-  // Build timestamp table: maps character positions to timestamps
-  // Uses diff between original transcript and formatted text for robust mapping
-  const timestampTable = useMemo(() => {
-    return buildTimestampTable(originalSegments, localText, originalText);
-  }, [originalSegments, localText, originalText]);
+  // Build STABLE timestamp table based on the saved/initial text (not localText)
+  // This ensures timestamps don't jump around during manual editing
+  const stableTimestampTable = useMemo(() => {
+    return buildTimestampTable(originalSegments, text, originalText);
+  }, [originalSegments, text, originalText]);
   
-  // Get ordered array of timestamped words for iteration
+  // Get stable timestamped words from the saved text
+  const stableTimestampedWords = useMemo(() => {
+    return getOrderedTimestampedWords(stableTimestampTable, text);
+  }, [stableTimestampTable, text]);
+  
+  // Map timestamps from stable text to current localText
+  // Uses word-sequence matching to handle insertions/deletions
   const timestampedWords = useMemo(() => {
-    return getOrderedTimestampedWords(timestampTable, localText);
-  }, [timestampTable, localText]);
+    if (localText === text) {
+      // No manual edits - use stable timestamps directly
+      return stableTimestampedWords;
+    }
+    
+    // Manual edits detected - need to remap timestamps
+    const localWords = parseWords(localText);
+    const stableWords = parseWords(text);
+    
+    if (localWords.length === 0) return [];
+    if (stableTimestampedWords.length === 0) return [];
+    
+    // Build a map of stable word timestamps by normalized word and approximate position
+    // Key: normalized word + position bucket (to handle duplicates)
+    const result: TimestampedWord[] = [];
+    
+    // Use diff to match words between stable and local text
+    const stableWordString = stableWords.map(w => w.normalized).join(' ');
+    const localWordString = localWords.map(w => w.normalized).join(' ');
+    const diffs = diffWordsWithSpace(stableWordString, localWordString);
+    
+    let stableIdx = 0;
+    let localIdx = 0;
+    
+    for (const diff of diffs) {
+      const words = diff.value?.split(/\s+/).filter(w => w.length > 0) || [];
+      const wordCount = words.length;
+      
+      if (diff.removed) {
+        // Words in stable that were removed in local - skip them
+        stableIdx += wordCount;
+        continue;
+      }
+      
+      if (diff.added) {
+        // Words added in local - they need interpolated timestamps
+        for (let i = 0; i < wordCount && localIdx < localWords.length; i++) {
+          const lw = localWords[localIdx];
+          // Interpolate based on surrounding timestamps
+          let estimatedStart = 0;
+          let estimatedEnd = 0.2;
+          
+          if (stableIdx > 0 && stableIdx <= stableTimestampedWords.length) {
+            const prevTs = stableTimestampedWords[stableIdx - 1];
+            estimatedStart = prevTs.end + 0.1;
+            estimatedEnd = estimatedStart + 0.2;
+          } else if (stableIdx < stableTimestampedWords.length) {
+            const nextTs = stableTimestampedWords[stableIdx];
+            estimatedStart = Math.max(0, nextTs.start - 0.2);
+            estimatedEnd = nextTs.start;
+          }
+          
+          result.push({
+            word: lw.word,
+            start: estimatedStart,
+            end: estimatedEnd,
+            isInterpolated: true,
+            charPos: lw.charPos
+          });
+          localIdx++;
+        }
+        continue;
+      }
+      
+      // Unchanged - direct mapping
+      for (let i = 0; i < wordCount && stableIdx < stableTimestampedWords.length && localIdx < localWords.length; i++) {
+        const stableTs = stableTimestampedWords[stableIdx];
+        const lw = localWords[localIdx];
+        
+        result.push({
+          word: lw.word,
+          start: stableTs.start,
+          end: stableTs.end,
+          isInterpolated: stableTs.isInterpolated,
+          charPos: lw.charPos
+        });
+        
+        stableIdx++;
+        localIdx++;
+      }
+    }
+    
+    return result;
+  }, [localText, text, stableTimestampedWords]);
   
   // Detect if audio is playing (time is changing)
   const prevTimeRef = useRef(audioCurrentTime);

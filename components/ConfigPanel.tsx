@@ -21,6 +21,7 @@ interface RuntimeConfig {
   // Double Precision Pipeline
   doublePrecisionEnabled?: boolean;
   doublePrecisionSecondProvider?: 'whisperx' | 'elevenlabs' | 'mistral';
+  doublePrecisionWhisperModel?: string;
   doublePrecisionMode?: 'parallel' | 'sequential';
 }
 
@@ -337,6 +338,32 @@ export default function ConfigPanel() {
                     ))}
                 </select>
               </div>
+              
+              {/* Whisper-Modell Auswahl für Double Precision, wenn Provider whisperx ist */}
+              {config.doublePrecisionSecondProvider === 'whisperx' && (
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Whisper-Modell (Double Precision)</label>
+                  <select
+                    value={config.doublePrecisionWhisperModel || 'large-v2'}
+                    onChange={(e) => updateConfig({ doublePrecisionWhisperModel: e.target.value })}
+                    disabled={!isRoot || saving}
+                    className="input text-sm w-full max-w-xs"
+                  >
+                    {whisperModels
+                      .filter(m => config.transcriptionProvider !== 'whisperx' || m.id !== config.whisperModel)
+                      .map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.name}
+                        </option>
+                      ))}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {config.transcriptionProvider === 'whisperx' 
+                      ? 'Anderes Modell als Haupt-Transkription für Vergleich'
+                      : 'Whisper-Modell für zweite Transkription'}
+                  </p>
+                </div>
+              )}
               
               <div>
                 <label className="text-xs text-gray-500 block mb-1">Ausführungsmodus</label>

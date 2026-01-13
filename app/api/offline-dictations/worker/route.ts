@@ -182,9 +182,10 @@ async function transcribeWithProvider(
   request: NextRequest, 
   audioBlob: Blob, 
   provider: 'whisperx' | 'elevenlabs' | 'mistral',
-  initialPrompt?: string
+  initialPrompt?: string,
+  whisperModel?: string
 ): Promise<TranscriptionResult> {
-  console.log(`[Worker] Transcribing with ${provider}...`);
+  console.log(`[Worker] Transcribing with ${provider}${whisperModel ? ` (model: ${whisperModel})` : ''}...`);
   
   let result: { text: string; segments?: any[] };
   
@@ -197,7 +198,7 @@ async function transcribeWithProvider(
       break;
     case 'whisperx':
     default:
-      result = await transcribeWithWhisperX(request, audioBlob, initialPrompt);
+      result = await transcribeWithWhisperX(request, audioBlob, initialPrompt, whisperModel);
       break;
   }
   
@@ -352,8 +353,10 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, dictationI
   if (runtimeConfig.doublePrecisionEnabled && runtimeConfig.doublePrecisionSecondProvider) {
     const secondProvider = runtimeConfig.doublePrecisionSecondProvider;
     const mode = runtimeConfig.doublePrecisionMode || 'parallel';
+    // Use specific whisper model for double precision if configured and second provider is whisperx
+    const dpWhisperModel = secondProvider === 'whisperx' ? runtimeConfig.doublePrecisionWhisperModel : undefined;
     
-    console.log(`[Worker DoublePrecision] Enabled - Primary: ${provider}, Secondary: ${secondProvider}, Mode: ${mode}`);
+    console.log(`[Worker DoublePrecision] Enabled - Primary: ${provider}, Secondary: ${secondProvider}${dpWhisperModel ? ` (model: ${dpWhisperModel})` : ''}, Mode: ${mode}`);
     
     let result1: TranscriptionResult;
     let result2: TranscriptionResult;
@@ -362,14 +365,14 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, dictationI
       // Parallel execution
       const [r1, r2] = await Promise.all([
         transcribeWithProvider(request, audioBlob, provider, initialPrompt),
-        transcribeWithProvider(request, audioBlob, secondProvider, undefined),
+        transcribeWithProvider(request, audioBlob, secondProvider, undefined, dpWhisperModel),
       ]);
       result1 = r1;
       result2 = r2;
     } else {
       // Sequential execution
       result1 = await transcribeWithProvider(request, audioBlob, provider, initialPrompt);
-      result2 = await transcribeWithProvider(request, audioBlob, secondProvider, undefined);
+      result2 = await transcribeWithProvider(request, audioBlob, secondProvider, undefined, dpWhisperModel);
     }
     
     console.log(`[Worker DoublePrecision] Got transcriptions: ${provider}=${result1.text.length} chars, ${secondProvider}=${result2.text.length} chars`);
@@ -423,7 +426,7 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, dictationI
   }
 }
 
-async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialPrompt?: string): Promise<{ text: string; segments?: any[] }> {
+async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialPrompt?: string, whisperModelOverride?: string): Promise<{ text: string; segments?: any[] }> {
   const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:5000';
   const isGradio = whisperUrl.includes(':7860');
   
@@ -510,9 +513,11 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     
     // Use whisperOfflineModel (German-optimized) for Gradio, with full HuggingFace path
     // Load from runtime config (which reads from DB)
+    // whisperModelOverride can be used for Double Precision with a different model
     const runtimeConfig = await getRuntimeConfigWithRequest(request);
-    const whisperModel = getWhisperOfflineModelPath(runtimeConfig.whisperOfflineModel);
-    console.log(`[Worker] Using Gradio model: ${whisperModel} (from offline config: ${runtimeConfig.whisperOfflineModel || 'default'})`);
+    const modelToUse = whisperModelOverride || runtimeConfig.whisperOfflineModel;
+    const whisperModel = getWhisperOfflineModelPath(modelToUse);
+    console.log(`[Worker] Using Gradio model: ${whisperModel} (from ${whisperModelOverride ? 'double precision override' : 'offline config'}: ${modelToUse || 'default'})`);
     
     // Log initial_prompt usage for medical terminology
     if (initialPrompt) {

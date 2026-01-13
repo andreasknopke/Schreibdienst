@@ -161,6 +161,10 @@ export async function POST(request: NextRequest) {
       newConfig.doublePrecisionSecondProvider = body.doublePrecisionSecondProvider;
     }
     
+    if (body.doublePrecisionWhisperModel && typeof body.doublePrecisionWhisperModel === 'string') {
+      newConfig.doublePrecisionWhisperModel = body.doublePrecisionWhisperModel;
+    }
+    
     if (body.doublePrecisionMode && ['parallel', 'sequential'].includes(body.doublePrecisionMode)) {
       newConfig.doublePrecisionMode = body.doublePrecisionMode;
     }

@@ -53,6 +53,99 @@ interface DictationQueueProps {
   onRefreshNeeded?: () => void;
 }
 
+/**
+ * CorrectedTextMitlesen - Proportional highlighting of corrected text during audio playback
+ * Since corrected text doesn't have word-level timestamps, we use proportional mapping
+ * based on the audio progress to highlight approximately where we are in the text.
+ */
+function CorrectedTextMitlesen({ 
+  correctedText, 
+  audioCurrentTime, 
+  audioDuration,
+  audioRef
+}: { 
+  correctedText: string; 
+  audioCurrentTime: number; 
+  audioDuration: number;
+  audioRef: React.RefObject<HTMLAudioElement>;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  // Split text into words for highlighting
+  const words = correctedText.split(/(\s+)/);
+  
+  // Calculate progress percentage
+  const progress = audioDuration > 0 ? audioCurrentTime / audioDuration : 0;
+  
+  // Calculate which word index corresponds to current progress
+  // We only count actual words (not whitespace)
+  const actualWords = words.filter(w => w.trim().length > 0);
+  const currentWordIndex = Math.floor(progress * actualWords.length);
+  
+  // Auto-scroll to current position
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const currentEl = containerRef.current.querySelector('.bg-green-300, .dark\\:bg-green-600');
+    if (currentEl) {
+      currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [currentWordIndex]);
+  
+  // Reconstruct text with proper whitespace and track actual word index
+  let actualWordCounter = 0;
+  
+  return (
+    <div 
+      ref={containerRef}
+      className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 max-h-40 overflow-y-auto"
+    >
+      <div className="text-xs text-green-600 dark:text-green-400 mb-2 font-medium flex items-center justify-between">
+        <span>✨ Korrigierter Text (proportionales Mitlesen)</span>
+        <span className="text-green-500">{Math.round(progress * 100)}%</span>
+      </div>
+      <div className="text-sm leading-relaxed">
+        {words.map((word, idx) => {
+          // Whitespace - just render it
+          if (word.trim().length === 0) {
+            return <span key={idx}>{word}</span>;
+          }
+          
+          // Actual word - apply highlighting based on position
+          const wordIdx = actualWordCounter;
+          actualWordCounter++;
+          
+          const isPast = wordIdx < currentWordIndex;
+          const isCurrent = wordIdx === currentWordIndex;
+          
+          return (
+            <span
+              key={idx}
+              className={`transition-colors duration-100 ${
+                isCurrent 
+                  ? 'bg-green-300 dark:bg-green-600 font-semibold rounded px-0.5' 
+                  : isPast 
+                    ? 'text-gray-500 dark:text-gray-500' 
+                    : ''
+              }`}
+              onClick={() => {
+                // Click to seek to proportional position
+                if (audioRef.current && audioDuration > 0) {
+                  const targetTime = (wordIdx / actualWords.length) * audioDuration;
+                  audioRef.current.currentTime = targetTime;
+                }
+              }}
+              style={{ cursor: 'pointer' }}
+              title={`Position: ${Math.round((wordIdx / actualWords.length) * 100)}%`}
+            >
+              {word}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function DictationQueue({ username, canViewAll = false, isSecretariat = false, onRefreshNeeded }: DictationQueueProps) {
   const { getAuthHeader } = useAuth();
   const [dictations, setDictations] = useState<Dictation[]>([]);
@@ -1104,7 +1197,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             </button>
                             {showMitlesen && (
                               <span className="ml-2 text-xs text-gray-500">
-                                Original-Transkription mit Wort-Zeitstempeln
+                                Original + korrigierter Text synchron
                               </span>
                             )}
                           </>
@@ -1120,73 +1213,86 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                 
                 {/* Mitlesen Panel - Word-level highlighting of original transcription */}
                 {isFullscreen && showMitlesen && parsedSegments.length > 0 && (
-                  <div 
-                    ref={mitlesenRef}
-                    className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 max-h-48 overflow-y-auto"
-                  >
-                    <div className="text-xs text-blue-600 dark:text-blue-400 mb-2 font-medium">
-                      📖 Original Whisper-Transkription (Mitlesen)
-                    </div>
-                    <div className="text-sm leading-relaxed">
-                      {parsedSegments.map((segment, segIdx) => (
-                        <span key={segIdx}>
-                          {segment.words ? (
-                            // Word-level highlighting
-                            segment.words.map((word, wordIdx) => {
-                              // Skip words without valid timestamps
-                              if (word.start === undefined || word.end === undefined) {
-                                return <span key={`${segIdx}-${wordIdx}`}>{word.word}{' '}</span>;
-                              }
-                              const isCurrentWord = audioCurrentTime >= word.start && audioCurrentTime < word.end;
-                              return (
+                  <div className="space-y-3">
+                    {/* Original Transcription with word-level timestamps */}
+                    <div 
+                      ref={mitlesenRef}
+                      className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 max-h-40 overflow-y-auto"
+                    >
+                      <div className="text-xs text-blue-600 dark:text-blue-400 mb-2 font-medium">
+                        📖 Original Whisper-Transkription
+                      </div>
+                      <div className="text-sm leading-relaxed">
+                        {parsedSegments.map((segment, segIdx) => (
+                          <span key={segIdx}>
+                            {segment.words ? (
+                              // Word-level highlighting
+                              segment.words.map((word, wordIdx) => {
+                                // Skip words without valid timestamps
+                                if (word.start === undefined || word.end === undefined) {
+                                  return <span key={`${segIdx}-${wordIdx}`}>{word.word}{' '}</span>;
+                                }
+                                const isCurrentWord = audioCurrentTime >= word.start && audioCurrentTime < word.end;
+                                return (
+                                  <span
+                                    key={`${segIdx}-${wordIdx}`}
+                                    className={`transition-colors duration-100 ${
+                                      isCurrentWord 
+                                        ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold rounded px-0.5' 
+                                        : audioCurrentTime > word.end 
+                                          ? 'text-gray-500 dark:text-gray-500' 
+                                          : ''
+                                    }`}
+                                    onClick={() => {
+                                      if (audioRef.current) {
+                                        audioRef.current.currentTime = word.start;
+                                      }
+                                    }}
+                                    style={{ cursor: 'pointer' }}
+                                    title={`${word.start.toFixed(1)}s - ${word.end.toFixed(1)}s`}
+                                  >
+                                    {word.word}{' '}
+                                  </span>
+                                );
+                              })
+                            ) : (
+                              // Segment-level highlighting (fallback if no words)
+                              segment.start !== undefined && segment.end !== undefined ? (
                                 <span
-                                  key={`${segIdx}-${wordIdx}`}
                                   className={`transition-colors duration-100 ${
-                                    isCurrentWord 
-                                      ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold rounded px-0.5' 
-                                      : audioCurrentTime > word.end 
-                                        ? 'text-gray-500 dark:text-gray-500' 
+                                    audioCurrentTime >= segment.start && audioCurrentTime < segment.end
+                                      ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold rounded px-0.5'
+                                      : audioCurrentTime > segment.end
+                                        ? 'text-gray-500 dark:text-gray-500'
                                         : ''
                                   }`}
                                   onClick={() => {
                                     if (audioRef.current) {
-                                      audioRef.current.currentTime = word.start;
+                                      audioRef.current.currentTime = segment.start;
                                     }
                                   }}
                                   style={{ cursor: 'pointer' }}
-                                  title={`${word.start.toFixed(1)}s - ${word.end.toFixed(1)}s`}
                                 >
-                                  {word.word}{' '}
+                                  {segment.text}{' '}
                                 </span>
-                              );
-                            })
-                          ) : (
-                            // Segment-level highlighting (fallback if no words)
-                            segment.start !== undefined && segment.end !== undefined ? (
-                              <span
-                                className={`transition-colors duration-100 ${
-                                  audioCurrentTime >= segment.start && audioCurrentTime < segment.end
-                                    ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold rounded px-0.5'
-                                    : audioCurrentTime > segment.end
-                                      ? 'text-gray-500 dark:text-gray-500'
-                                      : ''
-                                }`}
-                                onClick={() => {
-                                  if (audioRef.current) {
-                                    audioRef.current.currentTime = segment.start;
-                                  }
-                                }}
-                                style={{ cursor: 'pointer' }}
-                              >
-                                {segment.text}{' '}
-                              </span>
-                            ) : (
-                              <span>{segment.text}{' '}</span>
-                            )
-                          )}
-                        </span>
-                      ))}
+                              ) : (
+                                <span>{segment.text}{' '}</span>
+                              )
+                            )}
+                          </span>
+                        ))}
+                      </div>
                     </div>
+                    
+                    {/* Corrected Text with proportional highlighting */}
+                    {selectedDictation.corrected_text && !isReverted && (
+                      <CorrectedTextMitlesen
+                        correctedText={editedTexts.corrected_text || selectedDictation.corrected_text}
+                        audioCurrentTime={audioCurrentTime}
+                        audioDuration={audioDuration}
+                        audioRef={audioRef}
+                      />
+                    )}
                   </div>
                 )}
 

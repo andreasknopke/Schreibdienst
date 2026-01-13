@@ -36,6 +36,7 @@ export interface RuntimeConfig {
   // Double Precision Pipeline
   doublePrecisionEnabled?: boolean;
   doublePrecisionSecondProvider?: 'whisperx' | 'elevenlabs' | 'mistral';
+  doublePrecisionWhisperModel?: string;
   doublePrecisionMode?: 'parallel' | 'sequential';
 }
 
@@ -96,6 +97,9 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
           if (['whisperx', 'elevenlabs', 'mistral'].includes(row.config_value)) {
             config.doublePrecisionSecondProvider = row.config_value as any;
           }
+          break;
+        case 'doublePrecisionWhisperModel':
+          config.doublePrecisionWhisperModel = row.config_value;
           break;
         case 'doublePrecisionMode':
           if (['parallel', 'sequential'].includes(row.config_value)) {
@@ -180,6 +184,9 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
           if (['whisperx', 'elevenlabs', 'mistral'].includes(row.config_value)) {
             config.doublePrecisionSecondProvider = row.config_value as any;
           }
+          break;
+        case 'doublePrecisionWhisperModel':
+          config.doublePrecisionWhisperModel = row.config_value;
           break;
         case 'doublePrecisionMode':
           if (['parallel', 'sequential'].includes(row.config_value)) {

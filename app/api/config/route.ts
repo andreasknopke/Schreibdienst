@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
     const validWhisperModels = [
       'large-v3',
       'deepdml/faster-whisper-large-v3-german-2',
-      'systran/faster-whisper-large-v3',
+      'large-v2',
       'cstr/whisper-large-v3-turbo-german-int8_float32',
     ];
     if (body.whisperModel && validWhisperModels.includes(body.whisperModel)) {

@@ -11,8 +11,16 @@ export interface RuntimeConfig {
   llmProvider: 'openai' | 'lmstudio';
   // WhisperX-spezifische Einstellungen
   whisperModel?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v2' | 'large-v3';
+  whisperOfflineModel?: string;
   // OpenAI-spezifische Einstellungen
   openaiModel?: string;
+  mistralModel?: string;
+  llmPromptAddition?: string;
+  // Double Precision Pipeline
+  doublePrecisionEnabled?: boolean;
+  doublePrecisionSecondProvider?: 'whisperx' | 'elevenlabs' | 'mistral';
+  doublePrecisionWhisperModel?: string;
+  doublePrecisionMode?: 'parallel' | 'sequential';
 }
 
 const DEFAULT_CONFIG: RuntimeConfig = {

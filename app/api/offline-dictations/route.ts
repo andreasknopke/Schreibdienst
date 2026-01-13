@@ -16,6 +16,7 @@ import {
 } from '@/lib/offlineDictationDb';
 import { logManualCorrectionWithRequest } from '@/lib/correctionLogDb';
 import { calculateChangeScore } from '@/lib/changeScore';
+import { compressAudioForSpeech } from '@/lib/audioCompression';
 
 export const runtime = 'nodejs';
 
@@ -112,12 +113,28 @@ export async function POST(req: NextRequest) {
     
     // Convert file to buffer
     const arrayBuffer = await audioFile.arrayBuffer();
-    const audioBuffer = Buffer.from(arrayBuffer);
+    let audioBuffer: Buffer = Buffer.from(arrayBuffer);
+    let audioMimeType = audioFile.type || 'audio/webm';
+    
+    // Compress audio BEFORE storing to avoid MySQL max_allowed_packet errors
+    // Large audio files can exceed the default 16MB limit
+    const originalSize = audioBuffer.length;
+    try {
+      const compressed = await compressAudioForSpeech(audioBuffer, audioMimeType);
+      if (compressed.compressed) {
+        audioBuffer = Buffer.from(compressed.data);
+        audioMimeType = compressed.mimeType;
+        const ratio = ((1 - compressed.compressedSize / compressed.originalSize) * 100).toFixed(1);
+        console.log(`[Offline Dictations] Audio compressed: ${(originalSize/1024/1024).toFixed(2)}MB → ${(compressed.compressedSize/1024/1024).toFixed(2)}MB (${ratio}% smaller)`);
+      }
+    } catch (compressError: any) {
+      console.warn(`[Offline Dictations] Audio compression failed, using original: ${compressError.message}`);
+    }
     
     const id = await createOfflineDictationWithRequest(req, {
       username,
       audioData: audioBuffer,
-      audioMimeType: audioFile.type || 'audio/webm',
+      audioMimeType: audioMimeType,
       audioDuration: duration,
       orderNumber,
       patientName: patientName || undefined,

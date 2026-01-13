@@ -10,6 +10,7 @@ import CustomActionsManager from './CustomActionsManager';
 import DiffHighlight, { DiffStats } from './DiffHighlight';
 import CorrectionLogViewer from './CorrectionLogViewer';
 import ArchiveView from './ArchiveView';
+import EditableTextWithMitlesen from './EditableTextWithMitlesen';
 
 interface Dictation {
   id: number;
@@ -330,6 +331,9 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     beurteilung: string;
     corrected_text: string;
   }>({ methodik: '', befund: '', beurteilung: '', corrected_text: '' });
+  
+  // Track last saved text to detect manual changes
+  const [savedText, setSavedText] = useState<string>('');
   
   // Fullscreen mode for better readability of long texts
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -772,6 +776,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       
       if (res.ok) {
         setHasUnsavedChanges(false);
+        setSavedText(editedTexts.corrected_text); // Update saved state after successful save
         // Reload to get updated data
         loadDictations();
       } else {
@@ -850,12 +855,14 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     
     const selected = dictations.find(d => d.id === selectedId);
     if (selected && selected.status === 'completed') {
+      const initialText = selected.corrected_text || selected.transcript || '';
       setEditedTexts({
         methodik: selected.methodik || '',
         befund: selected.befund || '',
         beurteilung: selected.beurteilung || '',
-        corrected_text: selected.corrected_text || selected.transcript || ''
+        corrected_text: initialText
       });
+      setSavedText(initialText); // Track the initial/saved state
       setIsReverted(false); // Reset revert state when selection changes
       setApplyFormatting(false); // Reset formatting toggle when selection changes
       setHasUnsavedChanges(false); // Reset unsaved changes when selection changes
@@ -1428,16 +1435,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                       </div>
                     </div>
                     
-                    {/* Corrected Text with smart timestamp mapping */}
-                    {selectedDictation.corrected_text && !isReverted && (
-                      <CorrectedTextMitlesen
-                        correctedText={editedTexts.corrected_text || selectedDictation.corrected_text}
-                        originalSegments={parsedSegments}
-                        audioCurrentTime={audioCurrentTime}
-                        audioDuration={audioDuration}
-                        audioRef={audioRef}
-                      />
-                    )}
+                    {/* Corrected Text with smart timestamp mapping - now integrated in EditableTextWithMitlesen below */}
                   </div>
                 )}
 
@@ -1449,79 +1447,61 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                 {/* Results - always Arztbrief mode */}
                 {selectedDictation.status === 'completed' && (
                   <div className="space-y-3">
-                    {/* Textarea with Action Buttons */}
+                    {/* Header with labels and buttons */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs font-medium text-gray-500">
+                          {isReverted ? 'Reine Transkription (vor Korrektur)' : 'Korrigiertes Ergebnis'}
+                        </label>
+                        {!isReverted && selectedDictation.change_score !== undefined && (
+                          <ChangeIndicator score={selectedDictation.change_score} size="sm" />
+                        )}
+                        {/* Diff View Toggle */}
+                        {!isReverted && formattedRawText && (
+                          <button
+                            className={`btn btn-xs ${showDiffView ? 'btn-primary' : 'btn-outline'}`}
+                            onClick={() => setShowDiffView(!showDiffView)}
+                            title="Zeigt Unterschiede farbig an (grün=KI-Änderung, blau=manuell)"
+                          >
+                            {showDiffView ? '🔍 Diff aus' : '🔍 Diff an'}
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isReverted && (
+                          <span className="text-xs text-orange-600 dark:text-orange-400">⚠️ Unkorrigiert</span>
+                        )}
+                        <button
+                          className="btn btn-xs btn-ghost"
+                          onClick={() => setIsFullscreen(!isFullscreen)}
+                          title={isFullscreen ? 'Vollbild beenden (Esc)' : 'Vollbild anzeigen'}
+                        >
+                          {isFullscreen ? '🗗 Verkleinern' : '🗖 Vollbild'}
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {/* EditableTextWithMitlesen - single panel with Mitlesen, Diff, and editing */}
                     <div className="flex gap-2">
-                      {/* Textarea section */}
                       <div className="flex-1">
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <label className="text-xs font-medium text-gray-500">
-                              {isReverted ? 'Reine Transkription (vor Korrektur)' : 'Korrigiertes Ergebnis'}
-                            </label>
-                            {!isReverted && selectedDictation.change_score !== undefined && (
-                              <ChangeIndicator score={selectedDictation.change_score} size="sm" />
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {isReverted && (
-                              <span className="text-xs text-orange-600 dark:text-orange-400">⚠️ Unkorrigiert</span>
-                            )}
-                            <button
-                              className="btn btn-xs btn-ghost"
-                              onClick={() => setIsFullscreen(!isFullscreen)}
-                              title={isFullscreen ? 'Vollbild beenden (Esc)' : 'Vollbild anzeigen'}
-                            >
-                              {isFullscreen ? '🗗 Verkleinern' : '🗖 Vollbild'}
-                            </button>
-                          </div>
-                        </div>
-                        
-                        {/* Diff View Toggle - only show when not reverted and raw_transcript available */}
-                        {!isReverted && selectedDictation.raw_transcript && formattedRawText && (
-                          <div className="flex items-center gap-2 mb-2">
-                            <button
-                              className={`btn btn-xs ${showDiffView ? 'btn-primary' : 'btn-outline'}`}
-                              onClick={() => setShowDiffView(!showDiffView)}
-                              title="Zeigt Unterschiede zwischen formatiertem Original und KI-Korrektur"
-                            >
-                              {showDiffView ? '🔍 Diff aus' : '🔍 Änderungen anzeigen'}
-                            </button>
-                            {showDiffView && (
-                              <DiffStats originalText={formattedRawText} correctedText={editedTexts.corrected_text} />
-                            )}
-                          </div>
-                        )}
-                        
-                        {/* Diff View - read-only highlighted view */}
-                        {showDiffView && !isReverted && formattedRawText && (
-                          <div className={`mb-2 p-3 rounded-lg border bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 overflow-auto ${
-                            isFullscreen ? 'max-h-[50vh]' : 'max-h-[300px]'
-                          }`}>
-                            <DiffHighlight
-                              originalText={formattedRawText}
-                              correctedText={editedTexts.corrected_text}
-                              showDiff={true}
-                            />
-                          </div>
-                        )}
-                        
-                        <textarea
-                          ref={textareaRef}
-                          className={`mt-1 w-full p-3 rounded-lg text-sm font-mono resize-y border ${
-                            isFullscreen ? 'min-h-[60vh]' : 'min-h-[200px]'
-                          } ${
-                            showDiffView ? 'min-h-[100px] max-h-[200px]' : ''
-                          } ${
-                            isReverted 
-                              ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800' 
-                              : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700'
-                          }`}
-                          value={editedTexts.corrected_text}
-                          onChange={(e) => {
-                            setEditedTexts(prev => ({ ...prev, corrected_text: e.target.value }));
+                        <EditableTextWithMitlesen
+                          text={editedTexts.corrected_text}
+                          originalText={formattedRawText}
+                          savedText={savedText}
+                          originalSegments={parsedSegments}
+                          audioCurrentTime={audioCurrentTime}
+                          audioRef={audioRef}
+                          showMitlesen={showMitlesen}
+                          showDiff={showDiffView}
+                          onChange={(newText) => {
+                            setEditedTexts(prev => ({ ...prev, corrected_text: newText }));
                             setHasUnsavedChanges(true);
                           }}
-                          placeholder="(leer)"
+                          className={`${isFullscreen ? 'min-h-[60vh]' : 'min-h-[200px]'} ${
+                            isReverted 
+                              ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800' 
+                              : ''
+                          }`}
                         />
                       </div>
                       
@@ -1589,9 +1569,12 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                       </div>
                     )}
                     
-                    <p className="text-xs text-gray-400 italic">
-                      💡 Tipp: Texte können bearbeitet und an den Ecken vergrößert werden
-                    </p>
+                    {/* Diff legend when active */}
+                    {showDiffView && !isReverted && (
+                      <p className="text-xs text-gray-400 italic">
+                        💡 Legende: <span className="text-green-600">grün</span> = KI-Korrektur, <span className="text-blue-600">blau</span> = manuelle Änderung, <span className="bg-yellow-200 text-gray-800 px-1 rounded">gelb</span> = aktuelles Wort (Mitlesen)
+                      </p>
+                    )}
                   </div>
                 )}
 

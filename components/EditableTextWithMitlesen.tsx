@@ -125,13 +125,15 @@ function extractOriginalWords(segments: TranscriptSegment[]): OriginalWord[] {
 }
 
 /**
- * Build a timestamp lookup table for the formatted text using diff information.
- * This approach uses the diff between original and formatted text to:
- * - Unchanged words: get their exact timestamp from original
- * - Added words: interpolate between surrounding anchors
- * - Removed words: skip them but advance the original word index
+ * Build a timestamp lookup table for the formatted text.
  * 
- * This is robust because it uses the actual change information rather than guessing.
+ * New approach: Compare normalized word sequences, ignoring formatting.
+ * 1. Extract words from original (with timestamps)
+ * 2. Extract words from formatted text (with char positions)
+ * 3. Diff the normalized word sequences
+ * 4. Map timestamps based on word-level diff
+ * 
+ * This ignores formatting differences (newlines, brackets) and focuses only on words.
  */
 function buildTimestampTable(
   originalSegments: TranscriptSegment[],
@@ -144,139 +146,85 @@ function buildTimestampTable(
   const originalWords = extractOriginalWords(originalSegments);
   if (originalWords.length === 0) return result;
   
-  // Build the original text from segments if not provided
-  const origText = originalTranscriptText || originalWords.map(w => w.word).join(' ');
+  // Parse formatted text into words with their positions
+  const formattedWords = parseWords(formattedText);
+  if (formattedWords.length === 0) return result;
   
-  // Compute diff between original transcript and formatted text
-  const diffs = diffWordsWithSpace(origText, formattedText);
+  // Build normalized word strings for comparison
+  // This strips all formatting - just space-separated normalized words
+  const origWordString = originalWords.map(w => w.normalized).join(' ');
+  const formattedWordString = formattedWords.map(w => w.normalized).join(' ');
   
-  // Parse formatted text to get word positions
-  const formattedWordPositions = parseWords(formattedText);
+  // Diff the normalized word sequences
+  const diffs = diffWordsWithSpace(origWordString, formattedWordString);
   
-  // Create a map from normalized word to its positions in formatted text
-  const formattedWordPosMap = new Map<string, number[]>();
-  for (const fw of formattedWordPositions) {
-    const key = fw.normalized;
-    if (!formattedWordPosMap.has(key)) {
-      formattedWordPosMap.set(key, []);
-    }
-    formattedWordPosMap.get(key)!.push(fw.charPos);
-  }
+  // Track position in both word arrays
+  let origIdx = 0;
+  let formattedIdx = 0;
   
-  // First pass: Build a list of words with their status and timestamps
-  // Each entry: { word, charPos, status: 'unchanged'|'added'|'replaced', timestamp? }
-  interface WordEntry {
-    word: string;
-    charPos: number;
-    status: 'unchanged' | 'added';
-    originalWordIdx?: number; // Index in originalWords array
-  }
-  
-  const wordEntries: WordEntry[] = [];
-  let origWordIdx = 0; // Current position in original words
-  let formattedCharPos = 0; // Current character position in formatted text
-  
+  // Process each diff part
   for (const diff of diffs) {
-    const text = diff.value || '';
+    const words = diff.value?.split(/\s+/).filter(w => w.length > 0) || [];
+    const wordCount = words.length;
     
     if (diff.removed) {
-      // These words were in original but removed in formatted text
-      // Count how many words and advance origWordIdx
-      const removedWords = text.split(/\s+/).filter(w => w.trim().length > 0);
-      origWordIdx += removedWords.length;
-      // Don't add to wordEntries, don't advance formattedCharPos
+      // Words in original that were removed - skip them in original
+      origIdx += wordCount;
       continue;
     }
     
     if (diff.added) {
-      // These words were added in formatted text (not in original)
-      // They need interpolated timestamps
-      const tokens = text.split(/(\s+)/);
-      for (const token of tokens) {
-        if (token.length === 0) continue;
-        
-        if (token.trim().length === 0) {
-          // Whitespace - just advance position
-          formattedCharPos += token.length;
-        } else {
-          // Added word - needs interpolation
-          wordEntries.push({
-            word: token,
-            charPos: formattedCharPos,
-            status: 'added'
-          });
-          formattedCharPos += token.length;
-        }
+      // Words added to formatted text - they need interpolated timestamps
+      // For now, mark them as needing interpolation and advance formattedIdx
+      for (let i = 0; i < wordCount && formattedIdx < formattedWords.length; i++) {
+        const fw = formattedWords[formattedIdx];
+        // Mark for interpolation (will be filled in second pass)
+        formattedIdx++;
       }
       continue;
     }
     
-    // Unchanged: these words exist in both original and formatted
-    const tokens = text.split(/(\s+)/);
-    for (const token of tokens) {
-      if (token.length === 0) continue;
+    // Unchanged words - direct timestamp mapping
+    for (let i = 0; i < wordCount && origIdx < originalWords.length && formattedIdx < formattedWords.length; i++) {
+      const origWord = originalWords[origIdx];
+      const fw = formattedWords[formattedIdx];
       
-      if (token.trim().length === 0) {
-        // Whitespace
-        formattedCharPos += token.length;
-      } else {
-        // Unchanged word - has exact timestamp
-        wordEntries.push({
-          word: token,
-          charPos: formattedCharPos,
-          status: 'unchanged',
-          originalWordIdx: origWordIdx
-        });
-        origWordIdx++;
-        formattedCharPos += token.length;
-      }
+      result.set(fw.charPos, {
+        word: fw.word,
+        start: origWord.start,
+        end: origWord.end,
+        isInterpolated: false,
+        charPos: fw.charPos
+      });
+      
+      origIdx++;
+      formattedIdx++;
     }
   }
   
-  // Second pass: Assign timestamps
-  // Unchanged words get their exact timestamp
-  // Added words get interpolated timestamps
+  // Second pass: Interpolate timestamps for words that weren't matched
+  const audioDuration = originalWords[originalWords.length - 1].end;
   
-  const audioDuration = originalWords.length > 0 ? originalWords[originalWords.length - 1].end : 0;
-  
-  // First, set timestamps for unchanged words
-  for (const entry of wordEntries) {
-    if (entry.status === 'unchanged' && entry.originalWordIdx !== undefined) {
-      const origWord = originalWords[entry.originalWordIdx];
-      if (origWord) {
-        result.set(entry.charPos, {
-          word: entry.word,
-          start: origWord.start,
-          end: origWord.end,
-          isInterpolated: false,
-          charPos: entry.charPos
-        });
-      }
-    }
-  }
-  
-  // Then, interpolate timestamps for added words
-  for (let i = 0; i < wordEntries.length; i++) {
-    const entry = wordEntries[i];
-    if (entry.status !== 'added') continue;
-    if (result.has(entry.charPos)) continue; // Already set
+  for (let i = 0; i < formattedWords.length; i++) {
+    const fw = formattedWords[i];
+    if (result.has(fw.charPos)) continue; // Already has timestamp
     
-    // Find previous and next unchanged words
-    let prevAnchor: { idx: number; start: number; end: number } | null = null;
-    let nextAnchor: { idx: number; start: number; end: number } | null = null;
+    // Find nearest anchors (words with real timestamps)
+    let prevAnchor: { idx: number; end: number } | null = null;
+    let nextAnchor: { idx: number; start: number } | null = null;
     
     for (let j = i - 1; j >= 0; j--) {
-      const ts = result.get(wordEntries[j].charPos);
+      const ts = result.get(formattedWords[j].charPos);
       if (ts && !ts.isInterpolated) {
-        prevAnchor = { idx: j, start: ts.start, end: ts.end };
+        prevAnchor = { idx: j, end: ts.end };
         break;
       }
     }
     
-    for (let j = i + 1; j < wordEntries.length; j++) {
-      const ts = result.get(wordEntries[j].charPos);
+    for (let j = i + 1; j < formattedWords.length; j++) {
+      const ts = result.get(formattedWords[j].charPos);
       if (ts && !ts.isInterpolated) {
-        nextAnchor = { idx: j, start: ts.start, end: ts.end };
+        nextAnchor = { idx: j, start: ts.start };
         break;
       }
     }
@@ -301,18 +249,18 @@ function buildTimestampTable(
       estimatedStart = Math.max(0, nextAnchor.start - (wordsBefore * 0.2));
       estimatedEnd = estimatedStart + 0.2;
     } else {
-      // No anchors - linear distribution
-      const fraction = i / wordEntries.length;
+      // No anchors at all
+      const fraction = i / formattedWords.length;
       estimatedStart = fraction * audioDuration;
       estimatedEnd = estimatedStart + 0.2;
     }
     
-    result.set(entry.charPos, {
-      word: entry.word,
+    result.set(fw.charPos, {
+      word: fw.word,
       start: estimatedStart,
       end: Math.min(estimatedEnd, audioDuration),
       isInterpolated: true,
-      charPos: entry.charPos
+      charPos: fw.charPos
     });
   }
   

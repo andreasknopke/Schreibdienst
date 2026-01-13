@@ -277,10 +277,31 @@ export default function EditableTextWithMitlesen({
     setLocalText(text);
   }, [text]);
   
-  // Map timestamps to current text
+  // Map timestamps to current text - returns array of words with timestamps
+  // Each word in the text gets a timestamp from the original audio
   const timestampedWords = useMemo(() => {
     return mapTimestampsToText(originalSegments, localText);
   }, [originalSegments, localText]);
+  
+  // Create a lookup map: word position in text -> timestamp info
+  // This uses the actual character position in the text to match words
+  const wordTimestampMap = useMemo(() => {
+    const map = new Map<number, TimestampedWord>();
+    const words = localText.split(/\s+/).filter(w => w.length > 0);
+    let charPos = 0;
+    
+    for (let i = 0; i < words.length && i < timestampedWords.length; i++) {
+      const word = words[i];
+      // Find actual position in text
+      const pos = localText.indexOf(word, charPos);
+      if (pos !== -1) {
+        map.set(pos, timestampedWords[i]);
+        charPos = pos + word.length;
+      }
+    }
+    
+    return map;
+  }, [localText, timestampedWords]);
   
   // Detect if audio is playing (time is changing)
   const prevTimeRef = useRef(audioCurrentTime);
@@ -403,31 +424,44 @@ export default function EditableTextWithMitlesen({
     if (!diffResult) return localText;
     
     const elements: React.ReactNode[] = [];
-    let wordIdx = 0;
     let elementKey = 0;
+    let charPosition = 0; // Track position in the original localText
     
     for (const part of diffResult.llmDiff) {
       // Skip removed parts (not in final text)
       if (part.removed) continue;
       
-      const words = part.value?.split(/(\s+)/) || [];
+      const tokens = part.value?.split(/(\s+)/) || [];
       
-      for (const word of words) {
+      for (const token of tokens) {
         // Whitespace - render as-is
-        if (word.trim().length === 0) {
-          elements.push(<span key={elementKey++}>{word}</span>);
+        if (token.trim().length === 0) {
+          elements.push(<span key={elementKey++}>{token}</span>);
+          charPosition += token.length;
           continue;
         }
         
-        const tsWord = wordIdx < timestampedWords.length ? timestampedWords[wordIdx] : null;
-        // Show current word highlight always when Mitlesen is on (not just when playing)
-        const isCurrent = showMitlesen && wordIdx === currentWordIndex && currentWordIndex >= 0;
+        // Find this word's position in localText to get its timestamp
+        const wordPosInText = localText.indexOf(token, charPosition);
+        const tsWord = wordPosInText !== -1 ? wordTimestampMap.get(wordPosInText) : null;
+        
+        // Update char position
+        if (wordPosInText !== -1) {
+          charPosition = wordPosInText + token.length;
+        } else {
+          charPosition += token.length;
+        }
+        
+        // Check if this word is the current playing word
+        const isCurrent = showMitlesen && tsWord && currentWordIndex >= 0 && 
+          timestampedWords[currentWordIndex] && 
+          tsWord.start === timestampedWords[currentWordIndex].start;
+        
         const isPast = showMitlesen && isAudioActive && tsWord && audioCurrentTime > tsWord.end;
-        wordIdx++;
         
         // Determine diff styling
         let diffClass = '';
-        const wordNorm = word.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '');
+        const wordNorm = token.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '');
         
         // Check if manually added (blue) - kräftigere Farben
         if (diffResult.manualAddedWords.has(wordNorm)) {
@@ -452,7 +486,7 @@ export default function EditableTextWithMitlesen({
             }${tsWord?.isInterpolated ? 'italic ' : ''}cursor-pointer transition-colors duration-100`}
             title={tsWord ? `${tsWord.start.toFixed(1)}s${tsWord.isInterpolated ? ' (geschätzt)' : ''}` : undefined}
           >
-            {word}
+            {token}
           </span>
         );
       }

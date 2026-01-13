@@ -355,8 +355,13 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, dictationI
     const mode = runtimeConfig.doublePrecisionMode || 'parallel';
     // Use specific whisper model for double precision if configured and second provider is whisperx
     const dpWhisperModel = secondProvider === 'whisperx' ? runtimeConfig.doublePrecisionWhisperModel : undefined;
+    // Primary whisper model (used when primary provider is whisperx)
+    const primaryWhisperModel = provider === 'whisperx' ? runtimeConfig.whisperModel : undefined;
     
-    console.log(`[Worker DoublePrecision] Enabled - Primary: ${provider}, Secondary: ${secondProvider}${dpWhisperModel ? ` (model: ${dpWhisperModel})` : ''}, Mode: ${mode}`);
+    // Detect if we're comparing two different WhisperX models
+    const isTwoWhisperModels = provider === 'whisperx' && secondProvider === 'whisperx';
+    
+    console.log(`[Worker DoublePrecision] Enabled - Primary: ${provider}${primaryWhisperModel ? ` (${primaryWhisperModel})` : ''}, Secondary: ${secondProvider}${dpWhisperModel ? ` (${dpWhisperModel})` : ''}, Mode: ${mode}`);
     
     let result1: TranscriptionResult;
     let result2: TranscriptionResult;
@@ -364,18 +369,24 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, dictationI
     if (mode === 'parallel') {
       // Parallel execution
       const [r1, r2] = await Promise.all([
-        transcribeWithProvider(request, audioBlob, provider, initialPrompt),
+        transcribeWithProvider(request, audioBlob, provider, initialPrompt, primaryWhisperModel),
         transcribeWithProvider(request, audioBlob, secondProvider, undefined, dpWhisperModel),
       ]);
       result1 = r1;
       result2 = r2;
     } else {
       // Sequential execution
-      result1 = await transcribeWithProvider(request, audioBlob, provider, initialPrompt);
+      result1 = await transcribeWithProvider(request, audioBlob, provider, initialPrompt, primaryWhisperModel);
       result2 = await transcribeWithProvider(request, audioBlob, secondProvider, undefined, dpWhisperModel);
     }
     
-    console.log(`[Worker DoublePrecision] Got transcriptions: ${provider}=${result1.text.length} chars, ${secondProvider}=${result2.text.length} chars`);
+    // If both providers are whisperx with different models, update provider names for clarity
+    if (isTwoWhisperModels && primaryWhisperModel && dpWhisperModel) {
+      result1.provider = `whisperx (${primaryWhisperModel})`;
+      result2.provider = `whisperx (${dpWhisperModel})`;
+    }
+    
+    console.log(`[Worker DoublePrecision] Got transcriptions: ${result1.provider}=${result1.text.length} chars, ${result2.provider}=${result2.text.length} chars`);
     
     // Merge the transcriptions
     return doublePrecisionMerge(request, dictationId, result1, result2);

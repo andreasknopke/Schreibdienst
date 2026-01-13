@@ -330,36 +330,42 @@ export default function ConfigPanel() {
                   className="input text-sm w-full max-w-xs"
                 >
                   {transcriptionProviders
-                    .filter(p => p.available && p.id !== config.transcriptionProvider)
+                    .filter(p => p.available)
                     .map((provider) => (
                       <option key={provider.id} value={provider.id}>
-                        {provider.name}
+                        {provider.name}{provider.id === config.transcriptionProvider ? ' (wie Primär)' : ''}
                       </option>
                     ))}
                 </select>
+                {config.doublePrecisionSecondProvider === config.transcriptionProvider && config.transcriptionProvider === 'whisperx' && (
+                  <p className="text-xs text-blue-500 mt-1">
+                    💡 Zwei lokale Whisper-Modelle vergleichen - wähle unten verschiedene Modelle
+                  </p>
+                )}
               </div>
               
               {/* Whisper-Modell Auswahl für Double Precision, wenn Provider whisperx ist */}
               {config.doublePrecisionSecondProvider === 'whisperx' && (
                 <div>
-                  <label className="text-xs text-gray-500 block mb-1">Whisper-Modell (Double Precision)</label>
+                  <label className="text-xs text-gray-500 block mb-1">
+                    Whisper-Modell (zweite Transkription)
+                  </label>
                   <select
                     value={config.doublePrecisionWhisperModel || 'large-v2'}
                     onChange={(e) => updateConfig({ doublePrecisionWhisperModel: e.target.value })}
                     disabled={!isRoot || saving}
                     className="input text-sm w-full max-w-xs"
                   >
-                    {whisperModels
-                      .filter(m => config.transcriptionProvider !== 'whisperx' || m.id !== config.whisperModel)
-                      .map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.name}
-                        </option>
-                      ))}
+                    {whisperModels.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name}
+                        {config.transcriptionProvider === 'whisperx' && model.id === config.whisperModel ? ' (wie Primär)' : ''}
+                      </option>
+                    ))}
                   </select>
                   <p className="text-xs text-gray-400 mt-1">
-                    {config.transcriptionProvider === 'whisperx' 
-                      ? 'Anderes Modell als Haupt-Transkription für Vergleich'
+                    {config.transcriptionProvider === 'whisperx' && config.doublePrecisionSecondProvider === 'whisperx'
+                      ? `Primär: ${whisperModels.find(m => m.id === config.whisperModel)?.name || config.whisperModel || 'large-v3'}`
                       : 'Whisper-Modell für zweite Transkription'}
                   </p>
                 </div>

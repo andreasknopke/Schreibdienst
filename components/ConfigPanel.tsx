@@ -168,17 +168,17 @@ export default function ConfigPanel() {
 
   // Whisper-Modelle für Online-Transkription (aus Model_Manager.py)
   const whisperModels = [
-    { id: 'large-v3', name: 'Large-v3 (Standard)' },
+    { id: 'large-v3', name: 'Large-v3' },
     { id: 'deepdml/faster-whisper-large-v3-german-2', name: 'Large-v3 German 2 (empfohlen)' },
-    { id: 'systran/faster-whisper-large-v3', name: 'Large-v3 Systran' },
+    { id: 'large-v2', name: 'Large-v2' },
     { id: 'cstr/whisper-large-v3-turbo-german-int8_float32', name: 'Large-v3 Turbo German (schnell)' },
   ];
 
   // Whisper Offline-Modelle für Offline-Transkription (aus Model_Manager.py)
   const whisperOfflineModels = [
-    { id: 'large-v3', name: 'Large-v3 (Standard)' },
+    { id: 'large-v3', name: 'Large-v3' },
     { id: 'large-v3-german-2', name: 'Large-v3 German 2 (empfohlen)' },
-    { id: 'large-v3-systran', name: 'Large-v3 Systran' },
+    { id: 'large-v2', name: 'Large-v2' },
     { id: 'large-v3-turbo-german', name: 'Large-v3 Turbo German (schnell)' },
   ];
 

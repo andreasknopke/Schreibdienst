@@ -67,7 +67,7 @@ function CorrectedTextMitlesen({
   correctedText: string; 
   audioCurrentTime: number; 
   audioDuration: number;
-  audioRef: React.RefObject<HTMLAudioElement>;
+  audioRef: React.RefObject<HTMLAudioElement | null>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   

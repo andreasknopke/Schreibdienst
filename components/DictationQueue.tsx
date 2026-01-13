@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Spinner from './Spinner';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { useAuth } from './AuthProvider';
@@ -53,34 +53,146 @@ interface DictationQueueProps {
   onRefreshNeeded?: () => void;
 }
 
+// Word with timestamp for corrected text mapping
+interface TimestampedWord {
+  word: string;
+  start: number;
+  end: number;
+  isInterpolated?: boolean; // True if timestamp was estimated
+}
+
 /**
- * CorrectedTextMitlesen - Proportional highlighting of corrected text during audio playback
- * Since corrected text doesn't have word-level timestamps, we use proportional mapping
- * based on the audio progress to highlight approximately where we are in the text.
+ * Maps timestamps from original transcription to corrected text using word matching.
+ * Unchanged words get their exact timestamps, changed words get interpolated timestamps.
+ */
+function mapTimestampsToCorrectedText(
+  originalSegments: TranscriptSegment[],
+  correctedText: string
+): TimestampedWord[] {
+  // Extract all words with timestamps from original segments
+  const originalWords: { word: string; start: number; end: number }[] = [];
+  for (const segment of originalSegments) {
+    if (segment.words) {
+      for (const word of segment.words) {
+        if (word.start !== undefined && word.end !== undefined) {
+          originalWords.push({
+            word: word.word.toLowerCase().replace(/[.,!?;:"""„'']/g, ''),
+            start: word.start,
+            end: word.end
+          });
+        }
+      }
+    }
+  }
+  
+  if (originalWords.length === 0) {
+    return [];
+  }
+  
+  // Split corrected text into words
+  const correctedWords = correctedText.split(/\s+/).filter(w => w.length > 0);
+  const result: TimestampedWord[] = [];
+  
+  // Use a greedy matching algorithm with lookahead
+  let origIdx = 0;
+  const audioDuration = originalWords.length > 0 
+    ? originalWords[originalWords.length - 1].end 
+    : 0;
+  
+  for (let corrIdx = 0; corrIdx < correctedWords.length; corrIdx++) {
+    const corrWord = correctedWords[corrIdx];
+    const corrWordNorm = corrWord.toLowerCase().replace(/[.,!?;:"""„'']/g, '');
+    
+    // Look for matching word in original (with some lookahead tolerance)
+    let foundMatch = false;
+    const maxLookahead = Math.min(5, originalWords.length - origIdx);
+    
+    for (let lookahead = 0; lookahead < maxLookahead; lookahead++) {
+      const checkIdx = origIdx + lookahead;
+      if (checkIdx < originalWords.length) {
+        const origWord = originalWords[checkIdx];
+        
+        // Check for exact or fuzzy match
+        if (origWord.word === corrWordNorm || 
+            origWord.word.includes(corrWordNorm) || 
+            corrWordNorm.includes(origWord.word)) {
+          // Found a match - use exact timestamp
+          result.push({
+            word: corrWord,
+            start: origWord.start,
+            end: origWord.end,
+            isInterpolated: false
+          });
+          origIdx = checkIdx + 1;
+          foundMatch = true;
+          break;
+        }
+      }
+    }
+    
+    if (!foundMatch) {
+      // No match found - interpolate timestamp
+      // Use position between previous and next known timestamps
+      const prevEnd = result.length > 0 ? result[result.length - 1].end : 0;
+      const nextStart = origIdx < originalWords.length 
+        ? originalWords[origIdx].start 
+        : audioDuration;
+      
+      // Estimate duration based on word length
+      const wordDuration = Math.min(0.3, (nextStart - prevEnd) * 0.5);
+      
+      result.push({
+        word: corrWord,
+        start: prevEnd,
+        end: prevEnd + wordDuration,
+        isInterpolated: true
+      });
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * CorrectedTextMitlesen - Smart highlighting of corrected text during audio playback
+ * Uses timestamp mapping from original transcription for precise word highlighting.
  */
 function CorrectedTextMitlesen({ 
   correctedText, 
+  originalSegments,
   audioCurrentTime, 
   audioDuration,
   audioRef
 }: { 
   correctedText: string; 
+  originalSegments: TranscriptSegment[];
   audioCurrentTime: number; 
   audioDuration: number;
   audioRef: React.RefObject<HTMLAudioElement | null>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   
-  // Split text into words for highlighting
-  const words = correctedText.split(/(\s+)/);
+  // Map timestamps from original to corrected text
+  const timestampedWords = useMemo(() => {
+    return mapTimestampsToCorrectedText(originalSegments, correctedText);
+  }, [originalSegments, correctedText]);
   
-  // Calculate progress percentage
-  const progress = audioDuration > 0 ? audioCurrentTime / audioDuration : 0;
-  
-  // Calculate which word index corresponds to current progress
-  // We only count actual words (not whitespace)
-  const actualWords = words.filter(w => w.trim().length > 0);
-  const currentWordIndex = Math.floor(progress * actualWords.length);
+  // Find current word based on audio time
+  const currentWordIndex = useMemo(() => {
+    for (let i = 0; i < timestampedWords.length; i++) {
+      const word = timestampedWords[i];
+      if (audioCurrentTime >= word.start && audioCurrentTime < word.end) {
+        return i;
+      }
+    }
+    // If not in any word, find closest upcoming word
+    for (let i = 0; i < timestampedWords.length; i++) {
+      if (timestampedWords[i].start > audioCurrentTime) {
+        return i - 1;
+      }
+    }
+    return timestampedWords.length - 1;
+  }, [timestampedWords, audioCurrentTime]);
   
   // Auto-scroll to current position
   useEffect(() => {
@@ -91,8 +203,51 @@ function CorrectedTextMitlesen({
     }
   }, [currentWordIndex]);
   
-  // Reconstruct text with proper whitespace and track actual word index
-  let actualWordCounter = 0;
+  // Calculate match quality for display
+  const matchQuality = useMemo(() => {
+    if (timestampedWords.length === 0) return 0;
+    const matched = timestampedWords.filter(w => !w.isInterpolated).length;
+    return Math.round((matched / timestampedWords.length) * 100);
+  }, [timestampedWords]);
+  
+  if (timestampedWords.length === 0) {
+    // Fallback to proportional if no timestamps available
+    const progress = audioDuration > 0 ? audioCurrentTime / audioDuration : 0;
+    const words = correctedText.split(/(\s+)/);
+    const actualWords = words.filter(w => w.trim().length > 0);
+    const propCurrentIdx = Math.floor(progress * actualWords.length);
+    let wordCounter = 0;
+    
+    return (
+      <div 
+        ref={containerRef}
+        className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 max-h-40 overflow-y-auto"
+      >
+        <div className="text-xs text-green-600 dark:text-green-400 mb-2 font-medium flex items-center justify-between">
+          <span>✨ Korrigierter Text (proportional)</span>
+          <span className="text-green-500">{Math.round(progress * 100)}%</span>
+        </div>
+        <div className="text-sm leading-relaxed">
+          {words.map((word, idx) => {
+            if (word.trim().length === 0) return <span key={idx}>{word}</span>;
+            const wIdx = wordCounter++;
+            return (
+              <span
+                key={idx}
+                className={`transition-colors duration-100 ${
+                  wIdx === propCurrentIdx 
+                    ? 'bg-green-300 dark:bg-green-600 font-semibold rounded px-0.5' 
+                    : wIdx < propCurrentIdx ? 'text-gray-500' : ''
+                }`}
+              >
+                {word}{' '}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
   
   return (
     <div 
@@ -100,22 +255,13 @@ function CorrectedTextMitlesen({
       className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 max-h-40 overflow-y-auto"
     >
       <div className="text-xs text-green-600 dark:text-green-400 mb-2 font-medium flex items-center justify-between">
-        <span>✨ Korrigierter Text (proportionales Mitlesen)</span>
-        <span className="text-green-500">{Math.round(progress * 100)}%</span>
+        <span>✨ Korrigierter Text (Timestamp-Mapping: {matchQuality}% exakt)</span>
+        <span className="text-green-500">{audioCurrentTime.toFixed(1)}s</span>
       </div>
       <div className="text-sm leading-relaxed">
-        {words.map((word, idx) => {
-          // Whitespace - just render it
-          if (word.trim().length === 0) {
-            return <span key={idx}>{word}</span>;
-          }
-          
-          // Actual word - apply highlighting based on position
-          const wordIdx = actualWordCounter;
-          actualWordCounter++;
-          
-          const isPast = wordIdx < currentWordIndex;
-          const isCurrent = wordIdx === currentWordIndex;
+        {timestampedWords.map((tw, idx) => {
+          const isCurrent = idx === currentWordIndex;
+          const isPast = audioCurrentTime > tw.end;
           
           return (
             <span
@@ -126,18 +272,16 @@ function CorrectedTextMitlesen({
                   : isPast 
                     ? 'text-gray-500 dark:text-gray-500' 
                     : ''
-              }`}
+              } ${tw.isInterpolated ? 'italic' : ''}`}
               onClick={() => {
-                // Click to seek to proportional position
-                if (audioRef.current && audioDuration > 0) {
-                  const targetTime = (wordIdx / actualWords.length) * audioDuration;
-                  audioRef.current.currentTime = targetTime;
+                if (audioRef.current) {
+                  audioRef.current.currentTime = tw.start;
                 }
               }}
               style={{ cursor: 'pointer' }}
-              title={`Position: ${Math.round((wordIdx / actualWords.length) * 100)}%`}
+              title={`${tw.start.toFixed(1)}s - ${tw.end.toFixed(1)}s${tw.isInterpolated ? ' (geschätzt)' : ''}`}
             >
-              {word}
+              {tw.word}{' '}
             </span>
           );
         })}
@@ -1284,10 +1428,11 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                       </div>
                     </div>
                     
-                    {/* Corrected Text with proportional highlighting */}
+                    {/* Corrected Text with smart timestamp mapping */}
                     {selectedDictation.corrected_text && !isReverted && (
                       <CorrectedTextMitlesen
                         correctedText={editedTexts.corrected_text || selectedDictation.corrected_text}
+                        originalSegments={parsedSegments}
                         audioCurrentTime={audioCurrentTime}
                         audioDuration={audioDuration}
                         audioRef={audioRef}

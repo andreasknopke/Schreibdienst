@@ -14,7 +14,7 @@ import {
   DictationPriority,
   DictationStatus,
 } from '@/lib/offlineDictationDb';
-import { logManualCorrectionWithRequest } from '@/lib/correctionLogDb';
+import { logManualCorrectionWithRequest, initCorrectionLogTableWithRequest } from '@/lib/correctionLogDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { compressAudioForSpeech } from '@/lib/audioCompression';
 
@@ -186,6 +186,7 @@ export async function DELETE(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     await initOfflineDictationTableWithRequest(req);
+    await initCorrectionLogTableWithRequest(req);
     
     const { id, action, correctedText, changeScore } = await req.json();
     
@@ -211,21 +212,25 @@ export async function PATCH(req: NextRequest) {
       // Get the dictation to compare texts
       const dictation = await getDictationByIdWithRequest(req, id);
       if (dictation && username) {
-        // Log manual correction
-        try {
-          const textBefore = dictation.corrected_text || dictation.transcript || '';
-          const manualChangeScore = calculateChangeScore(textBefore, correctedText);
-          await logManualCorrectionWithRequest(
-            req,
-            id,
-            textBefore,
-            correctedText,
-            username,
-            manualChangeScore
-          );
-          console.log(`[Offline Dictations] ✓ Manual correction logged for #${id} by ${username} (score: ${manualChangeScore}%)`);
-        } catch (logError: any) {
-          console.warn(`[Offline Dictations] Failed to log manual correction: ${logError.message}`);
+        // Log manual correction only if text actually changed
+        const textBefore = dictation.corrected_text || dictation.transcript || '';
+        if (textBefore !== correctedText) {
+          try {
+            const manualChangeScore = calculateChangeScore(textBefore, correctedText);
+            await logManualCorrectionWithRequest(
+              req,
+              id,
+              textBefore,
+              correctedText,
+              username,
+              manualChangeScore
+            );
+            console.log(`[Offline Dictations] ✓ Manual correction logged for #${id} by ${username} (score: ${manualChangeScore}%)`);
+          } catch (logError: any) {
+            console.warn(`[Offline Dictations] Failed to log manual correction: ${logError.message}`);
+          }
+        } else {
+          console.log(`[Offline Dictations] No changes detected for #${id}, skipping log`);
         }
       }
       

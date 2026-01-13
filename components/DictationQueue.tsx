@@ -523,7 +523,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     if (!selected) return;
     
     try {
-      const res = await fetchWithDbToken('/api/offline-dictations', {
+      const res = await fetchWithDbToken(`/api/offline-dictations?username=${encodeURIComponent(username)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -543,7 +543,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     } catch (err: any) {
       setError(err.message || 'Fehler beim Speichern');
     }
-  }, [selectedId, dictations, editedTexts.corrected_text, loadDictations]);
+  }, [selectedId, dictations, editedTexts.corrected_text, loadDictations, username]);
 
   // Get combined text for a dictation - always Arztbrief mode now
   const getCombinedText = (d: Dictation): string => {

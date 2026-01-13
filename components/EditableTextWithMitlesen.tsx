@@ -300,10 +300,28 @@ export default function EditableTextWithMitlesen({
     return Math.round((matched / timestampedWords.length) * 100);
   }, [timestampedWords]);
   
-  // Render words with highlighting
-  const words = localText.split(/(\s+)/);
-  let wordIdx = 0;
-  
+  // Compute diff changes using the diff library
+  const diffResult = useMemo(() => {
+    if (!showDiff) return null;
+    
+    // Diff zwischen Original (vor KI) und aktuellem Text
+    const llmDiff = diffWordsWithSpace(originalText || '', localText || '');
+    
+    // Diff zwischen gespeichertem Text und aktuellem Text (manuelle Änderungen)
+    const manualDiff = savedText ? diffWordsWithSpace(savedText, localText || '') : [];
+    
+    // Sammle manuell hinzugefügte Wörter
+    const manualAddedWords = new Set<string>();
+    for (const part of manualDiff) {
+      if (part.added && part.value) {
+        const words = part.value.split(/\s+/).filter(w => w.trim());
+        words.forEach(w => manualAddedWords.add(w.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '')));
+      }
+    }
+    
+    return { llmDiff, manualAddedWords };
+  }, [originalText, localText, savedText, showDiff]);
+
   // Simple rendering when diff/mitlesen are off
   if (!showDiff && !showMitlesen) {
     return (
@@ -321,6 +339,68 @@ export default function EditableTextWithMitlesen({
       </div>
     );
   }
+  
+  // Build rendered elements from diff
+  const renderDiffContent = () => {
+    if (!diffResult) return localText;
+    
+    const elements: React.ReactNode[] = [];
+    let wordIdx = 0;
+    let elementKey = 0;
+    
+    for (const part of diffResult.llmDiff) {
+      // Skip removed parts (not in final text)
+      if (part.removed) continue;
+      
+      const words = part.value?.split(/(\s+)/) || [];
+      
+      for (const word of words) {
+        // Whitespace - render as-is
+        if (word.trim().length === 0) {
+          elements.push(<span key={elementKey++}>{word}</span>);
+          continue;
+        }
+        
+        const tsWord = wordIdx < timestampedWords.length ? timestampedWords[wordIdx] : null;
+        const isCurrent = showMitlesen && isAudioActive && wordIdx === currentWordIndex;
+        const isPast = showMitlesen && tsWord && audioCurrentTime > tsWord.end;
+        wordIdx++;
+        
+        // Determine diff styling
+        let diffClass = '';
+        const wordNorm = word.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '');
+        
+        // Check if manually added (blue)
+        if (diffResult.manualAddedWords.has(wordNorm)) {
+          diffClass = 'bg-blue-100 dark:bg-blue-900/40 ';
+        } 
+        // Check if added by LLM (green)
+        else if (part.added) {
+          diffClass = 'bg-green-100 dark:bg-green-900/40 ';
+        }
+        
+        elements.push(
+          <span
+            key={elementKey++}
+            data-current={isCurrent}
+            onClick={() => handleWordClick(tsWord ? { start: tsWord.start } : undefined)}
+            className={`${diffClass}${
+              isCurrent 
+                ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold rounded px-0.5 ' 
+                : isPast 
+                  ? 'text-gray-400 dark:text-gray-500 ' 
+                  : ''
+            }${tsWord?.isInterpolated ? 'italic ' : ''}cursor-pointer transition-colors duration-100`}
+            title={tsWord ? `${tsWord.start.toFixed(1)}s${tsWord.isInterpolated ? ' (geschätzt)' : ''}` : undefined}
+          >
+            {word}
+          </span>
+        );
+      }
+    }
+    
+    return elements;
+  };
   
   return (
     <div className="relative" ref={containerRef}>
@@ -355,58 +435,7 @@ export default function EditableTextWithMitlesen({
         className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none overflow-auto min-h-[200px] max-h-[400px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 ${className}`}
         style={{ whiteSpace: 'pre-wrap' }}
       >
-        {words.map((word, idx) => {
-          // Whitespace
-          if (word.trim().length === 0) {
-            return <span key={idx}>{word}</span>;
-          }
-          
-          const tsWord = wordIdx < timestampedWords.length ? timestampedWords[wordIdx] : null;
-          const isCurrent = showMitlesen && isAudioActive && wordIdx === currentWordIndex;
-          const isPast = showMitlesen && tsWord && audioCurrentTime > tsWord.end;
-          wordIdx++;
-          
-          // Determine diff styling
-          let diffClass = '';
-          if (showDiff && savedText !== originalText) {
-            // Check if word was added by LLM (in corrected but not in original)
-            const origWords = originalText.toLowerCase().split(/\s+/);
-            const wordLower = word.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '');
-            if (!origWords.some(ow => ow.replace(/[.,!?;:"""„''()\[\]]/g, '') === wordLower)) {
-              diffClass = 'bg-green-100 dark:bg-green-900/40 ';
-            }
-          }
-          
-          // Check for manual changes (in current but not in saved)
-          if (showDiff && savedText) {
-            const savedWords = savedText.toLowerCase().split(/\s+/);
-            const wordLower = word.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '');
-            const currWords = localText.toLowerCase().split(/\s+/);
-            // If word is in current text but not in saved text, it's a manual addition
-            if (!savedWords.some(sw => sw.replace(/[.,!?;:"""„''()\[\]]/g, '') === wordLower) &&
-                currWords.some(cw => cw.replace(/[.,!?;:"""„''()\[\]]/g, '') === wordLower)) {
-              diffClass = 'bg-blue-100 dark:bg-blue-900/40 ';
-            }
-          }
-          
-          return (
-            <span
-              key={idx}
-              data-current={isCurrent}
-              onClick={() => handleWordClick(tsWord ? { start: tsWord.start } : undefined)}
-              className={`${diffClass}${
-                isCurrent 
-                  ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold rounded px-0.5 ' 
-                  : isPast 
-                    ? 'text-gray-400 dark:text-gray-500 ' 
-                    : ''
-              }${tsWord?.isInterpolated ? 'italic ' : ''}cursor-pointer transition-colors duration-100`}
-              title={tsWord ? `${tsWord.start.toFixed(1)}s${tsWord.isInterpolated ? ' (geschätzt)' : ''}` : undefined}
-            >
-              {word}
-            </span>
-          );
-        })}
+        {renderDiffContent()}
       </div>
     </div>
   );

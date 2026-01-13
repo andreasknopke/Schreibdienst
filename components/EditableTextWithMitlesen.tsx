@@ -8,6 +8,7 @@ interface TimestampedWord {
   start: number;
   end: number;
   isInterpolated?: boolean;
+  charPos: number; // Character position in the text
 }
 
 // Segment interface for word-level highlighting
@@ -31,6 +32,24 @@ interface WordWithDiff {
   timestamp?: { start: number; end: number; isInterpolated?: boolean };
 }
 
+// Parsed word from any text
+interface ParsedWord {
+  word: string;
+  normalized: string;
+  charPos: number;
+  index: number;
+}
+
+// Original word with timestamp
+interface OriginalWord {
+  word: string;
+  normalized: string;
+  start: number;
+  end: number;
+  index: number;
+  used: boolean; // Track if already matched
+}
+
 interface EditableTextWithMitlesenProps {
   // Text content
   text: string; // Current text (after LLM + manual edits)
@@ -51,204 +70,224 @@ interface EditableTextWithMitlesenProps {
 }
 
 /**
- * Maps timestamps from original transcription to any text using word matching.
- * Uses a more robust algorithm that continues even when words don't match.
+ * Normalizes a word for comparison (lowercase, remove punctuation)
  */
-function mapTimestampsToText(
-  originalSegments: TranscriptSegment[],
-  text: string
-): TimestampedWord[] {
-  // Extract all words with timestamps from original segments
-  const originalWords: { word: string; start: number; end: number }[] = [];
-  for (const segment of originalSegments) {
+function normalizeWord(word: string): string {
+  return word.toLowerCase().replace(/[.,!?;:"""„''()\[\]<>«»–—\-\/\\@#$%^&*+=|~`]/g, '').trim();
+}
+
+/**
+ * Parse text into words with positions
+ */
+function parseWords(text: string): ParsedWord[] {
+  const words: ParsedWord[] = [];
+  const regex = /\S+/g;
+  let match;
+  let index = 0;
+  
+  while ((match = regex.exec(text)) !== null) {
+    words.push({
+      word: match[0],
+      normalized: normalizeWord(match[0]),
+      charPos: match.index,
+      index: index++
+    });
+  }
+  
+  return words;
+}
+
+/**
+ * Extract original words with timestamps from segments
+ */
+function extractOriginalWords(segments: TranscriptSegment[]): OriginalWord[] {
+  const words: OriginalWord[] = [];
+  let index = 0;
+  
+  for (const segment of segments) {
     if (segment.words) {
       for (const word of segment.words) {
         if (word.start !== undefined && word.end !== undefined) {
-          originalWords.push({
-            word: word.word.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '').trim(),
+          words.push({
+            word: word.word,
+            normalized: normalizeWord(word.word),
             start: word.start,
-            end: word.end
+            end: word.end,
+            index: index++,
+            used: false
           });
         }
       }
     }
   }
   
-  if (originalWords.length === 0) {
-    return [];
-  }
+  return words;
+}
+
+/**
+ * Build a timestamp lookup table for the formatted text.
+ * Maps each word position in the formatted text to its timestamp.
+ * Uses unchanged words between original and formatted text to anchor timestamps.
+ */
+function buildTimestampTable(
+  originalSegments: TranscriptSegment[],
+  formattedText: string
+): Map<number, TimestampedWord> {
+  const result = new Map<number, TimestampedWord>();
   
-  const textWords = text.split(/\s+/).filter(w => w.length > 0);
-  const result: TimestampedWord[] = [];
+  // Extract original words with timestamps
+  const originalWords = extractOriginalWords(originalSegments);
+  if (originalWords.length === 0) return result;
   
-  const audioDuration = originalWords[originalWords.length - 1].end;
+  // Parse formatted text into words
+  const formattedWords = parseWords(formattedText);
+  if (formattedWords.length === 0) return result;
   
-  // Build a map of original words for faster lookup
-  // Group words by their normalized form
-  const wordPositions: Map<string, number[]> = new Map();
-  for (let i = 0; i < originalWords.length; i++) {
-    const w = originalWords[i].word;
-    if (!wordPositions.has(w)) {
-      wordPositions.set(w, []);
+  // Reset usage flags
+  originalWords.forEach(w => w.used = false);
+  
+  // Build index of original words by normalized form for O(1) lookup
+  const originalWordIndex = new Map<string, OriginalWord[]>();
+  for (const ow of originalWords) {
+    if (ow.normalized.length > 0) {
+      if (!originalWordIndex.has(ow.normalized)) {
+        originalWordIndex.set(ow.normalized, []);
+      }
+      originalWordIndex.get(ow.normalized)!.push(ow);
     }
-    wordPositions.get(w)!.push(i);
   }
   
+  // First pass: Find exact matches (unchanged words)
+  // Track which formatted words have direct matches
+  const directMatches: (OriginalWord | null)[] = new Array(formattedWords.length).fill(null);
   let lastMatchedOrigIdx = -1;
   
-  for (let i = 0; i < textWords.length; i++) {
-    const word = textWords[i];
-    const wordNorm = word.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '').trim();
+  for (let i = 0; i < formattedWords.length; i++) {
+    const fw = formattedWords[i];
+    if (fw.normalized.length === 0) continue;
     
-    if (wordNorm.length === 0) continue;
+    // Look for matching original words
+    const candidates = originalWordIndex.get(fw.normalized) || [];
     
-    // Try to find the word in original, preferring positions after lastMatchedOrigIdx
-    let bestMatchIdx = -1;
-    let bestMatchScore = -1;
+    // Find the best candidate: unused, after last match, closest to expected position
+    let bestMatch: OriginalWord | null = null;
+    let bestScore = -Infinity;
     
-    // Direct match lookup
-    const directMatches = wordPositions.get(wordNorm) || [];
-    for (const idx of directMatches) {
-      if (idx > lastMatchedOrigIdx) {
-        // Prefer matches that are close to where we expect the word to be
-        const expectedPos = lastMatchedOrigIdx + 1;
-        const distance = Math.abs(idx - expectedPos);
-        const score = 1000 - distance; // Higher score for closer matches
-        if (score > bestMatchScore) {
-          bestMatchScore = score;
-          bestMatchIdx = idx;
-        }
-      }
-    }
-    
-    // If no direct match, try fuzzy matching within a window
-    if (bestMatchIdx === -1) {
-      const searchStart = Math.max(0, lastMatchedOrigIdx + 1);
-      const searchEnd = Math.min(originalWords.length, searchStart + 20); // Look ahead up to 20 words
+    for (const candidate of candidates) {
+      if (candidate.used) continue;
+      if (candidate.index <= lastMatchedOrigIdx) continue;
       
-      for (let j = searchStart; j < searchEnd; j++) {
-        const origWord = originalWords[j].word;
-        
-        // Fuzzy matching
-        if (origWord.includes(wordNorm) || 
-            wordNorm.includes(origWord) ||
-            (wordNorm.length >= 4 && origWord.length >= 4 && 
-             (origWord.startsWith(wordNorm.slice(0, 4)) || wordNorm.startsWith(origWord.slice(0, 4))))) {
-          const distance = j - (lastMatchedOrigIdx + 1);
-          const score = 500 - distance;
-          if (score > bestMatchScore) {
-            bestMatchScore = score;
-            bestMatchIdx = j;
-          }
-        }
+      // Score based on proximity to expected position
+      const expectedIdx = lastMatchedOrigIdx + 1;
+      const distance = candidate.index - expectedIdx;
+      // Prefer candidates that are close to where we expect them
+      // But allow some gap for insertions/deletions
+      const score = -distance;
+      
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = candidate;
       }
     }
     
-    if (bestMatchIdx !== -1) {
-      // Found a match
-      result.push({
-        word: word,
-        start: originalWords[bestMatchIdx].start,
-        end: originalWords[bestMatchIdx].end,
-        isInterpolated: false
+    if (bestMatch) {
+      bestMatch.used = true;
+      directMatches[i] = bestMatch;
+      lastMatchedOrigIdx = bestMatch.index;
+      
+      result.set(fw.charPos, {
+        word: fw.word,
+        start: bestMatch.start,
+        end: bestMatch.end,
+        isInterpolated: false,
+        charPos: fw.charPos
       });
-      lastMatchedOrigIdx = bestMatchIdx;
+    }
+  }
+  
+  // Second pass: Interpolate timestamps for unmatched words
+  // Use surrounding matched words to estimate timestamps
+  const audioDuration = originalWords[originalWords.length - 1].end;
+  
+  for (let i = 0; i < formattedWords.length; i++) {
+    const fw = formattedWords[i];
+    if (result.has(fw.charPos)) continue; // Already matched
+    
+    // Find nearest matched words before and after
+    let prevMatch: { idx: number; ts: TimestampedWord } | null = null;
+    let nextMatch: { idx: number; ts: TimestampedWord } | null = null;
+    
+    for (let j = i - 1; j >= 0; j--) {
+      const ts = result.get(formattedWords[j].charPos);
+      if (ts && !ts.isInterpolated) {
+        prevMatch = { idx: j, ts };
+        break;
+      }
+    }
+    
+    for (let j = i + 1; j < formattedWords.length; j++) {
+      const ts = result.get(formattedWords[j].charPos);
+      if (ts && !ts.isInterpolated) {
+        nextMatch = { idx: j, ts };
+        break;
+      }
+    }
+    
+    // Interpolate based on position between anchors
+    let estimatedStart: number;
+    let estimatedEnd: number;
+    
+    if (prevMatch && nextMatch) {
+      // Interpolate between two known points
+      const totalWords = nextMatch.idx - prevMatch.idx;
+      const wordOffset = i - prevMatch.idx;
+      const fraction = wordOffset / totalWords;
+      const timeDelta = nextMatch.ts.start - prevMatch.ts.end;
+      estimatedStart = prevMatch.ts.end + (timeDelta * fraction);
+      estimatedEnd = estimatedStart + 0.2; // Assume 200ms per word
+    } else if (prevMatch) {
+      // After last match - extrapolate forward
+      const wordsAfter = i - prevMatch.idx;
+      estimatedStart = prevMatch.ts.end + (wordsAfter * 0.15);
+      estimatedEnd = estimatedStart + 0.2;
+    } else if (nextMatch) {
+      // Before first match - extrapolate backward
+      const wordsBefore = nextMatch.idx - i;
+      estimatedStart = Math.max(0, nextMatch.ts.start - (wordsBefore * 0.2));
+      estimatedEnd = estimatedStart + 0.2;
     } else {
-      // No match - interpolate timestamp based on position
-      const progress = i / textWords.length;
-      const estimatedTime = progress * audioDuration;
-      
-      // Find the closest original word timestamp to this estimated time
-      let closestIdx = 0;
-      let closestDiff = Infinity;
-      for (let j = 0; j < originalWords.length; j++) {
-        const diff = Math.abs(originalWords[j].start - estimatedTime);
-        if (diff < closestDiff) {
-          closestDiff = diff;
-          closestIdx = j;
-        }
-      }
-      
-      result.push({
-        word: word,
-        start: originalWords[closestIdx].start,
-        end: originalWords[closestIdx].end,
-        isInterpolated: true
-      });
-      
-      // Don't update lastMatchedOrigIdx for interpolated words
-      // This allows the algorithm to continue looking for matches
+      // No matches at all - use linear distribution
+      const fraction = i / formattedWords.length;
+      estimatedStart = fraction * audioDuration;
+      estimatedEnd = estimatedStart + 0.2;
     }
+    
+    result.set(fw.charPos, {
+      word: fw.word,
+      start: estimatedStart,
+      end: Math.min(estimatedEnd, audioDuration),
+      isInterpolated: true,
+      charPos: fw.charPos
+    });
   }
   
   return result;
 }
 
 /**
- * Computes word-level diff with timestamps
+ * Create an array of timestamped words in order for the text
  */
-function computeDiffWithTimestamps(
-  originalText: string,
-  correctedText: string,
-  savedText: string,
-  timestampedWords: TimestampedWord[]
-): WordWithDiff[] {
-  const result: WordWithDiff[] = [];
+function getOrderedTimestampedWords(
+  timestampTable: Map<number, TimestampedWord>,
+  text: string
+): TimestampedWord[] {
+  const parsedWords = parseWords(text);
+  const result: TimestampedWord[] = [];
   
-  // First: diff original vs corrected (LLM changes)
-  const llmDiffs = diffWordsWithSpace(originalText, correctedText);
-  
-  // Then: diff savedText vs correctedText (manual changes since last save)
-  const manualDiffs = diffWordsWithSpace(savedText, correctedText);
-  
-  // Build a set of manually added words
-  const manualAddedWords = new Set<string>();
-  for (const diff of manualDiffs) {
-    if (diff.added && diff.value) {
-      const words = diff.value.trim().split(/\s+/);
-      words.forEach(w => manualAddedWords.add(w.toLowerCase()));
-    }
-  }
-  
-  // Process LLM diffs and mark manual changes
-  let tsIdx = 0;
-  for (const diff of llmDiffs) {
-    if (diff.removed) {
-      // Removed by LLM - don't show in final text
-      continue;
-    }
-    
-    const words = diff.value?.split(/(\s+)/) || [];
-    for (const word of words) {
-      if (word.trim().length === 0) continue;
-      
-      // Check if this is a manual addition (not in savedText)
-      const isManual = manualAddedWords.has(word.toLowerCase());
-      
-      let diffType: DiffType = 'unchanged';
-      if (isManual) {
-        diffType = 'manual';
-      } else if (diff.added) {
-        diffType = 'added';
-      }
-      
-      // Find timestamp for this word
-      const ts = tsIdx < timestampedWords.length ? timestampedWords[tsIdx] : undefined;
-      if (ts && ts.word.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '') === 
-                word.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '')) {
-        result.push({
-          word: word,
-          diffType,
-          timestamp: { start: ts.start, end: ts.end, isInterpolated: ts.isInterpolated }
-        });
-        tsIdx++;
-      } else {
-        result.push({
-          word: word,
-          diffType,
-          timestamp: ts ? { start: ts.start, end: ts.end, isInterpolated: true } : undefined
-        });
-      }
+  for (const pw of parsedWords) {
+    const ts = timestampTable.get(pw.charPos);
+    if (ts) {
+      result.push(ts);
     }
   }
   
@@ -277,31 +316,16 @@ export default function EditableTextWithMitlesen({
     setLocalText(text);
   }, [text]);
   
-  // Map timestamps to current text - returns array of words with timestamps
-  // Each word in the text gets a timestamp from the original audio
-  const timestampedWords = useMemo(() => {
-    return mapTimestampsToText(originalSegments, localText);
+  // Build timestamp table: maps character positions to timestamps
+  // This is the core of the new approach - builds a stable mapping
+  const timestampTable = useMemo(() => {
+    return buildTimestampTable(originalSegments, localText);
   }, [originalSegments, localText]);
   
-  // Create a lookup map: word position in text -> timestamp info
-  // This uses the actual character position in the text to match words
-  const wordTimestampMap = useMemo(() => {
-    const map = new Map<number, TimestampedWord>();
-    const words = localText.split(/\s+/).filter(w => w.length > 0);
-    let charPos = 0;
-    
-    for (let i = 0; i < words.length && i < timestampedWords.length; i++) {
-      const word = words[i];
-      // Find actual position in text
-      const pos = localText.indexOf(word, charPos);
-      if (pos !== -1) {
-        map.set(pos, timestampedWords[i]);
-        charPos = pos + word.length;
-      }
-    }
-    
-    return map;
-  }, [localText, timestampedWords]);
+  // Get ordered array of timestamped words for iteration
+  const timestampedWords = useMemo(() => {
+    return getOrderedTimestampedWords(timestampTable, localText);
+  }, [timestampTable, localText]);
   
   // Detect if audio is playing (time is changing)
   const prevTimeRef = useRef(audioCurrentTime);
@@ -381,8 +405,6 @@ export default function EditableTextWithMitlesen({
   
   // Compute diff changes using the diff library
   const diffResult = useMemo(() => {
-    if (!showDiff) return null;
-    
     // Diff zwischen Original (vor KI) und aktuellem Text
     const llmDiff = diffWordsWithSpace(originalText || '', localText || '');
     
@@ -398,86 +420,121 @@ export default function EditableTextWithMitlesen({
       }
     }
     
-    return { llmDiff, manualAddedWords };
-  }, [originalText, localText, savedText, showDiff]);
-
-  // Simple rendering when diff/mitlesen are off
-  if (!showDiff && !showMitlesen) {
-    return (
-      <div className="relative">
-        <div
-          ref={editableRef}
-          contentEditable={!disabled}
-          suppressContentEditableWarning
-          onInput={handleInput}
-          className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none min-h-[200px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 ${className}`}
-          style={{ whiteSpace: 'pre-wrap' }}
-        >
-          {localText}
-        </div>
-      </div>
-    );
-  }
-  
-  // Build rendered elements from diff
-  const renderDiffContent = () => {
-    if (!diffResult) return localText;
-    
-    const elements: React.ReactNode[] = [];
-    let elementKey = 0;
-    let charPosition = 0; // Track position in the original localText
-    
-    for (const part of diffResult.llmDiff) {
-      // Skip removed parts (not in final text)
+    // Baue eine Liste von Wörtern mit ihrem Diff-Status
+    const wordsWithDiffStatus: { word: string; isAdded: boolean; isManual: boolean; isWhitespace: boolean }[] = [];
+    for (const part of llmDiff) {
       if (part.removed) continue;
       
       const tokens = part.value?.split(/(\s+)/) || [];
-      
       for (const token of tokens) {
+        if (token.length === 0) continue;
+        
+        const isWhitespace = token.trim().length === 0;
+        const wordNorm = token.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '');
+        
+        wordsWithDiffStatus.push({
+          word: token,
+          isAdded: !isWhitespace && part.added === true,
+          isManual: !isWhitespace && manualAddedWords.has(wordNorm),
+          isWhitespace
+        });
+      }
+    }
+    
+    return { wordsWithDiffStatus, manualAddedWords };
+  }, [originalText, localText, savedText]);
+
+  // Render content with Mitlesen and optional Diff highlighting
+  // This new approach uses the timestamp table directly for robust mapping
+  const renderContent = () => {
+    const elements: React.ReactNode[] = [];
+    
+    // Parse the text to get word positions
+    const parsedWords = parseWords(localText);
+    
+    // Build a map from word index to parsed word info
+    const wordIndexToInfo = new Map<number, { word: string; charPos: number }>();
+    for (let i = 0; i < parsedWords.length; i++) {
+      wordIndexToInfo.set(i, { word: parsedWords[i].word, charPos: parsedWords[i].charPos });
+    }
+    
+    // If we have diff info, use it; otherwise just iterate through words
+    if (showDiff) {
+      // Use diff-based rendering
+      let wordIndex = 0;
+      
+      for (let i = 0; i < diffResult.wordsWithDiffStatus.length; i++) {
+        const item = diffResult.wordsWithDiffStatus[i];
+        
         // Whitespace - render as-is
-        if (token.trim().length === 0) {
-          elements.push(<span key={elementKey++}>{token}</span>);
-          charPosition += token.length;
+        if (item.isWhitespace) {
+          elements.push(<span key={i}>{item.word}</span>);
           continue;
         }
         
-        // Find this word's position in localText to get its timestamp
-        const wordPosInText = localText.indexOf(token, charPosition);
-        const tsWord = wordPosInText !== -1 ? wordTimestampMap.get(wordPosInText) : null;
-        
-        // Update char position
-        if (wordPosInText !== -1) {
-          charPosition = wordPosInText + token.length;
-        } else {
-          charPosition += token.length;
-        }
-        
-        // Check if this word is the current playing word
-        const isCurrent = showMitlesen && tsWord && currentWordIndex >= 0 && 
-          timestampedWords[currentWordIndex] && 
-          tsWord.start === timestampedWords[currentWordIndex].start;
-        
+        // Get timestamp for this word using the charPos
+        const wordInfo = wordIndexToInfo.get(wordIndex);
+        const tsWord = wordInfo ? timestampTable.get(wordInfo.charPos) : null;
+        const isCurrent = showMitlesen && wordIndex === currentWordIndex && currentWordIndex >= 0;
         const isPast = showMitlesen && isAudioActive && tsWord && audioCurrentTime > tsWord.end;
+        wordIndex++;
         
         // Determine diff styling
         let diffClass = '';
-        const wordNorm = token.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '');
-        
-        // Check if manually added (blue) - kräftigere Farben
-        if (diffResult.manualAddedWords.has(wordNorm)) {
+        if (item.isManual) {
           diffClass = 'bg-blue-200 text-blue-900 dark:bg-blue-600 dark:text-white font-medium rounded px-0.5 ';
-        } 
-        // Check if added by LLM (green) - kräftigere Farben
-        else if (part.added) {
+        } else if (item.isAdded) {
           diffClass = 'bg-green-200 text-green-900 dark:bg-green-600 dark:text-white font-medium rounded px-0.5 ';
         }
         
         elements.push(
           <span
-            key={elementKey++}
+            key={i}
             data-current={isCurrent}
             onClick={() => handleWordClick(tsWord ? { start: tsWord.start } : undefined)}
             className={`${diffClass}${
+              isCurrent 
+                ? 'bg-yellow-300 dark:bg-yellow-500 text-black font-semibold rounded px-0.5 ' 
+                : isPast 
+                  ? 'text-gray-400 dark:text-gray-500 ' 
+                  : ''
+            }${tsWord?.isInterpolated ? 'italic ' : ''}cursor-pointer transition-colors duration-100`}
+            title={tsWord ? `${tsWord.start.toFixed(1)}s${tsWord.isInterpolated ? ' (geschätzt)' : ''}` : undefined}
+          >
+            {item.word}
+          </span>
+        );
+      }
+    } else {
+      // Non-diff rendering: iterate through text preserving whitespace
+      // Split text but keep whitespace as separate tokens
+      const tokens = localText.split(/(\s+)/);
+      let wordIndex = 0;
+      
+      for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        if (token.length === 0) continue;
+        
+        const isWhitespace = token.trim().length === 0;
+        
+        if (isWhitespace) {
+          elements.push(<span key={i}>{token}</span>);
+          continue;
+        }
+        
+        // Get timestamp for this word
+        const wordInfo = wordIndexToInfo.get(wordIndex);
+        const tsWord = wordInfo ? timestampTable.get(wordInfo.charPos) : null;
+        const isCurrent = showMitlesen && wordIndex === currentWordIndex && currentWordIndex >= 0;
+        const isPast = showMitlesen && isAudioActive && tsWord && audioCurrentTime > tsWord.end;
+        wordIndex++;
+        
+        elements.push(
+          <span
+            key={i}
+            data-current={isCurrent}
+            onClick={() => handleWordClick(tsWord ? { start: tsWord.start } : undefined)}
+            className={`${
               isCurrent 
                 ? 'bg-yellow-300 dark:bg-yellow-500 text-black font-semibold rounded px-0.5 ' 
                 : isPast 
@@ -494,6 +551,24 @@ export default function EditableTextWithMitlesen({
     
     return elements;
   };
+
+  // Simple rendering when both diff and mitlesen are off
+  if (!showDiff && !showMitlesen) {
+    return (
+      <div className="relative">
+        <div
+          ref={editableRef}
+          contentEditable={!disabled}
+          suppressContentEditableWarning
+          onInput={handleInput}
+          className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none min-h-[200px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 ${className}`}
+          style={{ whiteSpace: 'pre-wrap' }}
+        >
+          {localText}
+        </div>
+      </div>
+    );
+  }
   
   return (
     <div className="relative" ref={containerRef}>
@@ -528,7 +603,7 @@ export default function EditableTextWithMitlesen({
         className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none overflow-auto min-h-[200px] max-h-[400px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 ${className}`}
         style={{ whiteSpace: 'pre-wrap' }}
       >
-        {renderDiffContent()}
+        {renderContent()}
       </div>
     </div>
   );

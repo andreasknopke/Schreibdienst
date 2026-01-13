@@ -445,39 +445,44 @@ export default function EditableTextWithMitlesen({
   }, [originalText, localText, savedText]);
 
   // Render content with Mitlesen and optional Diff highlighting
-  // This new approach uses the timestamp table directly for robust mapping
+  // This approach tracks character position to find timestamps
   const renderContent = () => {
     const elements: React.ReactNode[] = [];
     
-    // Parse the text to get word positions
-    const parsedWords = parseWords(localText);
-    
-    // Build a map from word index to parsed word info
-    const wordIndexToInfo = new Map<number, { word: string; charPos: number }>();
-    for (let i = 0; i < parsedWords.length; i++) {
-      wordIndexToInfo.set(i, { word: parsedWords[i].word, charPos: parsedWords[i].charPos });
-    }
-    
     // If we have diff info, use it; otherwise just iterate through words
     if (showDiff) {
-      // Use diff-based rendering
-      let wordIndex = 0;
+      // Use diff-based rendering with character position tracking
+      let charPos = 0; // Track position in localText
+      let wordIdx = 0; // Track which word we're on for currentWordIndex comparison
       
       for (let i = 0; i < diffResult.wordsWithDiffStatus.length; i++) {
         const item = diffResult.wordsWithDiffStatus[i];
         
-        // Whitespace - render as-is
+        // Whitespace - render as-is and advance charPos
         if (item.isWhitespace) {
           elements.push(<span key={i}>{item.word}</span>);
+          charPos += item.word.length;
           continue;
         }
         
-        // Get timestamp for this word using the charPos
-        const wordInfo = wordIndexToInfo.get(wordIndex);
-        const tsWord = wordInfo ? timestampTable.get(wordInfo.charPos) : null;
-        const isCurrent = showMitlesen && wordIndex === currentWordIndex && currentWordIndex >= 0;
+        // Find this word's actual position in localText
+        // Search from current charPos to handle duplicates correctly
+        const wordPosInText = localText.indexOf(item.word, charPos);
+        
+        // Get timestamp using the actual character position
+        const tsWord = wordPosInText !== -1 ? timestampTable.get(wordPosInText) : null;
+        
+        // Check if this is the current word being played
+        const isCurrent = showMitlesen && wordIdx === currentWordIndex && currentWordIndex >= 0;
         const isPast = showMitlesen && isAudioActive && tsWord && audioCurrentTime > tsWord.end;
-        wordIndex++;
+        
+        // Update charPos to after this word
+        if (wordPosInText !== -1) {
+          charPos = wordPosInText + item.word.length;
+        } else {
+          charPos += item.word.length;
+        }
+        wordIdx++;
         
         // Determine diff styling
         let diffClass = '';
@@ -509,7 +514,8 @@ export default function EditableTextWithMitlesen({
       // Non-diff rendering: iterate through text preserving whitespace
       // Split text but keep whitespace as separate tokens
       const tokens = localText.split(/(\s+)/);
-      let wordIndex = 0;
+      let charPos = 0; // Track position in text
+      let wordIdx = 0; // Track word index for currentWordIndex comparison
       
       for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
@@ -519,15 +525,25 @@ export default function EditableTextWithMitlesen({
         
         if (isWhitespace) {
           elements.push(<span key={i}>{token}</span>);
+          charPos += token.length;
           continue;
         }
         
-        // Get timestamp for this word
-        const wordInfo = wordIndexToInfo.get(wordIndex);
-        const tsWord = wordInfo ? timestampTable.get(wordInfo.charPos) : null;
-        const isCurrent = showMitlesen && wordIndex === currentWordIndex && currentWordIndex >= 0;
+        // Find this word's actual position in localText
+        const wordPosInText = localText.indexOf(token, charPos);
+        
+        // Get timestamp using the actual character position
+        const tsWord = wordPosInText !== -1 ? timestampTable.get(wordPosInText) : null;
+        const isCurrent = showMitlesen && wordIdx === currentWordIndex && currentWordIndex >= 0;
         const isPast = showMitlesen && isAudioActive && tsWord && audioCurrentTime > tsWord.end;
-        wordIndex++;
+        
+        // Update charPos
+        if (wordPosInText !== -1) {
+          charPos = wordPosInText + token.length;
+        } else {
+          charPos += token.length;
+        }
+        wordIdx++;
         
         elements.push(
           <span

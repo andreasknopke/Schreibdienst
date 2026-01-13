@@ -344,7 +344,6 @@ async function doublePrecisionMerge(
   } catch (logError: any) {
     console.warn(`[Worker DoublePrecision] Failed to log double precision correction: ${logError.message}`);
   }
-  }
   
   // Use segments from the first transcription (or could interpolate)
   return { text: finalText, segments: result1.segments };

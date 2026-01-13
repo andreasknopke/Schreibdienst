@@ -52,6 +52,7 @@ interface EditableTextWithMitlesenProps {
 
 /**
  * Maps timestamps from original transcription to any text using word matching.
+ * Uses a more robust algorithm that continues even when words don't match.
  */
 function mapTimestampsToText(
   originalSegments: TranscriptSegment[],
@@ -64,7 +65,7 @@ function mapTimestampsToText(
       for (const word of segment.words) {
         if (word.start !== undefined && word.end !== undefined) {
           originalWords.push({
-            word: word.word.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, ''),
+            word: word.word.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '').trim(),
             start: word.start,
             end: word.end
           });
@@ -80,56 +81,103 @@ function mapTimestampsToText(
   const textWords = text.split(/\s+/).filter(w => w.length > 0);
   const result: TimestampedWord[] = [];
   
-  let origIdx = 0;
-  const audioDuration = originalWords.length > 0 
-    ? originalWords[originalWords.length - 1].end 
-    : 0;
+  const audioDuration = originalWords[originalWords.length - 1].end;
+  
+  // Build a map of original words for faster lookup
+  // Group words by their normalized form
+  const wordPositions: Map<string, number[]> = new Map();
+  for (let i = 0; i < originalWords.length; i++) {
+    const w = originalWords[i].word;
+    if (!wordPositions.has(w)) {
+      wordPositions.set(w, []);
+    }
+    wordPositions.get(w)!.push(i);
+  }
+  
+  let lastMatchedOrigIdx = -1;
   
   for (let i = 0; i < textWords.length; i++) {
     const word = textWords[i];
-    const wordNorm = word.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '');
+    const wordNorm = word.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '').trim();
     
-    // Look for matching word with lookahead
-    let foundMatch = false;
-    const maxLookahead = Math.min(8, originalWords.length - origIdx);
+    if (wordNorm.length === 0) continue;
     
-    for (let lookahead = 0; lookahead < maxLookahead; lookahead++) {
-      const checkIdx = origIdx + lookahead;
-      if (checkIdx < originalWords.length) {
-        const origWord = originalWords[checkIdx];
-        
-        if (origWord.word === wordNorm || 
-            origWord.word.includes(wordNorm) || 
-            wordNorm.includes(origWord.word) ||
-            (wordNorm.length > 3 && origWord.word.length > 3 && 
-             (origWord.word.startsWith(wordNorm.slice(0, 3)) || wordNorm.startsWith(origWord.word.slice(0, 3))))) {
-          result.push({
-            word: word,
-            start: origWord.start,
-            end: origWord.end,
-            isInterpolated: false
-          });
-          origIdx = checkIdx + 1;
-          foundMatch = true;
-          break;
+    // Try to find the word in original, preferring positions after lastMatchedOrigIdx
+    let bestMatchIdx = -1;
+    let bestMatchScore = -1;
+    
+    // Direct match lookup
+    const directMatches = wordPositions.get(wordNorm) || [];
+    for (const idx of directMatches) {
+      if (idx > lastMatchedOrigIdx) {
+        // Prefer matches that are close to where we expect the word to be
+        const expectedPos = lastMatchedOrigIdx + 1;
+        const distance = Math.abs(idx - expectedPos);
+        const score = 1000 - distance; // Higher score for closer matches
+        if (score > bestMatchScore) {
+          bestMatchScore = score;
+          bestMatchIdx = idx;
         }
       }
     }
     
-    if (!foundMatch) {
-      const prevEnd = result.length > 0 ? result[result.length - 1].end : 0;
-      const nextStart = origIdx < originalWords.length 
-        ? originalWords[origIdx].start 
-        : audioDuration;
+    // If no direct match, try fuzzy matching within a window
+    if (bestMatchIdx === -1) {
+      const searchStart = Math.max(0, lastMatchedOrigIdx + 1);
+      const searchEnd = Math.min(originalWords.length, searchStart + 20); // Look ahead up to 20 words
       
-      const wordDuration = Math.min(0.4, (nextStart - prevEnd) * 0.6);
+      for (let j = searchStart; j < searchEnd; j++) {
+        const origWord = originalWords[j].word;
+        
+        // Fuzzy matching
+        if (origWord.includes(wordNorm) || 
+            wordNorm.includes(origWord) ||
+            (wordNorm.length >= 4 && origWord.length >= 4 && 
+             (origWord.startsWith(wordNorm.slice(0, 4)) || wordNorm.startsWith(origWord.slice(0, 4))))) {
+          const distance = j - (lastMatchedOrigIdx + 1);
+          const score = 500 - distance;
+          if (score > bestMatchScore) {
+            bestMatchScore = score;
+            bestMatchIdx = j;
+          }
+        }
+      }
+    }
+    
+    if (bestMatchIdx !== -1) {
+      // Found a match
+      result.push({
+        word: word,
+        start: originalWords[bestMatchIdx].start,
+        end: originalWords[bestMatchIdx].end,
+        isInterpolated: false
+      });
+      lastMatchedOrigIdx = bestMatchIdx;
+    } else {
+      // No match - interpolate timestamp based on position
+      const progress = i / textWords.length;
+      const estimatedTime = progress * audioDuration;
+      
+      // Find the closest original word timestamp to this estimated time
+      let closestIdx = 0;
+      let closestDiff = Infinity;
+      for (let j = 0; j < originalWords.length; j++) {
+        const diff = Math.abs(originalWords[j].start - estimatedTime);
+        if (diff < closestDiff) {
+          closestDiff = diff;
+          closestIdx = j;
+        }
+      }
       
       result.push({
         word: word,
-        start: prevEnd,
-        end: prevEnd + wordDuration,
+        start: originalWords[closestIdx].start,
+        end: originalWords[closestIdx].end,
         isInterpolated: true
       });
+      
+      // Don't update lastMatchedOrigIdx for interpolated words
+      // This allows the algorithm to continue looking for matches
     }
   }
   
@@ -237,40 +285,50 @@ export default function EditableTextWithMitlesen({
   // Detect if audio is playing (time is changing)
   const prevTimeRef = useRef(audioCurrentTime);
   const [isAudioActive, setIsAudioActive] = useState(false);
+  const lastActiveTimeRef = useRef(0);
   
   useEffect(() => {
     // If time changed, audio is active
     if (Math.abs(audioCurrentTime - prevTimeRef.current) > 0.01) {
       setIsAudioActive(true);
+      lastActiveTimeRef.current = Date.now();
       prevTimeRef.current = audioCurrentTime;
     }
-    // Reset after 500ms of no change
+    // Reset after 1s of no change (longer timeout for better UX)
     const timer = setTimeout(() => {
-      if (Math.abs(audioCurrentTime - prevTimeRef.current) < 0.01) {
+      if (Date.now() - lastActiveTimeRef.current > 1000) {
         setIsAudioActive(false);
       }
-    }, 500);
+    }, 1000);
     return () => clearTimeout(timer);
   }, [audioCurrentTime]);
   
   // Find current word index based on audio time
+  // Always calculate, not just when playing (so clicking works too)
   const currentWordIndex = useMemo(() => {
-    if (!showMitlesen || !isAudioActive) return -1;
+    if (!showMitlesen) return -1;
+    if (timestampedWords.length === 0) return -1;
+    
+    // Find word that contains current time
     for (let i = 0; i < timestampedWords.length; i++) {
       const word = timestampedWords[i];
       if (audioCurrentTime >= word.start && audioCurrentTime < word.end) {
         return i;
       }
     }
-    for (let i = 0; i < timestampedWords.length; i++) {
-      if (timestampedWords[i].start > audioCurrentTime) {
-        return Math.max(0, i - 1);
+    
+    // Find closest word before current time
+    for (let i = timestampedWords.length - 1; i >= 0; i--) {
+      if (timestampedWords[i].start <= audioCurrentTime) {
+        return i;
       }
     }
-    return timestampedWords.length - 1;
-  }, [timestampedWords, audioCurrentTime, showMitlesen, isAudioActive]);
+    
+    // Default to first word if time is before all words
+    return 0;
+  }, [timestampedWords, audioCurrentTime, showMitlesen]);
   
-  // Auto-scroll to current word
+  // Auto-scroll to current word (only when playing)
   useEffect(() => {
     if (!showMitlesen || !isAudioActive || currentWordIndex < 0 || !containerRef.current) return;
     const currentEl = containerRef.current.querySelector('[data-current="true"]');
@@ -362,8 +420,9 @@ export default function EditableTextWithMitlesen({
         }
         
         const tsWord = wordIdx < timestampedWords.length ? timestampedWords[wordIdx] : null;
-        const isCurrent = showMitlesen && isAudioActive && wordIdx === currentWordIndex;
-        const isPast = showMitlesen && tsWord && audioCurrentTime > tsWord.end;
+        // Show current word highlight always when Mitlesen is on (not just when playing)
+        const isCurrent = showMitlesen && wordIdx === currentWordIndex && currentWordIndex >= 0;
+        const isPast = showMitlesen && isAudioActive && tsWord && audioCurrentTime > tsWord.end;
         wordIdx++;
         
         // Determine diff styling

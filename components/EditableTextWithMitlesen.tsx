@@ -370,13 +370,13 @@ export default function EditableTextWithMitlesen({
         let diffClass = '';
         const wordNorm = word.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '');
         
-        // Check if manually added (blue)
+        // Check if manually added (blue) - kräftigere Farben
         if (diffResult.manualAddedWords.has(wordNorm)) {
-          diffClass = 'bg-blue-100 dark:bg-blue-900/40 ';
+          diffClass = 'bg-blue-200 text-blue-900 dark:bg-blue-600 dark:text-white font-medium rounded px-0.5 ';
         } 
-        // Check if added by LLM (green)
+        // Check if added by LLM (green) - kräftigere Farben
         else if (part.added) {
-          diffClass = 'bg-green-100 dark:bg-green-900/40 ';
+          diffClass = 'bg-green-200 text-green-900 dark:bg-green-600 dark:text-white font-medium rounded px-0.5 ';
         }
         
         elements.push(
@@ -386,7 +386,7 @@ export default function EditableTextWithMitlesen({
             onClick={() => handleWordClick(tsWord ? { start: tsWord.start } : undefined)}
             className={`${diffClass}${
               isCurrent 
-                ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold rounded px-0.5 ' 
+                ? 'bg-yellow-300 dark:bg-yellow-500 text-black font-semibold rounded px-0.5 ' 
                 : isPast 
                   ? 'text-gray-400 dark:text-gray-500 ' 
                   : ''
@@ -414,10 +414,10 @@ export default function EditableTextWithMitlesen({
           )}
           {showDiff && (
             <span className="flex items-center gap-1">
-              <span className="inline-block w-2 h-2 bg-green-200 dark:bg-green-800 rounded"></span>
-              <span className="text-gray-500">KI hinzugefügt</span>
-              <span className="inline-block w-2 h-2 bg-blue-200 dark:bg-blue-800 rounded ml-2"></span>
-              <span className="text-gray-500">Manuell</span>
+              <span className="inline-block w-3 h-3 bg-green-500 dark:bg-green-600 rounded"></span>
+              <span className="text-gray-600 dark:text-gray-300">KI hinzugefügt</span>
+              <span className="inline-block w-3 h-3 bg-blue-500 dark:bg-blue-600 rounded ml-2"></span>
+              <span className="text-gray-600 dark:text-gray-300">Manuell</span>
             </span>
           )}
         </div>

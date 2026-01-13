@@ -25,14 +25,14 @@ interface CorrectionLogViewerProps {
 const correctionTypeLabels: Record<string, string> = {
   textFormatting: '📝 Text-Formatierung',
   llm: '🤖 KI-Korrektur',
-  doublePrecision: '🔍 Double Precision',
+  doublePrecision: '🔍 Double Precision Merge',
   manual: '✏️ Manuelle Korrektur'
 };
 
 const correctionTypeDescriptions: Record<string, string> = {
   textFormatting: 'Automatische Formatierung (Absätze, Wörterbuch, etc.)',
   llm: 'KI-gestützte Grammatik- und Rechtschreibkorrektur',
-  doublePrecision: 'Zusammenführung zweier Transkriptionen',
+  doublePrecision: 'Vergleich und Zusammenführung zweier Transkriptionen durch LLM',
   manual: 'Manuelle Korrektur durch Benutzer'
 };
 
@@ -164,37 +164,64 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
                   {/* Expanded Content */}
                   {expandedId === log.id && (
                     <div className="p-3 space-y-3">
-                      {/* Diff View */}
-                      <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3">
-                        <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
-                          Änderungen:
-                        </div>
-                        <DiffHighlight
-                          originalText={log.text_before}
-                          correctedText={log.text_after}
-                          showDiff={true}
-                        />
-                      </div>
+                      {/* Special rendering for Double Precision logs */}
+                      {log.correction_type === 'doublePrecision' && log.text_before.startsWith('[DOUBLE PRECISION') ? (
+                        <>
+                          {/* Double Precision Details - parsed from text_before */}
+                          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                            <div className="text-xs font-medium text-blue-700 dark:text-blue-300 mb-2">
+                              🔍 Double Precision Analyse:
+                            </div>
+                            <pre className="text-xs whitespace-pre-wrap text-blue-800 dark:text-blue-200 max-h-64 overflow-y-auto">
+                              {log.text_before}
+                            </pre>
+                          </div>
 
-                      {/* Original Text */}
-                      <div>
-                        <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                          Text vorher:
-                        </div>
-                        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2 text-sm font-mono max-h-32 overflow-y-auto">
-                          {log.text_before || '(leer)'}
-                        </div>
-                      </div>
+                          {/* Final merged text */}
+                          <div>
+                            <div className="text-xs font-medium text-green-700 dark:text-green-300 mb-1">
+                              ✓ Finaler Text nach LLM-Auflösung:
+                            </div>
+                            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded p-2 text-sm max-h-48 overflow-y-auto">
+                              {log.text_after || '(leer)'}
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {/* Diff View - for non-DP logs */}
+                          <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3">
+                            <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                              Änderungen:
+                            </div>
+                            <DiffHighlight
+                              originalText={log.text_before}
+                              correctedText={log.text_after}
+                              showDiff={true}
+                            />
+                          </div>
 
-                      {/* Corrected Text */}
-                      <div>
-                        <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                          Text nachher:
-                        </div>
-                        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2 text-sm font-mono max-h-32 overflow-y-auto">
-                          {log.text_after || '(leer)'}
-                        </div>
-                      </div>
+                          {/* Original Text */}
+                          <div>
+                            <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                              Text vorher:
+                            </div>
+                            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2 text-sm font-mono max-h-32 overflow-y-auto">
+                              {log.text_before || '(leer)'}
+                            </div>
+                          </div>
+
+                          {/* Corrected Text */}
+                          <div>
+                            <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                              Text nachher:
+                            </div>
+                            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-2 text-sm font-mono max-h-32 overflow-y-auto">
+                              {log.text_after || '(leer)'}
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>

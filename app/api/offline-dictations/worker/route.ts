@@ -220,16 +220,38 @@ async function doublePrecisionMerge(
   
   const merged = mergeTranscriptionsWithMarkers(result1, result2);
   
+  // Always log Double Precision step, even when no differences found
+  const runtimeConfig = await getRuntimeConfigWithRequest(request);
+  const llmProvider = runtimeConfig.llmProvider;
+  
   if (!merged.hasDifferences) {
     console.log('[Worker DoublePrecision] No differences found, using first transcription');
+    
+    // Log that Double Precision was performed, but no differences were found
+    try {
+      const dpLogText = `[DOUBLE PRECISION - KEINE UNTERSCHIEDE]\n\n` +
+        `Transkription A (${result1.provider}):\n${result1.text}\n\n` +
+        `Transkription B (${result2.provider}):\n${result2.text}\n\n` +
+        `Ergebnis: Beide Transkriptionen sind identisch.`;
+      
+      await logDoublePrecisionCorrectionWithRequest(
+        request,
+        dictationId,
+        dpLogText,
+        result1.text,
+        'keine Unterschiede',
+        'double-precision',
+        0 // No changes = 0%
+      );
+      console.log(`[Worker DoublePrecision] ✓ No differences log recorded`);
+    } catch (logError: any) {
+      console.warn(`[Worker DoublePrecision] Failed to log no-differences: ${logError.message}`);
+    }
+    
     return { text: result1.text, segments: result1.segments };
   }
   
   console.log('[Worker DoublePrecision] Differences found, sending to LLM for resolution');
-  
-  // Get LLM config
-  const runtimeConfig = await getRuntimeConfigWithRequest(request);
-  const llmProvider = runtimeConfig.llmProvider;
   
   const mergePrompt = createMergePrompt(merged);
   
@@ -299,23 +321,29 @@ async function doublePrecisionMerge(
   
   console.log(`[Worker DoublePrecision] ✓ Merged text length: ${finalText.length} chars`);
   
-  // Log double precision correction
-  if (finalText !== result1.text) {
-    try {
-      const dpChangeScore = calculateChangeScore(result1.text, finalText);
-      await logDoublePrecisionCorrectionWithRequest(
-        request,
-        dictationId,
-        result1.text,
-        finalText,
-        modelName,
-        modelProvider,
-        dpChangeScore
-      );
-      console.log(`[Worker DoublePrecision] ✓ Double precision correction logged (model: ${modelProvider}/${modelName}, score: ${dpChangeScore}%)`);
-    } catch (logError: any) {
-      console.warn(`[Worker DoublePrecision] Failed to log double precision correction: ${logError.message}`);
-    }
+  // Log double precision correction with detailed diff information
+  try {
+    const dpChangeScore = calculateChangeScore(result1.text, finalText);
+    
+    // Create detailed log showing both versions and the marked differences
+    const dpLogText = `[DOUBLE PRECISION - UNTERSCHIEDE GEFUNDEN]\n\n` +
+      `Transkription A (${merged.provider1}):\n${merged.text1}\n\n` +
+      `Transkription B (${merged.provider2}):\n${merged.text2}\n\n` +
+      `Markierte Unterschiede:\n${merged.mergedTextWithMarkers}`;
+    
+    await logDoublePrecisionCorrectionWithRequest(
+      request,
+      dictationId,
+      dpLogText,
+      finalText,
+      modelName,
+      modelProvider,
+      dpChangeScore
+    );
+    console.log(`[Worker DoublePrecision] ✓ Double precision correction logged (model: ${modelProvider}/${modelName}, score: ${dpChangeScore}%)`);
+  } catch (logError: any) {
+    console.warn(`[Worker DoublePrecision] Failed to log double precision correction: ${logError.message}`);
+  }
   }
   
   // Use segments from the first transcription (or could interpolate)
@@ -1060,7 +1088,7 @@ KRITISCH - AUSGABEFORMAT:
       ]);
     }
   } else {
-    // OpenAI: Process all at once
+    // OpenAI or Mistral: Process all at once
     result = await callLLM(llmConfig, [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: `<<<DIKTAT_START>>>${text}<<<DIKTAT_ENDE>>>` }
@@ -1086,6 +1114,15 @@ async function getLLMConfig(request: NextRequest) {
       baseUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
       apiKey: 'lm-studio',
       model: process.env.LLM_STUDIO_MODEL || 'local-model'
+    };
+  }
+  
+  if (provider === 'mistral') {
+    return {
+      provider: 'mistral' as const,
+      baseUrl: 'https://api.mistral.ai',
+      apiKey: process.env.MISTRAL_API_KEY || '',
+      model: runtimeConfig.mistralModel || process.env.MISTRAL_MODEL || 'mistral-large-latest'
     };
   }
   
@@ -1202,7 +1239,9 @@ async function callLLM(
   options: { jsonMode?: boolean } = {}
 ): Promise<string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (config.provider === 'openai') {
+  
+  // Set authorization header based on provider
+  if (config.provider === 'openai' || config.provider === 'mistral') {
     headers['Authorization'] = `Bearer ${config.apiKey}`;
   }
   
@@ -1223,7 +1262,11 @@ async function callLLM(
     body: JSON.stringify(body),
   });
   
-  if (!res.ok) throw new Error(`LLM API error (${res.status})`);
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[Worker] LLM API error (${res.status}): ${errorText.substring(0, 200)}`);
+    throw new Error(`LLM API error (${res.status}): ${errorText.substring(0, 100)}`);
+  }
   const data = await res.json();
   return data.choices?.[0]?.message?.content?.trim() || '';
 }

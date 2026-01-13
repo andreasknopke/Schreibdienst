@@ -437,125 +437,78 @@ export default function EditableTextWithMitlesen({
     return { wordsWithDiffStatus, manualAddedWords };
   }, [originalText, localText, savedText]);
 
+  // Build a map of diff status for each word based on normalized form
+  // This helps us get diff styling even when using timestampTable
+  const wordDiffStatusMap = useMemo(() => {
+    const map = new Map<string, { isAdded: boolean; isManual: boolean }>();
+    for (const item of diffResult.wordsWithDiffStatus) {
+      if (!item.isWhitespace) {
+        const norm = normalizeWord(item.word);
+        // Store the status - if multiple words with same norm, we'll use first status
+        if (!map.has(norm)) {
+          map.set(norm, { isAdded: item.isAdded, isManual: item.isManual });
+        }
+      }
+    }
+    return map;
+  }, [diffResult.wordsWithDiffStatus]);
+
   // Render content with Mitlesen and optional Diff highlighting
-  // This approach tracks character position to find timestamps
+  // Uses timestampedWords for consistent word iteration
   const renderContent = () => {
     const elements: React.ReactNode[] = [];
     
-    // If we have diff info, use it; otherwise just iterate through words
-    if (showDiff) {
-      // Use diff-based rendering with character position tracking
-      let charPos = 0; // Track position in localText
-      let wordIdx = 0; // Track which word we're on for currentWordIndex comparison
+    // Parse text to get words and whitespace
+    const tokens = localText.split(/(\s+)/);
+    let wordIdx = 0;
+    
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (token.length === 0) continue;
       
-      for (let i = 0; i < diffResult.wordsWithDiffStatus.length; i++) {
-        const item = diffResult.wordsWithDiffStatus[i];
-        
-        // Whitespace - render as-is and advance charPos
-        if (item.isWhitespace) {
-          elements.push(<span key={i}>{item.word}</span>);
-          charPos += item.word.length;
-          continue;
-        }
-        
-        // Find this word's actual position in localText
-        // Search from current charPos to handle duplicates correctly
-        const wordPosInText = localText.indexOf(item.word, charPos);
-        
-        // Get timestamp using the actual character position
-        const tsWord = wordPosInText !== -1 ? timestampTable.get(wordPosInText) : null;
-        
-        // Check if this is the current word being played
-        const isCurrent = showMitlesen && wordIdx === currentWordIndex && currentWordIndex >= 0;
-        const isPast = showMitlesen && isAudioActive && tsWord && audioCurrentTime > tsWord.end;
-        
-        // Update charPos to after this word
-        if (wordPosInText !== -1) {
-          charPos = wordPosInText + item.word.length;
-        } else {
-          charPos += item.word.length;
-        }
-        wordIdx++;
-        
-        // Determine diff styling
-        let diffClass = '';
-        if (item.isManual) {
+      const isWhitespace = token.trim().length === 0;
+      
+      if (isWhitespace) {
+        elements.push(<span key={i}>{token}</span>);
+        continue;
+      }
+      
+      // Get timestamp for this word
+      const tsWord = wordIdx < timestampedWords.length ? timestampedWords[wordIdx] : null;
+      const isCurrent = showMitlesen && wordIdx === currentWordIndex && currentWordIndex >= 0;
+      const isPast = showMitlesen && isAudioActive && tsWord && audioCurrentTime > tsWord.end;
+      
+      // Get diff status for styling (only if showDiff is on)
+      let diffClass = '';
+      if (showDiff) {
+        const norm = normalizeWord(token);
+        const diffStatus = wordDiffStatusMap.get(norm);
+        if (diffStatus?.isManual) {
           diffClass = 'bg-blue-200 text-blue-900 dark:bg-blue-600 dark:text-white font-medium rounded px-0.5 ';
-        } else if (item.isAdded) {
+        } else if (diffStatus?.isAdded) {
           diffClass = 'bg-green-200 text-green-900 dark:bg-green-600 dark:text-white font-medium rounded px-0.5 ';
         }
-        
-        elements.push(
-          <span
-            key={i}
-            data-current={isCurrent}
-            onClick={() => handleWordClick(tsWord ? { start: tsWord.start } : undefined)}
-            className={`${diffClass}${
-              isCurrent 
-                ? 'bg-yellow-300 dark:bg-yellow-500 text-black font-semibold rounded px-0.5 ' 
-                : isPast 
-                  ? 'text-gray-400 dark:text-gray-500 ' 
-                  : ''
-            }${tsWord?.isInterpolated ? 'italic ' : ''}cursor-pointer transition-colors duration-100`}
-            title={tsWord ? `${tsWord.start.toFixed(1)}s${tsWord.isInterpolated ? ' (geschätzt)' : ''}` : undefined}
-          >
-            {item.word}
-          </span>
-        );
       }
-    } else {
-      // Non-diff rendering: iterate through text preserving whitespace
-      // Split text but keep whitespace as separate tokens
-      const tokens = localText.split(/(\s+)/);
-      let charPos = 0; // Track position in text
-      let wordIdx = 0; // Track word index for currentWordIndex comparison
       
-      for (let i = 0; i < tokens.length; i++) {
-        const token = tokens[i];
-        if (token.length === 0) continue;
-        
-        const isWhitespace = token.trim().length === 0;
-        
-        if (isWhitespace) {
-          elements.push(<span key={i}>{token}</span>);
-          charPos += token.length;
-          continue;
-        }
-        
-        // Find this word's actual position in localText
-        const wordPosInText = localText.indexOf(token, charPos);
-        
-        // Get timestamp using the actual character position
-        const tsWord = wordPosInText !== -1 ? timestampTable.get(wordPosInText) : null;
-        const isCurrent = showMitlesen && wordIdx === currentWordIndex && currentWordIndex >= 0;
-        const isPast = showMitlesen && isAudioActive && tsWord && audioCurrentTime > tsWord.end;
-        
-        // Update charPos
-        if (wordPosInText !== -1) {
-          charPos = wordPosInText + token.length;
-        } else {
-          charPos += token.length;
-        }
-        wordIdx++;
-        
-        elements.push(
-          <span
-            key={i}
-            data-current={isCurrent}
-            onClick={() => handleWordClick(tsWord ? { start: tsWord.start } : undefined)}
-            className={`${
-              isCurrent 
-                ? 'bg-yellow-300 dark:bg-yellow-500 text-black font-semibold rounded px-0.5 ' 
-                : isPast 
-                  ? 'text-gray-400 dark:text-gray-500 ' 
-                  : ''
-            }${tsWord?.isInterpolated ? 'italic ' : ''}cursor-pointer transition-colors duration-100`}
-            title={tsWord ? `${tsWord.start.toFixed(1)}s${tsWord.isInterpolated ? ' (geschätzt)' : ''}` : undefined}
-          >
-            {token}
-          </span>
-        );
-      }
+      wordIdx++;
+      
+      elements.push(
+        <span
+          key={i}
+          data-current={isCurrent}
+          onClick={() => handleWordClick(tsWord ? { start: tsWord.start } : undefined)}
+          className={`${diffClass}${
+            isCurrent 
+              ? 'bg-yellow-300 dark:bg-yellow-500 text-black font-semibold rounded px-0.5 ' 
+              : isPast 
+                ? 'text-gray-400 dark:text-gray-500 ' 
+                : ''
+          }${tsWord?.isInterpolated ? 'italic ' : ''}cursor-pointer transition-colors duration-100`}
+          title={tsWord ? `${tsWord.start.toFixed(1)}s${tsWord.isInterpolated ? ' (geschätzt)' : ''}` : undefined}
+        >
+          {token}
+        </span>
+      );
     }
     
     return elements;

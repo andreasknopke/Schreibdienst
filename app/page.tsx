@@ -10,6 +10,7 @@ import { applyFormattingControlWords, preprocessTranscription } from '@/lib/text
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
+import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 
 // Identifier für PowerShell Clipboard-Listener (RadCentre Integration)
 const CLIPBOARD_IDENTIFIER = '##RAD##';
@@ -117,6 +118,11 @@ export default function HomePage() {
 
   // Custom Actions Manager
   const [showCustomActionsManager, setShowCustomActionsManager] = useState(false);
+
+  // SpeaKING Import State
+  const [speakingMetadata, setSpeakingMetadata] = useState<SpeaKINGMetadata | null>(null);
+  const [speakingWavFile, setSpeakingWavFile] = useState<File | null>(null);
+  const [showSpeakingImport, setShowSpeakingImport] = useState(false);
 
   // Template-Modus: Textbaustein mit diktierten Änderungen kombinieren
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -1037,6 +1043,160 @@ export default function HomePage() {
     }
   }
 
+  // SpeaKING XML-Datei verarbeiten
+  async function handleSpeakingXml(file: File) {
+    try {
+      const xmlContent = await readFileAsText(file);
+      const metadata = parseSpeaKINGXml(xmlContent);
+      if (metadata) {
+        setSpeakingMetadata(metadata);
+        setShowSpeakingImport(true);
+        console.log('[SpeaKING] XML geladen:', metadata);
+      } else {
+        setError('Konnte SpeaKING XML nicht parsen');
+      }
+    } catch (err: any) {
+      setError('Fehler beim Lesen der XML-Datei: ' + err.message);
+    }
+  }
+
+  // SpeaKING WAV-Datei mit Metadaten transkribieren
+  async function handleSpeakingImport() {
+    if (!speakingWavFile) {
+      setError('Bitte wählen Sie eine WAV-Datei aus');
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setShowSpeakingImport(false);
+
+    try {
+      // Transkribieren (die WAV wird serverseitig normalisiert)
+      const text = await transcribeChunk(speakingWavFile, false);
+      
+      // Formatierung anwenden
+      let formattedText = applyFormattingControlWords(text);
+      
+      // Wenn Metadaten vorhanden, Header mit Patientendaten erstellen
+      if (speakingMetadata) {
+        const headerLines: string[] = [];
+        if (speakingMetadata.patientName) {
+          headerLines.push(`Patient: ${speakingMetadata.patientName}`);
+        }
+        if (speakingMetadata.patientId) {
+          headerLines.push(`ID: ${speakingMetadata.patientId}`);
+        }
+        if (speakingMetadata.docType) {
+          headerLines.push(`Dokumenttyp: ${speakingMetadata.docType}`);
+        }
+        if (speakingMetadata.creator) {
+          headerLines.push(`Diktiert von: ${speakingMetadata.creator}`);
+        }
+        if (speakingMetadata.creationTime) {
+          const date = new Date(speakingMetadata.creationTime);
+          headerLines.push(`Datum: ${date.toLocaleDateString('de-DE')} ${date.toLocaleTimeString('de-DE')}`);
+        }
+        
+        if (headerLines.length > 0) {
+          formattedText = headerLines.join('\n') + '\n\n---\n\n' + formattedText;
+        }
+      }
+      
+      setTranscript(formattedText);
+      
+      // Speichere Text VOR der Korrektur
+      if (formattedText) {
+        setPreCorrectionState({
+          methodik: '',
+          befund: '',
+          beurteilung: '',
+          transcript: formattedText
+        });
+      }
+      
+      // Auto-Korrektur wenn aktiviert
+      if (formattedText && autoCorrect) {
+        setCorrecting(true);
+        try {
+          const res = await fetchWithDbToken('/api/correct', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: formattedText, username }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.correctedText) {
+              setTranscript(data.correctedText);
+              setChangeScore(data.changeScore ?? null);
+              setCanRevert(true);
+            }
+          }
+        } finally {
+          setCorrecting(false);
+        }
+      } else if (formattedText && !autoCorrect) {
+        setPendingCorrection(true);
+      }
+      
+      // Aufräumen
+      setSpeakingMetadata(null);
+      setSpeakingWavFile(null);
+      
+    } catch (err: any) {
+      setError('SpeaKING Import fehlgeschlagen: ' + err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Datei-Handler der XML und WAV unterscheidet
+  async function handleFileSelect(files: FileList | null) {
+    if (!files || files.length === 0) return;
+
+    const fileArray = Array.from(files);
+    const xmlFile = fileArray.find(f => f.name.endsWith('.xml'));
+    const wavFile = fileArray.find(f => f.name.endsWith('.wav'));
+    const otherAudio = fileArray.find(f => 
+      f.type.startsWith('audio/') && !f.name.endsWith('.wav')
+    );
+
+    // Fall 1: XML + WAV zusammen ausgewählt
+    if (xmlFile && wavFile) {
+      await handleSpeakingXml(xmlFile);
+      setSpeakingWavFile(wavFile);
+      return;
+    }
+
+    // Fall 2: Nur XML - zeige Import-Dialog
+    if (xmlFile) {
+      await handleSpeakingXml(xmlFile);
+      return;
+    }
+
+    // Fall 3: Nur WAV - könnte SpeaKING sein
+    if (wavFile) {
+      // Wenn bereits Metadaten vorhanden, als SpeaKING verarbeiten
+      if (speakingMetadata) {
+        setSpeakingWavFile(wavFile);
+        await handleSpeakingImport();
+      } else {
+        // Direkter Import als normale Audio-Datei
+        await handleFile(wavFile);
+      }
+      return;
+    }
+
+    // Fall 4: Andere Audio-Datei
+    if (otherAudio) {
+      await handleFile(otherAudio);
+      return;
+    }
+
+    // Fall 5: Erste Datei als Fallback
+    await handleFile(files[0]);
+  }
+
   async function handleFormat() {
     setBusy(true);
     setError(null);
@@ -1268,11 +1428,131 @@ export default function HomePage() {
   );
 
   const DateiUpload = (
-    <div className="py-2">
-      <input className="input text-sm" type="file" accept="audio/*" onChange={(e) => {
-        const f = e.target.files?.[0];
-        if (f) handleFile(f);
-      }} />
+    <div className="py-2 space-y-3">
+      {/* Standard Audio-Import */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          Audio-Datei importieren
+        </label>
+        <input 
+          className="input text-sm" 
+          type="file" 
+          accept="audio/*,.xml" 
+          multiple
+          onChange={(e) => handleFileSelect(e.target.files)} 
+        />
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          Unterstützt: MP3, WAV, WebM, M4A, OGG • SpeaKING: XML + WAV zusammen auswählen
+        </p>
+      </div>
+
+      {/* SpeaKING Import Dialog */}
+      {showSpeakingImport && speakingMetadata && (
+        <div className="border border-blue-200 dark:border-blue-800 rounded-lg p-4 bg-blue-50 dark:bg-blue-900/30">
+          <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-2 flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" x2="12" y1="19" y2="22"/>
+            </svg>
+            SpeaKING Diktat erkannt
+          </h4>
+          
+          {/* Metadaten anzeigen */}
+          <div className="grid grid-cols-2 gap-2 text-sm mb-3">
+            {speakingMetadata.patientName && (
+              <div>
+                <span className="text-gray-500 dark:text-gray-400">Patient:</span>{' '}
+                <span className="font-medium">{speakingMetadata.patientName}</span>
+              </div>
+            )}
+            {speakingMetadata.patientId && (
+              <div>
+                <span className="text-gray-500 dark:text-gray-400">ID:</span>{' '}
+                <span className="font-medium">{speakingMetadata.patientId}</span>
+              </div>
+            )}
+            {speakingMetadata.docType && (
+              <div>
+                <span className="text-gray-500 dark:text-gray-400">Dokumenttyp:</span>{' '}
+                <span className="font-medium">{speakingMetadata.docType}</span>
+              </div>
+            )}
+            {speakingMetadata.creator && (
+              <div>
+                <span className="text-gray-500 dark:text-gray-400">Diktiert von:</span>{' '}
+                <span className="font-medium">{speakingMetadata.creator}</span>
+              </div>
+            )}
+            {speakingMetadata.creationTime && (
+              <div>
+                <span className="text-gray-500 dark:text-gray-400">Datum:</span>{' '}
+                <span className="font-medium">
+                  {new Date(speakingMetadata.creationTime).toLocaleDateString('de-DE')}
+                </span>
+              </div>
+            )}
+            {speakingMetadata.organisation && (
+              <div>
+                <span className="text-gray-500 dark:text-gray-400">Abteilung:</span>{' '}
+                <span className="font-medium">{speakingMetadata.organisation}</span>
+              </div>
+            )}
+          </div>
+
+          {/* WAV-Datei Status */}
+          {speakingWavFile ? (
+            <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-300 mb-3">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <polyline points="22 4 12 14.01 9 11.01"/>
+              </svg>
+              WAV-Datei: {speakingWavFile.name}
+            </div>
+          ) : (
+            <div className="mb-3">
+              <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
+                WAV-Datei auswählen:
+              </label>
+              <input 
+                className="input text-sm" 
+                type="file" 
+                accept=".wav"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) setSpeakingWavFile(f);
+                }} 
+              />
+              {speakingMetadata.audioFilename && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Erwartet: {speakingMetadata.audioFilename}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Aktionsbuttons */}
+          <div className="flex gap-2">
+            <button
+              className="btn btn-primary text-sm"
+              onClick={handleSpeakingImport}
+              disabled={!speakingWavFile || busy}
+            >
+              {busy ? <Spinner size={16} /> : 'Transkribieren'}
+            </button>
+            <button
+              className="btn btn-secondary text-sm"
+              onClick={() => {
+                setShowSpeakingImport(false);
+                setSpeakingMetadata(null);
+                setSpeakingWavFile(null);
+              }}
+            >
+              Abbrechen
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 

@@ -1,6 +1,72 @@
 "use client";
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
 import { diffWordsWithSpace } from 'diff';
+
+// Helper to save and restore cursor position in contentEditable
+function saveCursorPosition(el: HTMLElement): { start: number; end: number } | null {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+  
+  const range = selection.getRangeAt(0);
+  const preCaretRange = range.cloneRange();
+  preCaretRange.selectNodeContents(el);
+  preCaretRange.setEnd(range.startContainer, range.startOffset);
+  const start = preCaretRange.toString().length;
+  
+  preCaretRange.setEnd(range.endContainer, range.endOffset);
+  const end = preCaretRange.toString().length;
+  
+  return { start, end };
+}
+
+function restoreCursorPosition(el: HTMLElement, pos: { start: number; end: number }): void {
+  const selection = window.getSelection();
+  if (!selection) return;
+  
+  const range = document.createRange();
+  let currentOffset = 0;
+  let startNode: Node | null = null;
+  let startOffset = 0;
+  let endNode: Node | null = null;
+  let endOffset = 0;
+  
+  function traverse(node: Node): boolean {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent || '';
+      const nodeEnd = currentOffset + text.length;
+      
+      if (!startNode && pos.start >= currentOffset && pos.start <= nodeEnd) {
+        startNode = node;
+        startOffset = pos.start - currentOffset;
+      }
+      if (!endNode && pos.end >= currentOffset && pos.end <= nodeEnd) {
+        endNode = node;
+        endOffset = pos.end - currentOffset;
+        return true; // Found both, stop
+      }
+      
+      currentOffset = nodeEnd;
+    } else {
+      for (const child of Array.from(node.childNodes)) {
+        if (traverse(child)) return true;
+      }
+    }
+    return false;
+  }
+  
+  traverse(el);
+  
+  if (startNode && endNode) {
+    try {
+      range.setStart(startNode, startOffset);
+      range.setEnd(endNode, endOffset);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch (e) {
+      // Ignore cursor restoration errors
+    }
+  }
+}
 
 // Word with timestamp for highlighting
 interface TimestampedWord {
@@ -303,11 +369,22 @@ export default function EditableTextWithMitlesen({
   const containerRef = useRef<HTMLDivElement>(null);
   const editableRef = useRef<HTMLDivElement>(null);
   const [localText, setLocalText] = useState(text);
+  const cursorPosRef = useRef<{ start: number; end: number } | null>(null);
+  const isEditingRef = useRef(false);
   
-  // Sync with prop changes
+  // Sync with prop changes (only when not actively editing)
   useEffect(() => {
-    setLocalText(text);
+    if (!isEditingRef.current) {
+      setLocalText(text);
+    }
   }, [text]);
+  
+  // Restore cursor position after render
+  useLayoutEffect(() => {
+    if (cursorPosRef.current && editableRef.current && isEditingRef.current) {
+      restoreCursorPosition(editableRef.current, cursorPosRef.current);
+    }
+  });
   
   // Build STABLE timestamp table based on the saved/initial text (not localText)
   // This ensures timestamps don't jump around during manual editing
@@ -465,9 +542,19 @@ export default function EditableTextWithMitlesen({
   
   // Handle text input
   const handleInput = useCallback((e: React.FormEvent<HTMLDivElement>) => {
-    const newText = e.currentTarget.innerText || '';
+    const target = e.currentTarget;
+    // Save cursor position before React re-renders
+    cursorPosRef.current = saveCursorPosition(target);
+    isEditingRef.current = true;
+    
+    const newText = target.innerText || '';
     setLocalText(newText);
     onChange(newText);
+    
+    // Reset editing flag after a short delay
+    setTimeout(() => {
+      isEditingRef.current = false;
+    }, 100);
   }, [onChange]);
   
   // Click on word to seek audio
@@ -485,6 +572,7 @@ export default function EditableTextWithMitlesen({
   }, [timestampedWords]);
   
   // Compute diff changes using the diff library
+  // Now tracking by character position to avoid marking all identical words
   const diffResult = useMemo(() => {
     // Diff zwischen Original (vor KI) und aktuellem Text
     const llmDiff = diffWordsWithSpace(originalText || '', localText || '');
@@ -492,17 +580,34 @@ export default function EditableTextWithMitlesen({
     // Diff zwischen gespeichertem Text und aktuellem Text (manuelle Änderungen)
     const manualDiff = savedText ? diffWordsWithSpace(savedText, localText || '') : [];
     
-    // Sammle manuell hinzugefügte Wörter
-    const manualAddedWords = new Set<string>();
+    // Track manual changes by CHARACTER POSITION in localText
+    const manualAddedPositions = new Set<number>();
+    let localCharPos = 0;
+    let savedCharPos = 0;
+    
     for (const part of manualDiff) {
-      if (part.added && part.value) {
-        const words = part.value.split(/\s+/).filter(w => w.trim());
-        words.forEach(w => manualAddedWords.add(w.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '')));
+      if (part.removed) {
+        // Skip removed characters from saved text position
+        savedCharPos += part.value?.length || 0;
+        continue;
       }
+      
+      const text = part.value || '';
+      if (part.added) {
+        // Mark these character positions as manually added
+        for (let i = 0; i < text.length; i++) {
+          if (text[i].trim()) { // Only mark non-whitespace
+            manualAddedPositions.add(localCharPos + i);
+          }
+        }
+      }
+      localCharPos += text.length;
     }
     
-    // Baue eine Liste von Wörtern mit ihrem Diff-Status
-    const wordsWithDiffStatus: { word: string; isAdded: boolean; isManual: boolean; isWhitespace: boolean }[] = [];
+    // Build list of words with their diff status and character positions
+    const wordsWithDiffStatus: { word: string; isAdded: boolean; isManual: boolean; isWhitespace: boolean; charPos: number }[] = [];
+    let currentCharPos = 0;
+    
     for (const part of llmDiff) {
       if (part.removed) continue;
       
@@ -511,31 +616,37 @@ export default function EditableTextWithMitlesen({
         if (token.length === 0) continue;
         
         const isWhitespace = token.trim().length === 0;
-        const wordNorm = token.toLowerCase().replace(/[.,!?;:"""„''()\[\]]/g, '');
+        
+        // Check if any character in this word was manually added
+        let isManual = false;
+        for (let i = 0; i < token.length && !isManual; i++) {
+          if (manualAddedPositions.has(currentCharPos + i)) {
+            isManual = true;
+          }
+        }
         
         wordsWithDiffStatus.push({
           word: token,
           isAdded: !isWhitespace && part.added === true,
-          isManual: !isWhitespace && manualAddedWords.has(wordNorm),
-          isWhitespace
+          isManual: !isWhitespace && isManual,
+          isWhitespace,
+          charPos: currentCharPos
         });
+        
+        currentCharPos += token.length;
       }
     }
     
-    return { wordsWithDiffStatus, manualAddedWords };
+    return { wordsWithDiffStatus, manualAddedPositions };
   }, [originalText, localText, savedText]);
 
-  // Build a map of diff status for each word based on normalized form
-  // This helps us get diff styling even when using timestampTable
+  // Build a map of diff status for each word based on character position
+  // This ensures only the specific word instance is marked, not all identical words
   const wordDiffStatusMap = useMemo(() => {
-    const map = new Map<string, { isAdded: boolean; isManual: boolean }>();
+    const map = new Map<number, { isAdded: boolean; isManual: boolean }>();
     for (const item of diffResult.wordsWithDiffStatus) {
       if (!item.isWhitespace) {
-        const norm = normalizeWord(item.word);
-        // Store the status - if multiple words with same norm, we'll use first status
-        if (!map.has(norm)) {
-          map.set(norm, { isAdded: item.isAdded, isManual: item.isManual });
-        }
+        map.set(item.charPos, { isAdded: item.isAdded, isManual: item.isManual });
       }
     }
     return map;
@@ -546,15 +657,18 @@ export default function EditableTextWithMitlesen({
   const renderContent = () => {
     const elements: React.ReactNode[] = [];
     
-    // Parse text to get words and whitespace
+    // Parse text to get words and whitespace with character positions
     const tokens = localText.split(/(\s+)/);
     let wordIdx = 0;
+    let charPos = 0;
     
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i];
       if (token.length === 0) continue;
       
       const isWhitespace = token.trim().length === 0;
+      const tokenCharPos = charPos;
+      charPos += token.length;
       
       if (isWhitespace) {
         elements.push(<span key={i}>{token}</span>);
@@ -566,11 +680,10 @@ export default function EditableTextWithMitlesen({
       const isCurrent = showMitlesen && wordIdx === currentWordIndex && currentWordIndex >= 0;
       const isPast = showMitlesen && isAudioActive && tsWord && audioCurrentTime > tsWord.end;
       
-      // Get diff status for styling (only if showDiff is on)
+      // Get diff status for styling (only if showDiff is on) - now by character position
       let diffClass = '';
       if (showDiff) {
-        const norm = normalizeWord(token);
-        const diffStatus = wordDiffStatusMap.get(norm);
+        const diffStatus = wordDiffStatusMap.get(tokenCharPos);
         if (diffStatus?.isManual) {
           diffClass = 'bg-blue-200 text-blue-900 dark:bg-blue-600 dark:text-white font-medium rounded px-0.5 ';
         } else if (diffStatus?.isAdded) {

@@ -1639,9 +1639,28 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   {selectedDictation.status === 'error' && (
                     <button
                       className="btn btn-sm btn-outline flex-1"
-                      onClick={() => handleRetry(selectedDictation.id)}
+                      onClick={async () => {
+                        try {
+                          const res = await fetchWithDbToken(`/api/offline-dictations?id=${selectedDictation.id}&audio=true`);
+                          if (!res.ok) {
+                            alert('Audio nicht verfügbar');
+                            return;
+                          }
+                          const blob = await res.blob();
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = `dictation_${selectedDictation.id}_${selectedDictation.order_number}.wav`;
+                          document.body.appendChild(a);
+                          a.click();
+                          document.body.removeChild(a);
+                          URL.revokeObjectURL(url);
+                        } catch (err) {
+                          alert('Fehler beim Herunterladen');
+                        }
+                      }}
                     >
-                      🔄 Erneut versuchen
+                      ⬇️ Audio herunterladen
                     </button>
                   )}
                   

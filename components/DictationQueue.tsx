@@ -1641,7 +1641,8 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                       className="btn btn-sm btn-outline flex-1"
                       onClick={async () => {
                         try {
-                          const res = await fetchWithDbToken(`/api/offline-dictations?id=${selectedDictation.id}&audio=true`);
+                          // Download with extract=true to get raw payload without WAV headers
+                          const res = await fetchWithDbToken(`/api/offline-dictations?id=${selectedDictation.id}&audio=true&extract=true`);
                           if (!res.ok) {
                             alert('Audio nicht verfügbar');
                             return;
@@ -1650,7 +1651,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                           const url = URL.createObjectURL(blob);
                           const a = document.createElement('a');
                           a.href = url;
-                          a.download = `dictation_${selectedDictation.id}_${selectedDictation.order_number}.wav`;
+                          a.download = `dictation_${selectedDictation.id}_${selectedDictation.order_number}_payload.bin`;
                           document.body.appendChild(a);
                           a.click();
                           document.body.removeChild(a);
@@ -1660,7 +1661,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                         }
                       }}
                     >
-                      ⬇️ Audio herunterladen
+                      ⬇️ Payload herunterladen
                     </button>
                   )}
                   

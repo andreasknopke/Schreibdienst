@@ -49,6 +49,7 @@ export async function GET(req: NextRequest) {
     // Get single dictation
     if (id) {
       const includeAudio = searchParams.get('audio') === 'true';
+      const extractPayload = searchParams.get('extract') === 'true';
       const dictation = await getDictationByIdWithRequest(req, parseInt(id), includeAudio);
       if (!dictation) {
         return NextResponse.json({ error: 'Dictation not found' }, { status: 404 });
@@ -56,10 +57,28 @@ export async function GET(req: NextRequest) {
       
       // If audio requested, return as binary stream
       if (includeAudio && dictation.audio_data) {
-        const audioBuffer = Buffer.from(dictation.audio_data);
+        let audioBuffer = Buffer.from(dictation.audio_data);
+        let contentType = dictation.audio_mime_type || 'audio/webm';
+        
+        // If extract=true, try to extract payload from SpeaKING/WAV format
+        if (extractPayload) {
+          // Check for RIFF/WAVE header and extract data chunk payload
+          if (audioBuffer.length > 44 && 
+              audioBuffer.toString('ascii', 0, 4) === 'RIFF' && 
+              audioBuffer.toString('ascii', 8, 12) === 'WAVE') {
+            const dataIndex = audioBuffer.indexOf(Buffer.from('data'));
+            if (dataIndex !== -1) {
+              // 'data' tag (4 bytes) + size (4 bytes) = 8 bytes offset
+              audioBuffer = audioBuffer.subarray(dataIndex + 8);
+              contentType = 'application/octet-stream';
+              console.log(`[Offline Dictations] Extracted payload: ${audioBuffer.length} bytes`);
+            }
+          }
+        }
+        
         return new Response(audioBuffer, {
           headers: {
-            'Content-Type': dictation.audio_mime_type || 'audio/webm',
+            'Content-Type': contentType,
             'Content-Length': audioBuffer.length.toString(),
             'Cache-Control': 'private, max-age=3600',
           },

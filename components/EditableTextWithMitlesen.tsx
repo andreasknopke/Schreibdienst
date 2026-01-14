@@ -302,16 +302,43 @@ export default function EditableTextWithMitlesen({
 }: EditableTextWithMitlesenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editableRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [localText, setLocalText] = useState(text);
-  const [isEditing, setIsEditing] = useState(false);
-  const editTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Sync with prop changes (only when not actively editing)
+  // Dedicated edit mode state
+  const [isManualEditMode, setIsManualEditMode] = useState(false);
+  const [editModeText, setEditModeText] = useState('');
+  
+  // Sync with prop changes (only when not in manual edit mode)
   useEffect(() => {
-    if (!isEditing) {
+    if (!isManualEditMode) {
       setLocalText(text);
     }
-  }, [text, isEditing]);
+  }, [text, isManualEditMode]);
+  
+  // Enter manual edit mode
+  const handleStartEdit = useCallback(() => {
+    setEditModeText(localText);
+    setIsManualEditMode(true);
+    // Focus textarea after render
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 50);
+  }, [localText]);
+  
+  // Cancel manual edit - discard changes
+  const handleCancelEdit = useCallback(() => {
+    setEditModeText('');
+    setIsManualEditMode(false);
+  }, []);
+  
+  // Apply manual edit - save changes and exit edit mode
+  const handleApplyEdit = useCallback(() => {
+    setLocalText(editModeText);
+    onChange(editModeText);
+    setIsManualEditMode(false);
+    setEditModeText('');
+  }, [editModeText, onChange]);
   
   // Build STABLE timestamp table based on the saved/initial text (not localText)
   // This ensures timestamps don't jump around during manual editing
@@ -458,55 +485,22 @@ export default function EditableTextWithMitlesen({
     return 0;
   }, [timestampedWords, audioCurrentTime, showMitlesen]);
   
-  // Auto-scroll to current word (only when playing)
+  // Auto-scroll to current word (only when playing and not in edit mode)
   useEffect(() => {
-    if (!showMitlesen || !isAudioActive || currentWordIndex < 0 || !containerRef.current) return;
+    if (!showMitlesen || !isAudioActive || currentWordIndex < 0 || !containerRef.current || isManualEditMode) return;
     const currentEl = containerRef.current.querySelector('[data-current="true"]');
     if (currentEl) {
       currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-  }, [currentWordIndex, showMitlesen, isAudioActive]);
+  }, [currentWordIndex, showMitlesen, isAudioActive, isManualEditMode]);
   
-  // Handle text input - use native contentEditable behavior, don't re-render spans during editing
-  const handleInput = useCallback((e: React.FormEvent<HTMLDivElement>) => {
-    const target = e.currentTarget;
-    const newText = target.innerText || '';
-    
-    // Mark as editing - this prevents React from replacing content with spans
-    setIsEditing(true);
-    setLocalText(newText);
-    onChange(newText);
-    
-    // Clear any existing timeout
-    if (editTimeoutRef.current) {
-      clearTimeout(editTimeoutRef.current);
-    }
-    
-    // Reset editing flag after user stops typing for 500ms
-    editTimeoutRef.current = setTimeout(() => {
-      setIsEditing(false);
-    }, 500);
-  }, [onChange]);
-  
-  // Handle focus events
-  const handleFocus = useCallback(() => {
-    setIsEditing(true);
-  }, []);
-  
-  const handleBlur = useCallback(() => {
-    // Clear timeout and stop editing mode on blur
-    if (editTimeoutRef.current) {
-      clearTimeout(editTimeoutRef.current);
-    }
-    setIsEditing(false);
-  }, []);
-  
-  // Click on word to seek audio
+  // Click on word to seek audio (only when not in edit mode)
   const handleWordClick = useCallback((timestamp?: { start: number }) => {
+    if (isManualEditMode) return;
     if (timestamp && audioRef.current) {
       audioRef.current.currentTime = timestamp.start;
     }
-  }, [audioRef]);
+  }, [audioRef, isManualEditMode]);
   
   // Calculate match quality
   const matchQuality = useMemo(() => {
@@ -659,18 +653,64 @@ export default function EditableTextWithMitlesen({
     return elements;
   };
 
+  // Manual Edit Mode UI - full textarea for editing
+  if (isManualEditMode) {
+    return (
+      <div className="relative" ref={containerRef}>
+        {/* Edit mode header */}
+        <div className="flex items-center justify-between mb-2 px-1">
+          <span className="text-sm font-medium text-blue-600 dark:text-blue-400">
+            ✏️ Bearbeitungsmodus
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={handleCancelEdit}
+              className="px-3 py-1 text-xs font-medium rounded bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 transition-colors"
+            >
+              Abbrechen
+            </button>
+            <button
+              onClick={handleApplyEdit}
+              className="px-3 py-1 text-xs font-medium rounded bg-blue-500 hover:bg-blue-600 text-white transition-colors"
+            >
+              ✓ Übernehmen
+            </button>
+          </div>
+        </div>
+        
+        {/* Simple textarea for editing - no React interference */}
+        <textarea
+          ref={textareaRef}
+          value={editModeText}
+          onChange={(e) => setEditModeText(e.target.value)}
+          className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none min-h-[200px] max-h-[400px] resize-y bg-white dark:bg-gray-900 border-blue-400 dark:border-blue-500 focus:ring-2 focus:ring-blue-500 ${className}`}
+          style={{ whiteSpace: 'pre-wrap' }}
+          disabled={disabled}
+        />
+      </div>
+    );
+  }
+
   // Simple rendering when both diff and mitlesen are off
   if (!showDiff && !showMitlesen) {
     return (
       <div className="relative">
+        {/* Edit button */}
+        {!disabled && (
+          <button
+            onClick={handleStartEdit}
+            className="absolute top-2 right-2 z-10 p-1.5 rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors"
+            title="Text bearbeiten"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+          </button>
+        )}
         <div
           ref={editableRef}
-          contentEditable={!disabled}
-          suppressContentEditableWarning
-          onInput={handleInput}
-          onFocus={handleFocus}
-          onBlur={handleBlur}
-          className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none min-h-[200px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 ${className}`}
+          className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none min-h-[200px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 ${className}`}
           style={{ whiteSpace: 'pre-wrap' }}
         >
           {localText}
@@ -681,7 +721,7 @@ export default function EditableTextWithMitlesen({
   
   return (
     <div className="relative" ref={containerRef}>
-      {/* Header with stats */}
+      {/* Header with stats and edit button */}
       <div className="flex items-center justify-between mb-1 text-xs">
         <div className="flex items-center gap-2">
           {showMitlesen && (
@@ -698,23 +738,34 @@ export default function EditableTextWithMitlesen({
             </span>
           )}
         </div>
-        {showMitlesen && isAudioActive && (
-          <span className="text-gray-500">{audioCurrentTime.toFixed(1)}s</span>
-        )}
+        <div className="flex items-center gap-2">
+          {showMitlesen && isAudioActive && (
+            <span className="text-gray-500">{audioCurrentTime.toFixed(1)}s</span>
+          )}
+          {/* Edit button */}
+          {!disabled && (
+            <button
+              onClick={handleStartEdit}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors"
+              title="Text manuell bearbeiten"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+              <span>Bearbeiten</span>
+            </button>
+          )}
+        </div>
       </div>
       
-      {/* Editable content - show plain text during editing to prevent duplication */}
+      {/* Read-only content with highlights */}
       <div
         ref={editableRef}
-        contentEditable={!disabled}
-        suppressContentEditableWarning
-        onInput={handleInput}
-        onFocus={handleFocus}
-        onBlur={handleBlur}
-        className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none overflow-auto min-h-[200px] max-h-[400px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 ${className}`}
+        className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none overflow-auto min-h-[200px] max-h-[400px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 ${className}`}
         style={{ whiteSpace: 'pre-wrap' }}
       >
-        {isEditing ? localText : renderContent()}
+        {renderContent()}
       </div>
     </div>
   );

@@ -1,72 +1,6 @@
 "use client";
-import { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { diffWordsWithSpace } from 'diff';
-
-// Helper to save and restore cursor position in contentEditable
-function saveCursorPosition(el: HTMLElement): { start: number; end: number } | null {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) return null;
-  
-  const range = selection.getRangeAt(0);
-  const preCaretRange = range.cloneRange();
-  preCaretRange.selectNodeContents(el);
-  preCaretRange.setEnd(range.startContainer, range.startOffset);
-  const start = preCaretRange.toString().length;
-  
-  preCaretRange.setEnd(range.endContainer, range.endOffset);
-  const end = preCaretRange.toString().length;
-  
-  return { start, end };
-}
-
-function restoreCursorPosition(el: HTMLElement, pos: { start: number; end: number }): void {
-  const selection = window.getSelection();
-  if (!selection) return;
-  
-  const range = document.createRange();
-  let currentOffset = 0;
-  let startNode: Node | null = null;
-  let startOffset = 0;
-  let endNode: Node | null = null;
-  let endOffset = 0;
-  
-  function traverse(node: Node): boolean {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const text = node.textContent || '';
-      const nodeEnd = currentOffset + text.length;
-      
-      if (!startNode && pos.start >= currentOffset && pos.start <= nodeEnd) {
-        startNode = node;
-        startOffset = pos.start - currentOffset;
-      }
-      if (!endNode && pos.end >= currentOffset && pos.end <= nodeEnd) {
-        endNode = node;
-        endOffset = pos.end - currentOffset;
-        return true; // Found both, stop
-      }
-      
-      currentOffset = nodeEnd;
-    } else {
-      for (const child of Array.from(node.childNodes)) {
-        if (traverse(child)) return true;
-      }
-    }
-    return false;
-  }
-  
-  traverse(el);
-  
-  if (startNode && endNode) {
-    try {
-      range.setStart(startNode, startOffset);
-      range.setEnd(endNode, endOffset);
-      selection.removeAllRanges();
-      selection.addRange(range);
-    } catch (e) {
-      // Ignore cursor restoration errors
-    }
-  }
-}
 
 // Word with timestamp for highlighting
 interface TimestampedWord {
@@ -369,22 +303,15 @@ export default function EditableTextWithMitlesen({
   const containerRef = useRef<HTMLDivElement>(null);
   const editableRef = useRef<HTMLDivElement>(null);
   const [localText, setLocalText] = useState(text);
-  const cursorPosRef = useRef<{ start: number; end: number } | null>(null);
-  const isEditingRef = useRef(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const editTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Sync with prop changes (only when not actively editing)
   useEffect(() => {
-    if (!isEditingRef.current) {
+    if (!isEditing) {
       setLocalText(text);
     }
-  }, [text]);
-  
-  // Restore cursor position after render
-  useLayoutEffect(() => {
-    if (cursorPosRef.current && editableRef.current && isEditingRef.current) {
-      restoreCursorPosition(editableRef.current, cursorPosRef.current);
-    }
-  });
+  }, [text, isEditing]);
   
   // Build STABLE timestamp table based on the saved/initial text (not localText)
   // This ensures timestamps don't jump around during manual editing
@@ -540,22 +467,39 @@ export default function EditableTextWithMitlesen({
     }
   }, [currentWordIndex, showMitlesen, isAudioActive]);
   
-  // Handle text input
+  // Handle text input - use native contentEditable behavior, don't re-render spans during editing
   const handleInput = useCallback((e: React.FormEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
-    // Save cursor position before React re-renders
-    cursorPosRef.current = saveCursorPosition(target);
-    isEditingRef.current = true;
-    
     const newText = target.innerText || '';
+    
+    // Mark as editing - this prevents React from replacing content with spans
+    setIsEditing(true);
     setLocalText(newText);
     onChange(newText);
     
-    // Reset editing flag after a short delay
-    setTimeout(() => {
-      isEditingRef.current = false;
-    }, 100);
+    // Clear any existing timeout
+    if (editTimeoutRef.current) {
+      clearTimeout(editTimeoutRef.current);
+    }
+    
+    // Reset editing flag after user stops typing for 500ms
+    editTimeoutRef.current = setTimeout(() => {
+      setIsEditing(false);
+    }, 500);
   }, [onChange]);
+  
+  // Handle focus events
+  const handleFocus = useCallback(() => {
+    setIsEditing(true);
+  }, []);
+  
+  const handleBlur = useCallback(() => {
+    // Clear timeout and stop editing mode on blur
+    if (editTimeoutRef.current) {
+      clearTimeout(editTimeoutRef.current);
+    }
+    setIsEditing(false);
+  }, []);
   
   // Click on word to seek audio
   const handleWordClick = useCallback((timestamp?: { start: number }) => {
@@ -724,6 +668,8 @@ export default function EditableTextWithMitlesen({
           contentEditable={!disabled}
           suppressContentEditableWarning
           onInput={handleInput}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
           className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none min-h-[200px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 ${className}`}
           style={{ whiteSpace: 'pre-wrap' }}
         >
@@ -757,16 +703,18 @@ export default function EditableTextWithMitlesen({
         )}
       </div>
       
-      {/* Editable content */}
+      {/* Editable content - show plain text during editing to prevent duplication */}
       <div
         ref={editableRef}
         contentEditable={!disabled}
         suppressContentEditableWarning
         onInput={handleInput}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none overflow-auto min-h-[200px] max-h-[400px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 ${className}`}
         style={{ whiteSpace: 'pre-wrap' }}
       >
-        {renderContent()}
+        {isEditing ? localText : renderContent()}
       </div>
     </div>
   );

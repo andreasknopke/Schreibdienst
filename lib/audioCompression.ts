@@ -35,6 +35,52 @@ async function checkFfmpegAvailable(): Promise<boolean> {
 }
 
 /**
+ * Detect SpeaKING proprietary format (WAV with format 0x0028)
+ */
+function isSpeaKINGFormat(buffer: Buffer): boolean {
+  try {
+    if (buffer.length < 44) return false;
+    // Check RIFF header
+    if (buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WAVE') return false;
+    
+    // Check format chunk
+    let offset = 12;
+    while (offset < buffer.length - 8) {
+      const chunkId = buffer.toString('ascii', offset, offset + 4);
+      const chunkSize = buffer.readUInt32LE(offset + 4);
+      
+      if (chunkId === 'fmt ') {
+        // Format code is first 2 bytes of fmt chunk data
+        if (chunkSize >= 2) {
+          const formatCode = buffer.readUInt16LE(offset + 8);
+          // Format 0x0028 is officially "Antex ADPCM" but used by SpeaKING/MediaInterface
+          // as a wrapper for Opus or other codecs
+          return formatCode === 0x0028;
+        }
+        return false;
+      }
+      
+      offset += 8 + chunkSize;
+      if (offset > 1024) break; // Stop searching if header is too large
+    }
+  } catch (e) {
+    return false;
+  }
+  return false;
+}
+
+/**
+ * Extract payload from SpeaKING/WAV file
+ * Skips WAV header and returns data chunk content
+ */
+function extractSpeaKINGPayload(buffer: Buffer): Buffer {
+  const dataIndex = buffer.indexOf(Buffer.from('data'));
+  if (dataIndex === -1) return buffer;
+  // 'data' tag (4 bytes) + size (4 bytes) = 8 bytes offset
+  return buffer.subarray(dataIndex + 8);
+}
+
+/**
  * Compress audio using FFmpeg with Opus codec
  * Optimized for speech recordings (mono, 16kHz, low bitrate)
  * 
@@ -66,8 +112,53 @@ export async function compressAudioForSpeech(
   const inputExt = getExtensionFromMime(mimeType);
   const inputPath = join(tmpdir(), `audio_in_${tempId}.${inputExt}`);
   const outputPath = join(tmpdir(), `audio_out_${tempId}.ogg`);
+  const rawPath = join(tmpdir(), `audio_raw_${tempId}.bin`);
   
   try {
+    // Special handling for SpeaKING format
+    if (isSpeaKINGFormat(audioBuffer)) {
+      console.log('[AudioCompression] Detected SpeaKING format (0x0028). specific processing...');
+      const payload = extractSpeaKINGPayload(audioBuffer);
+      await writeFile(rawPath, payload);
+      
+      try {
+        // Attempt 1: Raw Opus
+        console.log('[AudioCompression] Trying convert as raw Opus...');
+        await runFfmpeg([
+          '-f', 'opus', 
+          '-i', rawPath,
+          '-vn', '-c:a', 'libopus', '-b:a', '24k', '-ar', '16000', '-ac', '1', '-application', 'voip', 
+          '-y', outputPath
+        ]);
+      } catch (e) {
+        console.log('[AudioCompression] Raw Opus failed, trying raw PCM fallback...');
+        // Attempt 2: Raw PCM (s16le)
+        await runFfmpeg([
+          '-f', 's16le', '-ar', '16000', '-ac', '1',
+          '-i', rawPath,
+          '-vn', '-c:a', 'libopus', '-b:a', '24k', '-ar', '16000', '-ac', '1', '-application', 'voip',
+          '-y', outputPath
+        ]);
+      }
+      
+      // Clean raw file immediately
+      await safeUnlink(rawPath);
+      
+      // If we are here, we likely succeeded or threw error to outer catch
+      const compressedBuffer = await readFile(outputPath);
+      const compressedSize = compressedBuffer.length;
+      
+      console.log(`[AudioCompression] Converted SpeaKING format: ${formatBytes(originalSize)} → ${formatBytes(compressedSize)}`);
+      
+      return {
+        data: compressedBuffer,
+        mimeType: 'audio/ogg',
+        compressed: true,
+        originalSize,
+        compressedSize
+      };
+    }
+    
     // Write input file
     await writeFile(inputPath, audioBuffer);
     
@@ -132,6 +223,8 @@ export async function compressAudioForSpeech(
     // Cleanup temp files
     await safeUnlink(inputPath);
     await safeUnlink(outputPath);
+    // Try to cleanup raw path if it was used (construct path again or rely on variable if scoped correctly)
+    try { await unlink(join(tmpdir(), `audio_raw_${tempId}.bin`)); } catch {}
   }
 }
 

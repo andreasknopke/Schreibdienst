@@ -54,8 +54,9 @@ function isSpeaKINGFormat(buffer: Buffer): boolean {
         if (chunkSize >= 2) {
           const formatCode = buffer.readUInt16LE(offset + 8);
           // Format 0x0028 is officially "Antex ADPCM" but used by SpeaKING/MediaInterface
-          // as a wrapper for Opus or other codecs
-          return formatCode === 0x0028;
+          // as a wrapper for Opus or other codecs.
+          // Format 0x704F (28751) is also seen in log files for Opus (Op[0][0])
+          return formatCode === 0x0028 || formatCode === 0x704F;
         }
         return false;
       }
@@ -316,8 +317,53 @@ export async function normalizeAudioForWhisper(
   const inputExt = getExtensionFromMime(mimeType);
   const inputPath = join(tmpdir(), `audio_norm_in_${tempId}.${inputExt}`);
   const outputPath = join(tmpdir(), `audio_norm_out_${tempId}.wav`);
+  const rawPath = join(tmpdir(), `audio_norm_raw_${tempId}.bin`);
   
   try {
+    // Check for SpeaKING format and handle it specifically
+    if (isSpeaKINGFormat(audioBuffer)) {
+      console.log('[AudioNormalize] Detected SpeaKING format (0x0028/0x704F). Converting payload directly to WAV PCM...');
+      const payload = extractSpeaKINGPayload(audioBuffer);
+      await writeFile(rawPath, payload);
+      
+      try {
+        // Attempt 1: Input is raw Opus. Convert to WAV PCM.
+        console.log('[AudioNormalize] Trying to convert raw Opus payload to WAV PCM...');
+        await runFfmpeg([
+          '-f', 'opus', 
+          '-i', rawPath,
+          '-vn', 
+          '-acodec', 'pcm_s16le',
+          '-ar', '16000',
+          '-ac', '1',
+          '-y', outputPath
+        ]);
+      } catch (e) {
+        console.log('[AudioNormalize] Raw Opus conversion failed, trying raw PCM fallback...');
+        // Attempt 2: Input is maybe already raw PCM or ADPCM? Treat as s16le input just in case
+        await runFfmpeg([
+          '-f', 's16le', '-ar', '16000', '-ac', '1',
+          '-i', rawPath,
+          '-vn',
+          '-acodec', 'pcm_s16le',
+          '-ar', '16000',
+          '-ac', '1',
+          '-y', outputPath
+        ]);
+      }
+      
+      await safeUnlink(rawPath);
+       // Read normalized file
+      const normalizedBuffer = await readFile(outputPath);
+      console.log(`[AudioNormalize] Converted SpeaKING format: ${formatBytes(audioBuffer.length)} → ${formatBytes(normalizedBuffer.length)}`);
+      
+      return { 
+        data: normalizedBuffer, 
+        mimeType: 'audio/wav', 
+        normalized: true 
+      };
+    }
+
     // Write input file
     await writeFile(inputPath, audioBuffer);
     
@@ -353,5 +399,6 @@ export async function normalizeAudioForWhisper(
     // Cleanup temp files
     await safeUnlink(inputPath);
     await safeUnlink(outputPath);
+    try { await unlink(join(tmpdir(), `audio_norm_raw_${tempId}.bin`)); } catch {}
   }
 }

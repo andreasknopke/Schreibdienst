@@ -116,47 +116,17 @@ export async function compressAudioForSpeech(
   const rawPath = join(tmpdir(), `audio_raw_${tempId}.bin`);
   
   try {
-    // Special handling for SpeaKING format
+    // Special handling for SpeaKING format - DO NOT COMPRESS
+    // The proprietary format cannot be reliably converted without losing data.
+    // Store original and let user download for analysis.
     if (isSpeaKINGFormat(audioBuffer)) {
-      console.log('[AudioCompression] Detected SpeaKING format (0x0028). specific processing...');
-      const payload = extractSpeaKINGPayload(audioBuffer);
-      await writeFile(rawPath, payload);
-      
-      try {
-        // Attempt 1: Raw Opus
-        console.log('[AudioCompression] Trying convert as raw Opus...');
-        await runFfmpeg([
-          '-f', 'opus', 
-          '-i', rawPath,
-          '-vn', '-c:a', 'libopus', '-b:a', '24k', '-ar', '16000', '-ac', '1', '-application', 'voip', 
-          '-y', outputPath
-        ]);
-      } catch (e) {
-        console.log('[AudioCompression] Raw Opus failed, trying raw PCM fallback...');
-        // Attempt 2: Raw PCM (s16le)
-        await runFfmpeg([
-          '-f', 's16le', '-ar', '16000', '-ac', '1',
-          '-i', rawPath,
-          '-vn', '-c:a', 'libopus', '-b:a', '24k', '-ar', '16000', '-ac', '1', '-application', 'voip',
-          '-y', outputPath
-        ]);
-      }
-      
-      // Clean raw file immediately
-      await safeUnlink(rawPath);
-      
-      // If we are here, we likely succeeded or threw error to outer catch
-      const compressedBuffer = await readFile(outputPath);
-      const compressedSize = compressedBuffer.length;
-      
-      console.log(`[AudioCompression] Converted SpeaKING format: ${formatBytes(originalSize)} → ${formatBytes(compressedSize)}`);
-      
-      return {
-        data: compressedBuffer,
-        mimeType: 'audio/ogg',
-        compressed: true,
-        originalSize,
-        compressedSize
+      console.log('[AudioCompression] Detected SpeaKING format (0x0028/0x704F). Skipping compression to preserve original data.');
+      return { 
+        data: audioBuffer, 
+        mimeType, 
+        compressed: false, 
+        originalSize, 
+        compressedSize: originalSize 
       };
     }
     
@@ -320,48 +290,12 @@ export async function normalizeAudioForWhisper(
   const rawPath = join(tmpdir(), `audio_norm_raw_${tempId}.bin`);
   
   try {
-    // Check for SpeaKING format and handle it specifically
+    // Check for SpeaKING format - CANNOT BE CONVERTED RELIABLY
+    // The proprietary format wraps Opus frames with unknown headers.
+    // Return original and let the transcription fail gracefully.
     if (isSpeaKINGFormat(audioBuffer)) {
-      console.log('[AudioNormalize] Detected SpeaKING format (0x0028/0x704F). Converting payload directly to WAV PCM...');
-      const payload = extractSpeaKINGPayload(audioBuffer);
-      await writeFile(rawPath, payload);
-      
-      try {
-        // Attempt 1: Input is raw Opus. Convert to WAV PCM.
-        console.log('[AudioNormalize] Trying to convert raw Opus payload to WAV PCM...');
-        await runFfmpeg([
-          '-f', 'opus', 
-          '-i', rawPath,
-          '-vn', 
-          '-acodec', 'pcm_s16le',
-          '-ar', '16000',
-          '-ac', '1',
-          '-y', outputPath
-        ]);
-      } catch (e) {
-        console.log('[AudioNormalize] Raw Opus conversion failed, trying raw PCM fallback...');
-        // Attempt 2: Input is maybe already raw PCM or ADPCM? Treat as s16le input just in case
-        await runFfmpeg([
-          '-f', 's16le', '-ar', '16000', '-ac', '1',
-          '-i', rawPath,
-          '-vn',
-          '-acodec', 'pcm_s16le',
-          '-ar', '16000',
-          '-ac', '1',
-          '-y', outputPath
-        ]);
-      }
-      
-      await safeUnlink(rawPath);
-       // Read normalized file
-      const normalizedBuffer = await readFile(outputPath);
-      console.log(`[AudioNormalize] Converted SpeaKING format: ${formatBytes(audioBuffer.length)} → ${formatBytes(normalizedBuffer.length)}`);
-      
-      return { 
-        data: normalizedBuffer, 
-        mimeType: 'audio/wav', 
-        normalized: true 
-      };
+      console.log('[AudioNormalize] Detected SpeaKING format (0x0028/0x704F). Cannot convert - returning original for download/analysis.');
+      return { data: audioBuffer, mimeType, normalized: false };
     }
 
     // Write input file

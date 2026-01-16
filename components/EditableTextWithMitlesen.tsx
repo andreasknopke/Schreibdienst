@@ -486,11 +486,30 @@ export default function EditableTextWithMitlesen({
   }, [timestampedWords, audioCurrentTime, showMitlesen]);
   
   // Auto-scroll to current word (only when playing and not in edit mode)
+  // Uses manual scroll calculation to avoid scrollIntoView moving the entire page
   useEffect(() => {
-    if (!showMitlesen || !isAudioActive || currentWordIndex < 0 || !containerRef.current || isManualEditMode) return;
-    const currentEl = containerRef.current.querySelector('[data-current="true"]');
-    if (currentEl) {
-      currentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!showMitlesen || !isAudioActive || currentWordIndex < 0 || !editableRef.current || isManualEditMode) return;
+    const currentEl = editableRef.current.querySelector('[data-current="true"]') as HTMLElement;
+    if (currentEl && editableRef.current) {
+      const container = editableRef.current;
+      const containerRect = container.getBoundingClientRect();
+      const elementRect = currentEl.getBoundingClientRect();
+      
+      // Calculate the element's position relative to the container's scroll area
+      const elementTop = elementRect.top - containerRect.top + container.scrollTop;
+      const elementCenter = elementTop - container.clientHeight / 2 + currentEl.offsetHeight / 2;
+      
+      // Only scroll if the element is outside the visible area (with some margin)
+      const visibleTop = container.scrollTop + 50;
+      const visibleBottom = container.scrollTop + container.clientHeight - 50;
+      const elementBottom = elementTop + currentEl.offsetHeight;
+      
+      if (elementTop < visibleTop || elementBottom > visibleBottom) {
+        container.scrollTo({
+          top: Math.max(0, elementCenter),
+          behavior: 'smooth'
+        });
+      }
     }
   }, [currentWordIndex, showMitlesen, isAudioActive, isManualEditMode]);
   

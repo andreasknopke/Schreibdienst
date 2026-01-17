@@ -357,20 +357,27 @@ async function executeWithRetry<T>(
   const totalStart = Date.now();
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const attemptStart = Date.now();
     try {
-      const attemptStart = Date.now();
       const result = await operation();
       const attemptTime = Date.now() - attemptStart;
       
-      // Log slow queries (> 500ms)
-      if (attemptTime > 500) {
-        console.warn(`[DB] SLOW ${operationName}: ${attemptTime}ms (attempt ${attempt + 1})`);
+      // Log alle Queries mit Timing (auch schnelle, für Diagnose)
+      if (attemptTime > 100) {
+        console.log(`[DB Time] ${operationName}: ${attemptTime}ms${attempt > 0 ? ` (retry ${attempt})` : ''}`);
+      }
+      
+      // Warnung für sehr langsame Queries
+      if (attemptTime > 2000) {
+        console.warn(`[DB] ⚠️ VERY SLOW ${operationName}: ${attemptTime}ms`);
       }
       
       lastSuccessfulQuery = Date.now();
       return result;
     } catch (error: any) {
       lastError = error;
+      const attemptTime = Date.now() - attemptStart;
+      console.error(`[DB] ✗ ${operationName} failed after ${attemptTime}ms: ${error.code || error.message}`);
       
       // Prüfe auf Verbindungsfehler die einen Retry rechtfertigen
       const isConnectionError = 
@@ -383,7 +390,7 @@ async function executeWithRetry<T>(
         error.message?.includes('Pool is closed');
       
       if (isConnectionError && attempt < maxRetries) {
-        console.warn(`[DB] Connection error (attempt ${attempt + 1}/${maxRetries + 1}): ${error.code || error.message}`);
+        console.warn(`[DB] Retrying ${operationName} (attempt ${attempt + 2}/${maxRetries + 1})...`);
         // Kurze Pause vor Retry
         await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
         continue;
@@ -399,37 +406,42 @@ async function executeWithRetry<T>(
 // Standard-Query (nutzt Default-Pool)
 export async function query<T = any>(sql: string, params?: any[]): Promise<T[]> {
   const db = await getPool();
+  // Extrahiere Query-Typ für Logging (SELECT, INSERT, etc.)
+  const queryType = sql.trim().split(/\s+/)[0].toUpperCase();
   return executeWithRetry(db, async () => {
     const [rows] = await db.execute(sql, params);
     return rows as T[];
-  });
+  }, 2, queryType);
 }
 
 // Standard-Execute (nutzt Default-Pool)
 export async function execute(sql: string, params?: any[]): Promise<mysql.ResultSetHeader> {
   const db = await getPool();
+  const queryType = sql.trim().split(/\s+/)[0].toUpperCase();
   return executeWithRetry(db, async () => {
     const [result] = await db.execute(sql, params);
     return result as mysql.ResultSetHeader;
-  });
+  }, 2, queryType);
 }
 
 // Query mit Request-Context (nutzt dynamischen Pool wenn Token vorhanden)
 export async function queryWithRequest<T = any>(request: NextRequest, sql: string, params?: any[]): Promise<T[]> {
   const db = await getPoolForRequest(request);
+  const queryType = sql.trim().split(/\s+/)[0].toUpperCase();
   return executeWithRetry(db, async () => {
     const [rows] = await db.execute(sql, params);
     return rows as T[];
-  });
+  }, 2, queryType);
 }
 
 // Execute mit Request-Context (nutzt dynamischen Pool wenn Token vorhanden)
 export async function executeWithRequest(request: NextRequest, sql: string, params?: any[]): Promise<mysql.ResultSetHeader> {
   const db = await getPoolForRequest(request);
+  const queryType = sql.trim().split(/\s+/)[0].toUpperCase();
   return executeWithRetry(db, async () => {
     const [result] = await db.execute(sql, params);
     return result as mysql.ResultSetHeader;
-  });
+  }, 2, queryType);
 }
 
 // Pool-Reset Funktion für Notfälle (z.B. nach vielen Fehlern)

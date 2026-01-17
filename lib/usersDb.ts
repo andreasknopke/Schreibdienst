@@ -235,7 +235,9 @@ export async function authenticateUserWithRequest(
   username: string, 
   password: string
 ): Promise<{ success: boolean; user?: { username: string; isAdmin: boolean; canViewAllDictations: boolean; autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief' }; error?: string }> {
-  // Check for root user first
+  const start = Date.now();
+  
+  // Check for root user first (no DB needed)
   if (username.toLowerCase() === 'root') {
     const rootPassword = getRootPassword();
     if (!rootPassword) {
@@ -249,11 +251,21 @@ export async function authenticateUserWithRequest(
 
   // Check database users with dynamic pool
   try {
+    const poolStart = Date.now();
     const db = await getPoolForRequest(request);
+    const poolTime = Date.now() - poolStart;
+    
+    const queryStart = Date.now();
     const [rows] = await db.execute<any[]>(
       'SELECT * FROM users WHERE LOWER(username) = LOWER(?)',
       [username]
     );
+    const queryTime = Date.now() - queryStart;
+    
+    const totalTime = Date.now() - start;
+    if (totalTime > 100) {
+      console.log(`[Users] Auth timing: pool=${poolTime}ms, query=${queryTime}ms, total=${totalTime}ms`);
+    }
     
     if (rows.length === 0) {
       return { success: false, error: 'Benutzer nicht gefunden' };

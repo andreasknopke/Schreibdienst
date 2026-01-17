@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
     // Validate whisperModel - accepts both short IDs and full HuggingFace paths
     const validWhisperModels = [
       'large-v3',
-      'deepdml/faster-whisper-large-v3-german-2',
+      'guillaumekln/faster-whisper-large-v2',
       'large-v2',
       'cstr/whisper-large-v3-turbo-german-int8_float32',
     ];

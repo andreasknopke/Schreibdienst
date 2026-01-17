@@ -565,7 +565,7 @@ export async function POST(request: NextRequest) {
 
     // Get whisper model from runtime config (Online-Transkription)
     // For online mode, use whisperModel directly (full HuggingFace path)
-    const whisperModel = runtimeConfig.whisperModel || 'deepdml/faster-whisper-large-v3-german-2';
+    const whisperModel = runtimeConfig.whisperModel || 'guillaumekln/faster-whisper-large-v2';
     console.log(`[Config] WhisperX Online Model: ${whisperModel} (from config)`);
 
     // Online-Transkription nutzt Turbo-Modus für minimale Latenz

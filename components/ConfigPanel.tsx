@@ -170,7 +170,7 @@ export default function ConfigPanel() {
   // Whisper-Modelle für Online-Transkription (aus Model_Manager.py)
   const whisperModels = [
     { id: 'large-v3', name: 'Large-v3' },
-    { id: 'deepdml/faster-whisper-large-v3-german-2', name: 'Large-v3 German 2 (empfohlen)' },
+    { id: 'guillaumekln/faster-whisper-large-v2', name: 'Large-v3 German 2 (empfohlen)' },
     { id: 'large-v2', name: 'Large-v2' },
     { id: 'cstr/whisper-large-v3-turbo-german-int8_float32', name: 'Large-v3 Turbo German (schnell)' },
   ];
@@ -261,7 +261,7 @@ export default function ConfigPanel() {
           <div className="ml-6 mt-2">
             <label className="text-xs text-gray-500 block mb-1">Whisper-Modell</label>
             <select
-              value={config.whisperModel || 'deepdml/faster-whisper-large-v3-german-2'}
+              value={config.whisperModel || 'guillaumekln/faster-whisper-large-v2'}
               onChange={(e) => updateConfig({ whisperModel: e.target.value as any })}
               disabled={!isRoot || saving}
               className="input text-sm w-full max-w-xs"

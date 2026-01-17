@@ -18,7 +18,7 @@ async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; 
       provider: 'lmstudio',
       baseUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
       apiKey: 'lm-studio', // LM Studio doesn't require a real API key
-      model: process.env.LLM_STUDIO_MODEL || 'local-model'
+      model: process.env.LLM_STUDIO_MODEL || 'meta-llama-3.1-8b-instruct'
     };
   }
   

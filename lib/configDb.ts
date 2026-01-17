@@ -4,13 +4,13 @@ import { query, execute, getPoolForRequest } from './db';
 // Verfügbare Offline-Modelle für WhisperX (aus Model_Manager.py)
 export type WhisperOfflineModel = 
   | 'large-v3'                 // Standard large-v3
-  | 'large-v3-german-2'        // deepdml/faster-whisper-large-v3-german-2
+  | 'large-v3-german-2'        // guillaumekln/faster-whisper-large-v2
   | 'large-v2'                 // Standard large-v2
   | 'large-v3-turbo-german';   // cstr/whisper-large-v3-turbo-german-int8_float32
 
 export const WHISPER_OFFLINE_MODELS: { id: WhisperOfflineModel; name: string; modelPath: string }[] = [
   { id: 'large-v3', name: 'Large-v3 (Standard)', modelPath: 'large-v3' },
-  { id: 'large-v3-german-2', name: 'Large-v3 German 2 (empfohlen)', modelPath: 'deepdml/faster-whisper-large-v3-german-2' },
+  { id: 'large-v3-german-2', name: 'Large-v3 German 2 (empfohlen)', modelPath: 'guillaumekln/faster-whisper-large-v2' },
   { id: 'large-v2', name: 'Large-v2', modelPath: 'large-v2' },
   { id: 'large-v3-turbo-german', name: 'Large-v3 Turbo German (schnell)', modelPath: 'cstr/whisper-large-v3-turbo-german-int8_float32' },
 ];
@@ -43,7 +43,7 @@ export interface RuntimeConfig {
 const DEFAULT_CONFIG: RuntimeConfig = {
   transcriptionProvider: (process.env.TRANSCRIPTION_PROVIDER as any) || 'whisperx',
   llmProvider: (process.env.LLM_PROVIDER as any) || 'openai',
-  whisperModel: process.env.WHISPER_MODEL || 'deepdml/faster-whisper-large-v3-german-2',
+  whisperModel: process.env.WHISPER_MODEL || 'guillaumekln/faster-whisper-large-v2',
   whisperOfflineModel: (process.env.WHISPER_OFFLINE_MODEL as WhisperOfflineModel) || 'large-v3-german-2',
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   mistralModel: process.env.MISTRAL_MODEL || 'mistral-large-latest',

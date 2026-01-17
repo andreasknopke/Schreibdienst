@@ -314,30 +314,45 @@ async function doublePrecisionMerge(
   } else {
     // LM Studio
     const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
-    const lmStudioModel = process.env.LLM_STUDIO_MODEL || 'local-model';
+    // LM Studio verwendet das aktuell geladene Modell - wir müssen keinen spezifischen Namen angeben
+    // oder wir verwenden die Umgebungsvariable falls gesetzt
+    const lmStudioModel = process.env.LLM_STUDIO_MODEL || '';
     
     console.log(`[Worker DoublePrecision] Using LM Studio for merge: ${lmStudioUrl}`);
-    modelName = lmStudioModel;
+    modelName = lmStudioModel || 'lmstudio-model';
     modelProvider = 'lmstudio';
+    
+    // LM Studio erwartet ein bestimmtes Format - model kann leer sein wenn nur ein Modell geladen ist
+    const requestBody: any = {
+      messages: [
+        { role: 'system', content: mergePrompt },
+        { role: 'user', content: 'Erstelle den finalen Text.' }
+      ],
+      temperature: 0.1,
+      max_tokens: 8192,  // Genug für lange Texte
+    };
+    
+    // Nur model angeben wenn explizit gesetzt
+    if (lmStudioModel) {
+      requestBody.model = lmStudioModel;
+    }
     
     const res = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer lm-studio',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model: lmStudioModel,
-        messages: [
-          { role: 'system', content: mergePrompt },
-          { role: 'user', content: 'Erstelle den finalen Text.' }
-        ],
-        temperature: 0.1,
-      }),
+      body: JSON.stringify(requestBody),
     });
     
     if (!res.ok) {
-      console.error(`[Worker DoublePrecision] LM Studio API error: ${res.status}`);
+      // Lese den Fehler-Body für bessere Diagnose
+      let errorDetails = '';
+      try {
+        const errorBody = await res.text();
+        errorDetails = `: ${errorBody}`;
+      } catch (e) {}
+      console.error(`[Worker DoublePrecision] LM Studio API error: ${res.status}${errorDetails}`);
       // Fallback to first transcription if LM Studio fails
       finalText = result1.text;
     } else {

@@ -242,8 +242,8 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
       meta: { _type: 'gradio.FileData' }
     };
     
-    // Language for WhisperX Gradio - use ISO code for direct language setting (avoids detection overhead)
-    const languageCode = 'de';
+    // Language for WhisperX Gradio - must match dropdown choices, conversion to ISO code happens in transcriber.py
+    const languageCode = 'German';
 
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
       method: 'POST',

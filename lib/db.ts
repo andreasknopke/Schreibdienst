@@ -19,6 +19,11 @@ const CONNECTION_HEALTH_THRESHOLD = 30000; // 30 Sekunden
 let lastPoolStatsLog = 0;
 const POOL_STATS_INTERVAL = 60000;
 
+// Aktive Queries Tracking (für Diagnose)
+let activeQueries = 0;
+let maxConcurrentQueries = 0;
+const QUERY_TIMEOUT = 30000; // 30 Sekunden Query-Timeout
+
 // ============================================================
 // DB-Token Credentials Interface
 // ============================================================
@@ -358,7 +363,7 @@ async function logPoolStats(db: mysql.Pool, prefix: string = ''): Promise<void> 
   }
 }
 
-// Wrapper für Query mit Retry-Logik
+// Wrapper für Query mit Retry-Logik und Timeout
 async function executeWithRetry<T>(
   db: mysql.Pool,
   operation: () => Promise<T>,
@@ -368,51 +373,70 @@ async function executeWithRetry<T>(
   let lastError: Error | null = null;
   const totalStart = Date.now();
   
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const attemptStart = Date.now();
-    try {
-      const result = await operation();
-      const attemptTime = Date.now() - attemptStart;
-      
-      // Log alle Queries mit Timing (auch schnelle, für Diagnose)
-      if (attemptTime > 100) {
-        console.log(`[DB Time] ${operationName}: ${attemptTime}ms${attempt > 0 ? ` (retry ${attempt})` : ''}`);
-      }
-      
-      // Warnung für sehr langsame Queries
-      if (attemptTime > 2000) {
-        console.warn(`[DB] ⚠️ VERY SLOW ${operationName}: ${attemptTime}ms`);
-      }
-      
-      lastSuccessfulQuery = Date.now();
-      return result;
-    } catch (error: any) {
-      lastError = error;
-      const attemptTime = Date.now() - attemptStart;
-      console.error(`[DB] ✗ ${operationName} failed after ${attemptTime}ms: ${error.code || error.message}`);
-      
-      // Prüfe auf Verbindungsfehler die einen Retry rechtfertigen
-      const isConnectionError = 
-        error.code === 'ECONNRESET' ||
-        error.code === 'ETIMEDOUT' ||
-        error.code === 'ECONNREFUSED' ||
-        error.code === 'PROTOCOL_CONNECTION_LOST' ||
-        error.message?.includes('Connection lost') ||
-        error.message?.includes('Cannot enqueue') ||
-        error.message?.includes('Pool is closed');
-      
-      if (isConnectionError && attempt < maxRetries) {
-        console.warn(`[DB] Retrying ${operationName} (attempt ${attempt + 2}/${maxRetries + 1})...`);
-        // Kurze Pause vor Retry
-        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
-        continue;
-      }
-      
-      throw error;
-    }
+  // Track aktive Queries
+  activeQueries++;
+  if (activeQueries > maxConcurrentQueries) {
+    maxConcurrentQueries = activeQueries;
+  }
+  if (activeQueries > 3) {
+    console.warn(`[DB] ⚠️ ${activeQueries} concurrent queries (max seen: ${maxConcurrentQueries})`);
   }
   
-  throw lastError;
+  try {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const attemptStart = Date.now();
+      try {
+        // Wrap operation mit Timeout
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`Query timeout after ${QUERY_TIMEOUT}ms`)), QUERY_TIMEOUT);
+        });
+        
+        const result = await Promise.race([operation(), timeoutPromise]);
+        const attemptTime = Date.now() - attemptStart;
+        
+        // Log alle Queries mit Timing (auch schnelle, für Diagnose)
+        if (attemptTime > 100) {
+          console.log(`[DB Time] ${operationName}: ${attemptTime}ms${attempt > 0 ? ` (retry ${attempt})` : ''} [active: ${activeQueries}]`);
+        }
+        
+        // Warnung für sehr langsame Queries
+        if (attemptTime > 2000) {
+          console.warn(`[DB] ⚠️ VERY SLOW ${operationName}: ${attemptTime}ms`);
+        }
+        
+        lastSuccessfulQuery = Date.now();
+        return result;
+      } catch (error: any) {
+        lastError = error;
+        const attemptTime = Date.now() - attemptStart;
+        console.error(`[DB] ✗ ${operationName} failed after ${attemptTime}ms: ${error.code || error.message}`);
+        
+        // Prüfe auf Verbindungsfehler die einen Retry rechtfertigen
+        const isConnectionError = 
+          error.code === 'ECONNRESET' ||
+          error.code === 'ETIMEDOUT' ||
+          error.code === 'ECONNREFUSED' ||
+          error.code === 'PROTOCOL_CONNECTION_LOST' ||
+          error.message?.includes('Connection lost') ||
+          error.message?.includes('Cannot enqueue') ||
+          error.message?.includes('Pool is closed') ||
+          error.message?.includes('Query timeout');
+        
+        if (isConnectionError && attempt < maxRetries) {
+          console.warn(`[DB] Retrying ${operationName} (attempt ${attempt + 2}/${maxRetries + 1})...`);
+          // Kurze Pause vor Retry
+          await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+          continue;
+        }
+        
+        throw error;
+      }
+    }
+    
+    throw lastError;
+  } finally {
+    activeQueries--;
+  }
 }
 
 // Standard-Query (nutzt Default-Pool)

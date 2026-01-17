@@ -526,10 +526,13 @@ function getPoolKeyFromRequest(request: NextRequest): string {
 export async function initOfflineDictationTableWithRequest(request: NextRequest): Promise<void> {
   const poolKey = getPoolKeyFromRequest(request);
   
-  // Only initialize once per pool
+  // Only initialize once per pool - fast path without DB access
   if (tableInitializedPerPool.get(poolKey)) {
     return;
   }
+  
+  const initStart = Date.now();
+  console.log(`[DB] Initializing offline_dictations table for pool: ${poolKey}...`);
   
   const db = await getPoolForRequest(request);
   
@@ -643,7 +646,7 @@ export async function initOfflineDictationTableWithRequest(request: NextRequest)
   }
   
   tableInitializedPerPool.set(poolKey, true);
-  console.log(`[DB] ✓ Offline dictations table ready (${poolKey})`);
+  console.log(`[DB] ✓ Offline dictations table initialized in ${Date.now() - initStart}ms (${poolKey})`);
 }
 
 // Create a new offline dictation with Request context

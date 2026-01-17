@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { query, execute, getPoolForRequest } from './db';
+import { query, execute, getPoolForRequest, tableExistsCache } from './db';
 
 export interface CustomAction {
   id: number;
@@ -45,9 +45,16 @@ export async function getCustomActions(username: string): Promise<CustomAction[]
   }
 }
 
-// Ensure custom_actions table exists
-async function ensureTableExists(pool: any): Promise<void> {
+// Ensure custom_actions table exists (cached to avoid repeated queries)
+async function ensureTableExists(pool: any, poolKey: string): Promise<void> {
+  // Skip if already checked for this pool
+  const cacheKey = `custom_actions:${poolKey}`;
+  if (tableExistsCache.has(cacheKey)) {
+    return;
+  }
+  
   try {
+    const start = Date.now();
     await pool.execute(`
       CREATE TABLE IF NOT EXISTS custom_actions (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -61,24 +68,40 @@ async function ensureTableExists(pool: any): Promise<void> {
         UNIQUE KEY unique_user_action (username, name)
       )
     `);
+    tableExistsCache.add(cacheKey);
+    console.log(`[CustomActions] Table ensured in ${Date.now() - start}ms`);
   } catch (error) {
-    // Table might already exist, ignore errors
+    // Table might already exist, mark as cached anyway
+    tableExistsCache.add(cacheKey);
     console.log('[CustomActions] Table check:', error);
   }
 }
 
 // Get custom actions with dynamic DB pool
 export async function getCustomActionsWithRequest(request: NextRequest, username: string): Promise<CustomAction[]> {
+  const totalStart = Date.now();
   try {
+    const poolStart = Date.now();
     const pool = await getPoolForRequest(request);
+    const poolTime = Date.now() - poolStart;
     
-    // Auto-create table if not exists
-    await ensureTableExists(pool);
+    // Get pool identifier for caching
+    const dbToken = request.headers.get('x-db-token');
+    const poolKey = dbToken ? dbToken.substring(0, 20) : 'default';
     
+    // Auto-create table if not exists (cached)
+    await ensureTableExists(pool, poolKey);
+    
+    const queryStart = Date.now();
     const [rows] = await pool.query<any[]>(
       'SELECT id, name, icon, prompt, target_field, created_at, updated_at FROM custom_actions WHERE LOWER(username) = LOWER(?) ORDER BY name ASC',
       [username]
     );
+    const queryTime = Date.now() - queryStart;
+    
+    if (poolTime > 100 || queryTime > 100) {
+      console.log(`[CustomActions] GET timing: pool=${poolTime}ms, query=${queryTime}ms, total=${Date.now() - totalStart}ms`);
+    }
     
     return (rows || []).map((a: DbCustomAction) => ({
       id: a.id,

@@ -7,6 +7,10 @@ let pool: mysql.Pool | null = null;
 // Cache für dynamische Pools (basierend auf DB-Token)
 const dynamicPools = new Map<string, mysql.Pool>();
 
+// Globales Cache für Tabellen-Existenz-Checks (verhindert wiederholte CREATE TABLE Queries)
+// Key: "poolKey:tableName", Value: true wenn Tabelle geprüft wurde
+export const tableExistsCache = new Set<string>();
+
 // Letzte erfolgreiche Verbindungszeit (für Health-Check)
 let lastSuccessfulQuery = Date.now();
 const CONNECTION_HEALTH_THRESHOLD = 30000; // 30 Sekunden
@@ -102,6 +106,8 @@ export function getDynamicPool(credentials: DbCredentials): mysql.Pool {
 const loggedPools = new Set<string>();
 
 export async function getPoolForRequest(request?: NextRequest): Promise<mysql.Pool> {
+  const start = Date.now();
+  
   // Prüfe auf X-DB-Token Header
   if (request) {
     const dbToken = request.headers.get('x-db-token');
@@ -114,7 +120,12 @@ export async function getPoolForRequest(request?: NextRequest): Promise<mysql.Po
           console.log(`[DB] ✓ Verwende dynamische DB: ${credentials.host}/${credentials.database}`);
           loggedPools.add(poolKey);
         }
-        return getDynamicPool(credentials);
+        const pool = getDynamicPool(credentials);
+        const elapsed = Date.now() - start;
+        if (elapsed > 50) {
+          console.log(`[DB] getPoolForRequest took ${elapsed}ms (dynamic)`);
+        }
+        return pool;
       } else {
         console.warn('[DB] ❌ Ungültiger DB-Token, verwende Default-Pool');
       }
@@ -122,7 +133,12 @@ export async function getPoolForRequest(request?: NextRequest): Promise<mysql.Po
   }
   
   // Fallback auf Default-Pool
-  return getPool();
+  const pool = await getPool();
+  const elapsed = Date.now() - start;
+  if (elapsed > 50) {
+    console.log(`[DB] getPoolForRequest took ${elapsed}ms (default)`);
+  }
+  return pool;
 }
 
 // ============================================================
@@ -334,13 +350,23 @@ async function logPoolStats(db: mysql.Pool, prefix: string = ''): Promise<void> 
 async function executeWithRetry<T>(
   db: mysql.Pool,
   operation: () => Promise<T>,
-  maxRetries: number = 2
+  maxRetries: number = 2,
+  operationName: string = 'query'
 ): Promise<T> {
   let lastError: Error | null = null;
+  const totalStart = Date.now();
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
+      const attemptStart = Date.now();
       const result = await operation();
+      const attemptTime = Date.now() - attemptStart;
+      
+      // Log slow queries (> 500ms)
+      if (attemptTime > 500) {
+        console.warn(`[DB] SLOW ${operationName}: ${attemptTime}ms (attempt ${attempt + 1})`);
+      }
+      
       lastSuccessfulQuery = Date.now();
       return result;
     } catch (error: any) {

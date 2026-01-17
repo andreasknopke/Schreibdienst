@@ -616,7 +616,8 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
           languageCode,
           whisperModel,
           "cuda",
-          initialPrompt || "" // medical dictionary terms for better recognition
+          initialPrompt || "", // medical dictionary terms for better recognition
+          false // speed_mode=false für Offline-Diktate (Präzisionsmodus mit Alignment)
         ]
       }),
     });

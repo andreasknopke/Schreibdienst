@@ -7,6 +7,14 @@ let pool: mysql.Pool | null = null;
 // Cache für dynamische Pools (basierend auf DB-Token)
 const dynamicPools = new Map<string, mysql.Pool>();
 
+// Letzte erfolgreiche Verbindungszeit (für Health-Check)
+let lastSuccessfulQuery = Date.now();
+const CONNECTION_HEALTH_THRESHOLD = 30000; // 30 Sekunden
+
+// Pool-Stats Logging (alle 60 Sekunden max)
+let lastPoolStatsLog = 0;
+const POOL_STATS_INTERVAL = 60000;
+
 // ============================================================
 // DB-Token Credentials Interface
 // ============================================================
@@ -65,12 +73,22 @@ export function getDynamicPool(credentials: DbCredentials): mysql.Pool {
     password: credentials.password,
     database: credentials.database,
     waitForConnections: true,
-    connectionLimit: 10,      // Erhöht von 5 auf 10
+    connectionLimit: 5,       // Reduziert von 10 auf 5 für Railway
     queueLimit: 0,
     connectTimeout: 10000,    // 10s Verbindungs-Timeout
     enableKeepAlive: true,    // Keep-Alive für Railway
     keepAliveInitialDelay: 10000, // Keep-Alive nach 10s
+    idleTimeout: 60000,       // Idle-Verbindungen nach 60s schließen
     ...(credentials.ssl ? { ssl: { rejectUnauthorized: false } } : {})
+  });
+  
+  // Event-Handler für Pool-Probleme
+  newPool.on('connection', (connection) => {
+    console.log(`[DB Pool] New connection created`);
+  });
+  
+  newPool.on('release', (connection) => {
+    // Stille Release - nur bei Debug loggen
   });
   
   dynamicPools.set(poolKey, newPool);
@@ -129,11 +147,17 @@ export async function getPool(): Promise<mysql.Pool> {
   pool = mysql.createPool({
     uri: connectionString,
     waitForConnections: true,
-    connectionLimit: 10,
+    connectionLimit: 5,          // Reduziert von 10 auf 5
     queueLimit: 0,
     connectTimeout: 10000,       // 10s Verbindungs-Timeout
     enableKeepAlive: true,       // Keep-Alive für Railway
     keepAliveInitialDelay: 10000, // Keep-Alive nach 10s
+    idleTimeout: 60000,          // Idle-Verbindungen nach 60s schließen
+  });
+  
+  // Event-Handler für Pool-Probleme
+  pool.on('connection', (connection) => {
+    console.log(`[DB Pool] New default connection created`);
   });
   
   // Test connection
@@ -291,30 +315,121 @@ export async function initDatabaseWithRequest(request: NextRequest): Promise<voi
 // Helper für Queries (mit optionalem Request für dynamische DB)
 // ============================================================
 
+// Log Pool-Stats (max alle 60s)
+async function logPoolStats(db: mysql.Pool, prefix: string = ''): Promise<void> {
+  const now = Date.now();
+  if (now - lastPoolStatsLog < POOL_STATS_INTERVAL) return;
+  lastPoolStatsLog = now;
+  
+  try {
+    // mysql2/promise Pool hat keine direkte Stats-API, aber wir können es über eine Query prüfen
+    const [rows] = await db.query('SELECT 1 as ping');
+    console.log(`[DB Pool${prefix}] Health check OK`);
+  } catch (e) {
+    console.warn(`[DB Pool${prefix}] Health check failed:`, e);
+  }
+}
+
+// Wrapper für Query mit Retry-Logik
+async function executeWithRetry<T>(
+  db: mysql.Pool,
+  operation: () => Promise<T>,
+  maxRetries: number = 2
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await operation();
+      lastSuccessfulQuery = Date.now();
+      return result;
+    } catch (error: any) {
+      lastError = error;
+      
+      // Prüfe auf Verbindungsfehler die einen Retry rechtfertigen
+      const isConnectionError = 
+        error.code === 'ECONNRESET' ||
+        error.code === 'ETIMEDOUT' ||
+        error.code === 'ECONNREFUSED' ||
+        error.code === 'PROTOCOL_CONNECTION_LOST' ||
+        error.message?.includes('Connection lost') ||
+        error.message?.includes('Cannot enqueue') ||
+        error.message?.includes('Pool is closed');
+      
+      if (isConnectionError && attempt < maxRetries) {
+        console.warn(`[DB] Connection error (attempt ${attempt + 1}/${maxRetries + 1}): ${error.code || error.message}`);
+        // Kurze Pause vor Retry
+        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+        continue;
+      }
+      
+      throw error;
+    }
+  }
+  
+  throw lastError;
+}
+
 // Standard-Query (nutzt Default-Pool)
 export async function query<T = any>(sql: string, params?: any[]): Promise<T[]> {
   const db = await getPool();
-  const [rows] = await db.execute(sql, params);
-  return rows as T[];
+  return executeWithRetry(db, async () => {
+    const [rows] = await db.execute(sql, params);
+    return rows as T[];
+  });
 }
 
 // Standard-Execute (nutzt Default-Pool)
 export async function execute(sql: string, params?: any[]): Promise<mysql.ResultSetHeader> {
   const db = await getPool();
-  const [result] = await db.execute(sql, params);
-  return result as mysql.ResultSetHeader;
+  return executeWithRetry(db, async () => {
+    const [result] = await db.execute(sql, params);
+    return result as mysql.ResultSetHeader;
+  });
 }
 
 // Query mit Request-Context (nutzt dynamischen Pool wenn Token vorhanden)
 export async function queryWithRequest<T = any>(request: NextRequest, sql: string, params?: any[]): Promise<T[]> {
   const db = await getPoolForRequest(request);
-  const [rows] = await db.execute(sql, params);
-  return rows as T[];
+  return executeWithRetry(db, async () => {
+    const [rows] = await db.execute(sql, params);
+    return rows as T[];
+  });
 }
 
 // Execute mit Request-Context (nutzt dynamischen Pool wenn Token vorhanden)
 export async function executeWithRequest(request: NextRequest, sql: string, params?: any[]): Promise<mysql.ResultSetHeader> {
   const db = await getPoolForRequest(request);
-  const [result] = await db.execute(sql, params);
-  return result as mysql.ResultSetHeader;
+  return executeWithRetry(db, async () => {
+    const [result] = await db.execute(sql, params);
+    return result as mysql.ResultSetHeader;
+  });
+}
+
+// Pool-Reset Funktion für Notfälle (z.B. nach vielen Fehlern)
+export async function resetPools(): Promise<void> {
+  console.log('[DB] Resetting all connection pools...');
+  
+  // Default Pool zurücksetzen
+  if (pool) {
+    try {
+      await pool.end();
+    } catch (e) {
+      console.warn('[DB] Error closing default pool:', e);
+    }
+    pool = null;
+  }
+  
+  // Dynamische Pools zurücksetzen
+  for (const [key, dynPool] of dynamicPools) {
+    try {
+      await dynPool.end();
+    } catch (e) {
+      console.warn(`[DB] Error closing pool ${key}:`, e);
+    }
+  }
+  dynamicPools.clear();
+  loggedPools.clear();
+  
+  console.log('[DB] ✓ All pools reset');
 }

@@ -222,6 +222,8 @@ export default function HomePage() {
       if (username) {
         fd.append('username', username);
       }
+      // Online-Diktat: Turbo-Modus (kein Alignment, schnellere Antwort)
+      fd.append('speed_mode', 'turbo');
       const res = await fetchWithDbToken('/api/transcribe', { method: 'POST', body: fd });
       if (!res.ok) throw new Error(`Transkription fehlgeschlagen (${res.status})`);
       const data = await res.json();

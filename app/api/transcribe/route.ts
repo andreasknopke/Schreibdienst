@@ -257,7 +257,8 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
           languageCode,  // language (ISO code)
           modelToUse,    // model_name (from runtime config)
           "cuda",        // device
-          initialPrompt || "" // medical dictionary terms for better recognition
+          initialPrompt || "", // medical dictionary terms for better recognition
+          speedMode === 'turbo' // skip_alignment: true für Online (turbo), false für Offline (precision)
         ]
       }),
     });
@@ -526,6 +527,7 @@ export async function POST(request: NextRequest) {
     const form = await request.formData();
     const file = form.get('file');
     const username = form.get('username') as string | null;
+    const speedModeParam = form.get('speed_mode') as string | null;
     
     if (!file || !(file instanceof Blob)) {
       console.error('[Error] Invalid file:', file);
@@ -534,7 +536,7 @@ export async function POST(request: NextRequest) {
 
     const filename = (file as File).name || 'audio.webm';
     const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
-    console.log(`[Input] File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type || 'unknown'}, User: ${username || 'unknown'}`);
+    console.log(`[Input] File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type || 'unknown'}, User: ${username || 'unknown'}, Speed: ${speedModeParam || 'default'}`);
 
     // Lade Wörterbuch für initial_prompt bei WhisperX
     // Begrenzt auf MAX_PROMPT_WORDS wichtigste Begriffe um Halluzinationen zu vermeiden
@@ -568,9 +570,12 @@ export async function POST(request: NextRequest) {
     const whisperModel = runtimeConfig.whisperModel || 'guillaumekln/faster-whisper-large-v2';
     console.log(`[Config] WhisperX Online Model: ${whisperModel} (from config)`);
 
-    // Online-Transkription nutzt Turbo-Modus für minimale Latenz
-    const speedMode: 'turbo' | 'precision' | 'auto' = 'turbo';
-    console.log(`[Config] Speed Mode: ${speedMode} (optimized for live transcription)`);
+    // Speed mode: turbo für minimale Latenz (kein Alignment), precision für Wort-Timestamps
+    // Online-Diktat sollte immer turbo verwenden
+    const speedMode: 'turbo' | 'precision' | 'auto' = 
+      (speedModeParam === 'precision' ? 'precision' : 
+       speedModeParam === 'auto' ? 'auto' : 'turbo') as 'turbo' | 'precision' | 'auto';
+    console.log(`[Config] Speed Mode: ${speedMode} (${speedModeParam ? 'from request' : 'default turbo for online'})`);
 
     // Transkription mit gewähltem Provider
     let result;

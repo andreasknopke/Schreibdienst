@@ -639,18 +639,20 @@ export default function EditableTextWithMitlesen({
     let currentCharPos = 0;
     
     // Track removed words to pair with added words (for showing original in tooltip)
+    // Use a queue to properly pair removed words with their replacements
     let pendingRemovedWords: string[] = [];
     
-    for (const part of llmDiff) {
+    for (let partIdx = 0; partIdx < llmDiff.length; partIdx++) {
+      const part = llmDiff[partIdx];
+      
       if (part.removed) {
-        // Collect removed words for pairing with next added words
+        // Collect removed words - these are the originals before LLM correction
         const removedTokens = (part.value || '').split(/\s+/).filter(t => t.length > 0);
         pendingRemovedWords.push(...removedTokens);
         continue;
       }
       
       const tokens = part.value?.split(/(\s+)/) || [];
-      let addedWordIndex = 0;
       
       for (const token of tokens) {
         if (token.length === 0) continue;
@@ -666,9 +668,12 @@ export default function EditableTextWithMitlesen({
         }
         
         // For added words, try to pair with a removed word (the original)
+        // This allows showing "Original: X" in tooltip when hovering over changed words
         let originalWord: string | undefined;
-        if (part.added && !isWhitespace && pendingRemovedWords.length > 0) {
-          originalWord = pendingRemovedWords.shift();
+        if (part.added && !isWhitespace) {
+          if (pendingRemovedWords.length > 0) {
+            originalWord = pendingRemovedWords.shift();
+          }
         }
         
         wordsWithDiffStatus.push({
@@ -683,8 +688,9 @@ export default function EditableTextWithMitlesen({
         currentCharPos += token.length;
       }
       
-      // Clear pending removed words after processing added section
-      if (!part.added) {
+      // Only clear pending removed words when we hit an unchanged part
+      // This allows multi-word replacements to work correctly
+      if (!part.added && !part.removed) {
         pendingRemovedWords = [];
       }
     }
@@ -751,11 +757,16 @@ export default function EditableTextWithMitlesen({
       
       wordIdx++;
       
-      // Build tooltip: show original word if changed, otherwise show timestamp
+      // Build tooltip: show original word if changed, timestamp as fallback
       let tooltipText: string | undefined;
-      if (showDiff && diffStatus?.originalWord && diffStatus.originalWord !== token) {
-        tooltipText = `Original: ${diffStatus.originalWord}`;
+      if (showDiff && diffStatus?.originalWord) {
+        // Show original word for changed/added words
+        tooltipText = `Original: "${diffStatus.originalWord}"`;
+      } else if (showDiff && diffStatus?.isAdded && !diffStatus?.originalWord) {
+        // Word was added without a corresponding removed word
+        tooltipText = 'Neu hinzugefügt';
       } else if (tsWord) {
+        // Fallback to timestamp for unchanged words
         tooltipText = `${tsWord.start.toFixed(1)}s${tsWord.isInterpolated ? ' (geschätzt)' : ''}`;
       }
       

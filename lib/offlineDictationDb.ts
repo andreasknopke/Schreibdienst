@@ -690,8 +690,13 @@ export async function getUserDictationsWithRequest(
   username: string,
   includeArchived: boolean = false
 ): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
+  const start = Date.now();
+  const poolStart = Date.now();
   const db = await getPoolForRequest(request);
+  const poolTime = Date.now() - poolStart;
+  
   const archivedCondition = includeArchived ? '' : 'AND (archived IS NULL OR archived = FALSE)';
+  const queryStart = Date.now();
   const [rows] = await db.execute(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
             priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
@@ -708,6 +713,13 @@ export async function getUserDictationsWithRequest(
        created_at DESC`,
     [username]
   );
+  const queryTime = Date.now() - queryStart;
+  const totalTime = Date.now() - start;
+  
+  if (totalTime > 100) {
+    console.log(`[OfflineDb] getUserDictations: pool=${poolTime}ms, query=${queryTime}ms, total=${totalTime}ms, rows=${(rows as any[]).length}`);
+  }
+  
   return rows as Omit<OfflineDictation, 'audio_data'>[];
 }
 
@@ -718,7 +730,11 @@ export async function getAllDictationsWithRequest(
   userFilter?: string,
   includeArchived: boolean = false
 ): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
+  const start = Date.now();
+  const poolStart = Date.now();
   const db = await getPoolForRequest(request);
+  const poolTime = Date.now() - poolStart;
+  
   const conditions: string[] = [];
   const params: string[] = [];
   
@@ -737,6 +753,7 @@ export async function getAllDictationsWithRequest(
   
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   
+  const queryStart = Date.now();
   const [rows] = await db.execute(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
             priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
@@ -753,6 +770,13 @@ export async function getAllDictationsWithRequest(
        created_at DESC`,
     params
   );
+  const queryTime = Date.now() - queryStart;
+  const totalTime = Date.now() - start;
+  
+  if (totalTime > 100) {
+    console.log(`[OfflineDb] getAllDictations: pool=${poolTime}ms, query=${queryTime}ms, total=${totalTime}ms, rows=${(rows as any[]).length}`);
+  }
+  
   return rows as Omit<OfflineDictation, 'audio_data'>[];
 }
 

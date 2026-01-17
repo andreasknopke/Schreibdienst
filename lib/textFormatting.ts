@@ -125,7 +125,21 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   { pattern: /,\s*semikolon\b/gi, replacement: ';' },
   { pattern: /,\s*fragezeichen\b/gi, replacement: '?' },
   { pattern: /,\s*ausrufezeichen\b/gi, replacement: '!' },
+  // ", Punkt." → "." (mit nachfolgendem Punkt) - muss vor dem allgemeinen Pattern kommen
+  { pattern: /,\s*punkt\s*\./gi, replacement: '.' },
   { pattern: /,\s*punkt\b(?!\s*(eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|\d))/gi, replacement: '.' },
+  
+  // "Punkt" and "Komma" as control words when surrounded by punctuation
+  // ". Punkt." → "." (redundant spoken punctuation)
+  // ". Punkt " → ". " (Punkt as control word after sentence end)
+  // "? Punkt." → "?" etc.
+  { pattern: /([.!?])\s*punkt\s*\./gi, replacement: '$1' },  // ". Punkt." → "."
+  { pattern: /([.!?])\s*punkt\s+/gi, replacement: '$1 ' },   // ". Punkt " → ". "
+  { pattern: /([.!?])\s*komma\s*[.,]/gi, replacement: '$1' }, // ". Komma," → "."
+  
+  // Standalone "Punkt." at sentence boundary (after space or at start)
+  // This catches "... Text. Punkt." → "... Text."
+  { pattern: /\.\s+punkt\s*\./gi, replacement: '.' },
   
   // Punctuation - FIRST handle compound words ending with punctuation command
   // e.g., "Diagnosedoppelpunkt" → "Diagnose:"

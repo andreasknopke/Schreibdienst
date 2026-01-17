@@ -79,20 +79,28 @@ export function getDynamicPool(credentials: DbCredentials): mysql.Pool {
     waitForConnections: true,
     connectionLimit: 5,       // Reduziert von 10 auf 5 für Railway
     queueLimit: 0,
-    connectTimeout: 10000,    // 10s Verbindungs-Timeout
+    connectTimeout: 15000,    // 15s Verbindungs-Timeout (erhöht)
     enableKeepAlive: true,    // Keep-Alive für Railway
-    keepAliveInitialDelay: 10000, // Keep-Alive nach 10s
-    idleTimeout: 60000,       // Idle-Verbindungen nach 60s schließen
+    keepAliveInitialDelay: 5000, // Keep-Alive alle 5s (reduziert von 10s)
+    idleTimeout: 300000,      // Idle-Verbindungen nach 5 Minuten schließen (erhöht von 60s)
     ...(credentials.ssl ? { ssl: { rejectUnauthorized: false } } : {})
   });
   
-  // Event-Handler für Pool-Probleme
+  // Event-Handler für Pool-Diagnose
   newPool.on('connection', (connection) => {
-    console.log(`[DB Pool] New connection created`);
+    console.log(`[DB Pool] New connection created (dynamic)`);
+  });
+  
+  newPool.on('acquire', (connection) => {
+    // Log wenn Verbindung aus Pool geholt wird (nur bei Problemen aktivieren)
+  });
+  
+  newPool.on('enqueue', () => {
+    console.warn(`[DB Pool] ⚠️ Connection request queued - pool exhausted!`);
   });
   
   newPool.on('release', (connection) => {
-    // Stille Release - nur bei Debug loggen
+    // Stille Release
   });
   
   dynamicPools.set(poolKey, newPool);
@@ -165,15 +173,19 @@ export async function getPool(): Promise<mysql.Pool> {
     waitForConnections: true,
     connectionLimit: 5,          // Reduziert von 10 auf 5
     queueLimit: 0,
-    connectTimeout: 10000,       // 10s Verbindungs-Timeout
+    connectTimeout: 15000,       // 15s Verbindungs-Timeout (erhöht)
     enableKeepAlive: true,       // Keep-Alive für Railway
-    keepAliveInitialDelay: 10000, // Keep-Alive nach 10s
-    idleTimeout: 60000,          // Idle-Verbindungen nach 60s schließen
+    keepAliveInitialDelay: 5000, // Keep-Alive alle 5s (reduziert)
+    idleTimeout: 300000,         // Idle-Verbindungen nach 5 Minuten schließen (erhöht)
   });
   
-  // Event-Handler für Pool-Probleme
+  // Event-Handler für Pool-Diagnose
   pool.on('connection', (connection) => {
     console.log(`[DB Pool] New default connection created`);
+  });
+  
+  pool.on('enqueue', () => {
+    console.warn(`[DB Pool] ⚠️ Default pool: Connection request queued - pool exhausted!`);
   });
   
   // Test connection

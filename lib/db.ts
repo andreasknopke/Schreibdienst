@@ -65,9 +65,12 @@ export function getDynamicPool(credentials: DbCredentials): mysql.Pool {
     password: credentials.password,
     database: credentials.database,
     waitForConnections: true,
-    connectionLimit: 5,
+    connectionLimit: 10,      // Erhöht von 5 auf 10
     queueLimit: 0,
-    ...(credentials.ssl ? { ssl: {} } : {})
+    connectTimeout: 10000,    // 10s Verbindungs-Timeout
+    enableKeepAlive: true,    // Keep-Alive für Railway
+    keepAliveInitialDelay: 10000, // Keep-Alive nach 10s
+    ...(credentials.ssl ? { ssl: { rejectUnauthorized: false } } : {})
   });
   
   dynamicPools.set(poolKey, newPool);
@@ -77,6 +80,9 @@ export function getDynamicPool(credentials: DbCredentials): mysql.Pool {
 // ============================================================
 // Pool basierend auf Request Header abrufen
 // ============================================================
+// Track ob wir den Pool schon einmal für diese Credentials verwendet haben (verhindert Spam-Logs)
+const loggedPools = new Set<string>();
+
 export async function getPoolForRequest(request?: NextRequest): Promise<mysql.Pool> {
   // Prüfe auf X-DB-Token Header
   if (request) {
@@ -84,7 +90,12 @@ export async function getPoolForRequest(request?: NextRequest): Promise<mysql.Po
     if (dbToken) {
       const credentials = decodeDbTokenServer(dbToken);
       if (credentials) {
-        console.log(`[DB] ✓ Verwende dynamische DB: ${credentials.host}/${credentials.database}`);
+        const poolKey = `${credentials.host}:${credentials.port}:${credentials.database}`;
+        // Nur beim ersten Mal loggen
+        if (!loggedPools.has(poolKey)) {
+          console.log(`[DB] ✓ Verwende dynamische DB: ${credentials.host}/${credentials.database}`);
+          loggedPools.add(poolKey);
+        }
         return getDynamicPool(credentials);
       } else {
         console.warn('[DB] ❌ Ungültiger DB-Token, verwende Default-Pool');
@@ -120,6 +131,9 @@ export async function getPool(): Promise<mysql.Pool> {
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
+    connectTimeout: 10000,       // 10s Verbindungs-Timeout
+    enableKeepAlive: true,       // Keep-Alive für Railway
+    keepAliveInitialDelay: 10000, // Keep-Alive nach 10s
   });
   
   // Test connection

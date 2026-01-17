@@ -561,14 +561,24 @@ export default function EditableTextWithMitlesen({
       localCharPos += text.length;
     }
     
-    // Build list of words with their diff status and character positions
-    const wordsWithDiffStatus: { word: string; isAdded: boolean; isManual: boolean; isWhitespace: boolean; charPos: number }[] = [];
+    // Build list of words with their diff status, character positions, and original words
+    const wordsWithDiffStatus: { word: string; isAdded: boolean; isManual: boolean; isWhitespace: boolean; charPos: number; originalWord?: string }[] = [];
     let currentCharPos = 0;
     
+    // Track removed words to pair with added words (for showing original in tooltip)
+    let pendingRemovedWords: string[] = [];
+    
     for (const part of llmDiff) {
-      if (part.removed) continue;
+      if (part.removed) {
+        // Collect removed words for pairing with next added words
+        const removedTokens = (part.value || '').split(/\s+/).filter(t => t.length > 0);
+        pendingRemovedWords.push(...removedTokens);
+        continue;
+      }
       
       const tokens = part.value?.split(/(\s+)/) || [];
+      let addedWordIndex = 0;
+      
       for (const token of tokens) {
         if (token.length === 0) continue;
         
@@ -582,15 +592,27 @@ export default function EditableTextWithMitlesen({
           }
         }
         
+        // For added words, try to pair with a removed word (the original)
+        let originalWord: string | undefined;
+        if (part.added && !isWhitespace && pendingRemovedWords.length > 0) {
+          originalWord = pendingRemovedWords.shift();
+        }
+        
         wordsWithDiffStatus.push({
           word: token,
           isAdded: !isWhitespace && part.added === true,
           isManual: !isWhitespace && isManual,
           isWhitespace,
-          charPos: currentCharPos
+          charPos: currentCharPos,
+          originalWord
         });
         
         currentCharPos += token.length;
+      }
+      
+      // Clear pending removed words after processing added section
+      if (!part.added) {
+        pendingRemovedWords = [];
       }
     }
     
@@ -599,11 +621,16 @@ export default function EditableTextWithMitlesen({
 
   // Build a map of diff status for each word based on character position
   // This ensures only the specific word instance is marked, not all identical words
+  // Also includes originalWord for tooltip display
   const wordDiffStatusMap = useMemo(() => {
-    const map = new Map<number, { isAdded: boolean; isManual: boolean }>();
+    const map = new Map<number, { isAdded: boolean; isManual: boolean; originalWord?: string }>();
     for (const item of diffResult.wordsWithDiffStatus) {
       if (!item.isWhitespace) {
-        map.set(item.charPos, { isAdded: item.isAdded, isManual: item.isManual });
+        map.set(item.charPos, { 
+          isAdded: item.isAdded, 
+          isManual: item.isManual,
+          originalWord: item.originalWord
+        });
       }
     }
     return map;
@@ -639,8 +666,9 @@ export default function EditableTextWithMitlesen({
       
       // Get diff status for styling (only if showDiff is on) - now by character position
       let diffClass = '';
+      let diffStatus: { isAdded: boolean; isManual: boolean; originalWord?: string } | undefined;
       if (showDiff) {
-        const diffStatus = wordDiffStatusMap.get(tokenCharPos);
+        diffStatus = wordDiffStatusMap.get(tokenCharPos);
         if (diffStatus?.isManual) {
           diffClass = 'bg-blue-200 text-blue-900 dark:bg-blue-600 dark:text-white font-medium rounded px-0.5 ';
         } else if (diffStatus?.isAdded) {
@@ -649,6 +677,14 @@ export default function EditableTextWithMitlesen({
       }
       
       wordIdx++;
+      
+      // Build tooltip: show original word if changed, otherwise show timestamp
+      let tooltipText: string | undefined;
+      if (showDiff && diffStatus?.originalWord && diffStatus.originalWord !== token) {
+        tooltipText = `Original: ${diffStatus.originalWord}`;
+      } else if (tsWord) {
+        tooltipText = `${tsWord.start.toFixed(1)}s${tsWord.isInterpolated ? ' (geschätzt)' : ''}`;
+      }
       
       elements.push(
         <span
@@ -662,7 +698,7 @@ export default function EditableTextWithMitlesen({
                 ? 'text-gray-400 dark:text-gray-500 ' 
                 : ''
           }${tsWord?.isInterpolated ? 'italic ' : ''}cursor-pointer transition-colors duration-100`}
-          title={tsWord ? `${tsWord.start.toFixed(1)}s${tsWord.isInterpolated ? ' (geschätzt)' : ''}` : undefined}
+          title={tooltipText}
         >
           {token}
         </span>

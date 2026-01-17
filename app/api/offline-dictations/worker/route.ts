@@ -1255,19 +1255,31 @@ async function callLLM(
     body.response_format = { type: 'json_object' };
   }
   
-  const res = await fetch(`${config.baseUrl}/v1/chat/completions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  const url = `${config.baseUrl}/v1/chat/completions`;
+  console.log(`[Worker] LLM request to: ${url} (provider: ${config.provider}, model: ${config.model})`);
   
-  if (!res.ok) {
-    const errorText = await res.text();
-    console.error(`[Worker] LLM API error (${res.status}): ${errorText.substring(0, 200)}`);
-    throw new Error(`LLM API error (${res.status}): ${errorText.substring(0, 100)}`);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`[Worker] LLM API error (${res.status}): ${errorText.substring(0, 200)}`);
+      throw new Error(`LLM API error (${res.status}): ${errorText.substring(0, 100)}`);
+    }
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || '';
+  } catch (error: any) {
+    // More descriptive error for connection failures
+    if (error.cause?.code === 'ECONNREFUSED' || error.message === 'fetch failed') {
+      console.error(`[Worker] Cannot connect to LLM at ${url}. Is LM Studio running and accessible?`);
+      throw new Error(`Cannot connect to LLM at ${config.baseUrl}. Make sure LM Studio is running and LLM_STUDIO_URL is set correctly (e.g., http://host.docker.internal:1234 for Docker)`);
+    }
+    throw error;
   }
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() || '';
 }
 
 // POST: Trigger worker to process pending dictations

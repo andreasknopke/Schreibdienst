@@ -170,7 +170,7 @@ export default function ConfigPanel() {
   // Whisper-Modelle für Online-Transkription (aus Model_Manager.py)
   const whisperModels = [
     { id: 'large-v3', name: 'Large-v3' },
-    { id: 'guillaumekln/faster-whisper-large-v2', name: 'Large-v3 German 2 (empfohlen)' },
+    { id: 'guillaumekln/faster-whisper-large-v2', name: 'Large-v2 (empfohlen)' },
     { id: 'large-v2', name: 'Large-v2' },
     { id: 'cstr/whisper-large-v3-turbo-german-int8_float32', name: 'Large-v3 Turbo German (schnell)' },
   ];
@@ -178,9 +178,9 @@ export default function ConfigPanel() {
   // Whisper Offline-Modelle für Offline-Transkription (aus Model_Manager.py)
   const whisperOfflineModels = [
     { id: 'large-v3', name: 'Large-v3' },
-    { id: 'large-v3-german-2', name: 'Large-v3 German 2 (empfohlen)' },
+    { id: 'guillaumekln/faster-whisper-large-v2', name: 'Large-v2 (empfohlen)' },
     { id: 'large-v2', name: 'Large-v2' },
-    { id: 'large-v3-turbo-german', name: 'Large-v3 Turbo German (schnell)' },
+    { id: 'cstr/whisper-large-v3-turbo-german-int8_float32', name: 'Large-v3 Turbo German (schnell)' },
   ];
 
   const openaiModels = [
@@ -283,7 +283,7 @@ export default function ConfigPanel() {
               <span className="ml-1 text-gray-400">(für Diktate ohne Internetverbindung)</span>
             </label>
             <select
-              value={config.whisperOfflineModel || 'large-v3-german-2'}
+              value={config.whisperOfflineModel || 'guillaumekln/faster-whisper-large-v2'}
               onChange={(e) => updateConfig({ whisperOfflineModel: e.target.value as any })}
               disabled={!isRoot || saving}
               className="input text-sm w-full max-w-xs"

@@ -312,11 +312,38 @@ async function doublePrecisionMerge(
     const data = await res.json();
     finalText = data.choices?.[0]?.message?.content?.trim() || result1.text;
   } else {
-    // LM Studio or fallback
-    console.warn('[Worker DoublePrecision] LM Studio not supported for merge, using first transcription');
-    modelName = 'lmstudio';
+    // LM Studio
+    const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
+    const lmStudioModel = process.env.LLM_STUDIO_MODEL || 'local-model';
+    
+    console.log(`[Worker DoublePrecision] Using LM Studio for merge: ${lmStudioUrl}`);
+    modelName = lmStudioModel;
     modelProvider = 'lmstudio';
-    finalText = result1.text;
+    
+    const res = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer lm-studio',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: lmStudioModel,
+        messages: [
+          { role: 'system', content: mergePrompt },
+          { role: 'user', content: 'Erstelle den finalen Text.' }
+        ],
+        temperature: 0.1,
+      }),
+    });
+    
+    if (!res.ok) {
+      console.error(`[Worker DoublePrecision] LM Studio API error: ${res.status}`);
+      // Fallback to first transcription if LM Studio fails
+      finalText = result1.text;
+    } else {
+      const data = await res.json();
+      finalText = data.choices?.[0]?.message?.content?.trim() || result1.text;
+    }
   }
   
   console.log(`[Worker DoublePrecision] ✓ Merged text length: ${finalText.length} chars`);

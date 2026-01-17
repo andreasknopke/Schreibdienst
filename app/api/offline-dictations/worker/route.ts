@@ -930,6 +930,29 @@ async function correctText(request: NextRequest, text: string, username: string)
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
   const promptAddition = runtimeConfig.llmPromptAddition?.trim();
   
+  // Load user dictionary for LLM hints
+  let dictionaryPromptSection = '';
+  if (username) {
+    try {
+      const dictionary = await loadDictionaryWithRequest(request, username);
+      if (dictionary.entries.length > 0) {
+        const dictionaryLines = dictionary.entries.map(e => 
+          `  "${e.wrong}" → "${e.correct}"`
+        ).join('\n');
+        dictionaryPromptSection = `
+
+BENUTZERWÖRTERBUCH - Bekannte Korrekturen:
+Die folgenden Wörter werden häufig falsch transkribiert. Wenn du im Text ein Wort findest, 
+das einem dieser falschen Wörter entspricht oder sehr ähnlich klingt, korrigiere es zum richtigen Begriff,
+sofern es im medizinischen Kontext Sinn ergibt:
+${dictionaryLines}`;
+        console.log(`[Worker] Dictionary loaded for LLM prompt: ${dictionary.entries.length} entries`);
+      }
+    } catch (err) {
+      console.warn('[Worker] Failed to load dictionary for LLM prompt:', err);
+    }
+  }
+  
   // Note: Dictionary corrections are now applied programmatically in preprocessTranscription()
   // This saves tokens and ensures deterministic corrections
   
@@ -975,7 +998,7 @@ HAUPTAUFGABEN:
    - "neuer Absatz" → Absatzumbruch (Leerzeile)
    - "neue Zeile" → Zeilenumbruch
    - "Punkt", "Komma", "Doppelpunkt" → entsprechendes Satzzeichen
-${promptAddition ? `\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : ''}
+${dictionaryPromptSection}${promptAddition ? `\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : ''}
 
 KRITISCH - AUSGABEFORMAT:
 - Gib AUSSCHLIESSLICH den korrigierten Text zurück - NICHTS ANDERES!

@@ -567,9 +567,25 @@ export async function POST(req: NextRequest) {
     const promptAddition = runtimeConfig.llmPromptAddition?.trim();
     console.log(`[Correct] Runtime config loaded: llmProvider=${runtimeConfig.llmProvider}, promptAddition=${promptAddition ? promptAddition.substring(0, 50) + '...' : 'none'}`);
     
+    // Build dictionary prompt section for LLM hints (words to correct if similar found)
+    let dictionaryPromptSection = '';
+    if (dictionaryEntries.length > 0) {
+      const dictionaryLines = dictionaryEntries.map(e => 
+        `  "${e.wrong}" → "${e.correct}"`
+      ).join('\n');
+      dictionaryPromptSection = `
+
+BENUTZERWÖRTERBUCH - Bekannte Korrekturen:
+Die folgenden Wörter werden häufig falsch transkribiert. Wenn du im Text ein Wort findest, 
+das einem dieser falschen Wörter entspricht oder sehr ähnlich klingt, korrigiere es zum richtigen Begriff,
+sofern es im medizinischen Kontext Sinn ergibt:
+${dictionaryLines}`;
+      console.log(`[Correct] Dictionary added to LLM prompt: ${dictionaryEntries.length} entries`);
+    }
+    
     // Note: Dictionary is now applied programmatically above, so we don't need it in the prompt
-    // This saves tokens and ensures deterministic corrections
-    const promptSuffix = promptAddition || '';
+    // for deterministic corrections. The LLM section above is for catching similar words.
+    const promptSuffix = (dictionaryPromptSection + (promptAddition ? `\n\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : '')).trim();
     
     // Combine system prompt with dictionary and custom additions
     const enhancedSystemPrompt = promptSuffix 

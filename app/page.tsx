@@ -716,11 +716,22 @@ export default function HomePage() {
 
     // Fast Whisper WebSocket Modus
     if (runtimeConfig?.transcriptionProvider === 'fast_whisper' && runtimeConfig.fastWhisperWsUrl) {
-      console.log('[FastWhisper] Starting WebSocket recording to', runtimeConfig.fastWhisperWsUrl);
+      let wsUrl = runtimeConfig.fastWhisperWsUrl;
+      
+      // HTTPS-Seiten erfordern wss:// (WebSocket Secure)
+      // Automatisch konvertieren wenn nötig
+      if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+        if (wsUrl.startsWith('ws://')) {
+          wsUrl = wsUrl.replace('ws://', 'wss://');
+          console.log('[FastWhisper] Converted to secure WebSocket:', wsUrl);
+        }
+      }
+      
+      console.log('[FastWhisper] Starting WebSocket recording to', wsUrl);
       
       try {
         // WebSocket verbinden
-        const ws = new WebSocket(runtimeConfig.fastWhisperWsUrl);
+        const ws = new WebSocket(wsUrl);
         fastWhisperWsRef.current = ws;
         
         ws.onopen = async () => {
@@ -814,7 +825,7 @@ export default function HomePage() {
         
         ws.onerror = (event) => {
           console.error('[FastWhisper] WebSocket error:', event);
-          setError('Fast Whisper Verbindungsfehler');
+          setError('Fast Whisper Verbindungsfehler - Stelle sicher, dass der Server über wss:// (SSL) erreichbar ist');
         };
         
         ws.onclose = () => {

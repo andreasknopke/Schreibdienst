@@ -668,34 +668,23 @@ export default function HomePage() {
     
     console.log('[FastWhisper] Received:', text);
     
+    // Fast Whisper Server sendet jeden Satz einzeln - wir müssen akkumulieren
     // Aktualisiere Transkript basierend auf Modus
     if (mode === 'befund') {
       switch (activeField) {
         case 'methodik':
-          setMethodik(prev => {
-            const base = existingMethodikRef.current;
-            return base ? base + ' ' + text : text;
-          });
+          setMethodik(prev => prev ? prev + ' ' + text : text);
           break;
         case 'beurteilung':
-          setBeurteilung(prev => {
-            const base = existingBeurteilungRef.current;
-            return base ? base + ' ' + text : text;
-          });
+          setBeurteilung(prev => prev ? prev + ' ' + text : text);
           break;
         case 'befund':
         default:
-          setTranscript(prev => {
-            const base = existingTextRef.current;
-            return base ? base + ' ' + text : text;
-          });
+          setTranscript(prev => prev ? prev + ' ' + text : text);
           break;
       }
     } else {
-      setTranscript(prev => {
-        const base = existingTextRef.current;
-        return base ? base + ' ' + text : text;
-      });
+      setTranscript(prev => prev ? prev + ' ' + text : text);
     }
   }, [mode, activeField]);
 
@@ -825,7 +814,9 @@ export default function HomePage() {
         
         ws.onerror = (event) => {
           console.error('[FastWhisper] WebSocket error:', event);
-          setError('Fast Whisper Verbindungsfehler - Stelle sicher, dass der Server über wss:// (SSL) erreichbar ist');
+          // Bei selbst-signierten Zertifikaten muss das Zertifikat erst im Browser akzeptiert werden
+          const serverUrl = wsUrl.replace('wss://', 'https://').replace('ws://', 'http://');
+          setError(`Fast Whisper Verbindungsfehler - Bei selbst-signierten SSL-Zertifikaten: Öffne zuerst ${serverUrl} im Browser und akzeptiere das Zertifikat, dann neu laden.`);
         };
         
         ws.onclose = () => {

@@ -820,23 +820,90 @@ export default function HomePage() {
     let processedText = text.trim();
     let endsWithPeriod = false;
     
-    // Prüfe auf expliziten "Punkt" Sprachbefehl
-    const punktPatterns = [
-      /\bpunkt\s*$/i,           // "...Punkt" am Ende
-      /\bpunkt\s*[.!?]?\s*$/i,  // "...Punkt." am Ende
-    ];
+    // Prüfe ob der Text NUR "Punkt" ist (als separater Sprachbefehl)
+    const isOnlyPunkt = /^punkt[.!?]?$/i.test(processedText);
     
-    const hasPunktCommand = punktPatterns.some(p => p.test(processedText));
+    if (isOnlyPunkt) {
+      // "Punkt" wurde als eigener Satz diktiert - füge Punkt zum vorherigen Text hinzu
+      console.log('[FastWhisper] Separater Punkt-Befehl erkannt');
+      
+      const getFinalRef = () => {
+        if (mode === 'befund') {
+          switch (activeField) {
+            case 'methodik': return fastWhisperFinalMethodikRef;
+            case 'beurteilung': return fastWhisperFinalBeurteilungRef;
+            default: return fastWhisperFinalTextRef;
+          }
+        }
+        return fastWhisperFinalTextRef;
+      };
+      
+      const getExistingRef = () => {
+        if (mode === 'befund') {
+          switch (activeField) {
+            case 'methodik': return existingMethodikRef;
+            case 'beurteilung': return existingBeurteilungRef;
+            default: return existingTextRef;
+          }
+        }
+        return existingTextRef;
+      };
+      
+      const setText = (value: string) => {
+        if (mode === 'befund') {
+          switch (activeField) {
+            case 'methodik': setMethodik(value); break;
+            case 'beurteilung': setBeurteilung(value); break;
+            default: setTranscript(value); break;
+          }
+        } else {
+          setTranscript(value);
+        }
+      };
+      
+      const finalRef = getFinalRef();
+      const existingRef = getExistingRef();
+      
+      // Punkt an den letzten Text anhängen (ohne Leerzeichen)
+      if (finalRef.current) {
+        finalRef.current = finalRef.current.replace(/\s*$/, '') + '.';
+      }
+      
+      // Nächster Satz beginnt groß
+      fastWhisperEndsWithPeriodRef.current = true;
+      
+      // Anzeige aktualisieren
+      const displayText = [existingRef.current, finalRef.current].filter(p => p.trim()).join(' ');
+      setText(displayText);
+      return; // Fertig, kein weiterer Text zu verarbeiten
+    }
     
-    if (hasPunktCommand) {
-      // "Punkt" wurde gesagt - entferne das Wort und setze echten Punkt
-      processedText = processedText.replace(/\s*\bpunkt\s*[.!?]?\s*$/i, '').trim() + '.';
+    // Ersetze "Punkt" überall im Text durch echten Punkt (auch mitten im Satz)
+    // Pattern: "Punkt" gefolgt von Leerzeichen und Großbuchstaben (neuer Satz)
+    // Oder "Punkt" am Ende
+    const punktMittenImText = /\s+punkt\s+([A-ZÄÖÜ])/gi;
+    const punktAmEnde = /\s+punkt\s*[.!?]?\s*$/i;
+    
+    // Erst Punkt mitten im Text ersetzen
+    if (punktMittenImText.test(processedText)) {
+      processedText = processedText.replace(/\s+punkt\s+([A-ZÄÖÜ])/gi, '. $1');
+      console.log('[FastWhisper] Punkt-Befehl mitten im Text erkannt');
+    }
+    
+    // Dann Punkt am Ende prüfen
+    if (punktAmEnde.test(processedText)) {
+      processedText = processedText.replace(/\s+punkt\s*[.!?]?\s*$/i, '.');
       endsWithPeriod = true;
-      console.log('[FastWhisper] Punkt-Befehl erkannt');
-    } else {
-      // Kein Punkt-Befehl: Entferne automatische Satzzeichen am Ende
+      console.log('[FastWhisper] Punkt-Befehl am Ende erkannt');
+    }
+    
+    // Entferne automatische Satzzeichen am Ende (wenn kein expliziter Punkt)
+    if (!endsWithPeriod) {
       processedText = processedText.replace(/[.!?]+\s*$/, '').trim();
     }
+    
+    // Prüfe ob der Text jetzt mit Punkt endet
+    endsWithPeriod = /\.\s*$/.test(processedText);
     
     // Groß-/Kleinschreibung basierend auf vorherigem Satzende
     if (!fastWhisperEndsWithPeriodRef.current && processedText.length > 0) {

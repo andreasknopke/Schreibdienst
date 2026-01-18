@@ -4,7 +4,7 @@ import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 export const runtime = 'nodejs';
 
 /**
- * Schnelle Fachwort-Korrektur mit OpenAI GPT-4o-mini
+ * Schnelle Fachwort-Korrektur mit LM Studio (lokal)
  * Korrigiert nur medizinische Fachbegriffe, keine Grammatik/Satzbau
  */
 
@@ -17,12 +17,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Text fehlt' }, { status: 400 });
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      // Ohne API Key: Text unverändert zurückgeben
-      console.log('[QuickCorrect] No OpenAI API key, returning original text');
-      return NextResponse.json({ corrected: text, changed: false });
-    }
+    // LM Studio URL aus Umgebungsvariable
+    const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
+    const lmStudioModel = process.env.LLM_STUDIO_MODEL || 'meta-llama-3.1-8b-instruct';
 
     // Referenz-Begriffe aus Textbausteinen formatieren
     const termsContext = referenceTerms && referenceTerms.length > 0
@@ -46,14 +43,16 @@ Beispiele:
 - "Die Ventrikel sind normweit" → "Die Ventrikel sind normweit" (keine Änderung nötig)
 ${termsContext}`;
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    console.log('[QuickCorrect] Using LM Studio at', lmStudioUrl);
+    const startTime = Date.now();
+
+    const response = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: lmStudioModel,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: text }
@@ -63,9 +62,11 @@ ${termsContext}`;
       }),
     });
 
+    const elapsed = Date.now() - startTime;
+
     if (!response.ok) {
       const error = await response.text();
-      console.error('[QuickCorrect] OpenAI error:', error);
+      console.error('[QuickCorrect] LM Studio error:', error);
       return NextResponse.json({ corrected: text, changed: false, error: 'API error' });
     }
 
@@ -73,11 +74,12 @@ ${termsContext}`;
     const corrected = data.choices?.[0]?.message?.content?.trim() || text;
     const changed = corrected !== text;
 
+    console.log(`[QuickCorrect] LM Studio response in ${elapsed}ms`);
     if (changed) {
       console.log('[QuickCorrect] Corrected:', text, '→', corrected);
     }
 
-    return NextResponse.json({ corrected, changed });
+    return NextResponse.json({ corrected, changed, elapsed });
 
   } catch (error: any) {
     console.error('[QuickCorrect] Error:', error);

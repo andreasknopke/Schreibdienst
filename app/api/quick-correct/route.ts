@@ -154,6 +154,47 @@ export async function POST(request: NextRequest) {
     // Bereinige Output (manchmal fügt das Modell Zusätze hinzu)
     corrected = corrected.split('\n')[0].trim();
     
+    // HALLUZINATIONS-FILTER: Erkenne Block von kommagetrennten Prompt-Begriffen
+    // Typisches Muster: "(Begriff1, Begriff2, Begriff3, ..." - viele Begriffe hintereinander
+    const allPromptTerms = [...relevantTerms, ...dictCorrections.map((d: {wrong: string, correct: string}) => d.correct)];
+    const promptTermsLower = new Set(allPromptTerms.map(t => t.toLowerCase()));
+    
+    // Zähle wie viele Prompt-Begriffe in einem kurzen Abschnitt vorkommen
+    // Wenn >5 Begriffe kommasepariert hintereinander stehen = Halluzination
+    const segments = corrected.split(/[,;]\s*/);
+    let consecutivePromptTerms = 0;
+    let maxConsecutive = 0;
+    
+    for (const segment of segments) {
+      const segmentLower = segment.toLowerCase().trim();
+      // Prüfe ob dieses Segment ein Prompt-Begriff ist (oder sehr ähnlich)
+      const isPromptTerm = allPromptTerms.some(term => {
+        const termLower = term.toLowerCase();
+        return segmentLower === termLower || 
+               segmentLower.startsWith(termLower) || 
+               termLower.startsWith(segmentLower);
+      });
+      
+      if (isPromptTerm && segment.length < 30) { // Kurze Segmente = wahrscheinlich Liste
+        consecutivePromptTerms++;
+        maxConsecutive = Math.max(maxConsecutive, consecutivePromptTerms);
+      } else {
+        consecutivePromptTerms = 0; // Reset bei normalem Text
+      }
+    }
+    
+    // Wenn >5 Prompt-Begriffe hintereinander = definitiv Halluzination
+    if (maxConsecutive >= 5) {
+      console.warn(`[QuickCorrect] Halluzination erkannt: ${maxConsecutive} Prompt-Begriffe hintereinander`);
+      return NextResponse.json({ corrected: text, changed: false, elapsed, filtered: true });
+    }
+    
+    // Längenvalidierung: Ausgabe darf nicht viel länger sein als Input
+    if (corrected.length > text.length * 1.5) {
+      console.warn(`[QuickCorrect] Ausgabe zu lang (${corrected.length} vs ${text.length}), vermutlich Halluzination`);
+      return NextResponse.json({ corrected: text, changed: false, elapsed, filtered: true });
+    }
+    
     const changed = corrected !== text;
 
     console.log(`[QuickCorrect] ${elapsed}ms${changed ? ` | "${text}" → "${corrected}"` : ''}`);

@@ -765,12 +765,21 @@ export default function HomePage() {
   }, [startRecording, stopRecording, handleReset]);
 
   // Schnelle LLM-Fachwort-Korrektur
-  // Schnelle LLM-Fachwort-Korrektur (ohne Referenz-Begriffe um Halluzinationen zu vermeiden!)
+  // Schnelle LLM-Fachwort-Korrektur (mit Halluzinations-Filter auf Server-Seite)
   const quickCorrectWithLLM = useCallback(async (text: string): Promise<string> => {
     try {
-      // WICHTIG: Keine Referenz-Begriffe oder Wörterbuch-Einträge senden!
-      // Das LLM halluziniert diese sonst in den Output.
-      // Die Begriffe werden nur bei der finalen Korrektur (Korrigieren-Button) verwendet.
+      // Fachwörter aus Textbausteinen extrahieren
+      const referenceTerms = templates
+        .map(t => t.content)
+        .join(' ')
+        .split(/\s+/)
+        .filter(word => word.length > 3)
+        .filter((word, index, self) => self.indexOf(word) === index); // Unique
+      
+      // Wörterbuch-Korrekturen formatieren
+      const dictionaryCorrections = dictionaryEntries
+        .slice(0, 100) // Max 100 Einträge (reduziert für weniger Halluzinationen)
+        .map(entry => ({ wrong: entry.wrong, correct: entry.correct }));
       
       const response = await fetch('/api/quick-correct', {
         method: 'POST',
@@ -781,8 +790,8 @@ export default function HomePage() {
         },
         body: JSON.stringify({ 
           text,
-          referenceTerms: [], // LEER - keine Begriffe um Halluzinationen zu vermeiden
-          dictionaryCorrections: [] // LEER
+          referenceTerms: referenceTerms.slice(0, 100), // Max 100 (reduziert)
+          dictionaryCorrections
         })
       });
       
@@ -793,9 +802,9 @@ export default function HomePage() {
       
       const data = await response.json();
       
-      // Validierung: Ausgabe darf nicht viel länger sein als Input (Halluzinations-Schutz)
-      if (data.corrected && data.corrected.length > text.length * 1.5) {
-        console.warn('[QuickCorrect] Ausgabe zu lang, vermutlich Halluzination. Ignoriere.');
+      // Server hat Halluzination gefiltert
+      if (data.filtered) {
+        console.log('[QuickCorrect] Server filtered hallucination');
         return text;
       }
       
@@ -807,7 +816,7 @@ export default function HomePage() {
       console.warn('[QuickCorrect] Error:', error);
       return text;
     }
-  }, [getAuthHeader, getDbTokenHeader]);
+  }, [templates, dictionaryEntries, getAuthHeader, getDbTokenHeader]);
 
   // Ref um zu tracken ob der letzte Text mit Punkt endete (für Groß-/Kleinschreibung)
   const fastWhisperEndsWithPeriodRef = useRef<boolean>(true); // Start mit true = erster Buchstabe groß

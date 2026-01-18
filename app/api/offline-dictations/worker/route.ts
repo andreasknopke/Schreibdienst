@@ -394,7 +394,10 @@ async function doublePrecisionMerge(
 // Transcribe audio using the same logic as the transcribe API
 async function transcribeAudio(request: NextRequest, audioBlob: Blob, dictationId: number, username?: string): Promise<{ text: string; segments?: any[] }> {
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
-  const provider = runtimeConfig.transcriptionProvider;
+  // Fast Whisper ist nur für Online-Transkription - bei Offline auf WhisperX zurückfallen
+  const provider = runtimeConfig.transcriptionProvider === 'fast_whisper' 
+    ? 'whisperx' 
+    : runtimeConfig.transcriptionProvider;
   
   // Lade Wörterbuch für initial_prompt bei WhisperX
   // Nur Einträge mit useInPrompt=true werden verwendet

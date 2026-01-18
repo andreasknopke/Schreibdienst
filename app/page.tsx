@@ -878,31 +878,37 @@ export default function HomePage() {
       return; // Fertig, kein weiterer Text zu verarbeiten
     }
     
-    // Ersetze "Punkt" überall im Text durch echten Punkt (auch mitten im Satz)
-    // Pattern: "Punkt" gefolgt von Leerzeichen und Großbuchstaben (neuer Satz)
-    // Oder "Punkt" am Ende
-    const punktMittenImText = /\s+punkt\s+([A-ZÄÖÜ])/gi;
-    const punktAmEnde = /\s+punkt\s*[.!?]?\s*$/i;
+    // Ersetze "Punkt" überall im Text durch echten Punkt
+    // Verschiedene Muster die der Server senden kann:
+    // 1. "Text, Punkt, weiter" → ", Punkt," zwischen Kommas
+    // 2. "Text Punkt. Weiter" → " Punkt." mit automatischem Punkt
+    // 3. "Text Punkt Weiter" → " Punkt " vor Großbuchstabe
+    // 4. "Text Punkt" → am Ende
     
-    // Erst Punkt mitten im Text ersetzen
-    if (punktMittenImText.test(processedText)) {
-      processedText = processedText.replace(/\s+punkt\s+([A-ZÄÖÜ])/gi, '. $1');
-      console.log('[FastWhisper] Punkt-Befehl mitten im Text erkannt');
+    // Ersetze alle Varianten von "Punkt" als Sprachbefehl
+    // Pattern: Punkt umgeben von Satzzeichen, Leerzeichen, oder am Ende
+    const punktPatterns = [
+      // ", Punkt," oder ", Punkt " → "."
+      { pattern: /,\s*punkt\s*,?\s*/gi, replacement: '. ' },
+      // " Punkt." oder " Punkt. " → "."
+      { pattern: /\s+punkt\s*\.\s*/gi, replacement: '. ' },
+      // " Punkt " gefolgt von Großbuchstabe → ". "
+      { pattern: /\s+punkt\s+(?=[A-ZÄÖÜ])/gi, replacement: '. ' },
+      // " Punkt" am Ende → "."
+      { pattern: /\s+punkt\s*$/i, replacement: '.' },
+    ];
+    
+    for (const { pattern, replacement } of punktPatterns) {
+      if (pattern.test(processedText)) {
+        processedText = processedText.replace(pattern, replacement);
+        console.log('[FastWhisper] Punkt-Befehl erkannt und ersetzt');
+      }
     }
     
-    // Dann Punkt am Ende prüfen
-    if (punktAmEnde.test(processedText)) {
-      processedText = processedText.replace(/\s+punkt\s*[.!?]?\s*$/i, '.');
-      endsWithPeriod = true;
-      console.log('[FastWhisper] Punkt-Befehl am Ende erkannt');
-    }
+    // Bereinige doppelte Leerzeichen und Punkte
+    processedText = processedText.replace(/\s+/g, ' ').replace(/\.+/g, '.').trim();
     
-    // Entferne automatische Satzzeichen am Ende (wenn kein expliziter Punkt)
-    if (!endsWithPeriod) {
-      processedText = processedText.replace(/[.!?]+\s*$/, '').trim();
-    }
-    
-    // Prüfe ob der Text jetzt mit Punkt endet
+    // Prüfe ob der Text mit Punkt endet
     endsWithPeriod = /\.\s*$/.test(processedText);
     
     // Groß-/Kleinschreibung basierend auf vorherigem Satzende

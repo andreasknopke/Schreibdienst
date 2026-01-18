@@ -775,6 +775,11 @@ export default function HomePage() {
         .filter(word => word.length > 3)
         .filter((word, index, self) => self.indexOf(word) === index); // Unique
       
+      // Wörterbuch-Korrekturen formatieren
+      const dictionaryCorrections = dictionaryEntries
+        .slice(0, 50) // Max 50 Einträge
+        .map(entry => ({ wrong: entry.wrong, correct: entry.correct }));
+      
       const response = await fetch('/api/quick-correct', {
         method: 'POST',
         headers: {
@@ -782,7 +787,11 @@ export default function HomePage() {
           'Authorization': getAuthHeader(),
           ...getDbTokenHeader()
         },
-        body: JSON.stringify({ text, referenceTerms: referenceTerms.slice(0, 100) }) // Max 100 Terms
+        body: JSON.stringify({ 
+          text, 
+          referenceTerms: referenceTerms.slice(0, 100), // Max 100 Terms
+          dictionaryCorrections 
+        })
       });
       
       if (!response.ok) {
@@ -799,7 +808,7 @@ export default function HomePage() {
       console.warn('[QuickCorrect] Error:', error);
       return text;
     }
-  }, [templates, getAuthHeader, getDbTokenHeader]);
+  }, [templates, dictionaryEntries, getAuthHeader, getDbTokenHeader]);
 
   // Ref um zu tracken ob der letzte Text mit Punkt endete (für Groß-/Kleinschreibung)
   const fastWhisperEndsWithPeriodRef = useRef<boolean>(true); // Start mit true = erster Buchstabe groß

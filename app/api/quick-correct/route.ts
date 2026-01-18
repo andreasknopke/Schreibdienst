@@ -61,7 +61,7 @@ function selectRelevantTerms(terms: string[], inputText: string, maxTerms: numbe
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { text, referenceTerms } = body;
+    const { text, referenceTerms, dictionaryCorrections } = body;
 
     if (!text || typeof text !== 'string') {
       return NextResponse.json({ error: 'Text fehlt' }, { status: 400 });
@@ -75,17 +75,25 @@ export async function POST(request: NextRequest) {
     // Wähle nur relevante Begriffe (max 50 für Geschwindigkeit)
     const terms = referenceTerms || [];
     const relevantTerms = selectRelevantTerms(terms, text, 50);
-    const termsHash = hashTerms(relevantTerms);
     
-    // System-Prompt nur neu bauen wenn Begriffe sich ändern
+    // Wörterbuch-Korrekturen formatieren
+    const dictCorrections = dictionaryCorrections || [];
+    const dictContext = dictCorrections.length > 0
+      ? `\nUser-Wörterbuch (falsch→richtig, auch ähnliche Fehler korrigieren): ${dictCorrections.map((d: {wrong: string, correct: string}) => `"${d.wrong}"→"${d.correct}"`).join(', ')}`
+      : '';
+    
+    // Hash für Cache-Stabilität (kombiniert Begriffe und Wörterbuch)
+    const termsHash = hashTerms(relevantTerms) + '|' + dictCorrections.map((d: {wrong: string, correct: string}) => `${d.wrong}:${d.correct}`).join(',');
+    
+    // System-Prompt nur neu bauen wenn sich etwas ändert
     if (cachedSystemPrompt === null || cachedTermsHash !== termsHash) {
       const termsContext = relevantTerms.length > 0
         ? `\nFachbegriffe: ${relevantTerms.join(', ')}`
         : '';
 
-      cachedSystemPrompt = BASE_PROMPT + termsContext;
+      cachedSystemPrompt = BASE_PROMPT + termsContext + dictContext;
       cachedTermsHash = termsHash;
-      console.log(`[QuickCorrect] Prompt aktualisiert (${relevantTerms.length} Begriffe)`);
+      console.log(`[QuickCorrect] Prompt aktualisiert (${relevantTerms.length} Begriffe, ${dictCorrections.length} Wörterbuch-Einträge)`);
     }
 
     const startTime = Date.now();

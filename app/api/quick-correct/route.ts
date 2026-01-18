@@ -159,6 +159,7 @@ export async function POST(request: NextRequest) {
 
   } catch (error: any) {
     console.error('[QuickCorrect] Error:', error);
-    return NextResponse.json({ corrected: text, changed: false, error: error.message });
+    // Im catch haben wir keinen Zugriff auf text, geben leeres Ergebnis zurück
+    return NextResponse.json({ corrected: '', changed: false, error: error.message });
   }
 }

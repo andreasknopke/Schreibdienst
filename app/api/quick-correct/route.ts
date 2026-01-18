@@ -72,9 +72,9 @@ export async function POST(request: NextRequest) {
     const lmStudioModel = process.env.LLM_STUDIO_MODEL || 'meta-llama-3.1-8b-instruct';
     const useCompletionApi = process.env.LLM_USE_COMPLETION === 'true';
 
-    // Wähle nur relevante Begriffe (max 50 für Geschwindigkeit)
+    // Wähle nur relevante Begriffe (max 150 für bessere Korrektur)
     const terms = referenceTerms || [];
-    const relevantTerms = selectRelevantTerms(terms, text, 50);
+    const relevantTerms = selectRelevantTerms(terms, text, 150);
     
     // Wörterbuch-Korrekturen formatieren
     const dictCorrections = dictionaryCorrections || [];

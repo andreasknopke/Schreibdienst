@@ -777,7 +777,7 @@ export default function HomePage() {
       
       // Wörterbuch-Korrekturen formatieren
       const dictionaryCorrections = dictionaryEntries
-        .slice(0, 50) // Max 50 Einträge
+        .slice(0, 200) // Max 200 Einträge
         .map(entry => ({ wrong: entry.wrong, correct: entry.correct }));
       
       const response = await fetch('/api/quick-correct', {
@@ -789,7 +789,7 @@ export default function HomePage() {
         },
         body: JSON.stringify({ 
           text, 
-          referenceTerms: referenceTerms.slice(0, 100), // Max 100 Terms
+          referenceTerms: referenceTerms.slice(0, 300), // Max 300 Terms
           dictionaryCorrections 
         })
       });

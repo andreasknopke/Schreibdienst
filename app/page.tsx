@@ -765,45 +765,24 @@ export default function HomePage() {
   }, [startRecording, stopRecording, handleReset]);
 
   // Fast Whisper WebSocket Transkription Handler
-  // Wort-für-Wort Anzeige: Zeigt Wörter sobald sie über mehrere Partials stabil sind
-  const STABILITY_THRESHOLD = 3; // Anzahl gleicher Partials bevor Wörter als stabil gelten
-  
+  // Nur finale Sätze anzeigen (isFinal=true), Partials ignorieren
   const handleFastWhisperTranscript = useCallback((text: string, isFinal: boolean) => {
     if (!text) return;
     
-    // Hilfsfunktion: Finde stabile Wörter (die sich zwischen zwei Partials nicht geändert haben)
-    const findStableWords = (lastPartial: string, newPartial: string): string[] => {
-      const lastWords = lastPartial.trim().split(/\s+/).filter(w => w);
-      const newWords = newPartial.trim().split(/\s+/).filter(w => w);
-      
-      // Finde die längste gemeinsame Präfix-Sequenz
-      const stableWords: string[] = [];
-      const minLen = Math.min(lastWords.length, newWords.length);
-      
-      for (let i = 0; i < minLen; i++) {
-        // Wort ist stabil wenn es in beiden Partials identisch ist
-        if (lastWords[i].toLowerCase() === newWords[i].toLowerCase()) {
-          stableWords.push(newWords[i]);
-        } else {
-          break; // Erstes abweichendes Wort gefunden
-        }
-      }
-      
-      return stableWords;
-    };
+    // Partials ignorieren - nur finale Sätze anzeigen
+    if (!isFinal) {
+      return;
+    }
     
-    // Hole die richtigen Refs basierend auf aktuellem Feld
-    const getStableRef = () => {
-      if (mode === 'befund') {
-        switch (activeField) {
-          case 'methodik': return fastWhisperStableMethodikRef;
-          case 'beurteilung': return fastWhisperStableBeurteilungRef;
-          default: return fastWhisperStableWordsRef;
-        }
-      }
-      return fastWhisperStableWordsRef;
-    };
+    console.log('[FastWhisper] FINAL:', text);
     
+    // Wörterbuch-Ersetzungen anwenden
+    const correctedText = applyDictionaryToText(text);
+    if (correctedText !== text) {
+      console.log('[FastWhisper] Dictionary corrected:', text, '->', correctedText);
+    }
+    
+    // Finaler Satz: Zum akkumulierten Text hinzufügen
     const getFinalRef = () => {
       if (mode === 'befund') {
         switch (activeField) {
@@ -838,86 +817,17 @@ export default function HomePage() {
       }
     };
     
-    const stableRef = getStableRef();
     const finalRef = getFinalRef();
     const existingRef = getExistingRef();
     
-    // Basis-Text zusammenbauen
-    const buildDisplayText = (stableWords: string, currentWord?: string) => {
-      const parts = [
-        existingRef.current,
-        finalRef.current,
-        stableWords,
-        currentWord
-      ].filter(p => p && p.trim());
-      return parts.join(' ');
-    };
+    // Text akkumulieren
+    finalRef.current = finalRef.current 
+      ? finalRef.current + ' ' + correctedText 
+      : correctedText;
     
-    if (isFinal) {
-      console.log('[FastWhisper] FINAL:', text);
-      
-      // Wörterbuch-Ersetzungen anwenden
-      const correctedText = applyDictionaryToText(text);
-      if (correctedText !== text) {
-        console.log('[FastWhisper] Dictionary corrected:', text, '->', correctedText);
-      }
-      
-      // Finaler Satz: Zum akkumulierten Text hinzufügen, Partial-State zurücksetzen
-      finalRef.current = finalRef.current 
-        ? finalRef.current + ' ' + correctedText 
-        : correctedText;
-      
-      // Stable words und last partial zurücksetzen für nächsten Satz
-      stableRef.current = "";
-      fastWhisperLastPartialRef.current = "";
-      fastWhisperPartialCountRef.current = 0;
-      
-      setText(buildDisplayText(''));
-    } else {
-      // Partial: Prüfe ob der Partial sich geändert hat
-      const lastPartial = fastWhisperLastPartialRef.current;
-      
-      // Wenn der Partial gleich ist wie der letzte, Counter erhöhen
-      if (text.trim() === lastPartial.trim()) {
-        fastWhisperPartialCountRef.current++;
-      } else {
-        // Partial hat sich geändert - Counter zurücksetzen
-        fastWhisperPartialCountRef.current = 1;
-        fastWhisperLastPartialRef.current = text;
-      }
-      
-      // Nur wenn der gleiche Partial mehrfach kam (stabil), Wörter übernehmen
-      if (fastWhisperPartialCountRef.current >= STABILITY_THRESHOLD) {
-        const stableWords = findStableWords(stableRef.current, text);
-        
-        // Neue stabile Wörter hinzufügen (die noch nicht in stableRef sind)
-        const currentStableCount = stableRef.current.trim().split(/\s+/).filter(w => w).length;
-        const allWords = text.trim().split(/\s+/).filter(w => w);
-        
-        // Alle Wörter bis auf das letzte als stabil betrachten (letztes könnte sich noch ändern)
-        const wordsToStabilize = allWords.slice(currentStableCount, Math.max(currentStableCount, allWords.length - 1));
-        
-        if (wordsToStabilize.length > 0) {
-          // Wörterbuch auf neue stabile Wörter anwenden
-          const correctedNewWords = applyDictionaryToText(wordsToStabilize.join(' '));
-          stableRef.current = stableRef.current 
-            ? stableRef.current + ' ' + correctedNewWords 
-            : correctedNewWords;
-          console.log('[FastWhisper] Stable words:', stableRef.current);
-          // Counter zurücksetzen nach Übernahme
-          fastWhisperPartialCountRef.current = 0;
-        }
-      }
-      
-      // Aktuelles (noch nicht stabiles) Wort ermitteln - zeige nur wenn etwas Neues da ist
-      const allWords = text.trim().split(/\s+/).filter(w => w);
-      const stableWordCount = stableRef.current.trim().split(/\s+/).filter(w => w).length;
-      const unstableWords = allWords.slice(stableWordCount);
-      const unstableText = unstableWords.length > 0 ? unstableWords.join(' ') : '';
-      
-      // Anzeige aktualisieren: stabile Wörter + aktuelle instabile Wörter (noch nicht bestätigt)
-      setText(buildDisplayText(stableRef.current, unstableText));
-    }
+    // Anzeige aktualisieren
+    const displayText = [existingRef.current, finalRef.current].filter(p => p.trim()).join(' ');
+    setText(displayText);
   }, [mode, activeField, applyDictionaryToText]);
 
   async function startRecording() {

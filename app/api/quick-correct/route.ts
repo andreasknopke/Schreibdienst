@@ -18,9 +18,25 @@ export const runtime = 'nodejs';
 let cachedSystemPrompt: string | null = null;
 let cachedTermsHash: string | null = null;
 
-// Basis-Prompt - so kurz wie möglich für schnelle Verarbeitung
-const BASE_PROMPT = `Korrigiere NUR falsch erkannte medizinische Fachbegriffe. Ändere nichts anderes. Gib nur den Text zurück.
-Beispiele: "Hirn Druck Zeichen"→"Hirndruckzeichen", "M R T"→"MRT", "Liquoraus"→"Liquorraum"`;
+// Basis-Prompt mit strikten Regeln gegen Meta-Kommentare
+const BASE_PROMPT = `Du korrigierst medizinische Fachbegriffe in diktiertem Text.
+
+REGELN:
+1. Korrigiere NUR falsch erkannte medizinische Fachbegriffe
+2. Ändere NICHTS anderes (keine Grammatik, keine Umformulierungen)
+3. Gib AUSSCHLIESSLICH den korrigierten Text zwischen den Markierungen zurück
+4. VERBOTEN: "Keine Korrekturen", "Der korrigierte Text lautet", Erklärungen, Kommentare
+5. Wenn keine Korrektur nötig: Gib den Text UNVERÄNDERT zurück
+
+Beispiele:
+"Hirn Druck Zeichen" → "Hirndruckzeichen"
+"M R T" → "MRT"  
+"Liquoraus" → "Liquorraum"
+"Die Ventrikel sind normweit" → "Die Ventrikel sind normweit"`;
+
+// Marker für Input/Output
+const INPUT_MARKER_START = '<<<DIKTAT_START>>>';
+const INPUT_MARKER_END = '<<<DIKTAT_ENDE>>>';
 
 function hashTerms(terms: string[]): string {
   // Nur die ersten 50 Begriffe für stabilen Hash
@@ -101,7 +117,7 @@ export async function POST(request: NextRequest) {
 
     if (useCompletionApi) {
       // Completion API - effizienter, kein Chat-Overhead
-      const prompt = `${cachedSystemPrompt}\n\nInput: ${text}\nOutput:`;
+      const prompt = `${cachedSystemPrompt}\n\n${INPUT_MARKER_START}${text}${INPUT_MARKER_END}\n\nKorrigierter Text:`;
       
       response = await fetch(`${lmStudioUrl}/v1/completions`, {
         method: 'POST',
@@ -111,12 +127,14 @@ export async function POST(request: NextRequest) {
           prompt,
           temperature: 0.1,
           max_tokens: 200,
-          stop: ['\n\n', 'Input:'],
+          stop: ['\n\n', INPUT_MARKER_START, 'Input:'],
           cache_prompt: true,
         }),
       });
     } else {
-      // Chat API - Standard
+      // Chat API - Standard mit Markern
+      const userContent = `${INPUT_MARKER_START}${text}${INPUT_MARKER_END}`;
+      
       response = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -124,7 +142,7 @@ export async function POST(request: NextRequest) {
           model: lmStudioModel,
           messages: [
             { role: 'system', content: cachedSystemPrompt },
-            { role: 'user', content: text }
+            { role: 'user', content: userContent }
           ],
           temperature: 0.1,
           max_tokens: 200,
@@ -151,8 +169,37 @@ export async function POST(request: NextRequest) {
       corrected = data.choices?.[0]?.message?.content?.trim() || text;
     }
     
+    // Entferne Marker falls das LLM sie zurückgibt
+    corrected = corrected
+      .replace(INPUT_MARKER_START, '')
+      .replace(INPUT_MARKER_END, '')
+      .trim();
+    
     // Bereinige Output (manchmal fügt das Modell Zusätze hinzu)
     corrected = corrected.split('\n')[0].trim();
+    
+    // META-KOMMENTAR FILTER: Entferne typische LLM-Phrasen
+    const metaPatterns = [
+      /^(Keine Korrekturen?( notwendig| nötig| erforderlich)?\.?\s*)/i,
+      /^(Der korrigierte Text( lautet)?:?\s*)/i,
+      /^(Korrigierter Text:?\s*)/i,
+      /^(Hier ist der korrigierte Text:?\s*)/i,
+      /^(Text:?\s*)/i,
+      /(\s*Keine (weiteren )?Korrekturen?( notwendig| nötig)?\.?\s*)$/i,
+      /(\s*\(keine Änderungen?\)\.?\s*)$/i,
+    ];
+    
+    for (const pattern of metaPatterns) {
+      if (pattern.test(corrected)) {
+        corrected = corrected.replace(pattern, '').trim();
+        console.log('[QuickCorrect] Meta-Kommentar entfernt');
+      }
+    }
+    
+    // Wenn nach Bereinigung leer → Original zurück
+    if (!corrected) {
+      return NextResponse.json({ corrected: text, changed: false, elapsed, filtered: true });
+    }
     
     // HALLUZINATIONS-FILTER: Erkenne Block von kommagetrennten Prompt-Begriffen
     // Typisches Muster: "(Begriff1, Begriff2, Begriff3, ..." - viele Begriffe hintereinander

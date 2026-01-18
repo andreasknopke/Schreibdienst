@@ -67,6 +67,7 @@ export default function HomePage() {
   
   // Fast Whisper: Wort-für-Wort Anzeige - trackt stabile Wörter aus Partials
   const fastWhisperLastPartialRef = useRef<string>("");
+  const fastWhisperPartialCountRef = useRef<number>(0); // Zählt wie oft der gleiche Partial kam
   const fastWhisperStableWordsRef = useRef<string>(""); // Bestätigte Wörter aus Partials
   const fastWhisperStableMethodikRef = useRef<string>("");
   const fastWhisperStableBeurteilungRef = useRef<string>("");
@@ -157,10 +158,11 @@ export default function HomePage() {
   const [templateMode, setTemplateMode] = useState(false);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
 
-  // Wörterbuch-Einträge für Echtzeit-Korrektur
+  // Wörterbuch-Einträge für Echtzeit-Korrektur und Initial Prompt
   interface DictionaryEntry {
     wrong: string;
     correct: string;
+    useInPrompt?: boolean;
   }
   const [dictionaryEntries, setDictionaryEntries] = useState<DictionaryEntry[]>([]);
 
@@ -763,7 +765,9 @@ export default function HomePage() {
   }, [startRecording, stopRecording, handleReset]);
 
   // Fast Whisper WebSocket Transkription Handler
-  // Wort-für-Wort Anzeige: Zeigt Wörter sobald sie stabil sind (sich nicht mehr ändern)
+  // Wort-für-Wort Anzeige: Zeigt Wörter sobald sie über mehrere Partials stabil sind
+  const STABILITY_THRESHOLD = 3; // Anzahl gleicher Partials bevor Wörter als stabil gelten
+  
   const handleFastWhisperTranscript = useCallback((text: string, isFinal: boolean) => {
     if (!text) return;
     
@@ -866,37 +870,53 @@ export default function HomePage() {
       // Stable words und last partial zurücksetzen für nächsten Satz
       stableRef.current = "";
       fastWhisperLastPartialRef.current = "";
+      fastWhisperPartialCountRef.current = 0;
       
       setText(buildDisplayText(''));
     } else {
-      // Partial: Finde stabile Wörter durch Vergleich mit letztem Partial
+      // Partial: Prüfe ob der Partial sich geändert hat
       const lastPartial = fastWhisperLastPartialRef.current;
-      const stableWords = findStableWords(lastPartial, text);
       
-      // Neue stabile Wörter hinzufügen (die noch nicht in stableRef sind)
-      const currentStableCount = stableRef.current.trim().split(/\s+/).filter(w => w).length;
-      const newStableWords = stableWords.slice(currentStableCount);
-      
-      if (newStableWords.length > 0) {
-        // Wörterbuch auf neue stabile Wörter anwenden
-        const correctedNewWords = applyDictionaryToText(newStableWords.join(' '));
-        stableRef.current = stableRef.current 
-          ? stableRef.current + ' ' + correctedNewWords 
-          : correctedNewWords;
-        console.log('[FastWhisper] Stable words:', stableRef.current);
+      // Wenn der Partial gleich ist wie der letzte, Counter erhöhen
+      if (text.trim() === lastPartial.trim()) {
+        fastWhisperPartialCountRef.current++;
+      } else {
+        // Partial hat sich geändert - Counter zurücksetzen
+        fastWhisperPartialCountRef.current = 1;
+        fastWhisperLastPartialRef.current = text;
       }
       
-      // Aktuelles (noch nicht stabiles) Wort ermitteln
+      // Nur wenn der gleiche Partial mehrfach kam (stabil), Wörter übernehmen
+      if (fastWhisperPartialCountRef.current >= STABILITY_THRESHOLD) {
+        const stableWords = findStableWords(stableRef.current, text);
+        
+        // Neue stabile Wörter hinzufügen (die noch nicht in stableRef sind)
+        const currentStableCount = stableRef.current.trim().split(/\s+/).filter(w => w).length;
+        const allWords = text.trim().split(/\s+/).filter(w => w);
+        
+        // Alle Wörter bis auf das letzte als stabil betrachten (letztes könnte sich noch ändern)
+        const wordsToStabilize = allWords.slice(currentStableCount, Math.max(currentStableCount, allWords.length - 1));
+        
+        if (wordsToStabilize.length > 0) {
+          // Wörterbuch auf neue stabile Wörter anwenden
+          const correctedNewWords = applyDictionaryToText(wordsToStabilize.join(' '));
+          stableRef.current = stableRef.current 
+            ? stableRef.current + ' ' + correctedNewWords 
+            : correctedNewWords;
+          console.log('[FastWhisper] Stable words:', stableRef.current);
+          // Counter zurücksetzen nach Übernahme
+          fastWhisperPartialCountRef.current = 0;
+        }
+      }
+      
+      // Aktuelles (noch nicht stabiles) Wort ermitteln - zeige nur wenn etwas Neues da ist
       const allWords = text.trim().split(/\s+/).filter(w => w);
-      const unstableWord = allWords.length > stableWords.length 
-        ? allWords[stableWords.length] 
-        : '';
+      const stableWordCount = stableRef.current.trim().split(/\s+/).filter(w => w).length;
+      const unstableWords = allWords.slice(stableWordCount);
+      const unstableText = unstableWords.length > 0 ? unstableWords.join(' ') : '';
       
-      // Letzten Partial speichern für nächsten Vergleich
-      fastWhisperLastPartialRef.current = text;
-      
-      // Anzeige aktualisieren: stabile Wörter + aktuelles Wort (ausgegraut/kursiv wäre schön, aber erstmal normal)
-      setText(buildDisplayText(stableRef.current, unstableWord));
+      // Anzeige aktualisieren: stabile Wörter + aktuelle instabile Wörter (noch nicht bestätigt)
+      setText(buildDisplayText(stableRef.current, unstableText));
     }
   }, [mode, activeField, applyDictionaryToText]);
 
@@ -927,6 +947,7 @@ export default function HomePage() {
       fastWhisperStableMethodikRef.current = "";
       fastWhisperStableBeurteilungRef.current = "";
       fastWhisperLastPartialRef.current = "";
+      fastWhisperPartialCountRef.current = 0;
       
       let wsUrl = runtimeConfig.fastWhisperWsUrl;
       
@@ -948,6 +969,17 @@ export default function HomePage() {
         
         ws.onopen = async () => {
           console.log('[FastWhisper] WebSocket connected');
+          
+          // Initial Prompt aus Wörterbuch senden (Einträge mit useInPrompt=true)
+          const promptWords = dictionaryEntries
+            .filter(e => e.useInPrompt && e.correct)
+            .map(e => e.correct);
+          
+          if (promptWords.length > 0) {
+            const initialPrompt = promptWords.join(', ');
+            console.log('[FastWhisper] Sending initial_prompt with', promptWords.length, 'words');
+            ws.send(JSON.stringify({ type: 'set_prompt', text: initialPrompt }));
+          }
           
           try {
             // Mikrofon-Stream holen

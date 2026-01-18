@@ -35,6 +35,12 @@ interface Template {
   field: BefundField;
 }
 
+// Runtime Config Interface
+interface RuntimeConfig {
+  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper';
+  fastWhisperWsUrl?: string;
+}
+
 export default function HomePage() {
   const { username, autoCorrect, defaultMode, getAuthHeader, getDbTokenHeader } = useAuth();
   const [recording, setRecording] = useState(false);
@@ -46,6 +52,13 @@ export default function HomePage() {
   const streamRef = useRef<MediaStream | null>(null);
   const allChunksRef = useRef<BlobPart[]>([]);
   const transcriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Fast Whisper WebSocket State
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
+  const fastWhisperWsRef = useRef<WebSocket | null>(null);
+  const fastWhisperAudioContextRef = useRef<AudioContext | null>(null);
+  const fastWhisperProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const fastWhisperStreamRef = useRef<MediaStream | null>(null);
   
   // Mikrofonpegel-Visualisierung
   const [audioLevel, setAudioLevel] = useState(0);
@@ -158,6 +171,26 @@ export default function HomePage() {
       setMode(defaultMode);
     }
   }, [defaultMode]);
+
+  // Runtime Config laden (für Fast Whisper WebSocket URL)
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const res = await fetchWithDbToken('/api/config');
+        const data = await res.json();
+        if (data.config) {
+          setRuntimeConfig({
+            transcriptionProvider: data.config.transcriptionProvider,
+            fastWhisperWsUrl: data.envInfo?.fastWhisperWsUrl,
+          });
+          console.log('[Config] Loaded - Provider:', data.config.transcriptionProvider);
+        }
+      } catch (err) {
+        console.warn('[Config] Could not load runtime config');
+      }
+    };
+    loadConfig();
+  }, []);
 
   // WhisperX Warmup beim Start - lädt Modell vor für minimale Latenz
   useEffect(() => {
@@ -629,6 +662,43 @@ export default function HomePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [startRecording, stopRecording, handleReset]);
 
+  // Fast Whisper WebSocket Transkription Handler
+  const handleFastWhisperTranscript = useCallback((text: string) => {
+    if (!text) return;
+    
+    console.log('[FastWhisper] Received:', text);
+    
+    // Aktualisiere Transkript basierend auf Modus
+    if (mode === 'befund') {
+      switch (activeField) {
+        case 'methodik':
+          setMethodik(prev => {
+            const base = existingMethodikRef.current;
+            return base ? base + ' ' + text : text;
+          });
+          break;
+        case 'beurteilung':
+          setBeurteilung(prev => {
+            const base = existingBeurteilungRef.current;
+            return base ? base + ' ' + text : text;
+          });
+          break;
+        case 'befund':
+        default:
+          setTranscript(prev => {
+            const base = existingTextRef.current;
+            return base ? base + ' ' + text : text;
+          });
+          break;
+      }
+    } else {
+      setTranscript(prev => {
+        const base = existingTextRef.current;
+        return base ? base + ' ' + text : text;
+      });
+    }
+  }, [mode, activeField]);
+
   async function startRecording() {
     setError(null);
     // Bestehenden Text behalten
@@ -643,7 +713,123 @@ export default function HomePage() {
       lastMethodikRef.current = "";
       lastBeurteilungRef.current = "";
     }
+
+    // Fast Whisper WebSocket Modus
+    if (runtimeConfig?.transcriptionProvider === 'fast_whisper' && runtimeConfig.fastWhisperWsUrl) {
+      console.log('[FastWhisper] Starting WebSocket recording to', runtimeConfig.fastWhisperWsUrl);
+      
+      try {
+        // WebSocket verbinden
+        const ws = new WebSocket(runtimeConfig.fastWhisperWsUrl);
+        fastWhisperWsRef.current = ws;
+        
+        ws.onopen = async () => {
+          console.log('[FastWhisper] WebSocket connected');
+          
+          try {
+            // Mikrofon-Stream holen
+            const stream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                sampleRate: 16000,
+                channelCount: 1,
+                echoCancellation: true,
+                noiseSuppression: true,
+              }
+            });
+            fastWhisperStreamRef.current = stream;
+            
+            // AudioContext für Resampling und Audio-Level
+            const audioContext = new AudioContext({ sampleRate: 16000 });
+            fastWhisperAudioContextRef.current = audioContext;
+            
+            const source = audioContext.createMediaStreamSource(stream);
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            analyserRef.current = analyser;
+            
+            // Audio Level Monitor
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            const updateLevel = () => {
+              if (!analyserRef.current || !fastWhisperWsRef.current) return;
+              analyserRef.current.getByteFrequencyData(dataArray);
+              const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+              setAudioLevel(Math.min(100, (average / 128) * 100));
+              animationFrameRef.current = requestAnimationFrame(updateLevel);
+            };
+            updateLevel();
+            
+            // ScriptProcessorNode für Audio-Chunks
+            const processor = audioContext.createScriptProcessor(4096, 1, 1);
+            fastWhisperProcessorRef.current = processor;
+            
+            processor.onaudioprocess = (e) => {
+              if (!fastWhisperWsRef.current || fastWhisperWsRef.current.readyState !== WebSocket.OPEN) return;
+              
+              const inputData = e.inputBuffer.getChannelData(0);
+              
+              // Konvertiere Float32Array zu Int16Array für RealtimeSTT
+              const int16Data = new Int16Array(inputData.length);
+              for (let i = 0; i < inputData.length; i++) {
+                const s = Math.max(-1, Math.min(1, inputData[i]));
+                int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+              }
+              
+              // Sende als Binary
+              fastWhisperWsRef.current.send(int16Data.buffer);
+            };
+            
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+            
+            setRecording(true);
+          } catch (micError: any) {
+            console.error('[FastWhisper] Microphone error:', micError);
+            setError('Mikrofon-Zugriff fehlgeschlagen: ' + micError.message);
+            ws.close();
+          }
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            // RealtimeSTT sendet verschiedene Formate
+            let text: string = '';
+            
+            if (typeof event.data === 'string') {
+              if (event.data.startsWith('{')) {
+                const data = JSON.parse(event.data);
+                text = data.text || data.transcript || '';
+              } else {
+                text = event.data;
+              }
+            }
+            
+            if (text && text.trim()) {
+              handleFastWhisperTranscript(text.trim());
+            }
+          } catch (e) {
+            console.warn('[FastWhisper] Parse error:', e);
+          }
+        };
+        
+        ws.onerror = (event) => {
+          console.error('[FastWhisper] WebSocket error:', event);
+          setError('Fast Whisper Verbindungsfehler');
+        };
+        
+        ws.onclose = () => {
+          console.log('[FastWhisper] WebSocket closed');
+        };
+        
+      } catch (wsError: any) {
+        console.error('[FastWhisper] Connection error:', wsError);
+        setError('Fast Whisper Verbindung fehlgeschlagen: ' + wsError.message);
+      }
+      
+      return;
+    }
     
+    // Standard MediaRecorder Modus (für andere Provider)
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     streamRef.current = stream;
     
@@ -699,7 +885,49 @@ export default function HomePage() {
   }
 
   async function stopRecording() {
-    // Stoppe die Intervalle
+    // Fast Whisper WebSocket Modus stoppen
+    if (runtimeConfig?.transcriptionProvider === 'fast_whisper') {
+      console.log('[FastWhisper] Stopping WebSocket recording');
+      
+      // Stream stoppen
+      if (fastWhisperStreamRef.current) {
+        fastWhisperStreamRef.current.getTracks().forEach(track => track.stop());
+        fastWhisperStreamRef.current = null;
+      }
+      
+      // Processor trennen
+      if (fastWhisperProcessorRef.current) {
+        fastWhisperProcessorRef.current.disconnect();
+        fastWhisperProcessorRef.current = null;
+      }
+      
+      // AudioContext schließen
+      if (fastWhisperAudioContextRef.current) {
+        fastWhisperAudioContextRef.current.close();
+        fastWhisperAudioContextRef.current = null;
+      }
+      
+      // WebSocket schließen
+      if (fastWhisperWsRef.current) {
+        fastWhisperWsRef.current.close();
+        fastWhisperWsRef.current = null;
+      }
+      
+      // Animation Frame stoppen
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      
+      setAudioLevel(0);
+      setRecording(false);
+      
+      // Bei Fast Whisper: Direkt Korrektur anbieten (kein finaler Transkriptions-Chunk nötig)
+      setPendingCorrection(true);
+      return;
+    }
+    
+    // Standard Modus: Stoppe die Intervalle
     if (transcriptionIntervalRef.current) {
       clearInterval(transcriptionIntervalRef.current);
       transcriptionIntervalRef.current = null;

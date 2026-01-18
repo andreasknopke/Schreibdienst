@@ -1074,7 +1074,9 @@ export default function HomePage() {
         ws.onopen = async () => {
           console.log('[FastWhisper] WebSocket connected');
           
-          // Hinweis: initial_prompt wurde entfernt - die Korrektur erfolgt durch das LLM
+          // Explizit leeren Prompt senden um Server-Cache zu überschreiben
+          ws.send(JSON.stringify({ type: 'set_prompt', text: '' }));
+          console.log('[FastWhisper] Sent empty initial_prompt to clear server cache');
           
           try {
             // Mikrofon-Stream holen

@@ -765,20 +765,12 @@ export default function HomePage() {
   }, [startRecording, stopRecording, handleReset]);
 
   // Schnelle LLM-Fachwort-Korrektur
+  // Schnelle LLM-Fachwort-Korrektur (ohne Referenz-Begriffe um Halluzinationen zu vermeiden!)
   const quickCorrectWithLLM = useCallback(async (text: string): Promise<string> => {
     try {
-      // Fachwörter aus Textbausteinen extrahieren
-      const referenceTerms = templates
-        .map(t => t.content)
-        .join(' ')
-        .split(/\s+/)
-        .filter(word => word.length > 3)
-        .filter((word, index, self) => self.indexOf(word) === index); // Unique
-      
-      // Wörterbuch-Korrekturen formatieren
-      const dictionaryCorrections = dictionaryEntries
-        .slice(0, 200) // Max 200 Einträge
-        .map(entry => ({ wrong: entry.wrong, correct: entry.correct }));
+      // WICHTIG: Keine Referenz-Begriffe oder Wörterbuch-Einträge senden!
+      // Das LLM halluziniert diese sonst in den Output.
+      // Die Begriffe werden nur bei der finalen Korrektur (Korrigieren-Button) verwendet.
       
       const response = await fetch('/api/quick-correct', {
         method: 'POST',
@@ -788,9 +780,9 @@ export default function HomePage() {
           ...getDbTokenHeader()
         },
         body: JSON.stringify({ 
-          text, 
-          referenceTerms: referenceTerms.slice(0, 300), // Max 300 Terms
-          dictionaryCorrections 
+          text,
+          referenceTerms: [], // LEER - keine Begriffe um Halluzinationen zu vermeiden
+          dictionaryCorrections: [] // LEER
         })
       });
       
@@ -800,6 +792,13 @@ export default function HomePage() {
       }
       
       const data = await response.json();
+      
+      // Validierung: Ausgabe darf nicht viel länger sein als Input (Halluzinations-Schutz)
+      if (data.corrected && data.corrected.length > text.length * 1.5) {
+        console.warn('[QuickCorrect] Ausgabe zu lang, vermutlich Halluzination. Ignoriere.');
+        return text;
+      }
+      
       if (data.changed) {
         console.log('[QuickCorrect] LLM corrected:', text, '→', data.corrected);
       }
@@ -808,7 +807,7 @@ export default function HomePage() {
       console.warn('[QuickCorrect] Error:', error);
       return text;
     }
-  }, [templates, dictionaryEntries, getAuthHeader, getDbTokenHeader]);
+  }, [getAuthHeader, getDbTokenHeader]);
 
   // Ref um zu tracken ob der letzte Text mit Punkt endete (für Groß-/Kleinschreibung)
   const fastWhisperEndsWithPeriodRef = useRef<boolean>(true); // Start mit true = erster Buchstabe groß
@@ -952,9 +951,9 @@ export default function HomePage() {
       console.log('[FastWhisper] Dictionary corrected:', processedText, '->', correctedText);
     }
     
-    // DEAKTIVIERT: Quick-LLM-Korrektur führt zu Halluzinationen bei medgemma
-    // Die finale Korrektur erfolgt durch den "Korrigieren" Button
-    // const llmCorrectedPromise = quickCorrectWithLLM(correctedText);
+    // Schnelle LLM-Fachwort-Korrektur (async, nicht blockierend für UX)
+    // OHNE Referenz-Begriffe um Halluzinationen zu vermeiden
+    const llmCorrectedPromise = quickCorrectWithLLM(correctedText);
     
     // Finaler Satz: Zum akkumulierten Text hinzufügen
     const getFinalRef = () => {
@@ -1007,9 +1006,7 @@ export default function HomePage() {
     
     updateDisplay();
     
-    // DEAKTIVIERT: Quick-LLM-Korrektur führt zu Halluzinationen
-    // Die finale Korrektur erfolgt durch den "Korrigieren" Button
-    /*
+    // LLM-Korrektur im Hintergrund abwarten und dann ersetzen
     const llmCorrected = await llmCorrectedPromise;
     if (llmCorrected !== correctedText) {
       // Ersetze den letzten Satz im finalRef mit der LLM-korrigierten Version
@@ -1021,8 +1018,7 @@ export default function HomePage() {
       }
       updateDisplay();
     }
-    */
-  }, [mode, activeField, applyDictionaryToText]);
+  }, [mode, activeField, applyDictionaryToText, quickCorrectWithLLM]);
 
   async function startRecording() {
     setError(null);

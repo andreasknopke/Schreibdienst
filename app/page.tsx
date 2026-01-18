@@ -60,6 +60,9 @@ export default function HomePage() {
   const fastWhisperProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const fastWhisperStreamRef = useRef<MediaStream | null>(null);
   
+  // SSL-Zertifikat Status für Fast Whisper
+  const [sslCertWarning, setSslCertWarning] = useState<{ show: boolean; serverUrl: string } | null>(null);
+  
   // Mikrofonpegel-Visualisierung
   const [audioLevel, setAudioLevel] = useState(0);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -179,11 +182,49 @@ export default function HomePage() {
         const res = await fetchWithDbToken('/api/config');
         const data = await res.json();
         if (data.config) {
-          setRuntimeConfig({
+          const config = {
             transcriptionProvider: data.config.transcriptionProvider,
             fastWhisperWsUrl: data.envInfo?.fastWhisperWsUrl,
-          });
+          };
+          setRuntimeConfig(config);
           console.log('[Config] Loaded - Provider:', data.config.transcriptionProvider);
+          
+          // Bei Fast Whisper mit WSS: SSL-Zertifikat prüfen
+          if (config.transcriptionProvider === 'fast_whisper' && config.fastWhisperWsUrl) {
+            let wsUrl = config.fastWhisperWsUrl;
+            // HTTPS-Seiten erfordern wss://
+            if (typeof window !== 'undefined' && window.location.protocol === 'https:' && wsUrl.startsWith('ws://')) {
+              wsUrl = wsUrl.replace('ws://', 'wss://');
+            }
+            
+            if (wsUrl.startsWith('wss://')) {
+              // Teste WebSocket-Verbindung
+              console.log('[SSL Check] Testing WSS connection to', wsUrl);
+              const testWs = new WebSocket(wsUrl);
+              const timeout = setTimeout(() => {
+                testWs.close();
+                // Timeout = wahrscheinlich Zertifikatsproblem
+                const serverUrl = wsUrl.replace('wss://', 'https://').replace('ws://', 'http://');
+                setSslCertWarning({ show: true, serverUrl });
+                console.warn('[SSL Check] Connection timeout - certificate may need acceptance');
+              }, 3000);
+              
+              testWs.onopen = () => {
+                clearTimeout(timeout);
+                testWs.close();
+                setSslCertWarning(null);
+                console.log('[SSL Check] ✓ WSS connection successful');
+              };
+              
+              testWs.onerror = () => {
+                clearTimeout(timeout);
+                testWs.close();
+                const serverUrl = wsUrl.replace('wss://', 'https://').replace('ws://', 'http://');
+                setSslCertWarning({ show: true, serverUrl });
+                console.warn('[SSL Check] Connection error - certificate may need acceptance');
+              };
+            }
+          }
         }
       } catch (err) {
         console.warn('[Config] Could not load runtime config');
@@ -816,7 +857,8 @@ export default function HomePage() {
           console.error('[FastWhisper] WebSocket error:', event);
           // Bei selbst-signierten Zertifikaten muss das Zertifikat erst im Browser akzeptiert werden
           const serverUrl = wsUrl.replace('wss://', 'https://').replace('ws://', 'http://');
-          setError(`Fast Whisper Verbindungsfehler - Bei selbst-signierten SSL-Zertifikaten: Öffne zuerst ${serverUrl} im Browser und akzeptiere das Zertifikat, dann neu laden.`);
+          setSslCertWarning({ show: true, serverUrl });
+          setError(`Verbindung fehlgeschlagen - SSL-Zertifikat muss akzeptiert werden (siehe Hinweis oben)`);
         };
         
         ws.onclose = () => {
@@ -825,7 +867,9 @@ export default function HomePage() {
         
       } catch (wsError: any) {
         console.error('[FastWhisper] Connection error:', wsError);
-        setError('Fast Whisper Verbindung fehlgeschlagen: ' + wsError.message);
+        const serverUrl = wsUrl.replace('wss://', 'https://').replace('ws://', 'http://');
+        setSslCertWarning({ show: true, serverUrl });
+        setError('Fast Whisper Verbindung fehlgeschlagen - SSL-Zertifikat prüfen');
       }
       
       return;
@@ -2000,6 +2044,43 @@ export default function HomePage() {
           </div>
         </div>
       </div>
+
+      {/* SSL-Zertifikat Warnung für Fast Whisper */}
+      {sslCertWarning?.show && (
+        <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded-lg p-4 shadow-md">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">🔐</span>
+            <div className="flex-1">
+              <h3 className="font-semibold text-amber-800 dark:text-amber-200 mb-1">
+                SSL-Zertifikat muss akzeptiert werden
+              </h3>
+              <p className="text-sm text-amber-700 dark:text-amber-300 mb-3">
+                Der Fast Whisper Server verwendet ein selbst-signiertes Zertifikat. 
+                Bevor die Echtzeit-Transkription funktioniert, musst du das Zertifikat im Browser akzeptieren.
+              </p>
+              <div className="flex items-center gap-3">
+                <a
+                  href={sslCertWarning.serverUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary text-sm py-1.5 px-4"
+                >
+                  🔗 Zertifikat akzeptieren
+                </a>
+                <span className="text-xs text-amber-600 dark:text-amber-400">
+                  → Klicke &quot;Erweitert&quot; → &quot;Weiter zu ...&quot; → dann diese Seite neu laden
+                </span>
+              </div>
+              <button 
+                onClick={() => setSslCertWarning(null)}
+                className="mt-2 text-xs text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 underline"
+              >
+                Hinweis ausblenden
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Textbaustein-Hinweis wenn aktiv */}
       {templateMode && selectedTemplate && !recording && (

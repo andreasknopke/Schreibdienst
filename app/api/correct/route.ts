@@ -415,14 +415,21 @@ REGELN:
 1. Korrigiere NUR echte Grammatik- und Rechtschreibfehler - keine stilistischen Änderungen
 2. Behalte den medizinischen Fachinhalt und alle korrekten Fachtermini exakt bei
 3. Führe Diktat-Sprachbefehle aus und entferne sie aus dem Text:
-   - "Punkt" → Füge einen Punkt ein
-   - "Komma" → Füge ein Komma ein
-   - "Doppelpunkt" → Füge einen Doppelpunkt ein
+   - "Punkt" → Füge einen Punkt ein (.)
+   - "Komma" / "Beistrich" → Füge ein Komma ein (,)
+   - "Doppelpunkt" → Füge einen Doppelpunkt ein (:)
+   - "Semikolon" / "Strichpunkt" → Füge ein Semikolon ein (;)
+   - "Fragezeichen" → Füge ein Fragezeichen ein (?)
+   - "Ausrufezeichen" → Füge ein Ausrufezeichen ein (!)
    - "neuer Absatz" / "nächster Absatz" / "Absatz" → Füge einen Absatzumbruch ein (Leerzeile)
-   - "neue Zeile" / "nächste Zeile" → Füge einen Zeilenumbruch ein
+   - "neue Zeile" / "nächste Zeile" / "Zeilenumbruch" → Füge einen Zeilenumbruch ein
    - "lösche den letzten Satz" → Entferne den letzten Satz
    - "lösche das letzte Wort" → Entferne das letzte Wort
-   - "Klammer auf/zu" → Füge Klammer ein
+   - "Klammer auf" / "Klammer zu" → Füge Klammer ein ( )
+   - "Anführungszeichen auf" / "Anführungszeichen zu" → Füge Anführungszeichen ein
+   - "Bindestrich" / "Minus" → Füge Bindestrich ein (-)
+   - "Schrägstrich" → Füge Schrägstrich ein (/)
+   WICHTIG: Entferne diese Steuerwörter VOLLSTÄNDIG aus dem Text und ersetze sie durch das entsprechende Zeichen!
 4. Entferne Füllwörter wie "ähm", "äh" NUR wenn sie offensichtlich versehentlich diktiert wurden
 5. Formatiere Aufzählungen sauber
 
@@ -483,10 +490,20 @@ WICHTIG - MEDIZINISCHE FACHBEGRIFFE:
 REGELN:
 1. Korrigiere NUR echte Grammatik- und Rechtschreibfehler - keine stilistischen Änderungen
 2. Behalte den medizinischen Fachinhalt und alle Fachtermini exakt bei
-3. Führe Diktat-Sprachbefehle aus und entferne sie:
-   - "neuer Absatz" → Absatzumbruch (Leerzeile)
-   - "neue Zeile" → Zeilenumbruch
-   - "Punkt", "Komma", "Doppelpunkt" → entsprechendes Satzzeichen
+3. Führe Diktat-Sprachbefehle aus und entferne sie VOLLSTÄNDIG aus dem Text:
+   - "Punkt" → Punkt (.)
+   - "Komma" / "Beistrich" → Komma (,)
+   - "Doppelpunkt" → Doppelpunkt (:)
+   - "Semikolon" / "Strichpunkt" → Semikolon (;)
+   - "Fragezeichen" → Fragezeichen (?)
+   - "Ausrufezeichen" → Ausrufezeichen (!)
+   - "neuer Absatz" / "nächster Absatz" / "Absatz" → Absatzumbruch (Leerzeile)
+   - "neue Zeile" / "nächste Zeile" / "Zeilenumbruch" → Zeilenumbruch
+   - "Klammer auf" / "Klammer zu" → Klammern ( )
+   - "Anführungszeichen auf" / "Anführungszeichen zu" → Anführungszeichen
+   - "Bindestrich" / "Minus" → Bindestrich (-)
+   - "Schrägstrich" → Schrägstrich (/)
+   WICHTIG: Diese Steuerwörter MÜSSEN entfernt und durch das Zeichen ersetzt werden!
 4. Entferne Füllwörter wie "ähm", "äh"
 5. Entferne Feld-Steuerbefehle wie "Methodik:", "Befund:", "Beurteilung:" aus dem Text
 6. Gib die korrigierten Texte im JSON-Format zurück

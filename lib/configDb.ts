@@ -26,7 +26,7 @@ export function getWhisperOfflineModelPath(modelId: WhisperOfflineModel | string
 }
 
 export interface RuntimeConfig {
-  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral';
+  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper';
   llmProvider: 'openai' | 'lmstudio' | 'mistral';
   whisperModel?: string;
   whisperOfflineModel?: WhisperOfflineModel;
@@ -64,7 +64,7 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
     for (const row of rows) {
       switch (row.config_key) {
         case 'transcriptionProvider':
-          if (['whisperx', 'elevenlabs', 'mistral'].includes(row.config_value)) {
+          if (['whisperx', 'elevenlabs', 'mistral', 'fast_whisper'].includes(row.config_value)) {
             config.transcriptionProvider = row.config_value as any;
           }
           break;
@@ -151,7 +151,7 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
     for (const row of rows as { config_key: string; config_value: string }[]) {
       switch (row.config_key) {
         case 'transcriptionProvider':
-          if (['whisperx', 'elevenlabs', 'mistral'].includes(row.config_value)) {
+          if (['whisperx', 'elevenlabs', 'mistral', 'fast_whisper'].includes(row.config_value)) {
             config.transcriptionProvider = row.config_value as any;
           }
           break;

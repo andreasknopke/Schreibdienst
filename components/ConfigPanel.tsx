@@ -11,7 +11,7 @@ interface ProviderOption {
 }
 
 interface RuntimeConfig {
-  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral';
+  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper';
   llmProvider: 'openai' | 'lmstudio' | 'mistral';
   whisperModel?: string;
   whisperOfflineModel?: string;
@@ -31,8 +31,10 @@ interface EnvInfo {
   hasWhisperUrl: boolean;
   hasLMStudioUrl: boolean;
   hasMistralKey: boolean;
+  hasFastWhisperUrl: boolean;
   whisperServiceUrl: string;
   lmStudioUrl: string;
+  fastWhisperWsUrl: string;
 }
 
 interface MigrationStatus {
@@ -248,6 +250,11 @@ export default function ConfigPanel() {
                     {envInfo.whisperServiceUrl}
                   </div>
                 )}
+                {provider.id === 'fast_whisper' && envInfo?.fastWhisperWsUrl && (
+                  <div className="text-xs text-gray-500 truncate">
+                    {envInfo.fastWhisperWsUrl}
+                  </div>
+                )}
               </div>
               {config.transcriptionProvider === provider.id && (
                 <span className="text-green-500">✓</span>
@@ -259,7 +266,7 @@ export default function ConfigPanel() {
         {/* Whisper Model Selection */}
         {config.transcriptionProvider === 'whisperx' && (
           <div className="ml-6 mt-2">
-            <label className="text-xs text-gray-500 block mb-1">Whisper-Modell</label>
+            <label className="text-xs text-gray-500 block mb-1">Live-Transkription</label>
             <select
               value={config.whisperModel || 'guillaumekln/faster-whisper-large-v2'}
               onChange={(e) => updateConfig({ whisperModel: e.target.value as any })}
@@ -279,8 +286,7 @@ export default function ConfigPanel() {
         {config.transcriptionProvider === 'whisperx' && (
           <div className="ml-6 mt-3">
             <label className="text-xs text-gray-500 block mb-1">
-              Offline-Transkription Modell
-              <span className="ml-1 text-gray-400">(für Diktate ohne Internetverbindung)</span>
+              Offline-Transkription
             </label>
             <select
               value={config.whisperOfflineModel || 'guillaumekln/faster-whisper-large-v2'}
@@ -294,9 +300,6 @@ export default function ConfigPanel() {
                 </option>
               ))}
             </select>
-            <p className="text-xs text-gray-400 mt-1">
-              Diese Modelle werden lokal ausgeführt, wenn keine Online-Verbindung besteht.
-            </p>
           </div>
         )}
         

@@ -38,8 +38,10 @@ export async function GET(request: NextRequest) {
     hasWhisperUrl: !!process.env.WHISPER_SERVICE_URL,
     hasLMStudioUrl: !!process.env.LLM_STUDIO_URL,
     hasMistralKey: !!process.env.MISTRAL_API_KEY,
+    hasFastWhisperUrl: !!process.env.FAST_WHISPER_WS_URL,
     whisperServiceUrl: process.env.WHISPER_SERVICE_URL || 'http://localhost:5000',
     lmStudioUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
+    fastWhisperWsUrl: process.env.FAST_WHISPER_WS_URL || 'ws://localhost:5001',
   };
   
   return NextResponse.json({ 
@@ -57,6 +59,12 @@ function getAvailableTranscriptionProviders(envInfo: any): { id: string; name: s
       name: 'WhisperX (Lokal/Remote)',
       available: envInfo.hasWhisperUrl,
       reason: envInfo.hasWhisperUrl ? undefined : 'WHISPER_SERVICE_URL nicht konfiguriert',
+    },
+    {
+      id: 'fast_whisper',
+      name: 'Fast Whisper (WebSocket)',
+      available: envInfo.hasFastWhisperUrl,
+      reason: envInfo.hasFastWhisperUrl ? undefined : 'FAST_WHISPER_WS_URL nicht konfiguriert',
     },
     {
       id: 'elevenlabs',
@@ -113,7 +121,7 @@ export async function POST(request: NextRequest) {
       ...currentConfig,
     };
     
-    if (body.transcriptionProvider && ['whisperx', 'elevenlabs', 'mistral'].includes(body.transcriptionProvider)) {
+    if (body.transcriptionProvider && ['whisperx', 'elevenlabs', 'mistral', 'fast_whisper'].includes(body.transcriptionProvider)) {
       newConfig.transcriptionProvider = body.transcriptionProvider;
     }
     

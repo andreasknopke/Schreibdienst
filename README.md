@@ -88,11 +88,14 @@ App läuft auf http://localhost:3000
 ### Next.js App (.env.local)
 
 ```bash
-# Transkriptions-Provider (whisperx oder elevenlabs)
+# Transkriptions-Provider (whisperx, elevenlabs, mistral oder fast_whisper)
 TRANSCRIPTION_PROVIDER=whisperx
 
 # WhisperX Service URL (lokal oder remote)
 WHISPER_SERVICE_URL=http://localhost:5000
+
+# Fast Whisper WebSocket URL (optional, für Echtzeit-Transkription)
+FAST_WHISPER_WS_URL=ws://localhost:5001
 
 # ElevenLabs API Key (optional, als Fallback oder Primary)
 ELEVENLABS_API_KEY=your_api_key
@@ -127,6 +130,12 @@ ELEVENLABS_API_KEY=your_api_key
 TRANSCRIPTION_PROVIDER=whisperx
 WHISPER_SERVICE_URL=http://localhost:5000
 ELEVENLABS_API_KEY=your_api_key  # Wird verwendet wenn WhisperX nicht erreichbar
+```
+
+#### Option 5: Fast Whisper (WebSocket Server)
+```bash
+TRANSCRIPTION_PROVIDER=fast_whisper
+FAST_WHISPER_WS_URL=ws://localhost:5001
 ```
 
 ### WhisperX Service

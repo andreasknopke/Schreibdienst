@@ -764,9 +764,46 @@ export default function HomePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [startRecording, stopRecording, handleReset]);
 
+  // Schnelle LLM-Fachwort-Korrektur
+  const quickCorrectWithLLM = useCallback(async (text: string): Promise<string> => {
+    try {
+      // Fachwörter aus Textbausteinen extrahieren
+      const referenceTerms = templates
+        .map(t => t.content)
+        .join(' ')
+        .split(/\s+/)
+        .filter(word => word.length > 3)
+        .filter((word, index, self) => self.indexOf(word) === index); // Unique
+      
+      const response = await fetch('/api/quick-correct', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        },
+        body: JSON.stringify({ text, referenceTerms: referenceTerms.slice(0, 100) }) // Max 100 Terms
+      });
+      
+      if (!response.ok) {
+        console.warn('[QuickCorrect] API error:', response.status);
+        return text;
+      }
+      
+      const data = await response.json();
+      if (data.changed) {
+        console.log('[QuickCorrect] LLM corrected:', text, '→', data.corrected);
+      }
+      return data.corrected || text;
+    } catch (error) {
+      console.warn('[QuickCorrect] Error:', error);
+      return text;
+    }
+  }, [templates, getAuthHeader, getDbTokenHeader]);
+
   // Fast Whisper WebSocket Transkription Handler
   // Nur finale Sätze anzeigen (isFinal=true), Partials ignorieren
-  const handleFastWhisperTranscript = useCallback((text: string, isFinal: boolean) => {
+  const handleFastWhisperTranscript = useCallback(async (text: string, isFinal: boolean) => {
     if (!text) return;
     
     // Partials ignorieren - nur finale Sätze anzeigen
@@ -777,10 +814,14 @@ export default function HomePage() {
     console.log('[FastWhisper] FINAL:', text);
     
     // Wörterbuch-Ersetzungen anwenden
-    const correctedText = applyDictionaryToText(text);
+    let correctedText = applyDictionaryToText(text);
     if (correctedText !== text) {
       console.log('[FastWhisper] Dictionary corrected:', text, '->', correctedText);
     }
+    
+    // Schnelle LLM-Fachwort-Korrektur (async, nicht blockierend für UX)
+    // Zeige erst den Wörterbuch-korrigierten Text, dann LLM-korrigiert
+    const llmCorrectedPromise = quickCorrectWithLLM(correctedText);
     
     // Finaler Satz: Zum akkumulierten Text hinzufügen
     const getFinalRef = () => {
@@ -820,15 +861,32 @@ export default function HomePage() {
     const finalRef = getFinalRef();
     const existingRef = getExistingRef();
     
-    // Text akkumulieren
+    // Text akkumulieren (erst mit Wörterbuch-Korrektur)
     finalRef.current = finalRef.current 
       ? finalRef.current + ' ' + correctedText 
       : correctedText;
     
     // Anzeige aktualisieren
-    const displayText = [existingRef.current, finalRef.current].filter(p => p.trim()).join(' ');
-    setText(displayText);
-  }, [mode, activeField, applyDictionaryToText]);
+    const updateDisplay = () => {
+      const displayText = [existingRef.current, finalRef.current].filter(p => p.trim()).join(' ');
+      setText(displayText);
+    };
+    
+    updateDisplay();
+    
+    // LLM-Korrektur im Hintergrund abwarten und dann ersetzen
+    const llmCorrected = await llmCorrectedPromise;
+    if (llmCorrected !== correctedText) {
+      // Ersetze den letzten Satz im finalRef mit der LLM-korrigierten Version
+      const parts = finalRef.current.split(' ' + correctedText);
+      if (parts.length > 1) {
+        finalRef.current = parts[0] + ' ' + llmCorrected + parts.slice(1).join(' ' + correctedText);
+      } else if (finalRef.current === correctedText) {
+        finalRef.current = llmCorrected;
+      }
+      updateDisplay();
+    }
+  }, [mode, activeField, applyDictionaryToText, quickCorrectWithLLM]);
 
   async function startRecording() {
     setError(null);

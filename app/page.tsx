@@ -1082,9 +1082,16 @@ export default function HomePage() {
         ws.onopen = async () => {
           console.log('[FastWhisper] WebSocket connected');
           
-          // Explizit leeren Prompt senden um Server-Cache zu überschreiben
-          ws.send(JSON.stringify({ type: 'set_prompt', text: '' }));
-          console.log('[FastWhisper] Sent empty initial_prompt to clear server cache');
+          // Initial Prompt aus Wörterbuch senden (Einträge mit useInPrompt=true)
+          const promptWords = dictionaryEntries
+            .filter(e => e.useInPrompt && e.correct)
+            .map(e => e.correct);
+          
+          if (promptWords.length > 0) {
+            const initialPrompt = promptWords.join(', ');
+            console.log('[FastWhisper] Sending initial_prompt with', promptWords.length, 'words');
+            ws.send(JSON.stringify({ type: 'set_prompt', text: initialPrompt }));
+          }
           
           try {
             // Mikrofon-Stream holen

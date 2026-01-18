@@ -952,9 +952,9 @@ export default function HomePage() {
       console.log('[FastWhisper] Dictionary corrected:', processedText, '->', correctedText);
     }
     
-    // Schnelle LLM-Fachwort-Korrektur (async, nicht blockierend für UX)
-    // Zeige erst den Wörterbuch-korrigierten Text, dann LLM-korrigiert
-    const llmCorrectedPromise = quickCorrectWithLLM(correctedText);
+    // DEAKTIVIERT: Quick-LLM-Korrektur führt zu Halluzinationen bei medgemma
+    // Die finale Korrektur erfolgt durch den "Korrigieren" Button
+    // const llmCorrectedPromise = quickCorrectWithLLM(correctedText);
     
     // Finaler Satz: Zum akkumulierten Text hinzufügen
     const getFinalRef = () => {
@@ -1007,7 +1007,9 @@ export default function HomePage() {
     
     updateDisplay();
     
-    // LLM-Korrektur im Hintergrund abwarten und dann ersetzen
+    // DEAKTIVIERT: Quick-LLM-Korrektur führt zu Halluzinationen
+    // Die finale Korrektur erfolgt durch den "Korrigieren" Button
+    /*
     const llmCorrected = await llmCorrectedPromise;
     if (llmCorrected !== correctedText) {
       // Ersetze den letzten Satz im finalRef mit der LLM-korrigierten Version
@@ -1019,7 +1021,8 @@ export default function HomePage() {
       }
       updateDisplay();
     }
-  }, [mode, activeField, applyDictionaryToText, quickCorrectWithLLM]);
+    */
+  }, [mode, activeField, applyDictionaryToText]);
 
   async function startRecording() {
     setError(null);

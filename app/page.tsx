@@ -60,6 +60,11 @@ export default function HomePage() {
   const fastWhisperProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const fastWhisperStreamRef = useRef<MediaStream | null>(null);
   
+  // Fast Whisper: Akkumulierte finale Texte (wird bei jedem finalen Satz erweitert)
+  const fastWhisperFinalTextRef = useRef<string>("");
+  const fastWhisperFinalMethodikRef = useRef<string>("");
+  const fastWhisperFinalBeurteilungRef = useRef<string>("");
+  
   // SSL-Zertifikat Status für Fast Whisper
   const [sslCertWarning, setSslCertWarning] = useState<{ show: boolean; serverUrl: string } | null>(null);
   
@@ -704,28 +709,68 @@ export default function HomePage() {
   }, [startRecording, stopRecording, handleReset]);
 
   // Fast Whisper WebSocket Transkription Handler
-  const handleFastWhisperTranscript = useCallback((text: string) => {
+  // isFinal: true = Satz abgeschlossen (akkumulieren), false = Partial-Update (überschreiben)
+  const handleFastWhisperTranscript = useCallback((text: string, isFinal: boolean) => {
     if (!text) return;
     
-    console.log('[FastWhisper] Received:', text);
+    console.log('[FastWhisper]', isFinal ? 'FINAL:' : 'Partial:', text);
     
-    // Fast Whisper Server sendet jeden Satz einzeln - wir müssen akkumulieren
-    // Aktualisiere Transkript basierend auf Modus
-    if (mode === 'befund') {
-      switch (activeField) {
-        case 'methodik':
-          setMethodik(prev => prev ? prev + ' ' + text : text);
-          break;
-        case 'beurteilung':
-          setBeurteilung(prev => prev ? prev + ' ' + text : text);
-          break;
-        case 'befund':
-        default:
-          setTranscript(prev => prev ? prev + ' ' + text : text);
-          break;
+    // Basis-Text: existierender Text + alle bisherigen finalen Sätze dieser Session
+    const getDisplayText = (finalRef: React.MutableRefObject<string>, existingRef: React.MutableRefObject<string>, currentPartial: string) => {
+      const base = existingRef.current;
+      const finals = finalRef.current;
+      const parts = [base, finals, currentPartial].filter(p => p.trim());
+      return parts.join(' ');
+    };
+    
+    if (isFinal) {
+      // Finaler Satz: Zum akkumulierten Text hinzufügen
+      if (mode === 'befund') {
+        switch (activeField) {
+          case 'methodik':
+            fastWhisperFinalMethodikRef.current = fastWhisperFinalMethodikRef.current 
+              ? fastWhisperFinalMethodikRef.current + ' ' + text 
+              : text;
+            setMethodik(getDisplayText(fastWhisperFinalMethodikRef, existingMethodikRef, ''));
+            break;
+          case 'beurteilung':
+            fastWhisperFinalBeurteilungRef.current = fastWhisperFinalBeurteilungRef.current 
+              ? fastWhisperFinalBeurteilungRef.current + ' ' + text 
+              : text;
+            setBeurteilung(getDisplayText(fastWhisperFinalBeurteilungRef, existingBeurteilungRef, ''));
+            break;
+          case 'befund':
+          default:
+            fastWhisperFinalTextRef.current = fastWhisperFinalTextRef.current 
+              ? fastWhisperFinalTextRef.current + ' ' + text 
+              : text;
+            setTranscript(getDisplayText(fastWhisperFinalTextRef, existingTextRef, ''));
+            break;
+        }
+      } else {
+        fastWhisperFinalTextRef.current = fastWhisperFinalTextRef.current 
+          ? fastWhisperFinalTextRef.current + ' ' + text 
+          : text;
+        setTranscript(getDisplayText(fastWhisperFinalTextRef, existingTextRef, ''));
       }
     } else {
-      setTranscript(prev => prev ? prev + ' ' + text : text);
+      // Partial: Zeige Basis + aktuellen Partial (wird beim nächsten Partial überschrieben)
+      if (mode === 'befund') {
+        switch (activeField) {
+          case 'methodik':
+            setMethodik(getDisplayText(fastWhisperFinalMethodikRef, existingMethodikRef, text));
+            break;
+          case 'beurteilung':
+            setBeurteilung(getDisplayText(fastWhisperFinalBeurteilungRef, existingBeurteilungRef, text));
+            break;
+          case 'befund':
+          default:
+            setTranscript(getDisplayText(fastWhisperFinalTextRef, existingTextRef, text));
+            break;
+        }
+      } else {
+        setTranscript(getDisplayText(fastWhisperFinalTextRef, existingTextRef, text));
+      }
     }
   }, [mode, activeField]);
 
@@ -746,6 +791,11 @@ export default function HomePage() {
 
     // Fast Whisper WebSocket Modus
     if (runtimeConfig?.transcriptionProvider === 'fast_whisper' && runtimeConfig.fastWhisperWsUrl) {
+      // Finale Text-Refs zurücksetzen für neue Session
+      fastWhisperFinalTextRef.current = "";
+      fastWhisperFinalMethodikRef.current = "";
+      fastWhisperFinalBeurteilungRef.current = "";
+      
       let wsUrl = runtimeConfig.fastWhisperWsUrl;
       
       // HTTPS-Seiten erfordern wss:// (WebSocket Secure)
@@ -835,18 +885,23 @@ export default function HomePage() {
           try {
             // RealtimeSTT sendet verschiedene Formate
             let text: string = '';
+            let isFinal: boolean = false;
             
             if (typeof event.data === 'string') {
               if (event.data.startsWith('{')) {
                 const data = JSON.parse(event.data);
                 text = data.text || data.transcript || '';
+                // Verschiedene Flags für "final" je nach Server-Implementierung
+                isFinal = data.is_final || data.final || data.type === 'final' || data.message_type === 'FinalTranscript' || false;
               } else {
+                // Plain text wird als final behandelt
                 text = event.data;
+                isFinal = true;
               }
             }
             
             if (text && text.trim()) {
-              handleFastWhisperTranscript(text.trim());
+              handleFastWhisperTranscript(text.trim(), isFinal);
             }
           } catch (e) {
             console.warn('[FastWhisper] Parse error:', e);

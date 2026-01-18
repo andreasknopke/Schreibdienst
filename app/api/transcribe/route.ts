@@ -514,63 +514,6 @@ async function transcribeWithMistral(file: Blob, filename: string) {
   };
 }
 
-/**
- * Fast Whisper Transkription via HTTP (für Server-Side)
- * Der Fast Whisper Server läuft auf Port 5001 und akzeptiert Audio-Dateien
- */
-async function transcribeWithFastWhisper(file: Blob, filename: string, initialPrompt?: string) {
-  // Hole die WebSocket URL und konvertiere zu HTTP
-  const wsUrl = process.env.FAST_WHISPER_WS_URL || 'ws://localhost:5001';
-  // Konvertiere ws:// zu http:// bzw. wss:// zu https://
-  const httpUrl = wsUrl.replace(/^ws(s?):\/\//, 'http$1://');
-  
-  const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
-  console.log(`[FastWhisper] Starting transcription - File: ${filename}, Size: ${fileSizeMB}MB, URL: ${httpUrl}${initialPrompt ? `, Initial prompt: ${initialPrompt.length} chars` : ''}`);
-  
-  const startTime = Date.now();
-  
-  try {
-    // Erstelle FormData für HTTP Upload
-    const formData = new FormData();
-    formData.append('audio', file, filename);
-    if (initialPrompt) {
-      formData.append('initial_prompt', initialPrompt);
-    }
-    formData.append('language', 'de');
-    
-    // Sende an Fast Whisper HTTP Endpoint
-    const res = await fetch(`${httpUrl}/transcribe`, {
-      method: 'POST',
-      body: formData,
-    });
-    
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`Fast Whisper transcription failed (${res.status}): ${errorText}`);
-    }
-    
-    const data = await res.json();
-    const transcriptionText = data.text || data.transcription || '';
-    
-    // Entferne Wiederholungen/Halluzinationen
-    const cleanedText = detectAndRemoveRepetition(transcriptionText);
-    
-    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-    const textLength = cleanedText.length;
-    console.log(`[FastWhisper] ✓ Transcription complete - Duration: ${duration}s, Text length: ${textLength} chars`);
-    
-    return {
-      text: cleanedText,
-      segments: data.segments || [],
-      language: data.language || 'de',
-      provider: 'fast_whisper' as const
-    };
-  } catch (error: any) {
-    console.error(`[FastWhisper] Error:`, error.message);
-    throw error;
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     console.log('\n=== Transcription Request Started ===')
@@ -644,22 +587,19 @@ export async function POST(request: NextRequest) {
       console.log('Using Mistral AI Voxtral as primary provider');
       result = await transcribeWithMistral(file, filename);
     } else if (provider === 'fast_whisper') {
-      console.log('Using Fast Whisper as primary provider');
+      // Fast Whisper ist ein reiner WebSocket-Server (RealtimeSTT)
+      // Für Server-seitige Transkription müssen wir auf WhisperX zurückfallen
+      // Echtzeit-Streaming funktioniert nur Client-seitig im Browser
+      console.log('Fast Whisper (WebSocket) not available server-side, falling back to WhisperX');
       try {
-        result = await transcribeWithFastWhisper(file, filename, initialPrompt);
-      } catch (fastWhisperError: any) {
-        console.warn('Fast Whisper failed, trying fallback:', fastWhisperError.message);
-        
-        // Fallback zu WhisperX wenn konfiguriert
-        if (process.env.WHISPER_SERVICE_URL) {
-          console.log('Falling back to WhisperX...');
-          result = await transcribeWithWhisperX(file, filename, initialPrompt, whisperModel, speedMode);
-        } else if (process.env.ELEVENLABS_API_KEY) {
+        result = await transcribeWithWhisperX(file, filename, initialPrompt, whisperModel, speedMode);
+      } catch (whisperError: any) {
+        console.warn('WhisperX failed, trying ElevenLabs fallback:', whisperError.message);
+        if (process.env.ELEVENLABS_API_KEY) {
           console.log('Falling back to ElevenLabs...');
           result = await transcribeWithElevenLabs(file, filename);
         } else {
-          console.error('No fallback available');
-          throw fastWhisperError;
+          throw whisperError;
         }
       }
     } else {

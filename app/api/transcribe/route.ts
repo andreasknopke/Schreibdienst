@@ -530,12 +530,9 @@ async function transcribeWithFastWhisper(file: Blob, filename: string, initialPr
   const startTime = Date.now();
   
   try {
-    // Normalisiere Audio für bessere Erkennung
-    const normalizedAudio = await normalizeAudioForWhisper(file, filename);
-    
     // Erstelle FormData für HTTP Upload
     const formData = new FormData();
-    formData.append('audio', normalizedAudio, filename);
+    formData.append('audio', file, filename);
     if (initialPrompt) {
       formData.append('initial_prompt', initialPrompt);
     }

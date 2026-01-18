@@ -801,8 +801,11 @@ export default function HomePage() {
     }
   }, [templates, getAuthHeader, getDbTokenHeader]);
 
+  // Ref um zu tracken ob der letzte Text mit Punkt endete (für Groß-/Kleinschreibung)
+  const fastWhisperEndsWithPeriodRef = useRef<boolean>(true); // Start mit true = erster Buchstabe groß
+
   // Fast Whisper WebSocket Transkription Handler
-  // Nur finale Sätze anzeigen (isFinal=true), Partials ignorieren
+  // Diktat-Modus: Kein automatisches Satzende, "Punkt" als Sprachbefehl
   const handleFastWhisperTranscript = useCallback(async (text: string, isFinal: boolean) => {
     if (!text) return;
     
@@ -813,10 +816,49 @@ export default function HomePage() {
     
     console.log('[FastWhisper] FINAL:', text);
     
+    // Diktat-Logik: Sprachbefehle erkennen und Satzenden verarbeiten
+    let processedText = text.trim();
+    let endsWithPeriod = false;
+    
+    // Prüfe auf expliziten "Punkt" Sprachbefehl
+    const punktPatterns = [
+      /\bpunkt\s*$/i,           // "...Punkt" am Ende
+      /\bpunkt\s*[.!?]?\s*$/i,  // "...Punkt." am Ende
+    ];
+    
+    const hasPunktCommand = punktPatterns.some(p => p.test(processedText));
+    
+    if (hasPunktCommand) {
+      // "Punkt" wurde gesagt - entferne das Wort und setze echten Punkt
+      processedText = processedText.replace(/\s*\bpunkt\s*[.!?]?\s*$/i, '').trim() + '.';
+      endsWithPeriod = true;
+      console.log('[FastWhisper] Punkt-Befehl erkannt');
+    } else {
+      // Kein Punkt-Befehl: Entferne automatische Satzzeichen am Ende
+      processedText = processedText.replace(/[.!?]+\s*$/, '').trim();
+    }
+    
+    // Groß-/Kleinschreibung basierend auf vorherigem Satzende
+    if (!fastWhisperEndsWithPeriodRef.current && processedText.length > 0) {
+      // Vorheriger Text endete ohne Punkt → klein schreiben (außer Eigennamen/Nomen)
+      // Wir machen nur den ersten Buchstaben klein, da Nomen im Deutschen groß bleiben sollten
+      // Das LLM kann das später korrigieren wenn nötig
+      const firstChar = processedText[0];
+      // Nur Kleinschreibung wenn es ein typischer Satzanfang ist (Artikel, Pronomen, etc.)
+      const lowercaseWords = ['der', 'die', 'das', 'ein', 'eine', 'es', 'er', 'sie', 'wir', 'ich', 'und', 'oder', 'aber', 'sowie', 'als', 'wenn', 'da', 'dort', 'hier', 'nach', 'bei', 'mit', 'ohne', 'für', 'zu', 'im', 'am', 'an', 'auf', 'in'];
+      const firstWord = processedText.split(/\s+/)[0].toLowerCase();
+      if (lowercaseWords.includes(firstWord)) {
+        processedText = firstChar.toLowerCase() + processedText.slice(1);
+      }
+    }
+    
+    // Update des Refs für den nächsten Satz
+    fastWhisperEndsWithPeriodRef.current = endsWithPeriod;
+    
     // Wörterbuch-Ersetzungen anwenden
-    let correctedText = applyDictionaryToText(text);
-    if (correctedText !== text) {
-      console.log('[FastWhisper] Dictionary corrected:', text, '->', correctedText);
+    let correctedText = applyDictionaryToText(processedText);
+    if (correctedText !== processedText) {
+      console.log('[FastWhisper] Dictionary corrected:', processedText, '->', correctedText);
     }
     
     // Schnelle LLM-Fachwort-Korrektur (async, nicht blockierend für UX)
@@ -916,6 +958,9 @@ export default function HomePage() {
       fastWhisperStableBeurteilungRef.current = "";
       fastWhisperLastPartialRef.current = "";
       fastWhisperPartialCountRef.current = 0;
+      
+      // Diktat-Modus: Erster Buchstabe groß (wie Satzanfang)
+      fastWhisperEndsWithPeriodRef.current = true;
       
       let wsUrl = runtimeConfig.fastWhisperWsUrl;
       

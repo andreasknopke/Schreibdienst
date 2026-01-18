@@ -65,6 +65,12 @@ export default function HomePage() {
   const fastWhisperFinalMethodikRef = useRef<string>("");
   const fastWhisperFinalBeurteilungRef = useRef<string>("");
   
+  // Fast Whisper: Wort-für-Wort Anzeige - trackt stabile Wörter aus Partials
+  const fastWhisperLastPartialRef = useRef<string>("");
+  const fastWhisperStableWordsRef = useRef<string>(""); // Bestätigte Wörter aus Partials
+  const fastWhisperStableMethodikRef = useRef<string>("");
+  const fastWhisperStableBeurteilungRef = useRef<string>("");
+  
   // SSL-Zertifikat Status für Fast Whisper
   const [sslCertWarning, setSslCertWarning] = useState<{ show: boolean; serverUrl: string } | null>(null);
   
@@ -150,6 +156,47 @@ export default function HomePage() {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [templateMode, setTemplateMode] = useState(false);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+
+  // Wörterbuch-Einträge für Echtzeit-Korrektur
+  interface DictionaryEntry {
+    wrong: string;
+    correct: string;
+  }
+  const [dictionaryEntries, setDictionaryEntries] = useState<DictionaryEntry[]>([]);
+
+  // Wörterbuch laden
+  const fetchDictionary = useCallback(async () => {
+    if (!username) return;
+    try {
+      const response = await fetch('/api/dictionary', {
+        headers: { 
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        }
+      });
+      const data = await response.json();
+      if (data.entries) {
+        setDictionaryEntries(data.entries);
+        console.log('[Dictionary] Loaded', data.entries.length, 'entries for real-time correction');
+      }
+    } catch (error) {
+      console.error('[Dictionary] Load error:', error);
+    }
+  }, [username, getAuthHeader, getDbTokenHeader]);
+
+  // Wörterbuch-Ersetzungen auf Text anwenden (clientseitig)
+  const applyDictionaryToText = useCallback((text: string): string => {
+    if (dictionaryEntries.length === 0 || !text) return text;
+    
+    let result = text;
+    for (const entry of dictionaryEntries) {
+      // Case-insensitive Ersetzung mit Wortgrenzen
+      const escaped = entry.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
+      result = result.replace(regex, entry.correct);
+    }
+    return result;
+  }, [dictionaryEntries]);
 
   // Templates laden
   const fetchTemplates = useCallback(async () => {
@@ -272,6 +319,13 @@ export default function HomePage() {
       fetchTemplates();
     }
   }, [username, mode, fetchTemplates]);
+
+  // Wörterbuch beim Start laden (für Echtzeit-Korrektur bei Fast Whisper)
+  useEffect(() => {
+    if (username) {
+      fetchDictionary();
+    }
+  }, [username, fetchDictionary]);
 
   // Event-Listener für Template-Aktualisierungen (wenn Templates im Modal geändert werden)
   useEffect(() => {
@@ -709,70 +763,142 @@ export default function HomePage() {
   }, [startRecording, stopRecording, handleReset]);
 
   // Fast Whisper WebSocket Transkription Handler
-  // isFinal: true = Satz abgeschlossen (akkumulieren), false = Partial-Update (überschreiben)
+  // Wort-für-Wort Anzeige: Zeigt Wörter sobald sie stabil sind (sich nicht mehr ändern)
   const handleFastWhisperTranscript = useCallback((text: string, isFinal: boolean) => {
     if (!text) return;
     
-    console.log('[FastWhisper]', isFinal ? 'FINAL:' : 'Partial:', text);
+    // Hilfsfunktion: Finde stabile Wörter (die sich zwischen zwei Partials nicht geändert haben)
+    const findStableWords = (lastPartial: string, newPartial: string): string[] => {
+      const lastWords = lastPartial.trim().split(/\s+/).filter(w => w);
+      const newWords = newPartial.trim().split(/\s+/).filter(w => w);
+      
+      // Finde die längste gemeinsame Präfix-Sequenz
+      const stableWords: string[] = [];
+      const minLen = Math.min(lastWords.length, newWords.length);
+      
+      for (let i = 0; i < minLen; i++) {
+        // Wort ist stabil wenn es in beiden Partials identisch ist
+        if (lastWords[i].toLowerCase() === newWords[i].toLowerCase()) {
+          stableWords.push(newWords[i]);
+        } else {
+          break; // Erstes abweichendes Wort gefunden
+        }
+      }
+      
+      return stableWords;
+    };
     
-    // Basis-Text: existierender Text + alle bisherigen finalen Sätze dieser Session
-    const getDisplayText = (finalRef: React.MutableRefObject<string>, existingRef: React.MutableRefObject<string>, currentPartial: string) => {
-      const base = existingRef.current;
-      const finals = finalRef.current;
-      const parts = [base, finals, currentPartial].filter(p => p.trim());
+    // Hole die richtigen Refs basierend auf aktuellem Feld
+    const getStableRef = () => {
+      if (mode === 'befund') {
+        switch (activeField) {
+          case 'methodik': return fastWhisperStableMethodikRef;
+          case 'beurteilung': return fastWhisperStableBeurteilungRef;
+          default: return fastWhisperStableWordsRef;
+        }
+      }
+      return fastWhisperStableWordsRef;
+    };
+    
+    const getFinalRef = () => {
+      if (mode === 'befund') {
+        switch (activeField) {
+          case 'methodik': return fastWhisperFinalMethodikRef;
+          case 'beurteilung': return fastWhisperFinalBeurteilungRef;
+          default: return fastWhisperFinalTextRef;
+        }
+      }
+      return fastWhisperFinalTextRef;
+    };
+    
+    const getExistingRef = () => {
+      if (mode === 'befund') {
+        switch (activeField) {
+          case 'methodik': return existingMethodikRef;
+          case 'beurteilung': return existingBeurteilungRef;
+          default: return existingTextRef;
+        }
+      }
+      return existingTextRef;
+    };
+    
+    const setText = (value: string) => {
+      if (mode === 'befund') {
+        switch (activeField) {
+          case 'methodik': setMethodik(value); break;
+          case 'beurteilung': setBeurteilung(value); break;
+          default: setTranscript(value); break;
+        }
+      } else {
+        setTranscript(value);
+      }
+    };
+    
+    const stableRef = getStableRef();
+    const finalRef = getFinalRef();
+    const existingRef = getExistingRef();
+    
+    // Basis-Text zusammenbauen
+    const buildDisplayText = (stableWords: string, currentWord?: string) => {
+      const parts = [
+        existingRef.current,
+        finalRef.current,
+        stableWords,
+        currentWord
+      ].filter(p => p && p.trim());
       return parts.join(' ');
     };
     
     if (isFinal) {
-      // Finaler Satz: Zum akkumulierten Text hinzufügen
-      if (mode === 'befund') {
-        switch (activeField) {
-          case 'methodik':
-            fastWhisperFinalMethodikRef.current = fastWhisperFinalMethodikRef.current 
-              ? fastWhisperFinalMethodikRef.current + ' ' + text 
-              : text;
-            setMethodik(getDisplayText(fastWhisperFinalMethodikRef, existingMethodikRef, ''));
-            break;
-          case 'beurteilung':
-            fastWhisperFinalBeurteilungRef.current = fastWhisperFinalBeurteilungRef.current 
-              ? fastWhisperFinalBeurteilungRef.current + ' ' + text 
-              : text;
-            setBeurteilung(getDisplayText(fastWhisperFinalBeurteilungRef, existingBeurteilungRef, ''));
-            break;
-          case 'befund':
-          default:
-            fastWhisperFinalTextRef.current = fastWhisperFinalTextRef.current 
-              ? fastWhisperFinalTextRef.current + ' ' + text 
-              : text;
-            setTranscript(getDisplayText(fastWhisperFinalTextRef, existingTextRef, ''));
-            break;
-        }
-      } else {
-        fastWhisperFinalTextRef.current = fastWhisperFinalTextRef.current 
-          ? fastWhisperFinalTextRef.current + ' ' + text 
-          : text;
-        setTranscript(getDisplayText(fastWhisperFinalTextRef, existingTextRef, ''));
+      console.log('[FastWhisper] FINAL:', text);
+      
+      // Wörterbuch-Ersetzungen anwenden
+      const correctedText = applyDictionaryToText(text);
+      if (correctedText !== text) {
+        console.log('[FastWhisper] Dictionary corrected:', text, '->', correctedText);
       }
+      
+      // Finaler Satz: Zum akkumulierten Text hinzufügen, Partial-State zurücksetzen
+      finalRef.current = finalRef.current 
+        ? finalRef.current + ' ' + correctedText 
+        : correctedText;
+      
+      // Stable words und last partial zurücksetzen für nächsten Satz
+      stableRef.current = "";
+      fastWhisperLastPartialRef.current = "";
+      
+      setText(buildDisplayText(''));
     } else {
-      // Partial: Zeige Basis + aktuellen Partial (wird beim nächsten Partial überschrieben)
-      if (mode === 'befund') {
-        switch (activeField) {
-          case 'methodik':
-            setMethodik(getDisplayText(fastWhisperFinalMethodikRef, existingMethodikRef, text));
-            break;
-          case 'beurteilung':
-            setBeurteilung(getDisplayText(fastWhisperFinalBeurteilungRef, existingBeurteilungRef, text));
-            break;
-          case 'befund':
-          default:
-            setTranscript(getDisplayText(fastWhisperFinalTextRef, existingTextRef, text));
-            break;
-        }
-      } else {
-        setTranscript(getDisplayText(fastWhisperFinalTextRef, existingTextRef, text));
+      // Partial: Finde stabile Wörter durch Vergleich mit letztem Partial
+      const lastPartial = fastWhisperLastPartialRef.current;
+      const stableWords = findStableWords(lastPartial, text);
+      
+      // Neue stabile Wörter hinzufügen (die noch nicht in stableRef sind)
+      const currentStableCount = stableRef.current.trim().split(/\s+/).filter(w => w).length;
+      const newStableWords = stableWords.slice(currentStableCount);
+      
+      if (newStableWords.length > 0) {
+        // Wörterbuch auf neue stabile Wörter anwenden
+        const correctedNewWords = applyDictionaryToText(newStableWords.join(' '));
+        stableRef.current = stableRef.current 
+          ? stableRef.current + ' ' + correctedNewWords 
+          : correctedNewWords;
+        console.log('[FastWhisper] Stable words:', stableRef.current);
       }
+      
+      // Aktuelles (noch nicht stabiles) Wort ermitteln
+      const allWords = text.trim().split(/\s+/).filter(w => w);
+      const unstableWord = allWords.length > stableWords.length 
+        ? allWords[stableWords.length] 
+        : '';
+      
+      // Letzten Partial speichern für nächsten Vergleich
+      fastWhisperLastPartialRef.current = text;
+      
+      // Anzeige aktualisieren: stabile Wörter + aktuelles Wort (ausgegraut/kursiv wäre schön, aber erstmal normal)
+      setText(buildDisplayText(stableRef.current, unstableWord));
     }
-  }, [mode, activeField]);
+  }, [mode, activeField, applyDictionaryToText]);
 
   async function startRecording() {
     setError(null);
@@ -795,6 +921,12 @@ export default function HomePage() {
       fastWhisperFinalTextRef.current = "";
       fastWhisperFinalMethodikRef.current = "";
       fastWhisperFinalBeurteilungRef.current = "";
+      
+      // Stable-Words-Refs zurücksetzen für Wort-für-Wort Anzeige
+      fastWhisperStableWordsRef.current = "";
+      fastWhisperStableMethodikRef.current = "";
+      fastWhisperStableBeurteilungRef.current = "";
+      fastWhisperLastPartialRef.current = "";
       
       let wsUrl = runtimeConfig.fastWhisperWsUrl;
       

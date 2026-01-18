@@ -178,78 +178,47 @@ export async function POST(request: NextRequest) {
     // Bereinige Output (manchmal fügt das Modell Zusätze hinzu)
     corrected = corrected.split('\n')[0].trim();
     
-    // META-KOMMENTAR FILTER: Entferne typische LLM-Phrasen
-    const metaPatterns = [
-      /^(Keine Korrekturen?( notwendig| nötig| erforderlich)?\.?\s*)/i,
-      /^(Der korrigierte Text( lautet)?:?\s*)/i,
-      /^(Korrigierter Text:?\s*)/i,
-      /^(Hier ist der korrigierte Text:?\s*)/i,
-      /^(Text:?\s*)/i,
-      /(\s*Keine (weiteren )?Korrekturen?( notwendig| nötig)?\.?\s*)$/i,
-      /(\s*\(keine Änderungen?\)\.?\s*)$/i,
-    ];
-    
-    for (const pattern of metaPatterns) {
-      if (pattern.test(corrected)) {
-        corrected = corrected.replace(pattern, '').trim();
-        console.log('[QuickCorrect] Meta-Kommentar entfernt');
-      }
-    }
-    
-    // Wenn nach Bereinigung leer → Original zurück
+    // Wenn leer → Original zurück
     if (!corrected) {
       return NextResponse.json({ corrected: text, changed: false, elapsed, filtered: true });
     }
     
-    // HALLUZINATIONS-FILTER: Erkenne Block von kommagetrennten Prompt-Begriffen
-    // Typisches Muster: "(Begriff1, Begriff2, Begriff3, ..." - viele Begriffe hintereinander
-    const allPromptTerms = [...relevantTerms, ...dictCorrections.map((d: {wrong: string, correct: string}) => d.correct)];
-    const promptTermsLower = new Set(allPromptTerms.map(t => t.toLowerCase()));
+    // ÄHNLICHKEITS-CHECK: Wenn sich der Text zu stark unterscheidet → Original nehmen
+    // Berechne Wort-Überlappung (Jaccard-Ähnlichkeit)
+    const inputWords = new Set(text.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+    const outputWords = new Set(corrected.toLowerCase().split(/\s+/).filter(w => w.length > 2));
     
-    // Zähle wie viele Prompt-Begriffe in einem kurzen Abschnitt vorkommen
-    // Wenn >5 Begriffe kommasepariert hintereinander stehen = Halluzination
-    const segments = corrected.split(/[,;]\s*/);
-    let consecutivePromptTerms = 0;
-    let maxConsecutive = 0;
+    // Gemeinsame Wörter
+    const intersection = new Set([...inputWords].filter(w => outputWords.has(w)));
+    // Vereinigung
+    const union = new Set([...inputWords, ...outputWords]);
     
-    for (const segment of segments) {
-      const segmentLower = segment.toLowerCase().trim();
-      // Prüfe ob dieses Segment ein Prompt-Begriff ist (oder sehr ähnlich)
-      const isPromptTerm = allPromptTerms.some(term => {
-        const termLower = term.toLowerCase();
-        return segmentLower === termLower || 
-               segmentLower.startsWith(termLower) || 
-               termLower.startsWith(segmentLower);
-      });
-      
-      if (isPromptTerm && segment.length < 30) { // Kurze Segmente = wahrscheinlich Liste
-        consecutivePromptTerms++;
-        maxConsecutive = Math.max(maxConsecutive, consecutivePromptTerms);
-      } else {
-        consecutivePromptTerms = 0; // Reset bei normalem Text
-      }
+    // Jaccard-Ähnlichkeit: intersection / union
+    const similarity = union.size > 0 ? intersection.size / union.size : 1;
+    
+    // Wenn Ähnlichkeit < 70% → zu unterschiedlich, nehme Original
+    const MIN_SIMILARITY = 0.7;
+    if (similarity < MIN_SIMILARITY) {
+      console.warn(`[QuickCorrect] Text zu unterschiedlich (${(similarity * 100).toFixed(0)}% Ähnlichkeit), nehme Original`);
+      return NextResponse.json({ corrected: text, changed: false, elapsed, filtered: true, similarity });
     }
     
-    // Wenn >5 Prompt-Begriffe hintereinander = definitiv Halluzination
-    if (maxConsecutive >= 5) {
-      console.warn(`[QuickCorrect] Halluzination erkannt: ${maxConsecutive} Prompt-Begriffe hintereinander`);
-      return NextResponse.json({ corrected: text, changed: false, elapsed, filtered: true });
-    }
-    
-    // Längenvalidierung: Ausgabe darf nicht viel länger sein als Input
-    if (corrected.length > text.length * 1.5) {
-      console.warn(`[QuickCorrect] Ausgabe zu lang (${corrected.length} vs ${text.length}), vermutlich Halluzination`);
+    // Längenvalidierung: Ausgabe darf nicht viel länger/kürzer sein als Input
+    const lengthRatio = corrected.length / text.length;
+    if (lengthRatio > 1.5 || lengthRatio < 0.5) {
+      console.warn(`[QuickCorrect] Länge zu unterschiedlich (${(lengthRatio * 100).toFixed(0)}%), nehme Original`);
       return NextResponse.json({ corrected: text, changed: false, elapsed, filtered: true });
     }
     
     const changed = corrected !== text;
 
-    console.log(`[QuickCorrect] ${elapsed}ms${changed ? ` | "${text}" → "${corrected}"` : ''}`);
+    console.log(`[QuickCorrect] ${elapsed}ms | ${(similarity * 100).toFixed(0)}% ähnlich${changed ? ` | "${text}" → "${corrected}"` : ''}`);
 
     return NextResponse.json({ 
       corrected, 
       changed, 
       elapsed,
+      similarity,
       cached: cachedTermsHash === termsHash
     });
 

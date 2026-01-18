@@ -908,6 +908,15 @@ export default function HomePage() {
     // Bereinige doppelte Leerzeichen und Punkte
     processedText = processedText.replace(/\s+/g, ' ').replace(/\.+/g, '.').trim();
     
+    // Prüfe ob "Punkt" explizit diktiert wurde (dann bleibt der Punkt)
+    const hadExplicitPunkt = /punkt/i.test(text);
+    
+    // Entferne automatische Satzzeichen am Ende (wenn KEIN expliziter Punkt-Befehl)
+    // Der Server fügt bei Pausen automatisch Punkte ein, die wollen wir nicht
+    if (!hadExplicitPunkt) {
+      processedText = processedText.replace(/[.!?]+\s*$/, '').trim();
+    }
+    
     // Prüfe ob der Text mit Punkt endet
     endsWithPeriod = /\.\s*$/.test(processedText);
     

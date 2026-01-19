@@ -299,7 +299,23 @@ async function callLLM(
 ): Promise<{ content: string; tokens?: { input: number; output: number } }> {
   const { temperature = 0.3, maxTokens = 2000, jsonMode = false } = options;
   
-  console.log(`[LLM] Config: provider=${config.provider}, baseUrl=${config.baseUrl}, model=${config.model}`);
+  const fullUrl = `${config.baseUrl}/v1/chat/completions`;
+  
+  console.log(`[LLM] ========== LLM REQUEST START ==========`);
+  console.log(`[LLM] Provider: ${config.provider}`);
+  console.log(`[LLM] Base URL: ${config.baseUrl}`);
+  console.log(`[LLM] Full URL: ${fullUrl}`);
+  console.log(`[LLM] Model: ${config.model}`);
+  console.log(`[LLM] Environment LLM_STUDIO_URL: ${process.env.LLM_STUDIO_URL || '(not set)'}`);
+  console.log(`[LLM] Temperature: ${temperature}, MaxTokens: ${maxTokens}`);
+  
+  // Parse URL to check for hostname/port issues
+  try {
+    const urlObj = new URL(config.baseUrl);
+    console.log(`[LLM] Parsed URL - Protocol: ${urlObj.protocol}, Host: ${urlObj.host}, Hostname: ${urlObj.hostname}, Port: ${urlObj.port || '(default)'}`);
+  } catch (urlError: any) {
+    console.error(`[LLM] URL PARSE ERROR: ${urlError.message}`);
+  }
   
   if (config.provider === 'openai' && !config.apiKey) {
     throw new Error('OPENAI_API_KEY not configured');
@@ -330,27 +346,49 @@ async function callLLM(
     body.response_format = { type: 'json_object' };
   }
   
-  console.log(`[LLM] Request: ${config.baseUrl}/v1/chat/completions, Temperature: ${temperature}${jsonMode ? ', JSON mode' : ''}`);
+  console.log(`[LLM] Request Headers: ${JSON.stringify(Object.keys(headers))}`);
+  console.log(`[LLM] Request Body Size: ${JSON.stringify(body).length} bytes`);
   
-  // Log the exact prompt being sent
+  // Log the exact prompt being sent (truncated for large prompts)
   console.log(`[LLM] === PROMPT START ===`);
   for (const msg of messages) {
-    console.log(`[LLM] [${msg.role.toUpperCase()}]:`);
-    console.log(msg.content);
-    console.log(`[LLM] ---`);
+    const truncatedContent = msg.content.length > 500 
+      ? msg.content.substring(0, 500) + `... [truncated, total ${msg.content.length} chars]`
+      : msg.content;
+    console.log(`[LLM] [${msg.role.toUpperCase()}]: ${truncatedContent}`);
   }
   console.log(`[LLM] === PROMPT END ===`);
   
+  const startTime = Date.now();
+  
   try {
-    const res = await fetch(`${config.baseUrl}/v1/chat/completions`, {
+    console.log(`[LLM] Initiating fetch to ${fullUrl}...`);
+    
+    // Add timeout with AbortController for better error diagnosis
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      console.error(`[LLM] Request TIMEOUT after 60 seconds`);
+    }, 60000); // 60 second timeout
+    
+    const res = await fetch(fullUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
+    
+    clearTimeout(timeoutId);
+    const elapsed = Date.now() - startTime;
+    
+    console.log(`[LLM] Response received in ${elapsed}ms`);
+    console.log(`[LLM] Response Status: ${res.status} ${res.statusText}`);
+    console.log(`[LLM] Response Headers: content-type=${res.headers.get('content-type')}, content-length=${res.headers.get('content-length')}`);
     
     if (!res.ok) {
       const errorText = await res.text();
-      console.error(`[LLM] ${config.provider} API error:`, res.status, errorText);
+      console.error(`[LLM] ERROR Response Body: ${errorText.substring(0, 1000)}`);
+      console.error(`[LLM] ========== LLM REQUEST FAILED ==========`);
       throw new Error(`${config.provider} API error (${res.status}): ${errorText}`);
     }
     
@@ -359,9 +397,43 @@ async function callLLM(
     const tokens = data.usage ? { input: data.usage.prompt_tokens, output: data.usage.completion_tokens } : undefined;
     
     console.log(`[LLM] Response OK, content length: ${content.length} chars`);
+    if (tokens) {
+      console.log(`[LLM] Tokens used: input=${tokens.input}, output=${tokens.output}`);
+    }
+    console.log(`[LLM] ========== LLM REQUEST SUCCESS (${elapsed}ms) ==========`);
     return { content, tokens };
   } catch (error: any) {
-    console.error(`[LLM] Fetch error: ${error.message}`);
+    const elapsed = Date.now() - startTime;
+    console.error(`[LLM] ========== LLM REQUEST ERROR ==========`);
+    console.error(`[LLM] Error after ${elapsed}ms`);
+    console.error(`[LLM] Error Type: ${error.name}`);
+    console.error(`[LLM] Error Message: ${error.message}`);
+    console.error(`[LLM] Error Code: ${error.code || '(none)'}`);
+    console.error(`[LLM] Error Cause: ${error.cause ? JSON.stringify(error.cause) : '(none)'}`);
+    
+    // Specific error diagnosis
+    if (error.name === 'AbortError') {
+      console.error(`[LLM] DIAGNOSIS: Request was aborted (timeout or cancelled)`);
+    } else if (error.code === 'ECONNREFUSED') {
+      console.error(`[LLM] DIAGNOSIS: Connection refused - LM Studio may not be running or port is wrong`);
+    } else if (error.code === 'ENOTFOUND') {
+      console.error(`[LLM] DIAGNOSIS: DNS lookup failed - hostname could not be resolved`);
+    } else if (error.code === 'ETIMEDOUT' || error.code === 'ENETUNREACH') {
+      console.error(`[LLM] DIAGNOSIS: Network timeout/unreachable - firewall or routing issue`);
+    } else if (error.code === 'ECONNRESET') {
+      console.error(`[LLM] DIAGNOSIS: Connection reset by peer`);
+    } else if (error.message?.includes('IPv6')) {
+      console.error(`[LLM] DIAGNOSIS: IPv6 related issue - try using IPv4 address or hostname`);
+    } else if (error.message?.includes('certificate') || error.message?.includes('SSL') || error.message?.includes('TLS')) {
+      console.error(`[LLM] DIAGNOSIS: SSL/TLS certificate issue`);
+    }
+    
+    // Log full error stack
+    if (error.stack) {
+      console.error(`[LLM] Stack: ${error.stack}`);
+    }
+    
+    console.error(`[LLM] ========== END ERROR ==========`);
     throw error;
   }
 }

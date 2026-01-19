@@ -114,50 +114,127 @@ export async function POST(request: NextRequest) {
 
     const startTime = Date.now();
     let response: Response;
-
-    if (useCompletionApi) {
-      // Completion API - effizienter, kein Chat-Overhead
-      const prompt = `${cachedSystemPrompt}\n\n${INPUT_MARKER_START}${text}${INPUT_MARKER_END}\n\nKorrigierter Text:`;
-      
-      response = await fetch(`${lmStudioUrl}/v1/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: lmStudioModel,
-          prompt,
-          temperature: 0.1,
-          max_tokens: 200,
-          stop: ['\n\n', INPUT_MARKER_START, 'Input:'],
-          cache_prompt: true,
-        }),
-      });
-    } else {
-      // Chat API - Standard mit Markern
-      const userContent = `${INPUT_MARKER_START}${text}${INPUT_MARKER_END}`;
-      
-      response = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: lmStudioModel,
-          messages: [
-            { role: 'system', content: cachedSystemPrompt },
-            { role: 'user', content: userContent }
-          ],
-          temperature: 0.1,
-          max_tokens: 200,
-          cache_prompt: true,
-        }),
-      });
+    
+    console.log(`[QuickCorrect] ========== LM STUDIO REQUEST START ==========`);
+    console.log(`[QuickCorrect] LM Studio URL: ${lmStudioUrl}`);
+    console.log(`[QuickCorrect] LM Studio Model: ${lmStudioModel}`);
+    console.log(`[QuickCorrect] Using Completion API: ${useCompletionApi}`);
+    console.log(`[QuickCorrect] Environment LLM_STUDIO_URL: ${process.env.LLM_STUDIO_URL || '(not set)'}`);
+    console.log(`[QuickCorrect] Environment LLM_STUDIO_MODEL: ${process.env.LLM_STUDIO_MODEL || '(not set)'}`);
+    console.log(`[QuickCorrect] Text length: ${text.length} chars`);
+    
+    // Parse URL to check for issues
+    try {
+      const urlObj = new URL(lmStudioUrl);
+      console.log(`[QuickCorrect] Parsed URL - Protocol: ${urlObj.protocol}, Host: ${urlObj.host}, Hostname: ${urlObj.hostname}, Port: ${urlObj.port || '(default)'}`);
+    } catch (urlError: any) {
+      console.error(`[QuickCorrect] URL PARSE ERROR: ${urlError.message}`);
     }
 
+    // Add timeout with AbortController
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      console.error(`[QuickCorrect] Request TIMEOUT after 30 seconds`);
+    }, 30000);
+
+    try {
+      if (useCompletionApi) {
+        // Completion API - effizienter, kein Chat-Overhead
+        const prompt = `${cachedSystemPrompt}\n\n${INPUT_MARKER_START}${text}${INPUT_MARKER_END}\n\nKorrigierter Text:`;
+        const fullUrl = `${lmStudioUrl}/v1/completions`;
+        console.log(`[QuickCorrect] Fetching (Completion API): ${fullUrl}`);
+        
+        response = await fetch(fullUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: lmStudioModel,
+            prompt,
+            temperature: 0.1,
+            max_tokens: 200,
+            stop: ['\n\n', INPUT_MARKER_START, 'Input:'],
+            cache_prompt: true,
+          }),
+          signal: controller.signal,
+        });
+      } else {
+        // Chat API - Standard mit Markern
+        const userContent = `${INPUT_MARKER_START}${text}${INPUT_MARKER_END}`;
+        const fullUrl = `${lmStudioUrl}/v1/chat/completions`;
+        console.log(`[QuickCorrect] Fetching (Chat API): ${fullUrl}`);
+        
+        response = await fetch(fullUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: lmStudioModel,
+            messages: [
+              { role: 'system', content: cachedSystemPrompt },
+              { role: 'user', content: userContent }
+            ],
+            temperature: 0.1,
+            max_tokens: 200,
+            cache_prompt: true,
+          }),
+          signal: controller.signal,
+        });
+      }
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      const elapsed = Date.now() - startTime;
+      console.error(`[QuickCorrect] ========== FETCH ERROR ==========`);
+      console.error(`[QuickCorrect] Error after ${elapsed}ms`);
+      console.error(`[QuickCorrect] Error Type: ${fetchError.name}`);
+      console.error(`[QuickCorrect] Error Message: ${fetchError.message}`);
+      console.error(`[QuickCorrect] Error Code: ${fetchError.code || '(none)'}`);
+      
+      // Specific error diagnosis
+      if (fetchError.name === 'AbortError') {
+        console.error(`[QuickCorrect] DIAGNOSIS: Request timeout - LM Studio not responding`);
+      } else if (fetchError.code === 'ECONNREFUSED') {
+        console.error(`[QuickCorrect] DIAGNOSIS: Connection refused - LM Studio not running or wrong port`);
+      } else if (fetchError.code === 'ENOTFOUND') {
+        console.error(`[QuickCorrect] DIAGNOSIS: DNS lookup failed - hostname not found`);
+      } else if (fetchError.code === 'ETIMEDOUT' || fetchError.code === 'ENETUNREACH') {
+        console.error(`[QuickCorrect] DIAGNOSIS: Network unreachable - firewall or routing issue`);
+      } else if (fetchError.message?.includes('IPv6')) {
+        console.error(`[QuickCorrect] DIAGNOSIS: IPv6 issue - try IPv4 address`);
+      }
+      
+      if (fetchError.stack) {
+        console.error(`[QuickCorrect] Stack: ${fetchError.stack}`);
+      }
+      console.error(`[QuickCorrect] ========== END ERROR ==========`);
+      
+      return NextResponse.json({ 
+        corrected: text, 
+        changed: false, 
+        error: `Connection error: ${fetchError.message}`,
+        diagnostics: {
+          url: lmStudioUrl,
+          errorType: fetchError.name,
+          errorCode: fetchError.code,
+          errorMessage: fetchError.message
+        }
+      });
+    }
+    
+    clearTimeout(timeoutId);
     const elapsed = Date.now() - startTime;
+    
+    console.log(`[QuickCorrect] Response received in ${elapsed}ms`);
+    console.log(`[QuickCorrect] Response Status: ${response.status} ${response.statusText}`);
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('[QuickCorrect] LM Studio error:', error);
+      console.error(`[QuickCorrect] ========== LM STUDIO ERROR ==========`);
+      console.error('[QuickCorrect] LM Studio error response:', error);
+      console.error(`[QuickCorrect] ========== END ERROR ==========`);
       return NextResponse.json({ corrected: text, changed: false, error: 'API error' });
     }
+    
+    console.log(`[QuickCorrect] ========== LM STUDIO SUCCESS (${elapsed}ms) ==========`);
 
     const data = await response.json();
     

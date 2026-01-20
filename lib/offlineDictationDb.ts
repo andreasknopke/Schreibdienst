@@ -62,20 +62,31 @@ export async function initOfflineDictationTable(): Promise<void> {
       priority ENUM('normal', 'urgent', 'stat') DEFAULT 'normal',
       status ENUM('pending', 'processing', 'completed', 'error') DEFAULT 'pending',
       mode ENUM('befund', 'arztbrief') DEFAULT 'befund',
+      bemerkung TEXT,
+      termin DATETIME NULL,
+      fachabteilung VARCHAR(255),
+      berechtigte TEXT,
       raw_transcript TEXT,
+      segments LONGTEXT,
       transcript TEXT,
       methodik TEXT,
       befund TEXT,
       beurteilung TEXT,
       corrected_text TEXT,
+      change_score INT DEFAULT NULL,
       error_message TEXT,
+      archived BOOLEAN DEFAULT FALSE,
+      archived_at TIMESTAMP NULL,
+      archived_by VARCHAR(255) DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       processing_started_at TIMESTAMP NULL,
       completed_at TIMESTAMP NULL,
       INDEX idx_username (username),
       INDEX idx_status (status),
       INDEX idx_priority (priority),
-      INDEX idx_created_at (created_at)
+      INDEX idx_created_at (created_at),
+      INDEX idx_archived (archived),
+      INDEX idx_fachabteilung (fachabteilung)
     )
   `);
   
@@ -613,19 +624,30 @@ export async function initOfflineDictationTableWithRequest(request: NextRequest)
       status ENUM('pending', 'processing', 'completed', 'error') DEFAULT 'pending',
       mode ENUM('befund', 'arztbrief') DEFAULT 'befund',
       raw_transcript TEXT,
+      segments LONGTEXT,
       transcript TEXT,
       methodik TEXT,
       befund TEXT,
       beurteilung TEXT,
       corrected_text TEXT,
+      change_score INT DEFAULT NULL,
       error_message TEXT,
+      bemerkung TEXT,
+      termin DATETIME NULL,
+      fachabteilung VARCHAR(255),
+      berechtigte TEXT,
+      archived BOOLEAN DEFAULT FALSE,
+      archived_at TIMESTAMP NULL,
+      archived_by VARCHAR(255),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       processing_started_at TIMESTAMP NULL,
       completed_at TIMESTAMP NULL,
       INDEX idx_username (username),
       INDEX idx_status (status),
       INDEX idx_priority (priority),
-      INDEX idx_created_at (created_at)
+      INDEX idx_created_at (created_at),
+      INDEX idx_archived (archived),
+      INDEX idx_fachabteilung (fachabteilung)
     )
   `);
   
@@ -682,7 +704,44 @@ export async function initOfflineDictationTableWithRequest(request: NextRequest)
   } catch (e: any) {
     // Index already exists - ignore error
   }
+
+  // Migrate existing tables to add new metadata fields
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN bemerkung TEXT AFTER error_message`);
+    console.log(`[DB] ✓ Added bemerkung column (${poolKey})`);
+  } catch (e: any) {
+    // Column already exists - ignore error
+  }
   
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN termin DATETIME NULL AFTER bemerkung`);
+    console.log(`[DB] ✓ Added termin column (${poolKey})`);
+  } catch (e: any) {
+    // Column already exists - ignore error
+  }
+  
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN fachabteilung VARCHAR(255) AFTER termin`);
+    console.log(`[DB] ✓ Added fachabteilung column (${poolKey})`);
+  } catch (e: any) {
+    // Column already exists - ignore error
+  }
+  
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN berechtigte TEXT AFTER fachabteilung`);
+    console.log(`[DB] ✓ Added berechtigte column (${poolKey})`);
+  } catch (e: any) {
+    // Column already exists - ignore error
+  }
+  
+  // Add index for fachabteilung
+  try {
+    await db.execute(`CREATE INDEX idx_fachabteilung ON offline_dictations(fachabteilung)`);
+    console.log(`[DB] ✓ Added fachabteilung index (${poolKey})`);
+  } catch (e: any) {
+    // Index already exists - ignore error
+  }
+
   // Initialize correction log table
   try {
     await db.execute(`

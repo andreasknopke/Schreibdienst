@@ -369,6 +369,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   
   // "Mitlesen" mode - show original transcript with word highlighting
   const [showMitlesen, setShowMitlesen] = useState(false);
+  const [autoScrollMitlesen, setAutoScrollMitlesen] = useState(false); // User controls auto-scroll
   const [parsedSegments, setParsedSegments] = useState<TranscriptSegment[]>([]);
   const mitlesenRef = useRef<HTMLDivElement>(null);
   
@@ -597,15 +598,15 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     document.body.removeChild(link);
   };
   
-  // Auto-scroll to current word in Mitlesen panel
+  // Auto-scroll to current word in Mitlesen panel (only if enabled by user)
   useEffect(() => {
-    if (!showMitlesen || !mitlesenRef.current || !isPlaying) return;
+    if (!autoScrollMitlesen || !showMitlesen || !mitlesenRef.current || !isPlaying) return;
     
     const currentWordEl = mitlesenRef.current.querySelector('.bg-yellow-300, .dark\\:bg-yellow-600');
     if (currentWordEl) {
       currentWordEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-  }, [audioCurrentTime, showMitlesen, isPlaying]);
+  }, [audioCurrentTime, showMitlesen, isPlaying, autoScrollMitlesen]);
   
   // Load audio when entering fullscreen
   useEffect(() => {
@@ -1424,15 +1425,26 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   
                   {/* Mitlesen toggle */}
                   {audioUrl && (
-                    <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                    <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 flex items-center gap-2 flex-wrap">
                       {parsedSegments.length > 0 ? (
-                        <button
-                          className={`btn btn-sm ${showMitlesen ? 'btn-primary' : 'btn-outline'}`}
-                          onClick={() => setShowMitlesen(!showMitlesen)}
-                          title="Originaltext mit Wortmarkierung beim Abspielen"
-                        >
-                          {showMitlesen ? '📖 Mitlesen aus' : '📖 Mitlesen an'}
-                        </button>
+                        <>
+                          <button
+                            className={`btn btn-sm ${showMitlesen ? 'btn-primary' : 'btn-outline'}`}
+                            onClick={() => setShowMitlesen(!showMitlesen)}
+                            title="Originaltext mit Wortmarkierung beim Abspielen"
+                          >
+                            {showMitlesen ? '📖 Mitlesen aus' : '📖 Mitlesen an'}
+                          </button>
+                          {showMitlesen && (
+                            <button
+                              className={`btn btn-sm ${autoScrollMitlesen ? 'btn-secondary' : 'btn-outline'}`}
+                              onClick={() => setAutoScrollMitlesen(!autoScrollMitlesen)}
+                              title="Automatisch zum aktuellen Wort scrollen"
+                            >
+                              {autoScrollMitlesen ? '📍 Auto-Scroll aus' : '📍 Auto-Scroll an'}
+                            </button>
+                          )}
+                        </>
                       ) : (
                         <span className="text-xs text-gray-400">
                           ℹ️ Mitlesen nicht verfügbar (keine Wort-Zeitstempel)
@@ -1924,7 +1936,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                     
                     {/* Mitlesen toggle button - show even without segments for info */}
                     {audioUrl && (
-                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 flex items-center gap-2 flex-wrap">
                         {parsedSegments.length > 0 ? (
                           <>
                             <button
@@ -1935,9 +1947,18 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                               {showMitlesen ? '📖 Mitlesen aus' : '📖 Mitlesen an'}
                             </button>
                             {showMitlesen && (
-                              <span className="ml-2 text-xs text-gray-500">
-                                Original + korrigierter Text synchron
-                              </span>
+                              <>
+                                <button
+                                  className={`btn btn-sm ${autoScrollMitlesen ? 'btn-secondary' : 'btn-outline'}`}
+                                  onClick={() => setAutoScrollMitlesen(!autoScrollMitlesen)}
+                                  title="Automatisch zum aktuellen Wort scrollen"
+                                >
+                                  {autoScrollMitlesen ? '📍 Auto-Scroll aus' : '📍 Auto-Scroll an'}
+                                </button>
+                                <span className="text-xs text-gray-500">
+                                  Original + korrigierter Text synchron
+                                </span>
+                              </>
                             )}
                           </>
                         ) : (

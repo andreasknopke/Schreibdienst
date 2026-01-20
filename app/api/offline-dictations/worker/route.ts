@@ -181,15 +181,17 @@ async function processDictation(request: NextRequest, dictationId: number): Prom
 async function transcribeWithProvider(
   request: NextRequest, 
   audioBlob: Blob, 
-  provider: 'whisperx' | 'elevenlabs' | 'mistral',
+  provider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper',
   initialPrompt?: string,
   whisperModel?: string
 ): Promise<TranscriptionResult> {
-  console.log(`[Worker] Transcribing with ${provider}${whisperModel ? ` (model: ${whisperModel})` : ''}...`);
+  // fast_whisper is WebSocket-based and only works client-side, fallback to whisperx for batch processing
+  const effectiveProvider = provider === 'fast_whisper' ? 'whisperx' : provider;
+  console.log(`[Worker] Transcribing with ${effectiveProvider}${provider === 'fast_whisper' ? ' (fallback from fast_whisper)' : ''}${whisperModel ? ` (model: ${whisperModel})` : ''}...`);
   
   let result: { text: string; segments?: any[] };
   
-  switch (provider) {
+  switch (effectiveProvider) {
     case 'elevenlabs':
       result = await transcribeWithElevenLabs(audioBlob);
       break;
@@ -205,7 +207,7 @@ async function transcribeWithProvider(
   return {
     text: result.text,
     segments: result.segments,
-    provider: provider,
+    provider: effectiveProvider,
   };
 }
 

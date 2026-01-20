@@ -3,16 +3,16 @@ import { query, execute, getPoolForRequest } from './db';
 
 // Verfügbare Offline-Modelle für WhisperX (aus Model_Manager.py)
 export type WhisperOfflineModel = 
-  | 'large-v3'                                        // Standard large-v3
-  | 'guillaumekln/faster-whisper-large-v2'            // Large-v2 (empfohlen)
-  | 'large-v2'                                        // Standard large-v2
-  | 'cstr/whisper-large-v3-turbo-german-int8_float32'; // Turbo German
+  | 'large-v3'                 // Standard large-v3
+  | 'large-v3-german-2'        // deepdml/faster-whisper-large-v3-german-2
+  | 'large-v3-systran'         // systran/faster-whisper-large-v3
+  | 'large-v3-turbo-german';   // cstr/whisper-large-v3-turbo-german-int8_float32
 
 export const WHISPER_OFFLINE_MODELS: { id: WhisperOfflineModel; name: string; modelPath: string }[] = [
-  { id: 'large-v3', name: 'Large-v3', modelPath: 'large-v3' },
-  { id: 'guillaumekln/faster-whisper-large-v2', name: 'Large-v2 (empfohlen)', modelPath: 'guillaumekln/faster-whisper-large-v2' },
-  { id: 'large-v2', name: 'Large-v2', modelPath: 'large-v2' },
-  { id: 'cstr/whisper-large-v3-turbo-german-int8_float32', name: 'Large-v3 Turbo German (schnell)', modelPath: 'cstr/whisper-large-v3-turbo-german-int8_float32' },
+  { id: 'large-v3', name: 'Large-v3 (Standard)', modelPath: 'large-v3' },
+  { id: 'large-v3-german-2', name: 'Large-v3 German 2 (empfohlen)', modelPath: 'deepdml/faster-whisper-large-v3-german-2' },
+  { id: 'large-v3-systran', name: 'Large-v3 Systran', modelPath: 'systran/faster-whisper-large-v3' },
+  { id: 'large-v3-turbo-german', name: 'Large-v3 Turbo German (schnell)', modelPath: 'cstr/whisper-large-v3-turbo-german-int8_float32' },
 ];
 
 // Get the HuggingFace model path from the offline model ID
@@ -26,7 +26,7 @@ export function getWhisperOfflineModelPath(modelId: WhisperOfflineModel | string
 }
 
 export interface RuntimeConfig {
-  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper';
+  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral';
   llmProvider: 'openai' | 'lmstudio' | 'mistral';
   whisperModel?: string;
   whisperOfflineModel?: WhisperOfflineModel;
@@ -36,15 +36,14 @@ export interface RuntimeConfig {
   // Double Precision Pipeline
   doublePrecisionEnabled?: boolean;
   doublePrecisionSecondProvider?: 'whisperx' | 'elevenlabs' | 'mistral';
-  doublePrecisionWhisperModel?: string;
   doublePrecisionMode?: 'parallel' | 'sequential';
 }
 
 const DEFAULT_CONFIG: RuntimeConfig = {
   transcriptionProvider: (process.env.TRANSCRIPTION_PROVIDER as any) || 'whisperx',
   llmProvider: (process.env.LLM_PROVIDER as any) || 'openai',
-  whisperModel: process.env.WHISPER_MODEL || 'guillaumekln/faster-whisper-large-v2',
-  whisperOfflineModel: (process.env.WHISPER_OFFLINE_MODEL as WhisperOfflineModel) || 'guillaumekln/faster-whisper-large-v2',
+  whisperModel: process.env.WHISPER_MODEL || 'deepdml/faster-whisper-large-v3-german-2',
+  whisperOfflineModel: (process.env.WHISPER_OFFLINE_MODEL as WhisperOfflineModel) || 'large-v3-german-2',
   openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   mistralModel: process.env.MISTRAL_MODEL || 'mistral-large-latest',
   doublePrecisionEnabled: false,
@@ -64,7 +63,7 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
     for (const row of rows) {
       switch (row.config_key) {
         case 'transcriptionProvider':
-          if (['whisperx', 'elevenlabs', 'mistral', 'fast_whisper'].includes(row.config_value)) {
+          if (['whisperx', 'elevenlabs', 'mistral'].includes(row.config_value)) {
             config.transcriptionProvider = row.config_value as any;
           }
           break;
@@ -97,9 +96,6 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
           if (['whisperx', 'elevenlabs', 'mistral'].includes(row.config_value)) {
             config.doublePrecisionSecondProvider = row.config_value as any;
           }
-          break;
-        case 'doublePrecisionWhisperModel':
-          config.doublePrecisionWhisperModel = row.config_value;
           break;
         case 'doublePrecisionMode':
           if (['parallel', 'sequential'].includes(row.config_value)) {
@@ -151,7 +147,7 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
     for (const row of rows as { config_key: string; config_value: string }[]) {
       switch (row.config_key) {
         case 'transcriptionProvider':
-          if (['whisperx', 'elevenlabs', 'mistral', 'fast_whisper'].includes(row.config_value)) {
+          if (['whisperx', 'elevenlabs', 'mistral'].includes(row.config_value)) {
             config.transcriptionProvider = row.config_value as any;
           }
           break;
@@ -184,9 +180,6 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
           if (['whisperx', 'elevenlabs', 'mistral'].includes(row.config_value)) {
             config.doublePrecisionSecondProvider = row.config_value as any;
           }
-          break;
-        case 'doublePrecisionWhisperModel':
-          config.doublePrecisionWhisperModel = row.config_value;
           break;
         case 'doublePrecisionMode':
           if (['parallel', 'sequential'].includes(row.config_value)) {

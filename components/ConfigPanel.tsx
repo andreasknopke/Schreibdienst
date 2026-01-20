@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from './AuthProvider';
 import DbTokenManager from './DbTokenManager';
+import WhisperXRecoveryLogs from './WhisperXRecoveryLogs';
 
 interface ProviderOption {
   id: string;
@@ -582,6 +583,11 @@ export default function ConfigPanel() {
             </div>
           )}
         </div>
+      )}
+
+      {/* WhisperX Recovery Logs - nur für root */}
+      {isRoot && (
+        <WhisperXRecoveryLogs />
       )}
 
       {/* Datenbank-Token Manager - nur für root */}

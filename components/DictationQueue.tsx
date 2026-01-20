@@ -1355,26 +1355,24 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   </div>
                 )}
 
-                {/* Completed content - direct to EditableTextWithMitlesen */}
+                {/* Completed content - simplified textarea for secretariat modal */}
                 {selectedDictation.status === 'completed' && (
-                  <EditableTextWithMitlesen
-                    text={editedTexts.corrected_text ?? selectedDictation.corrected_text ?? selectedDictation.transcript ?? ''}
-                    rawTranscript={selectedDictation.raw_transcript}
-                    segments={selectedDictation.segments}
-                    audioUrl={audioUrl}
-                    isPlaying={isPlaying}
-                    audioCurrentTime={audioCurrentTime}
-                    onTextChange={(text) => {
-                      setEditedTexts(prev => ({ ...prev, corrected_text: text }));
-                      setHasUnsavedChanges(true);
-                    }}
-                    onCopy={() => handleCopy(getCombinedTextEdited(), selectedDictation.id)}
-                    copyFeedback={copyFeedback === selectedDictation.id}
-                    changeScore={selectedDictation.change_score}
-                    isFullscreen={isFullscreen}
-                    dictationId={selectedDictation.id}
-                    textareaRef={textareaRef}
-                  />
+                  <div className="space-y-2">
+                    {selectedDictation.change_score !== undefined && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-600 dark:text-gray-400">Änderungsscore:</span>
+                        <ChangeIndicatorDot score={selectedDictation.change_score} />
+                      </div>
+                    )}
+                    <textarea
+                      className="textarea w-full min-h-[300px] font-mono text-sm"
+                      value={editedTexts.corrected_text ?? selectedDictation.corrected_text ?? selectedDictation.transcript ?? ''}
+                      onChange={(e) => {
+                        setEditedTexts(prev => ({ ...prev, corrected_text: e.target.value }));
+                        setHasUnsavedChanges(true);
+                      }}
+                    />
+                  </div>
                 )}
 
                 {/* Actions */}

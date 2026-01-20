@@ -2,8 +2,230 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { normalizeAudioForWhisper } from '@/lib/audioCompression';
+import { 
+  logRecoveryEventWithRequest, 
+  initWhisperRecoveryLogTableWithRequest 
+} from '@/lib/whisperRecoveryLogDb';
 
 export const runtime = 'nodejs';
+
+/**
+ * WhisperX Auto-Recovery System
+ * Bei Fehlern wird automatisch versucht, WhisperX wiederherzustellen
+ */
+
+// Globaler State für Recovery-Tracking
+let lastRecoveryAttempt = 0;
+const RECOVERY_COOLDOWN = 60000; // 1 Minute Cooldown zwischen Recovery-Versuchen
+let recoveryInProgress = false;
+
+// Ruft die WhisperX System API auf
+async function callWhisperXSystemAPI(action: string, request: NextRequest): Promise<{ success: boolean; message: string }> {
+  try {
+    // Wir rufen die System-API intern auf
+    const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:7860';
+    
+    const authUser = process.env.WHISPER_AUTH_USERNAME;
+    let authPass = process.env.WHISPER_AUTH_PASSWORD;
+    
+    // Fallback: find password by iterating env vars
+    if (!authPass) {
+      const whisperEnvVars = Object.keys(process.env).filter(k => k.includes('WHISPER'));
+      for (const key of whisperEnvVars) {
+        if (key.includes('PASSWORD')) {
+          authPass = process.env[key] || '';
+        }
+      }
+    }
+    
+    // Login für Session
+    const loginBody = `username=${encodeURIComponent(authUser || '')}&password=${encodeURIComponent(authPass || '')}`;
+    const loginRes = await fetch(`${whisperUrl}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: loginBody,
+    });
+    
+    if (!loginRes.ok) {
+      return { success: false, message: `Login fehlgeschlagen: ${loginRes.status}` };
+    }
+    
+    const sessionCookie = loginRes.headers.get('set-cookie')?.split(';')[0] || '';
+    
+    // API-Methode aufrufen
+    const processRes = await fetch(`${whisperUrl}/gradio_api/call/${action}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': sessionCookie,
+      },
+      body: JSON.stringify({ data: [] }),
+    });
+    
+    if (!processRes.ok) {
+      return { success: false, message: `${action} fehlgeschlagen: ${processRes.status}` };
+    }
+    
+    const processData = await processRes.json();
+    const eventId = processData.event_id;
+    
+    // Ergebnis abrufen
+    const resultRes = await fetch(`${whisperUrl}/gradio_api/call/${action}/${eventId}`, {
+      headers: { 'Cookie': sessionCookie },
+    });
+    
+    if (!resultRes.ok) {
+      return { success: false, message: `${action} Ergebnis fehlgeschlagen: ${resultRes.status}` };
+    }
+    
+    const resultText = await resultRes.text();
+    const dataMatch = resultText.match(/data:\s*(\[.*\])/s);
+    
+    if (dataMatch) {
+      const resultData = JSON.parse(dataMatch[1]);
+      return { success: true, message: resultData[0] || `${action} erfolgreich` };
+    }
+    
+    return { success: true, message: `${action} ausgeführt` };
+  } catch (error: any) {
+    return { success: false, message: error.message };
+  }
+}
+
+// Health Check für WhisperX
+async function whisperXHealthCheck(): Promise<boolean> {
+  try {
+    const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:7860';
+    const res = await fetch(whisperUrl, { 
+      method: 'GET',
+      signal: AbortSignal.timeout(5000)
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// Sleep Utility
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Führt die WhisperX Auto-Recovery durch
+ * 1. VRAM leeren (system_cleanup)
+ * 2. Zombies killen (system_kill_zombies)  
+ * 3. Health Check
+ * 4. Bei Bedarf: Server Restart + 30s warten
+ */
+async function performWhisperXRecovery(request: NextRequest, errorContext: string): Promise<boolean> {
+  // Prüfe Cooldown
+  const now = Date.now();
+  if (now - lastRecoveryAttempt < RECOVERY_COOLDOWN) {
+    console.log(`[WhisperX Recovery] Cooldown aktiv, überspringe (letzte Recovery vor ${Math.round((now - lastRecoveryAttempt) / 1000)}s)`);
+    return false;
+  }
+  
+  if (recoveryInProgress) {
+    console.log('[WhisperX Recovery] Recovery bereits in Progress, überspringe');
+    return false;
+  }
+  
+  recoveryInProgress = true;
+  lastRecoveryAttempt = now;
+  
+  try {
+    await initWhisperRecoveryLogTableWithRequest(request);
+    
+    await logRecoveryEventWithRequest(request, 'error', 'error_detected', 
+      'WhisperX Fehler erkannt, starte Auto-Recovery', 
+      { errorContext, details: 'Automatische Wiederherstellungssequenz eingeleitet' });
+    
+    console.log('[WhisperX Recovery] ========================================');
+    console.log('[WhisperX Recovery] Fehler erkannt, starte Auto-Recovery...');
+    console.log(`[WhisperX Recovery] Fehlerkontext: ${errorContext}`);
+    console.log('[WhisperX Recovery] ========================================');
+    
+    // Schritt 1: VRAM leeren
+    console.log('[WhisperX Recovery] Schritt 1/4: VRAM Cleanup...');
+    await logRecoveryEventWithRequest(request, 'info', 'system_cleanup', 'VRAM wird geleert');
+    
+    const cleanupResult = await callWhisperXSystemAPI('system_cleanup', request);
+    console.log(`[WhisperX Recovery] VRAM Cleanup: ${cleanupResult.success ? '✓' : '✗'} ${cleanupResult.message}`);
+    await logRecoveryEventWithRequest(request, cleanupResult.success ? 'success' : 'warn', 'system_cleanup', 
+      cleanupResult.message, { success: cleanupResult.success });
+    
+    // Schritt 2: Zombies killen
+    console.log('[WhisperX Recovery] Schritt 2/4: Zombie-Prozesse beenden...');
+    await logRecoveryEventWithRequest(request, 'info', 'system_kill_zombies', 'Zombie-Prozesse werden beendet');
+    
+    const zombieResult = await callWhisperXSystemAPI('system_kill_zombies', request);
+    console.log(`[WhisperX Recovery] Zombie Kill: ${zombieResult.success ? '✓' : '✗'} ${zombieResult.message}`);
+    await logRecoveryEventWithRequest(request, zombieResult.success ? 'success' : 'warn', 'system_kill_zombies', 
+      zombieResult.message, { success: zombieResult.success });
+    
+    // Schritt 3: Health Check
+    console.log('[WhisperX Recovery] Schritt 3/4: Health Check...');
+    await sleep(2000);
+    
+    if (await whisperXHealthCheck()) {
+      console.log('[WhisperX Recovery] ✓ WhisperX funktioniert wieder!');
+      await logRecoveryEventWithRequest(request, 'success', 'recovery_success', 
+        'WhisperX nach VRAM Cleanup und Zombie-Kill wiederhergestellt', { success: true });
+      return true;
+    }
+    
+    console.log('[WhisperX Recovery] ✗ WhisperX reagiert nicht, versuche Server-Neustart...');
+    
+    // Schritt 4: Server Restart (Ultima Ratio)
+    console.log('[WhisperX Recovery] Schritt 4/4: Server-Neustart (Ultima Ratio)...');
+    await logRecoveryEventWithRequest(request, 'warn', 'system_reboot', 
+      'Server-Neustart als letzte Option', { details: 'VRAM Cleanup und Zombie-Kill waren nicht ausreichend' });
+    
+    const rebootResult = await callWhisperXSystemAPI('system_reboot', request);
+    console.log(`[WhisperX Recovery] Reboot: ${rebootResult.success ? '✓' : '✗'} ${rebootResult.message}`);
+    
+    // Session-Cache invalidieren
+    gradioSessionCache = null;
+    
+    // 30 Sekunden warten
+    console.log('[WhisperX Recovery] Warte 30 Sekunden auf Server-Neustart...');
+    await logRecoveryEventWithRequest(request, 'info', 'health_check', 
+      'Warte 30 Sekunden auf Server-Neustart');
+    await sleep(30000);
+    
+    // Mehrere Health Check Versuche
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log(`[WhisperX Recovery] Health Check Versuch ${attempt}/3...`);
+      
+      if (await whisperXHealthCheck()) {
+        console.log('[WhisperX Recovery] ✓ WhisperX nach Neustart wiederhergestellt!');
+        await logRecoveryEventWithRequest(request, 'success', 'recovery_success', 
+          `WhisperX nach Server-Neustart wiederhergestellt (Versuch ${attempt})`, { success: true });
+        return true;
+      }
+      
+      if (attempt < 3) {
+        console.log('[WhisperX Recovery] Warte weitere 10 Sekunden...');
+        await sleep(10000);
+      }
+    }
+    
+    console.log('[WhisperX Recovery] ✗ Recovery fehlgeschlagen - manueller Eingriff erforderlich');
+    await logRecoveryEventWithRequest(request, 'error', 'recovery_failed', 
+      'Automatische Wiederherstellung fehlgeschlagen - manueller Eingriff erforderlich', { success: false });
+    
+    return false;
+    
+  } catch (error: any) {
+    console.error('[WhisperX Recovery] Unerwarteter Fehler:', error);
+    await logRecoveryEventWithRequest(request, 'error', 'recovery_failed', 
+      `Unerwarteter Fehler bei Recovery: ${error.message}`, { errorContext: error.stack, success: false });
+    return false;
+  } finally {
+    recoveryInProgress = false;
+  }
+}
 
 /**
  * Erkennt und entfernt Whisper-Halluzinationen (Wiederholungsmuster)
@@ -121,7 +343,7 @@ function getUniqueCorrectWords(dictionary: { entries: DictionaryEntry[] }): stri
 }
 
 // Transkriptions-Provider auswählen
-type TranscriptionProvider = 'whisperx' | 'elevenlabs' | 'mistral';
+type TranscriptionProvider = 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper';
 
 // Session-Cache für Gradio (vermeidet wiederholtes Login)
 let gradioSessionCache: {
@@ -242,7 +464,7 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
       meta: { _type: 'gradio.FileData' }
     };
     
-    // Language for WhisperX Gradio - must match dropdown options (full name, not ISO code)
+    // Language for WhisperX Gradio - must match dropdown choices, conversion to ISO code happens in transcriber.py
     const languageCode = 'German';
 
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
@@ -257,7 +479,8 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
           languageCode,  // language (ISO code)
           modelToUse,    // model_name (from runtime config)
           "cuda",        // device
-          initialPrompt || "" // medical dictionary terms for better recognition
+          initialPrompt || "", // medical dictionary terms for better recognition
+          speedMode === 'turbo' // skip_alignment: true für Online (turbo), false für Offline (precision)
         ]
       }),
     });
@@ -480,8 +703,10 @@ async function transcribeWithMistral(file: Blob, filename: string) {
   // Use File object instead of Blob for proper multipart/form-data handling in Node.js
   const audioFile = new File([audioBuffer], 'audio.wav', { type: mimeType });
   formData.append('file', audioFile);
-  formData.append('model', 'voxtral-mini-latest');
+  formData.append('model', 'voxtral-small-latest');
   formData.append('language', 'de'); // Force German to prevent hallucinations
+  // Request word-level timestamps for "Mitlesen" feature
+  formData.append('timestamp_granularities[]', 'word');
 
   const res = await fetch('https://api.mistral.ai/v1/audio/transcriptions', {
     method: 'POST',
@@ -524,6 +749,7 @@ export async function POST(request: NextRequest) {
     const form = await request.formData();
     const file = form.get('file');
     const username = form.get('username') as string | null;
+    const speedModeParam = form.get('speed_mode') as string | null;
     
     if (!file || !(file instanceof Blob)) {
       console.error('[Error] Invalid file:', file);
@@ -532,7 +758,7 @@ export async function POST(request: NextRequest) {
 
     const filename = (file as File).name || 'audio.webm';
     const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
-    console.log(`[Input] File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type || 'unknown'}, User: ${username || 'unknown'}`);
+    console.log(`[Input] File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type || 'unknown'}, User: ${username || 'unknown'}, Speed: ${speedModeParam || 'default'}`);
 
     // Lade Wörterbuch für initial_prompt bei WhisperX
     // Begrenzt auf MAX_PROMPT_WORDS wichtigste Begriffe um Halluzinationen zu vermeiden
@@ -563,12 +789,15 @@ export async function POST(request: NextRequest) {
 
     // Get whisper model from runtime config (Online-Transkription)
     // For online mode, use whisperModel directly (full HuggingFace path)
-    const whisperModel = runtimeConfig.whisperModel || 'deepdml/faster-whisper-large-v3-german-2';
+    const whisperModel = runtimeConfig.whisperModel || 'guillaumekln/faster-whisper-large-v2';
     console.log(`[Config] WhisperX Online Model: ${whisperModel} (from config)`);
 
-    // Online-Transkription nutzt Turbo-Modus für minimale Latenz
-    const speedMode: 'turbo' | 'precision' | 'auto' = 'turbo';
-    console.log(`[Config] Speed Mode: ${speedMode} (optimized for live transcription)`);
+    // Speed mode: turbo für minimale Latenz (kein Alignment), precision für Wort-Timestamps
+    // Online-Diktat sollte immer turbo verwenden
+    const speedMode: 'turbo' | 'precision' | 'auto' = 
+      (speedModeParam === 'precision' ? 'precision' : 
+       speedModeParam === 'auto' ? 'auto' : 'turbo') as 'turbo' | 'precision' | 'auto';
+    console.log(`[Config] Speed Mode: ${speedMode} (${speedModeParam ? 'from request' : 'default turbo for online'})`);
 
     // Transkription mit gewähltem Provider
     let result;
@@ -579,6 +808,22 @@ export async function POST(request: NextRequest) {
     } else if (provider === 'mistral') {
       console.log('Using Mistral AI Voxtral as primary provider');
       result = await transcribeWithMistral(file, filename);
+    } else if (provider === 'fast_whisper') {
+      // Fast Whisper ist ein reiner WebSocket-Server (RealtimeSTT)
+      // Für Server-seitige Transkription müssen wir auf WhisperX zurückfallen
+      // Echtzeit-Streaming funktioniert nur Client-seitig im Browser
+      console.log('Fast Whisper (WebSocket) not available server-side, falling back to WhisperX');
+      try {
+        result = await transcribeWithWhisperX(file, filename, initialPrompt, whisperModel, speedMode);
+      } catch (whisperError: any) {
+        console.warn('WhisperX failed, trying ElevenLabs fallback:', whisperError.message);
+        if (process.env.ELEVENLABS_API_KEY) {
+          console.log('Falling back to ElevenLabs...');
+          result = await transcribeWithElevenLabs(file, filename);
+        } else {
+          throw whisperError;
+        }
+      }
     } else {
       // WhisperX ist Standard, mit Fallback zu ElevenLabs
       console.log('Using WhisperX as primary provider');
@@ -604,15 +849,56 @@ export async function POST(request: NextRequest) {
           }
         }
       } catch (whisperError: any) {
-        console.warn('WhisperX failed, trying ElevenLabs fallback:', whisperError.message);
+        console.warn('[WhisperX] Transkription fehlgeschlagen:', whisperError.message);
         
-        // Fallback zu ElevenLabs wenn konfiguriert
-        if (process.env.ELEVENLABS_API_KEY) {
-          console.log('Falling back to ElevenLabs...');
-          result = await transcribeWithElevenLabs(file, filename);
+        // Prüfe ob es ein WhisperX-Server-Fehler ist (nicht nur Netzwerk)
+        const isServerError = whisperError.message.includes('server error') || 
+                             whisperError.message.includes('Error:') ||
+                             whisperError.message.includes('CUDA') ||
+                             whisperError.message.includes('memory') ||
+                             whisperError.message.includes('OOM');
+        
+        if (isServerError) {
+          console.log('[WhisperX] Server-Fehler erkannt, starte Auto-Recovery...');
+          
+          // Versuche automatische Wiederherstellung
+          const recovered = await performWhisperXRecovery(request, whisperError.message);
+          
+          if (recovered) {
+            console.log('[WhisperX] Recovery erfolgreich, wiederhole Transkription...');
+            try {
+              result = await transcribeWithWhisperX(file, filename, initialPrompt, whisperModel, speedMode);
+              console.log('[WhisperX] ✓ Transkription nach Recovery erfolgreich!');
+            } catch (retryError: any) {
+              console.error('[WhisperX] Transkription nach Recovery fehlgeschlagen:', retryError.message);
+              // Fallback zu ElevenLabs wenn konfiguriert
+              if (process.env.ELEVENLABS_API_KEY) {
+                console.log('[WhisperX] Falling back to ElevenLabs...');
+                result = await transcribeWithElevenLabs(file, filename);
+              } else {
+                throw retryError;
+              }
+            }
+          } else {
+            // Recovery fehlgeschlagen, Fallback zu ElevenLabs
+            if (process.env.ELEVENLABS_API_KEY) {
+              console.log('[WhisperX] Recovery fehlgeschlagen, Fallback zu ElevenLabs...');
+              result = await transcribeWithElevenLabs(file, filename);
+            } else {
+              console.error('[WhisperX] Kein Fallback verfügbar - ElevenLabs API key nicht konfiguriert');
+              throw whisperError;
+            }
+          }
         } else {
-          console.error('No fallback available - ElevenLabs API key not configured');
-          throw whisperError;
+          // Kein Server-Fehler, normaler Fallback
+          console.warn('[WhisperX] Kein Server-Fehler, versuche ElevenLabs Fallback...');
+          if (process.env.ELEVENLABS_API_KEY) {
+            console.log('Falling back to ElevenLabs...');
+            result = await transcribeWithElevenLabs(file, filename);
+          } else {
+            console.error('No fallback available - ElevenLabs API key not configured');
+            throw whisperError;
+          }
         }
       }
     }

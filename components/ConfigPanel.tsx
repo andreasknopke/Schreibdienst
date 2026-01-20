@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from './AuthProvider';
 import DbTokenManager from './DbTokenManager';
+import WhisperXRecoveryLogs from './WhisperXRecoveryLogs';
 
 interface ProviderOption {
   id: string;
@@ -11,7 +12,7 @@ interface ProviderOption {
 }
 
 interface RuntimeConfig {
-  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral';
+  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper';
   llmProvider: 'openai' | 'lmstudio' | 'mistral';
   whisperModel?: string;
   whisperOfflineModel?: string;
@@ -21,6 +22,7 @@ interface RuntimeConfig {
   // Double Precision Pipeline
   doublePrecisionEnabled?: boolean;
   doublePrecisionSecondProvider?: 'whisperx' | 'elevenlabs' | 'mistral';
+  doublePrecisionWhisperModel?: string;
   doublePrecisionMode?: 'parallel' | 'sequential';
 }
 
@@ -30,8 +32,10 @@ interface EnvInfo {
   hasWhisperUrl: boolean;
   hasLMStudioUrl: boolean;
   hasMistralKey: boolean;
+  hasFastWhisperUrl: boolean;
   whisperServiceUrl: string;
   lmStudioUrl: string;
+  fastWhisperWsUrl: string;
 }
 
 interface MigrationStatus {
@@ -168,18 +172,18 @@ export default function ConfigPanel() {
 
   // Whisper-Modelle für Online-Transkription (aus Model_Manager.py)
   const whisperModels = [
-    { id: 'large-v3', name: 'Large-v3 (Standard)' },
-    { id: 'deepdml/faster-whisper-large-v3-german-2', name: 'Large-v3 German 2 (empfohlen)' },
-    { id: 'systran/faster-whisper-large-v3', name: 'Large-v3 Systran' },
+    { id: 'large-v3', name: 'Large-v3' },
+    { id: 'guillaumekln/faster-whisper-large-v2', name: 'Large-v2 (empfohlen)' },
+    { id: 'large-v2', name: 'Large-v2' },
     { id: 'cstr/whisper-large-v3-turbo-german-int8_float32', name: 'Large-v3 Turbo German (schnell)' },
   ];
 
   // Whisper Offline-Modelle für Offline-Transkription (aus Model_Manager.py)
   const whisperOfflineModels = [
-    { id: 'large-v3', name: 'Large-v3 (Standard)' },
-    { id: 'large-v3-german-2', name: 'Large-v3 German 2 (empfohlen)' },
-    { id: 'large-v3-systran', name: 'Large-v3 Systran' },
-    { id: 'large-v3-turbo-german', name: 'Large-v3 Turbo German (schnell)' },
+    { id: 'large-v3', name: 'Large-v3' },
+    { id: 'guillaumekln/faster-whisper-large-v2', name: 'Large-v2 (empfohlen)' },
+    { id: 'large-v2', name: 'Large-v2' },
+    { id: 'cstr/whisper-large-v3-turbo-german-int8_float32', name: 'Large-v3 Turbo German (schnell)' },
   ];
 
   const openaiModels = [
@@ -247,6 +251,11 @@ export default function ConfigPanel() {
                     {envInfo.whisperServiceUrl}
                   </div>
                 )}
+                {provider.id === 'fast_whisper' && envInfo?.fastWhisperWsUrl && (
+                  <div className="text-xs text-gray-500 truncate">
+                    {envInfo.fastWhisperWsUrl}
+                  </div>
+                )}
               </div>
               {config.transcriptionProvider === provider.id && (
                 <span className="text-green-500">✓</span>
@@ -258,9 +267,9 @@ export default function ConfigPanel() {
         {/* Whisper Model Selection */}
         {config.transcriptionProvider === 'whisperx' && (
           <div className="ml-6 mt-2">
-            <label className="text-xs text-gray-500 block mb-1">Whisper-Modell</label>
+            <label className="text-xs text-gray-500 block mb-1">Live-Transkription</label>
             <select
-              value={config.whisperModel || 'deepdml/faster-whisper-large-v3-german-2'}
+              value={config.whisperModel || 'guillaumekln/faster-whisper-large-v2'}
               onChange={(e) => updateConfig({ whisperModel: e.target.value as any })}
               disabled={!isRoot || saving}
               className="input text-sm w-full max-w-xs"
@@ -278,11 +287,10 @@ export default function ConfigPanel() {
         {config.transcriptionProvider === 'whisperx' && (
           <div className="ml-6 mt-3">
             <label className="text-xs text-gray-500 block mb-1">
-              Offline-Transkription Modell
-              <span className="ml-1 text-gray-400">(für Diktate ohne Internetverbindung)</span>
+              Offline-Transkription
             </label>
             <select
-              value={config.whisperOfflineModel || 'large-v3-german-2'}
+              value={config.whisperOfflineModel || 'guillaumekln/faster-whisper-large-v2'}
               onChange={(e) => updateConfig({ whisperOfflineModel: e.target.value as any })}
               disabled={!isRoot || saving}
               className="input text-sm w-full max-w-xs"
@@ -293,9 +301,6 @@ export default function ConfigPanel() {
                 </option>
               ))}
             </select>
-            <p className="text-xs text-gray-400 mt-1">
-              Diese Modelle werden lokal ausgeführt, wenn keine Online-Verbindung besteht.
-            </p>
           </div>
         )}
         
@@ -329,14 +334,46 @@ export default function ConfigPanel() {
                   className="input text-sm w-full max-w-xs"
                 >
                   {transcriptionProviders
-                    .filter(p => p.available && p.id !== config.transcriptionProvider)
+                    .filter(p => p.available)
                     .map((provider) => (
                       <option key={provider.id} value={provider.id}>
-                        {provider.name}
+                        {provider.name}{provider.id === config.transcriptionProvider ? ' (wie Primär)' : ''}
                       </option>
                     ))}
                 </select>
+                {config.doublePrecisionSecondProvider === config.transcriptionProvider && config.transcriptionProvider === 'whisperx' && (
+                  <p className="text-xs text-blue-500 mt-1">
+                    💡 Zwei lokale Whisper-Modelle vergleichen - wähle unten verschiedene Modelle
+                  </p>
+                )}
               </div>
+              
+              {/* Whisper-Modell Auswahl für Double Precision, wenn Provider whisperx ist */}
+              {config.doublePrecisionSecondProvider === 'whisperx' && (
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">
+                    Whisper-Modell (zweite Transkription)
+                  </label>
+                  <select
+                    value={config.doublePrecisionWhisperModel || 'large-v2'}
+                    onChange={(e) => updateConfig({ doublePrecisionWhisperModel: e.target.value })}
+                    disabled={!isRoot || saving}
+                    className="input text-sm w-full max-w-xs"
+                  >
+                    {whisperModels.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name}
+                        {config.transcriptionProvider === 'whisperx' && model.id === config.whisperModel ? ' (wie Primär)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {config.transcriptionProvider === 'whisperx' && config.doublePrecisionSecondProvider === 'whisperx'
+                      ? `Primär: ${whisperModels.find(m => m.id === config.whisperModel)?.name || config.whisperModel || 'large-v3'}`
+                      : 'Whisper-Modell für zweite Transkription'}
+                  </p>
+                </div>
+              )}
               
               <div>
                 <label className="text-xs text-gray-500 block mb-1">Ausführungsmodus</label>
@@ -546,6 +583,11 @@ export default function ConfigPanel() {
             </div>
           )}
         </div>
+      )}
+
+      {/* WhisperX Recovery Logs - nur für root */}
+      {isRoot && (
+        <WhisperXRecoveryLogs />
       )}
 
       {/* Datenbank-Token Manager - nur für root */}

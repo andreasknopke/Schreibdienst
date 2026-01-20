@@ -8,6 +8,11 @@ import {
   initOfflineDictationTableWithRequest,
   updateAudioDataWithRequest,
 } from '@/lib/offlineDictationDb';
+import {
+  logTextFormattingCorrectionWithRequest,
+  logLLMCorrectionWithRequest,
+  logDoublePrecisionCorrectionWithRequest,
+} from '@/lib/correctionLogDb';
 import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath, RuntimeConfig } from '@/lib/configDb';
 import { loadDictionaryWithRequest } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
@@ -47,7 +52,7 @@ async function processDictation(request: NextRequest, dictationId: number): Prom
     const audioData = new Uint8Array(dictation.audio_data);
     const audioBlob = new Blob([audioData], { type: dictation.audio_mime_type });
     console.log(`[Worker] Audio blob created: size=${audioBlob.size}, type=${audioBlob.type}, originalMime=${dictation.audio_mime_type}`);
-    const transcriptionResult = await transcribeAudio(request, audioBlob, dictation.username);
+    const transcriptionResult = await transcribeAudio(request, audioBlob, dictationId, dictation.username);
     
     if (!transcriptionResult.text) {
       throw new Error('Transcription returned empty text');
@@ -77,11 +82,53 @@ async function processDictation(request: NextRequest, dictationId: number): Prom
     // Preprocess: apply formatting control words AND dictionary corrections BEFORE LLM
     // This handles "neuer Absatz", "neue Zeile", "Klammer auf/zu", etc. programmatically
     // AND applies user dictionary corrections deterministically (saves tokens & more reliable)
+    const textBeforeFormatting = rawTranscript;
     const preprocessedText = preprocessTranscription(rawTranscript, dictionaryEntries);
     console.log(`[Worker] Preprocessed text: ${rawTranscript.length} → ${preprocessedText.length} chars${dictionaryEntries.length > 0 ? ` (dictionary: ${dictionaryEntries.length} entries applied)` : ''}`);
     
+    // Log text formatting correction
+    if (preprocessedText !== textBeforeFormatting) {
+      try {
+        const formattingChangeScore = calculateChangeScore(textBeforeFormatting, preprocessedText);
+        await logTextFormattingCorrectionWithRequest(
+          request,
+          dictationId,
+          textBeforeFormatting,
+          preprocessedText,
+          formattingChangeScore
+        );
+        console.log(`[Worker] ✓ Text formatting correction logged (score: ${formattingChangeScore}%)`);
+      } catch (logError: any) {
+        console.warn(`[Worker] Failed to log text formatting correction: ${logError.message}`);
+      }
+    }
+    
+    // Get runtime config to determine LLM provider
+    const runtimeConfig = await getRuntimeConfigWithRequest(request);
+    
     // Always use Arztbrief mode - no field parsing
+    const textBeforeLLM = preprocessedText;
     const correctedText = await correctText(request, preprocessedText, dictation.username);
+    
+    // Log LLM correction
+    if (correctedText !== textBeforeLLM) {
+      try {
+        const llmChangeScore = calculateChangeScore(textBeforeLLM, correctedText);
+        const llmConfig = await getLLMConfig(request);
+        await logLLMCorrectionWithRequest(
+          request,
+          dictationId,
+          textBeforeLLM,
+          correctedText,
+          llmConfig.model,
+          llmConfig.provider,
+          llmChangeScore
+        );
+        console.log(`[Worker] ✓ LLM correction logged (model: ${llmConfig.provider}/${llmConfig.model}, score: ${llmChangeScore}%)`);
+      } catch (logError: any) {
+        console.warn(`[Worker] Failed to log LLM correction: ${logError.message}`);
+      }
+    }
     
     // Berechne Änderungsscore für Ampelsystem (compare with raw transcript)
     const changeScore = calculateChangeScore(rawTranscript, correctedText);
@@ -134,14 +181,17 @@ async function processDictation(request: NextRequest, dictationId: number): Prom
 async function transcribeWithProvider(
   request: NextRequest, 
   audioBlob: Blob, 
-  provider: 'whisperx' | 'elevenlabs' | 'mistral',
-  initialPrompt?: string
+  provider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper',
+  initialPrompt?: string,
+  whisperModel?: string
 ): Promise<TranscriptionResult> {
-  console.log(`[Worker] Transcribing with ${provider}...`);
+  // fast_whisper is WebSocket-based and only works client-side, fallback to whisperx for batch processing
+  const effectiveProvider = provider === 'fast_whisper' ? 'whisperx' : provider;
+  console.log(`[Worker] Transcribing with ${effectiveProvider}${provider === 'fast_whisper' ? ' (fallback from fast_whisper)' : ''}${whisperModel ? ` (model: ${whisperModel})` : ''}...`);
   
   let result: { text: string; segments?: any[] };
   
-  switch (provider) {
+  switch (effectiveProvider) {
     case 'elevenlabs':
       result = await transcribeWithElevenLabs(audioBlob);
       break;
@@ -150,20 +200,21 @@ async function transcribeWithProvider(
       break;
     case 'whisperx':
     default:
-      result = await transcribeWithWhisperX(request, audioBlob, initialPrompt);
+      result = await transcribeWithWhisperX(request, audioBlob, initialPrompt, whisperModel);
       break;
   }
   
   return {
     text: result.text,
     segments: result.segments,
-    provider: provider,
+    provider: effectiveProvider,
   };
 }
 
 // Double Precision Pipeline - merge two transcriptions using LLM
 async function doublePrecisionMerge(
   request: NextRequest,
+  dictationId: number,
   result1: TranscriptionResult,
   result2: TranscriptionResult
 ): Promise<{ text: string; segments?: any[] }> {
@@ -171,24 +222,51 @@ async function doublePrecisionMerge(
   
   const merged = mergeTranscriptionsWithMarkers(result1, result2);
   
+  // Always log Double Precision step, even when no differences found
+  const runtimeConfig = await getRuntimeConfigWithRequest(request);
+  const llmProvider = runtimeConfig.llmProvider;
+  
   if (!merged.hasDifferences) {
     console.log('[Worker DoublePrecision] No differences found, using first transcription');
+    
+    // Log that Double Precision was performed, but no differences were found
+    try {
+      const dpLogText = `[DOUBLE PRECISION - KEINE UNTERSCHIEDE]\n\n` +
+        `Transkription A (${result1.provider}):\n${result1.text}\n\n` +
+        `Transkription B (${result2.provider}):\n${result2.text}\n\n` +
+        `Ergebnis: Beide Transkriptionen sind identisch.`;
+      
+      await logDoublePrecisionCorrectionWithRequest(
+        request,
+        dictationId,
+        dpLogText,
+        result1.text,
+        'keine Unterschiede',
+        'double-precision',
+        0 // No changes = 0%
+      );
+      console.log(`[Worker DoublePrecision] ✓ No differences log recorded`);
+    } catch (logError: any) {
+      console.warn(`[Worker DoublePrecision] Failed to log no-differences: ${logError.message}`);
+    }
+    
     return { text: result1.text, segments: result1.segments };
   }
   
   console.log('[Worker DoublePrecision] Differences found, sending to LLM for resolution');
   
-  // Get LLM config
-  const runtimeConfig = await getRuntimeConfigWithRequest(request);
-  const llmProvider = runtimeConfig.llmProvider;
-  
   const mergePrompt = createMergePrompt(merged);
   
   let finalText: string;
+  let modelName: string;
+  let modelProvider: string;
   
   if (llmProvider === 'openai') {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
+    
+    modelName = runtimeConfig.openaiModel || 'gpt-4o-mini';
+    modelProvider = 'openai';
     
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -197,7 +275,7 @@ async function doublePrecisionMerge(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: runtimeConfig.openaiModel || 'gpt-4o-mini',
+        model: modelName,
         messages: [
           { role: 'system', content: mergePrompt },
           { role: 'user', content: 'Erstelle den finalen Text.' }
@@ -213,6 +291,9 @@ async function doublePrecisionMerge(
     const apiKey = process.env.MISTRAL_API_KEY;
     if (!apiKey) throw new Error('MISTRAL_API_KEY not configured');
     
+    modelName = runtimeConfig.mistralModel || 'mistral-large-latest';
+    modelProvider = 'mistral';
+    
     const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -220,7 +301,7 @@ async function doublePrecisionMerge(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: runtimeConfig.mistralModel || 'mistral-large-latest',
+        model: modelName,
         messages: [
           { role: 'system', content: mergePrompt },
           { role: 'user', content: 'Erstelle den finalen Text.' }
@@ -235,17 +316,43 @@ async function doublePrecisionMerge(
   } else {
     // LM Studio or fallback
     console.warn('[Worker DoublePrecision] LM Studio not supported for merge, using first transcription');
+    modelName = 'lmstudio';
+    modelProvider = 'lmstudio';
     finalText = result1.text;
   }
   
   console.log(`[Worker DoublePrecision] ✓ Merged text length: ${finalText.length} chars`);
+  
+  // Log double precision correction with detailed diff information
+  try {
+    const dpChangeScore = calculateChangeScore(result1.text, finalText);
+    
+    // Create detailed log showing both versions and the marked differences
+    const dpLogText = `[DOUBLE PRECISION - UNTERSCHIEDE GEFUNDEN]\n\n` +
+      `Transkription A (${merged.provider1}):\n${merged.text1}\n\n` +
+      `Transkription B (${merged.provider2}):\n${merged.text2}\n\n` +
+      `Markierte Unterschiede:\n${merged.mergedTextWithMarkers}`;
+    
+    await logDoublePrecisionCorrectionWithRequest(
+      request,
+      dictationId,
+      dpLogText,
+      finalText,
+      modelName,
+      modelProvider,
+      dpChangeScore
+    );
+    console.log(`[Worker DoublePrecision] ✓ Double precision correction logged (model: ${modelProvider}/${modelName}, score: ${dpChangeScore}%)`);
+  } catch (logError: any) {
+    console.warn(`[Worker DoublePrecision] Failed to log double precision correction: ${logError.message}`);
+  }
   
   // Use segments from the first transcription (or could interpolate)
   return { text: finalText, segments: result1.segments };
 }
 
 // Transcribe audio using the same logic as the transcribe API
-async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?: string): Promise<{ text: string; segments?: any[] }> {
+async function transcribeAudio(request: NextRequest, audioBlob: Blob, dictationId: number, username?: string): Promise<{ text: string; segments?: any[] }> {
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
   const provider = runtimeConfig.transcriptionProvider;
   
@@ -275,8 +382,15 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?:
   if (runtimeConfig.doublePrecisionEnabled && runtimeConfig.doublePrecisionSecondProvider) {
     const secondProvider = runtimeConfig.doublePrecisionSecondProvider;
     const mode = runtimeConfig.doublePrecisionMode || 'parallel';
+    // Use specific whisper model for double precision if configured and second provider is whisperx
+    const dpWhisperModel = secondProvider === 'whisperx' ? runtimeConfig.doublePrecisionWhisperModel : undefined;
+    // Primary whisper model (used when primary provider is whisperx)
+    const primaryWhisperModel = provider === 'whisperx' ? runtimeConfig.whisperModel : undefined;
     
-    console.log(`[Worker DoublePrecision] Enabled - Primary: ${provider}, Secondary: ${secondProvider}, Mode: ${mode}`);
+    // Detect if we're comparing two different WhisperX models
+    const isTwoWhisperModels = provider === 'whisperx' && secondProvider === 'whisperx';
+    
+    console.log(`[Worker DoublePrecision] Enabled - Primary: ${provider}${primaryWhisperModel ? ` (${primaryWhisperModel})` : ''}, Secondary: ${secondProvider}${dpWhisperModel ? ` (${dpWhisperModel})` : ''}, Mode: ${mode}`);
     
     let result1: TranscriptionResult;
     let result2: TranscriptionResult;
@@ -284,21 +398,27 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?:
     if (mode === 'parallel') {
       // Parallel execution
       const [r1, r2] = await Promise.all([
-        transcribeWithProvider(request, audioBlob, provider, initialPrompt),
-        transcribeWithProvider(request, audioBlob, secondProvider, undefined),
+        transcribeWithProvider(request, audioBlob, provider, initialPrompt, primaryWhisperModel),
+        transcribeWithProvider(request, audioBlob, secondProvider, undefined, dpWhisperModel),
       ]);
       result1 = r1;
       result2 = r2;
     } else {
       // Sequential execution
-      result1 = await transcribeWithProvider(request, audioBlob, provider, initialPrompt);
-      result2 = await transcribeWithProvider(request, audioBlob, secondProvider, undefined);
+      result1 = await transcribeWithProvider(request, audioBlob, provider, initialPrompt, primaryWhisperModel);
+      result2 = await transcribeWithProvider(request, audioBlob, secondProvider, undefined, dpWhisperModel);
     }
     
-    console.log(`[Worker DoublePrecision] Got transcriptions: ${provider}=${result1.text.length} chars, ${secondProvider}=${result2.text.length} chars`);
+    // If both providers are whisperx with different models, update provider names for clarity
+    if (isTwoWhisperModels && primaryWhisperModel && dpWhisperModel) {
+      result1.provider = `whisperx (${primaryWhisperModel})`;
+      result2.provider = `whisperx (${dpWhisperModel})`;
+    }
+    
+    console.log(`[Worker DoublePrecision] Got transcriptions: ${result1.provider}=${result1.text.length} chars, ${result2.provider}=${result2.text.length} chars`);
     
     // Merge the transcriptions
-    return doublePrecisionMerge(request, result1, result2);
+    return doublePrecisionMerge(request, dictationId, result1, result2);
   }
   
   // ElevenLabs jetzt im Offline-Modus unterstützt mit Word-Level Timestamps für Mitlesefunktion
@@ -346,7 +466,7 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, username?:
   }
 }
 
-async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialPrompt?: string): Promise<{ text: string; segments?: any[] }> {
+async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialPrompt?: string, whisperModelOverride?: string): Promise<{ text: string; segments?: any[] }> {
   const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:5000';
   const isGradio = whisperUrl.includes(':7860');
   
@@ -433,9 +553,11 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     
     // Use whisperOfflineModel (German-optimized) for Gradio, with full HuggingFace path
     // Load from runtime config (which reads from DB)
+    // whisperModelOverride can be used for Double Precision with a different model
     const runtimeConfig = await getRuntimeConfigWithRequest(request);
-    const whisperModel = getWhisperOfflineModelPath(runtimeConfig.whisperOfflineModel);
-    console.log(`[Worker] Using Gradio model: ${whisperModel} (from offline config: ${runtimeConfig.whisperOfflineModel || 'default'})`);
+    const modelToUse = whisperModelOverride || runtimeConfig.whisperOfflineModel;
+    const whisperModel = getWhisperOfflineModelPath(modelToUse);
+    console.log(`[Worker] Using Gradio model: ${whisperModel} (from ${whisperModelOverride ? 'double precision override' : 'offline config'}: ${modelToUse || 'default'})`);
     
     // Log initial_prompt usage for medical terminology
     if (initialPrompt) {
@@ -733,7 +855,8 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
   const audioFile = new File([audioBuffer], 'audio.wav', { type: mimeType });
   formData.append('file', audioFile);
   formData.append('model', 'voxtral-mini-latest');
-  formData.append('language', 'de'); // Force German to prevent hallucinations
+  // NOTE: language parameter is NOT compatible with timestamp_granularities
+  // API automatically detects language when timestamps are requested
   // Request word-level timestamps for "Mitlesen" feature
   formData.append('timestamp_granularities[]', 'word');
   
@@ -966,7 +1089,7 @@ KRITISCH - AUSGABEFORMAT:
       ]);
     }
   } else {
-    // OpenAI: Process all at once
+    // OpenAI or Mistral: Process all at once
     result = await callLLM(llmConfig, [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: `<<<DIKTAT_START>>>${text}<<<DIKTAT_ENDE>>>` }
@@ -992,6 +1115,15 @@ async function getLLMConfig(request: NextRequest) {
       baseUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
       apiKey: 'lm-studio',
       model: process.env.LLM_STUDIO_MODEL || 'local-model'
+    };
+  }
+  
+  if (provider === 'mistral') {
+    return {
+      provider: 'mistral' as const,
+      baseUrl: 'https://api.mistral.ai',
+      apiKey: process.env.MISTRAL_API_KEY || '',
+      model: runtimeConfig.mistralModel || process.env.MISTRAL_MODEL || 'mistral-large-latest'
     };
   }
   
@@ -1108,7 +1240,9 @@ async function callLLM(
   options: { jsonMode?: boolean } = {}
 ): Promise<string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (config.provider === 'openai') {
+  
+  // Set authorization header based on provider
+  if (config.provider === 'openai' || config.provider === 'mistral') {
     headers['Authorization'] = `Bearer ${config.apiKey}`;
   }
   
@@ -1129,7 +1263,11 @@ async function callLLM(
     body: JSON.stringify(body),
   });
   
-  if (!res.ok) throw new Error(`LLM API error (${res.status})`);
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[Worker] LLM API error (${res.status}): ${errorText.substring(0, 200)}`);
+    throw new Error(`LLM API error (${res.status}): ${errorText.substring(0, 100)}`);
+  }
   const data = await res.json();
   return data.choices?.[0]?.message?.content?.trim() || '';
 }

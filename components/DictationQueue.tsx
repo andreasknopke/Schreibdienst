@@ -564,6 +564,12 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     audioRef.current.currentTime = Math.max(0, Math.min(audioDuration, audioRef.current.currentTime + seconds));
   };
   
+  // Seek to a specific time (for word-clicking in Mitlesen)
+  const seekToWord = (time: number) => {
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = time;
+  };
+  
   // Change playback speed (preservesPitch is default true in modern browsers)
   const changePlaybackSpeed = (speed: number) => {
     setPlaybackSpeed(speed);
@@ -1171,6 +1177,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
         </div>
       ) : isSecretariat ? (
         /* Sekretariat: Tabellenansicht */
+        <>
         <div className="card overflow-hidden flex-1 flex flex-col min-h-0">
           <div className="flex-1 overflow-auto">
             <table className="w-full text-sm">
@@ -1262,158 +1269,362 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
           <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-400">
             {filteredAndSortedDictations.length} von {dictations.length} Diktat(en)
           </div>
-          
-          {/* Detail View für Sekretariat (Fullscreen Modal) */}
-          {selectedDictation && (
-            <div className={`card ${
-              isFullscreen 
-                ? 'fixed inset-4 z-50 overflow-auto' 
-                : 'hidden'
-            }`}>
-              {/* Fullscreen backdrop */}
-              {isFullscreen && (
-                <div 
-                  className="fixed inset-0 bg-black/50 -z-10" 
-                  onClick={() => { setIsFullscreen(false); setSelectedId(null); }}
-                />
-              )}
-              <div className="card-body space-y-4">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="font-medium text-lg">{selectedDictation.order_number}</h3>
-                    <div className="flex items-center gap-2 mt-1">
-                      <PriorityBadge priority={selectedDictation.priority} />
-                      <StatusBadge status={selectedDictation.status} />
-                      <span className="px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
-                        👤 {selectedDictation.username}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="btn btn-sm btn-outline"
-                      onClick={() => setIsFullscreen(!isFullscreen)}
-                    >
-                      {isFullscreen ? '⊡' : '⊞'}
-                    </button>
-                    <button
-                      className="text-gray-400 hover:text-gray-600 text-xl"
-                      onClick={() => { setSelectedId(null); setIsFullscreen(false); }}
-                    >
-                      ✕
-                    </button>
+        </div>
+
+        {/* Detail View für Sekretariat - Vollständige Ansicht wie normale User */}
+        {selectedDictation && isFullscreen && (
+          <div className="fixed inset-4 z-50 overflow-auto card">
+            {/* Fullscreen backdrop */}
+            <div 
+              className="fixed inset-0 bg-black/50 -z-10" 
+              onClick={() => { setIsFullscreen(false); setSelectedId(null); }}
+            />
+            <div className="card-body space-y-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="font-medium text-lg">{selectedDictation.order_number}</h3>
+                  <div className="flex items-center gap-2 mt-1">
+                    <PriorityBadge priority={selectedDictation.priority} />
+                    <StatusBadge status={selectedDictation.status} />
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                      👤 {selectedDictation.username}
+                    </span>
                   </div>
                 </div>
-
-                {/* Metadata */}
-                <div className="text-sm text-gray-600 dark:text-gray-400 grid grid-cols-2 gap-x-4 gap-y-1">
-                  <p><strong>Erstellt:</strong> {formatDate(selectedDictation.created_at)}</p>
-                  {selectedDictation.completed_at && (
-                    <p><strong>Fertig:</strong> {formatDate(selectedDictation.completed_at)}</p>
-                  )}
-                  <p><strong>Dauer:</strong> {formatDuration(selectedDictation.audio_duration_seconds)}</p>
-                  <p><strong>Typ:</strong> {selectedDictation.mode === 'befund' ? 'Befund' : 'Arztbrief'}</p>
-                  {selectedDictation.patient_name && (
-                    <p><strong>Patient:</strong> {selectedDictation.patient_name}</p>
-                  )}
-                  {selectedDictation.patient_dob && (
-                    <p><strong>Geb.:</strong> {new Date(selectedDictation.patient_dob).toLocaleDateString('de-DE')}</p>
-                  )}
-                  {selectedDictation.fachabteilung && (
-                    <p><strong>Fachabteilung:</strong> {selectedDictation.fachabteilung}</p>
-                  )}
-                  {selectedDictation.termin && (
-                    <p><strong>Termin:</strong> {new Date(selectedDictation.termin).toLocaleString('de-DE')}</p>
-                  )}
-                  {selectedDictation.berechtigte && (
-                    <p><strong>Berechtigte:</strong> {(() => {
-                      try {
-                        const list = JSON.parse(selectedDictation.berechtigte);
-                        return Array.isArray(list) ? list.join(', ') : selectedDictation.berechtigte;
-                      } catch {
-                        return selectedDictation.berechtigte;
-                      }
-                    })()}</p>
-                  )}
-                  {selectedDictation.bemerkung && (
-                    <p className="col-span-2"><strong>Bemerkung:</strong> {selectedDictation.bemerkung}</p>
-                  )}
-                </div>
-
-                {/* Error message */}
-                {selectedDictation.status === 'error' && selectedDictation.error_message && (
-                  <div className="alert alert-error text-sm">
-                    {selectedDictation.error_message}
-                  </div>
-                )}
-
-                {/* Processing indicator */}
-                {selectedDictation.status === 'processing' && (
-                  <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
-                    <Spinner size={16} />
-                    <span>Wird verarbeitet...</span>
-                  </div>
-                )}
-
-                {/* Completed content - simplified textarea for secretariat modal */}
-                {selectedDictation.status === 'completed' && (
-                  <div className="space-y-2">
-                    {selectedDictation.change_score !== undefined && (
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-600 dark:text-gray-400">Änderungsscore:</span>
-                        <ChangeIndicatorDot score={selectedDictation.change_score} />
-                      </div>
-                    )}
-                    <textarea
-                      className="textarea w-full min-h-[300px] font-mono text-sm"
-                      value={editedTexts.corrected_text ?? selectedDictation.corrected_text ?? selectedDictation.transcript ?? ''}
-                      onChange={(e) => {
-                        setEditedTexts(prev => ({ ...prev, corrected_text: e.target.value }));
-                        setHasUnsavedChanges(true);
-                      }}
-                    />
-                  </div>
-                )}
-
-                {/* Actions */}
-                <div className="flex gap-2 pt-2 border-t flex-wrap">
-                  {selectedDictation.status === 'completed' && (
-                    <>
-                      <button
-                        className={`btn btn-sm flex-1 ${copyFeedback === selectedDictation.id ? 'btn-success' : 'btn-primary'}`}
-                        onClick={() => handleCopy(getCombinedTextEdited(), selectedDictation.id)}
-                      >
-                        {copyFeedback === selectedDictation.id ? '✓ Kopiert!' : '📋 In Zwischenablage'}
-                      </button>
-                      {hasUnsavedChanges && (
-                        <button
-                          className="btn btn-sm btn-warning"
-                          onClick={handleSave}
-                        >
-                          💾 Speichern
-                        </button>
-                      )}
-                    </>
-                  )}
-                  {selectedDictation.status === 'error' && (
-                    <button
-                      className="btn btn-sm btn-outline"
-                      onClick={() => handleRetry(selectedDictation.id)}
-                    >
-                      🔄 Erneut versuchen
-                    </button>
-                  )}
+                <div className="flex items-center gap-2">
                   <button
-                    className="btn btn-sm btn-outline text-red-600"
-                    onClick={() => handleDelete(selectedDictation.id)}
+                    className="text-gray-400 hover:text-gray-600 text-xl"
+                    onClick={() => { setSelectedId(null); setIsFullscreen(false); }}
                   >
-                    🗑️ Löschen
+                    ✕
                   </button>
                 </div>
               </div>
+
+              {/* Metadata */}
+              <div className="text-sm text-gray-600 dark:text-gray-400 grid grid-cols-2 gap-x-4 gap-y-1">
+                <p><strong>Erstellt:</strong> {formatDate(selectedDictation.created_at)}</p>
+                {selectedDictation.completed_at && (
+                  <p><strong>Fertig:</strong> {formatDate(selectedDictation.completed_at)}</p>
+                )}
+                <p><strong>Dauer:</strong> {formatDuration(selectedDictation.audio_duration_seconds)}</p>
+                <p><strong>Typ:</strong> {selectedDictation.mode === 'befund' ? 'Befund' : 'Arztbrief'}</p>
+                {selectedDictation.patient_name && (
+                  <p><strong>Patient:</strong> {selectedDictation.patient_name}</p>
+                )}
+                {selectedDictation.patient_dob && (
+                  <p><strong>Geb.:</strong> {new Date(selectedDictation.patient_dob).toLocaleDateString('de-DE')}</p>
+                )}
+                {selectedDictation.fachabteilung && (
+                  <p><strong>Fachabteilung:</strong> {selectedDictation.fachabteilung}</p>
+                )}
+                {selectedDictation.termin && (
+                  <p><strong>Termin:</strong> {new Date(selectedDictation.termin).toLocaleString('de-DE')}</p>
+                )}
+                {selectedDictation.berechtigte && (
+                  <p><strong>Berechtigte:</strong> {(() => {
+                    try {
+                      const list = JSON.parse(selectedDictation.berechtigte);
+                      return Array.isArray(list) ? list.join(', ') : selectedDictation.berechtigte;
+                    } catch {
+                      return selectedDictation.berechtigte;
+                    }
+                  })()}</p>
+                )}
+                {selectedDictation.bemerkung && (
+                  <p className="col-span-2"><strong>Bemerkung:</strong> {selectedDictation.bemerkung}</p>
+                )}
+              </div>
+
+              {/* Error message */}
+              {selectedDictation.status === 'error' && selectedDictation.error_message && (
+                <div className="alert alert-error text-sm">
+                  {selectedDictation.error_message}
+                </div>
+              )}
+
+              {/* Processing indicator */}
+              {selectedDictation.status === 'processing' && (
+                <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                  <Spinner size={16} />
+                  <span>Wird verarbeitet...</span>
+                </div>
+              )}
+
+              {/* Audio Player for Sekretariat - with Mitlesen support */}
+              {selectedDictation.status === 'completed' && (
+                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3">
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    <span>🎵 Audio-Wiedergabe</span>
+                    {audioLoading && <Spinner size={14} />}
+                    {audioError && <span className="text-orange-500">{audioError}</span>}
+                  </div>
+                  
+                  {audioUrl && (
+                    <>
+                      <audio
+                        ref={audioRef}
+                        src={audioUrl}
+                        onTimeUpdate={(e) => setAudioCurrentTime(e.currentTarget.currentTime)}
+                        onLoadedMetadata={(e) => {
+                          setAudioDuration(e.currentTarget.duration);
+                          e.currentTarget.playbackRate = playbackSpeed;
+                        }}
+                        onEnded={() => setIsPlaying(false)}
+                        onPlay={() => setIsPlaying(true)}
+                        onPause={() => setIsPlaying(false)}
+                      />
+                      
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button className="btn btn-sm btn-outline" onClick={seekToStart} title="Zum Anfang">⏮️</button>
+                        <button className="btn btn-sm btn-outline" onClick={() => seekRelative(-10)} title="10s zurück">⏪ 10</button>
+                        <button className="btn btn-sm btn-primary" onClick={togglePlayPause} title={isPlaying ? 'Pause' : 'Abspielen'}>
+                          {isPlaying ? '⏸️' : '▶️'}
+                        </button>
+                        <button className="btn btn-sm btn-outline" onClick={() => seekRelative(10)} title="10s vorwärts">10 ⏩</button>
+                        
+                        <span className="text-sm font-mono text-gray-600 dark:text-gray-400 ml-2">
+                          {formatTime(audioCurrentTime)} / {formatTime(audioDuration)}
+                        </span>
+                        
+                        <input
+                          type="range"
+                          min="0"
+                          max={audioDuration || 100}
+                          value={audioCurrentTime}
+                          onChange={(e) => {
+                            if (audioRef.current) {
+                              audioRef.current.currentTime = parseFloat(e.target.value);
+                            }
+                          }}
+                          className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-gray-300 dark:bg-gray-600"
+                        />
+                        
+                        <button className="btn btn-sm btn-outline ml-2" onClick={downloadAudio} title="Audio herunterladen">⬇️</button>
+                        
+                        <select
+                          value={playbackSpeed}
+                          onChange={(e) => changePlaybackSpeed(parseFloat(e.target.value))}
+                          className="select select-sm select-bordered text-xs w-20"
+                          title="Wiedergabegeschwindigkeit"
+                        >
+                          {SPEED_OPTIONS.map(speed => (
+                            <option key={speed} value={speed}>{speed === 1 ? '1x' : `${speed}x`}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </>
+                  )}
+                  
+                  {!audioUrl && !audioLoading && !audioError && (
+                    <button className="btn btn-sm btn-outline" onClick={() => loadAudio(selectedDictation.id)}>
+                      🔄 Audio laden
+                    </button>
+                  )}
+                  
+                  {/* Mitlesen toggle */}
+                  {audioUrl && (
+                    <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                      {parsedSegments.length > 0 ? (
+                        <button
+                          className={`btn btn-sm ${showMitlesen ? 'btn-primary' : 'btn-outline'}`}
+                          onClick={() => setShowMitlesen(!showMitlesen)}
+                          title="Originaltext mit Wortmarkierung beim Abspielen"
+                        >
+                          {showMitlesen ? '📖 Mitlesen aus' : '📖 Mitlesen an'}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-400">
+                          ℹ️ Mitlesen nicht verfügbar (keine Wort-Zeitstempel)
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Completed content with full editing capabilities */}
+              {selectedDictation.status === 'completed' && (
+                <div className="space-y-2">
+                  {selectedDictation.change_score !== undefined && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Änderungsscore:</span>
+                      <ChangeIndicatorDot score={selectedDictation.change_score} />
+                    </div>
+                  )}
+                  
+                  {/* Mitlesen Panel */}
+                  {showMitlesen && parsedSegments.length > 0 && (
+                    <div 
+                      ref={mitlesenRef}
+                      className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 max-h-48 overflow-auto border border-yellow-200 dark:border-yellow-800"
+                    >
+                      <div className="text-sm font-medium mb-2 flex items-center gap-2">
+                        📖 Originaltranskript (Mitlesen)
+                        <span className="text-xs text-gray-500">
+                          - Klicke auf ein Wort zum Springen
+                        </span>
+                      </div>
+                      <div className="text-sm leading-relaxed">
+                        {parsedSegments.map((segment, segIdx) => (
+                          <span key={segIdx}>
+                            {segment.words ? (
+                              segment.words.map((word, wordIdx) => {
+                                const isCurrentWord = audioCurrentTime >= word.start && audioCurrentTime < word.end;
+                                return (
+                                  <span
+                                    key={`${segIdx}-${wordIdx}`}
+                                    className={`cursor-pointer hover:bg-yellow-200 dark:hover:bg-yellow-700 rounded px-0.5 transition-colors ${
+                                      isCurrentWord ? 'bg-yellow-300 dark:bg-yellow-600 font-medium' : ''
+                                    }`}
+                                    onClick={() => seekToWord(word.start)}
+                                  >
+                                    {word.word}{' '}
+                                  </span>
+                                );
+                              })
+                            ) : (
+                              <span
+                                className={`cursor-pointer hover:bg-yellow-200 dark:hover:bg-yellow-700 rounded px-0.5 transition-colors ${
+                                  audioCurrentTime >= segment.start && audioCurrentTime < segment.end ? 'bg-yellow-300 dark:bg-yellow-600 font-medium' : ''
+                                }`}
+                                onClick={() => seekToWord(segment.start)}
+                              >
+                                {segment.text}{' '}
+                              </span>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* View Toggle */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      className={`btn btn-xs ${!showDiffView ? 'btn-primary' : 'btn-outline'}`}
+                      onClick={() => setShowDiffView(false)}
+                    >
+                      ✏️ Bearbeiten
+                    </button>
+                    <button
+                      className={`btn btn-xs ${showDiffView ? 'btn-primary' : 'btn-outline'}`}
+                      onClick={() => setShowDiffView(true)}
+                    >
+                      🔍 Diff-Ansicht
+                    </button>
+                  </div>
+                  
+                  {/* Text Content - using same EditableTextWithMitlesen as normal user view */}
+                  <EditableTextWithMitlesen
+                    text={editedTexts.corrected_text}
+                    originalText={formattedRawText}
+                    savedText={savedText}
+                    originalSegments={parsedSegments}
+                    audioCurrentTime={audioCurrentTime}
+                    audioRef={audioRef}
+                    showMitlesen={showMitlesen}
+                    showDiff={showDiffView}
+                    onChange={(newText) => {
+                      setEditedTexts(prev => ({ ...prev, corrected_text: newText }));
+                      setHasUnsavedChanges(true);
+                    }}
+                    className="min-h-[60vh]"
+                  />
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-2 pt-2 border-t flex-wrap">
+                {selectedDictation.status === 'completed' && (
+                  <>
+                    <button
+                      className={`btn btn-sm flex-1 ${copyFeedback === selectedDictation.id ? 'btn-success' : 'btn-primary'}`}
+                      onClick={() => handleCopy(getCombinedTextEdited(), selectedDictation.id)}
+                    >
+                      {copyFeedback === selectedDictation.id ? '✓ Kopiert!' : '📋 In Zwischenablage'}
+                    </button>
+                    {hasUnsavedChanges && (
+                      <button className="btn btn-sm btn-warning" onClick={handleSave} title="Änderungen speichern">
+                        💾 Speichern
+                      </button>
+                    )}
+                    <button className="btn btn-sm btn-outline" onClick={() => setShowCorrectionLog(true)} title="Korrekturprotokoll anzeigen">
+                      📋 Protokoll
+                    </button>
+                    <button className="btn btn-sm btn-outline" onClick={() => handleArchive(selectedDictation.id)} title="Diktat archivieren">
+                      📦 Archivieren
+                    </button>
+                    <button className="btn btn-sm btn-outline" onClick={() => handleDelete(selectedDictation.id, true)} title="Audio löschen, Text behalten">
+                      🎵✕
+                    </button>
+                    <button
+                      className="btn btn-sm btn-outline"
+                      onClick={() => showDictForm ? setShowDictForm(false) : handleOpenDictForm()}
+                      title={`Wort zu ${selectedDictation.username}s Wörterbuch hinzufügen (Text markieren!)`}
+                    >
+                      📖+
+                    </button>
+                  </>
+                )}
+                {selectedDictation.status === 'error' && (
+                  <button className="btn btn-sm btn-outline" onClick={() => handleRetry(selectedDictation.id)}>
+                    🔄 Erneut versuchen
+                  </button>
+                )}
+                <button className="btn btn-sm btn-outline text-red-600" onClick={() => handleDelete(selectedDictation.id)}>
+                  🗑️ Löschen
+                </button>
+              </div>
+              
+              {/* Dictionary Entry Form */}
+              {showDictForm && selectedDictation.status === 'completed' && (
+                <div className="mt-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
+                  <h4 className="text-sm font-medium mb-2">
+                    📖 Wörterbuch-Eintrag für <span className="text-purple-600 dark:text-purple-400">{selectedDictation.username}</span>
+                  </h4>
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      className="input w-full text-sm"
+                      placeholder="Falsches Wort (wie diktiert)"
+                      value={dictWrong}
+                      onChange={(e) => setDictWrong(e.target.value)}
+                    />
+                    <input
+                      type="text"
+                      className="input w-full text-sm"
+                      placeholder="Korrektes Wort"
+                      value={dictCorrect}
+                      onChange={(e) => setDictCorrect(e.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <button className="btn btn-sm btn-primary flex-1" onClick={() => handleAddToDictionary(selectedDictation.username)}>
+                        ✓ Hinzufügen
+                      </button>
+                      <button
+                        className="btn btn-sm btn-outline"
+                        onClick={() => { setShowDictForm(false); setDictWrong(''); setDictCorrect(''); setDictFeedback(null); }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    {dictFeedback && (
+                      <div className={`text-xs p-2 rounded ${
+                        dictFeedback.type === 'success' 
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                          : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                      }`}>
+                        {dictFeedback.message}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
+        </>
       ) : (
         /* Normale Benutzer: Kartenansicht */
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

@@ -219,34 +219,35 @@ export async function initDatabase(): Promise<void> {
       password_hash VARCHAR(255) NOT NULL,
       is_admin BOOLEAN DEFAULT FALSE,
       can_view_all_dictations BOOLEAN DEFAULT FALSE,
+      auto_correct BOOLEAN DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_by VARCHAR(255)
     )
   `);
   
-  // Migration: Add can_view_all_dictations column if not exists
-  try {
-    await db.execute(`
-      ALTER TABLE users ADD COLUMN can_view_all_dictations BOOLEAN DEFAULT FALSE
-    `);
-    console.log('[DB] ✓ Added can_view_all_dictations column');
-  } catch (e: any) {
-    // Column already exists - ignore
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] can_view_all_dictations column already exists');
-    }
-  }
+  // Fast migration: Check columns via INFORMATION_SCHEMA instead of try/catch ALTER
+  const [existingCols] = await db.execute(`
+    SELECT COLUMN_NAME 
+    FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() 
+    AND TABLE_NAME = 'users'
+  `) as any;
   
-  // Migration: Add auto_correct column if not exists (default TRUE for automatic correction)
-  try {
-    await db.execute(`
-      ALTER TABLE users ADD COLUMN auto_correct BOOLEAN DEFAULT TRUE
-    `);
-    console.log('[DB] ✓ Added auto_correct column');
-  } catch (e: any) {
-    // Column already exists - ignore
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] auto_correct column already exists');
+  const existingColumns = new Set((existingCols || []).map((row: any) => row.COLUMN_NAME.toLowerCase()));
+  
+  const userMigrations = [
+    { column: 'can_view_all_dictations', sql: 'ADD COLUMN can_view_all_dictations BOOLEAN DEFAULT FALSE' },
+    { column: 'auto_correct', sql: 'ADD COLUMN auto_correct BOOLEAN DEFAULT TRUE' },
+  ];
+  
+  for (const migration of userMigrations) {
+    if (!existingColumns.has(migration.column.toLowerCase())) {
+      try {
+        await db.execute(`ALTER TABLE users ${migration.sql}`);
+        console.log(`[DB] ✓ Added ${migration.column} column`);
+      } catch (e: any) {
+        // Ignore - might exist
+      }
     }
   }
   console.log('[DB] ✓ Users table ready');
@@ -283,7 +284,7 @@ export async function initDatabaseWithRequest(request: NextRequest): Promise<voi
   
   console.log('[DB] Initializing tables (dynamic)...');
   
-  // Users table
+  // Users table - include all columns in CREATE statement
   await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -291,32 +292,35 @@ export async function initDatabaseWithRequest(request: NextRequest): Promise<voi
       password_hash VARCHAR(255) NOT NULL,
       is_admin BOOLEAN DEFAULT FALSE,
       can_view_all_dictations BOOLEAN DEFAULT FALSE,
+      auto_correct BOOLEAN DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_by VARCHAR(255)
     )
   `);
   
-  // Migration: Add can_view_all_dictations column if not exists
-  try {
-    await db.execute(`
-      ALTER TABLE users ADD COLUMN can_view_all_dictations BOOLEAN DEFAULT FALSE
-    `);
-    console.log('[DB] ✓ Added can_view_all_dictations column');
-  } catch (e: any) {
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] can_view_all_dictations column already exists');
-    }
-  }
+  // Fast migration: Check columns via INFORMATION_SCHEMA instead of try/catch ALTER
+  const [existingCols] = await db.execute(`
+    SELECT COLUMN_NAME 
+    FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() 
+    AND TABLE_NAME = 'users'
+  `) as any;
   
-  // Migration: Add auto_correct column if not exists (default TRUE for automatic correction)
-  try {
-    await db.execute(`
-      ALTER TABLE users ADD COLUMN auto_correct BOOLEAN DEFAULT TRUE
-    `);
-    console.log('[DB] ✓ Added auto_correct column (dynamic)');
-  } catch (e: any) {
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] auto_correct column already exists');
+  const existingColumns = new Set((existingCols || []).map((row: any) => row.COLUMN_NAME.toLowerCase()));
+  
+  const userMigrations = [
+    { column: 'can_view_all_dictations', sql: 'ADD COLUMN can_view_all_dictations BOOLEAN DEFAULT FALSE' },
+    { column: 'auto_correct', sql: 'ADD COLUMN auto_correct BOOLEAN DEFAULT TRUE' },
+  ];
+  
+  for (const migration of userMigrations) {
+    if (!existingColumns.has(migration.column.toLowerCase())) {
+      try {
+        await db.execute(`ALTER TABLE users ${migration.sql}`);
+        console.log(`[DB] ✓ Added ${migration.column} column (dynamic)`);
+      } catch (e: any) {
+        // Ignore - might exist
+      }
     }
   }
   

@@ -1,5 +1,9 @@
 import { NextRequest } from 'next/server';
+import mysql from 'mysql2/promise';
 import { getPool, query, execute, getPoolForRequest } from './db';
+
+// Migration version - increment when adding new migrations
+const CURRENT_MIGRATION_VERSION = 5;
 
 // Offline Dictation Status
 export type DictationStatus = 'pending' | 'processing' | 'completed' | 'error';
@@ -90,128 +94,10 @@ export async function initOfflineDictationTable(): Promise<void> {
     )
   `);
   
-  // Migrate existing tables to add raw_transcript column if missing
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN raw_transcript TEXT AFTER mode`);
-    console.log('[DB] ✓ Added raw_transcript column');
-  } catch (e: any) {
-    // Column already exists - ignore error
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] raw_transcript column already exists');
-    }
-  }
-  
-  // Migrate existing tables to add change_score column if missing
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN change_score INT DEFAULT NULL AFTER corrected_text`);
-    console.log('[DB] ✓ Added change_score column');
-  } catch (e: any) {
-    // Column already exists - ignore error
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] change_score column already exists');
-    }
-  }
-  
-  // Migrate existing tables to add segments column for word-level timestamps
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN segments LONGTEXT AFTER raw_transcript`);
-    console.log('[DB] ✓ Added segments column');
-  } catch (e: any) {
-    // Column already exists - ignore error
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] segments column already exists');
-    }
-  }
-  
-  // Migrate existing tables to add archive fields
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN archived BOOLEAN DEFAULT FALSE AFTER error_message`);
-    console.log('[DB] ✓ Added archived column');
-  } catch (e: any) {
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] archived column already exists');
-    }
-  }
-  
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN archived_at TIMESTAMP NULL AFTER archived`);
-    console.log('[DB] ✓ Added archived_at column');
-  } catch (e: any) {
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] archived_at column already exists');
-    }
-  }
-  
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN archived_by VARCHAR(255) DEFAULT NULL AFTER archived_at`);
-    console.log('[DB] ✓ Added archived_by column');
-  } catch (e: any) {
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] archived_by column already exists');
-    }
-  }
-  
-  // Add index for archived status
-  try {
-    await db.execute(`CREATE INDEX idx_archived ON offline_dictations(archived)`);
-    console.log('[DB] ✓ Added archived index');
-  } catch (e: any) {
-    if (!e.message?.includes('Duplicate key')) {
-      console.log('[DB] archived index already exists');
-    }
-  }
-  
-  // Migrate existing tables to add bemerkung column
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN bemerkung TEXT AFTER mode`);
-    console.log('[DB] ✓ Added bemerkung column');
-  } catch (e: any) {
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] bemerkung column already exists');
-    }
-  }
-  
-  // Migrate existing tables to add termin column
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN termin DATETIME NULL AFTER bemerkung`);
-    console.log('[DB] ✓ Added termin column');
-  } catch (e: any) {
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] termin column already exists');
-    }
-  }
-  
-  // Migrate existing tables to add fachabteilung column
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN fachabteilung VARCHAR(255) AFTER termin`);
-    console.log('[DB] ✓ Added fachabteilung column');
-  } catch (e: any) {
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] fachabteilung column already exists');
-    }
-  }
-  
-  // Migrate existing tables to add berechtigte column
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN berechtigte TEXT AFTER fachabteilung`);
-    console.log('[DB] ✓ Added berechtigte column');
-  } catch (e: any) {
-    if (!e.message?.includes('Duplicate column')) {
-      console.log('[DB] berechtigte column already exists');
-    }
-  }
-  
-  // Add index for fachabteilung
-  try {
-    await db.execute(`CREATE INDEX idx_fachabteilung ON offline_dictations(fachabteilung)`);
-    console.log('[DB] ✓ Added fachabteilung index');
-  } catch (e: any) {
-    if (!e.message?.includes('Duplicate key')) {
-      console.log('[DB] fachabteilung index already exists');
-    }
-  }
-  
-  // Initialize correction log table
+  // Run schema migrations using fast INFORMATION_SCHEMA check
+  await runSchemaMigrations(db, 'default');
+
+  // Initialize correction log table (CREATE IF NOT EXISTS is fast)
   await db.execute(`
     CREATE TABLE IF NOT EXISTS correction_log (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -233,6 +119,107 @@ export async function initOfflineDictationTable(): Promise<void> {
   console.log('[DB] ✓ Correction log table ready');
   
   console.log('[DB] ✓ Offline dictations table ready');
+}
+
+// Shared schema migration logic - used by both init functions
+async function runSchemaMigrations(db: mysql.Pool, poolKey: string): Promise<void> {
+  // Check current migration version in config table
+  try {
+    const [versionRows] = await db.execute(
+      `SELECT config_value FROM config WHERE config_key = 'offline_dictation_migration_version'`
+    ) as any;
+    
+    const currentVersion = versionRows[0]?.config_value ? parseInt(versionRows[0].config_value) : 0;
+    
+    if (currentVersion >= CURRENT_MIGRATION_VERSION) {
+      console.log(`[DB] Schema already at version ${currentVersion}, skipping migrations (${poolKey})`);
+      return;
+    }
+    
+    console.log(`[DB] Schema version ${currentVersion} -> ${CURRENT_MIGRATION_VERSION}, running migrations...`);
+  } catch (e: any) {
+    console.log(`[DB] First-time schema setup for ${poolKey}`);
+  }
+  
+  // Get existing columns in one query
+  const [existingCols] = await db.execute(`
+    SELECT COLUMN_NAME 
+    FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() 
+    AND TABLE_NAME = 'offline_dictations'
+  `) as any;
+  
+  const existingColumns = new Set((existingCols || []).map((row: any) => row.COLUMN_NAME.toLowerCase()));
+  
+  // Define required columns and their ALTER statements
+  const requiredMigrations: { column: string; sql: string }[] = [
+    { column: 'raw_transcript', sql: 'ADD COLUMN raw_transcript TEXT AFTER mode' },
+    { column: 'change_score', sql: 'ADD COLUMN change_score INT DEFAULT NULL AFTER corrected_text' },
+    { column: 'segments', sql: 'ADD COLUMN segments LONGTEXT AFTER raw_transcript' },
+    { column: 'archived', sql: 'ADD COLUMN archived BOOLEAN DEFAULT FALSE AFTER error_message' },
+    { column: 'archived_at', sql: 'ADD COLUMN archived_at TIMESTAMP NULL AFTER archived' },
+    { column: 'archived_by', sql: 'ADD COLUMN archived_by VARCHAR(255) DEFAULT NULL AFTER archived_at' },
+    { column: 'bemerkung', sql: 'ADD COLUMN bemerkung TEXT AFTER mode' },
+    { column: 'termin', sql: 'ADD COLUMN termin DATETIME NULL AFTER bemerkung' },
+    { column: 'fachabteilung', sql: 'ADD COLUMN fachabteilung VARCHAR(255) AFTER termin' },
+    { column: 'berechtigte', sql: 'ADD COLUMN berechtigte TEXT AFTER fachabteilung' },
+  ];
+  
+  // Only run ALTER statements for missing columns
+  let migrationsRun = 0;
+  for (const migration of requiredMigrations) {
+    if (!existingColumns.has(migration.column.toLowerCase())) {
+      try {
+        await db.execute(`ALTER TABLE offline_dictations ${migration.sql}`);
+        console.log(`[DB] ✓ Added ${migration.column} column (${poolKey})`);
+        migrationsRun++;
+      } catch (e: any) {
+        // Column might exist but not in our set (race condition)
+      }
+    }
+  }
+  
+  // Check and add indexes
+  const [existingIndexes] = await db.execute(`
+    SELECT INDEX_NAME 
+    FROM INFORMATION_SCHEMA.STATISTICS 
+    WHERE TABLE_SCHEMA = DATABASE() 
+    AND TABLE_NAME = 'offline_dictations'
+  `) as any;
+  
+  const indexSet = new Set((existingIndexes || []).map((row: any) => row.INDEX_NAME.toLowerCase()));
+  
+  const requiredIndexes = [
+    { name: 'idx_archived', sql: 'CREATE INDEX idx_archived ON offline_dictations(archived)' },
+    { name: 'idx_fachabteilung', sql: 'CREATE INDEX idx_fachabteilung ON offline_dictations(fachabteilung)' },
+  ];
+  
+  for (const index of requiredIndexes) {
+    if (!indexSet.has(index.name.toLowerCase())) {
+      try {
+        await db.execute(index.sql);
+        console.log(`[DB] ✓ Added ${index.name} index (${poolKey})`);
+        migrationsRun++;
+      } catch (e: any) {
+        // Index might exist (race condition)
+      }
+    }
+  }
+  
+  // Save current migration version
+  try {
+    await db.execute(
+      `INSERT INTO config (config_key, config_value) VALUES ('offline_dictation_migration_version', ?)
+       ON DUPLICATE KEY UPDATE config_value = ?`,
+      [CURRENT_MIGRATION_VERSION.toString(), CURRENT_MIGRATION_VERSION.toString()]
+    );
+  } catch (e: any) {
+    console.warn(`[DB] Could not save migration version: ${e.message}`);
+  }
+  
+  if (migrationsRun > 0) {
+    console.log(`[DB] ✓ Schema migrated to version ${CURRENT_MIGRATION_VERSION} (${migrationsRun} changes)`);
+  }
 }
 
 // Create a new offline dictation
@@ -603,7 +590,7 @@ function getPoolKeyFromRequest(request: NextRequest): string {
 export async function initOfflineDictationTableWithRequest(request: NextRequest): Promise<void> {
   const poolKey = getPoolKeyFromRequest(request);
   
-  // Only initialize once per pool
+  // Only initialize once per pool - fast path without DB access
   if (tableInitializedPerPool.get(poolKey)) {
     return;
   }
@@ -651,121 +638,28 @@ export async function initOfflineDictationTableWithRequest(request: NextRequest)
     )
   `);
   
-  // Migrate existing tables to add raw_transcript column if missing
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN raw_transcript TEXT AFTER mode`);
-    console.log(`[DB] ✓ Added raw_transcript column (${poolKey})`);
-  } catch (e: any) {
-    // Column already exists - ignore error
-  }
-  
-  // Migrate existing tables to add change_score column if missing
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN change_score INT DEFAULT NULL AFTER corrected_text`);
-    console.log(`[DB] ✓ Added change_score column (${poolKey})`);
-  } catch (e: any) {
-    // Column already exists - ignore error
-  }
-  
-  // Migrate existing tables to add segments column for word-level timestamps
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN segments LONGTEXT AFTER raw_transcript`);
-    console.log(`[DB] ✓ Added segments column (${poolKey})`);
-  } catch (e: any) {
-    // Column already exists - ignore error
-  }
-  
-  // Migrate existing tables to add archive fields
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN archived BOOLEAN DEFAULT FALSE AFTER error_message`);
-    console.log(`[DB] ✓ Added archived column (${poolKey})`);
-  } catch (e: any) {
-    // Column already exists - ignore error
-  }
-  
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN archived_at TIMESTAMP NULL AFTER archived`);
-    console.log(`[DB] ✓ Added archived_at column (${poolKey})`);
-  } catch (e: any) {
-    // Column already exists - ignore error
-  }
-  
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN archived_by VARCHAR(255) DEFAULT NULL AFTER archived_at`);
-    console.log(`[DB] ✓ Added archived_by column (${poolKey})`);
-  } catch (e: any) {
-    // Column already exists - ignore error
-  }
-  
-  // Add index for archived status
-  try {
-    await db.execute(`CREATE INDEX idx_archived ON offline_dictations(archived)`);
-    console.log(`[DB] ✓ Added archived index (${poolKey})`);
-  } catch (e: any) {
-    // Index already exists - ignore error
-  }
+  // Run schema migrations only if needed (fast path using INFORMATION_SCHEMA)
+  await runSchemaMigrations(db, poolKey);
 
-  // Migrate existing tables to add new metadata fields
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN bemerkung TEXT AFTER error_message`);
-    console.log(`[DB] ✓ Added bemerkung column (${poolKey})`);
-  } catch (e: any) {
-    // Column already exists - ignore error
-  }
-  
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN termin DATETIME NULL AFTER bemerkung`);
-    console.log(`[DB] ✓ Added termin column (${poolKey})`);
-  } catch (e: any) {
-    // Column already exists - ignore error
-  }
-  
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN fachabteilung VARCHAR(255) AFTER termin`);
-    console.log(`[DB] ✓ Added fachabteilung column (${poolKey})`);
-  } catch (e: any) {
-    // Column already exists - ignore error
-  }
-  
-  try {
-    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN berechtigte TEXT AFTER fachabteilung`);
-    console.log(`[DB] ✓ Added berechtigte column (${poolKey})`);
-  } catch (e: any) {
-    // Column already exists - ignore error
-  }
-  
-  // Add index for fachabteilung
-  try {
-    await db.execute(`CREATE INDEX idx_fachabteilung ON offline_dictations(fachabteilung)`);
-    console.log(`[DB] ✓ Added fachabteilung index (${poolKey})`);
-  } catch (e: any) {
-    // Index already exists - ignore error
-  }
-
-  // Initialize correction log table
-  try {
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS correction_log (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        dictation_id INT NOT NULL,
-        correction_type ENUM('textFormatting', 'llm', 'doublePrecision', 'manual') NOT NULL,
-        model_name VARCHAR(255) DEFAULT NULL,
-        model_provider VARCHAR(100) DEFAULT NULL,
-        username VARCHAR(255) DEFAULT NULL,
-        text_before LONGTEXT NOT NULL,
-        text_after LONGTEXT NOT NULL,
-        change_score INT DEFAULT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_dictation_id (dictation_id),
-        INDEX idx_correction_type (correction_type),
-        INDEX idx_created_at (created_at),
-        FOREIGN KEY (dictation_id) REFERENCES offline_dictations(id) ON DELETE CASCADE
-      )
-    `);
-    console.log(`[DB] ✓ Correction log table ready (${poolKey})`);
-  } catch (e: any) {
-    // Table already exists
-  }
+  // Initialize correction log table (CREATE IF NOT EXISTS is fast)
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS correction_log (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      dictation_id INT NOT NULL,
+      correction_type ENUM('textFormatting', 'llm', 'doublePrecision', 'manual') NOT NULL,
+      model_name VARCHAR(255) DEFAULT NULL,
+      model_provider VARCHAR(100) DEFAULT NULL,
+      username VARCHAR(255) DEFAULT NULL,
+      text_before LONGTEXT NOT NULL,
+      text_after LONGTEXT NOT NULL,
+      change_score INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_dictation_id (dictation_id),
+      INDEX idx_correction_type (correction_type),
+      INDEX idx_created_at (created_at),
+      FOREIGN KEY (dictation_id) REFERENCES offline_dictations(id) ON DELETE CASCADE
+    )
+  `);
   
   tableInitializedPerPool.set(poolKey, true);
   console.log(`[DB] ✓ Offline dictations table ready (${poolKey})`);

@@ -281,26 +281,32 @@ export function cleanupText(text: string, entries: DictionaryEntry[]): string {
 // Request-basierte Funktionen (für dynamische DB über Token)
 // ============================================================
 
-// Ensure new columns exist (on-demand migration)
+// Ensure new columns exist (on-demand migration) - uses INFORMATION_SCHEMA for speed
 async function ensureColumnsExist(db: any, poolKey: string): Promise<void> {
-  try {
-    // Try to add use_in_prompt column if it doesn't exist
-    await db.execute(`
-      ALTER TABLE dictionary_entries ADD COLUMN use_in_prompt BOOLEAN DEFAULT FALSE
-    `);
-    console.log(`[Dictionary] Added use_in_prompt column on-demand (${poolKey})`);
-  } catch (e: any) {
-    // Column already exists - that's fine
-  }
+  // Fast check: Query INFORMATION_SCHEMA instead of try/catch ALTER TABLE
+  const [existingCols] = await db.execute(`
+    SELECT COLUMN_NAME 
+    FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() 
+    AND TABLE_NAME = 'dictionary_entries'
+  `) as any;
   
-  try {
-    // Try to add match_stem column if it doesn't exist
-    await db.execute(`
-      ALTER TABLE dictionary_entries ADD COLUMN match_stem BOOLEAN DEFAULT FALSE
-    `);
-    console.log(`[Dictionary] Added match_stem column on-demand (${poolKey})`);
-  } catch (e: any) {
-    // Column already exists - that's fine
+  const existingColumns = new Set((existingCols || []).map((row: any) => row.COLUMN_NAME.toLowerCase()));
+  
+  const requiredMigrations = [
+    { column: 'use_in_prompt', sql: 'ADD COLUMN use_in_prompt BOOLEAN DEFAULT FALSE' },
+    { column: 'match_stem', sql: 'ADD COLUMN match_stem BOOLEAN DEFAULT FALSE' },
+  ];
+  
+  for (const migration of requiredMigrations) {
+    if (!existingColumns.has(migration.column.toLowerCase())) {
+      try {
+        await db.execute(`ALTER TABLE dictionary_entries ${migration.sql}`);
+        console.log(`[Dictionary] ✓ Added ${migration.column} column (${poolKey})`);
+      } catch (e: any) {
+        // Column might exist - ignore
+      }
+    }
   }
 }
 

@@ -79,18 +79,20 @@ export default function OfflineDictationPage() {
   // Sekretariat view - only queue, no recording
   if (isSecretariat) {
     return (
-      <div className="space-y-4">
-        <div className="card">
+      <div className="flex flex-col h-[calc(100vh-12rem)] space-y-4">
+        <div className="card shrink-0">
           <div className="card-body py-3">
             <h2 className="font-medium text-lg">📋 Sekretariat - Diktat-Übersicht</h2>
           </div>
         </div>
-        <DictationQueue
-          key={refreshKey}
-          username={username}
-          canViewAll={true}
-          isSecretariat={true}
-        />
+        <div className="flex-1 min-h-0 flex flex-col">
+          <DictationQueue
+            key={refreshKey}
+            username={username}
+            canViewAll={true}
+            isSecretariat={true}
+          />
+        </div>
       </div>
     );
   }

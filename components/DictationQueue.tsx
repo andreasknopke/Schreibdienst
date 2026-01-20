@@ -976,7 +976,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const processingCount = dictations.filter(d => d.status === 'processing').length;
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col h-full space-y-4">
       {/* View Toggle Tabs */}
       <div className="card">
         <div className="card-body py-2">
@@ -1171,8 +1171,8 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
         </div>
       ) : isSecretariat ? (
         /* Sekretariat: Tabellenansicht */
-        <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
+        <div className="card overflow-hidden flex-1 flex flex-col min-h-0">
+          <div className="flex-1 overflow-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                 <tr>

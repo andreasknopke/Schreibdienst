@@ -9,8 +9,11 @@ import UserMenu from '@/components/UserMenu';
 import LoginForm from '@/components/LoginForm';
 
 function LayoutContent({ children }: { children: ReactNode }) {
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, canViewAllDictations } = useAuth();
   const pathname = usePathname();
+  
+  // Sekretariat auf Offline-Seite bekommt volle Breite
+  const isFullWidth = pathname === '/offline' && canViewAllDictations;
 
   if (!isLoggedIn) {
     return (
@@ -41,7 +44,7 @@ function LayoutContent({ children }: { children: ReactNode }) {
   return (
     <>
       <header className="border-b bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:bg-zinc-900/80 sticky top-0 z-40">
-        <div className="max-w-2xl mx-auto px-3 py-2 flex items-center justify-between">
+        <div className={`${isFullWidth ? 'w-full' : 'max-w-2xl'} mx-auto px-3 py-2 flex items-center justify-between`}>
           <div className="flex items-center gap-2">
             <div className="h-7 w-7 rounded-lg bg-[rgb(var(--primary-600))] flex items-center justify-center">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="white">
@@ -58,7 +61,7 @@ function LayoutContent({ children }: { children: ReactNode }) {
           </nav>
         </div>
         {/* Mode Navigation Tabs */}
-        <div className="max-w-2xl mx-auto px-3 pb-2">
+        <div className={`${isFullWidth ? 'w-full' : 'max-w-2xl'} mx-auto px-3 pb-2`}>
           <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
             <Link
               href="/"
@@ -83,7 +86,7 @@ function LayoutContent({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="max-w-2xl mx-auto px-3 py-4">{children}</main>
+      <main className={`${isFullWidth ? 'w-full' : 'max-w-2xl'} mx-auto px-3 py-4`}>{children}</main>
     </>
   );
 }

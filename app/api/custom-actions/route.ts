@@ -15,7 +15,6 @@ interface AuthResult {
 
 // Extract username from auth header
 async function getAuthenticatedUser(request: NextRequest): Promise<AuthResult | null> {
-  const start = Date.now();
   const authHeader = request.headers.get('Authorization');
   if (!authHeader || !authHeader.startsWith('Basic ')) {
     return null;
@@ -25,11 +24,6 @@ async function getAuthenticatedUser(request: NextRequest): Promise<AuthResult | 
     const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
     const [username, password] = credentials.split(':');
     const result = await authenticateUserWithRequest(request, username, password);
-    
-    const elapsed = Date.now() - start;
-    if (elapsed > 100) {
-      console.log(`[API/CustomActions] Auth took ${elapsed}ms`);
-    }
     
     if (result.success && result.user) {
       return { username: result.user.username };
@@ -43,23 +37,13 @@ async function getAuthenticatedUser(request: NextRequest): Promise<AuthResult | 
 
 // GET: Fetch all custom actions for a user
 export async function GET(req: NextRequest) {
-  const totalStart = Date.now();
-  
   const auth = await getAuthenticatedUser(req);
   if (!auth) {
     return NextResponse.json({ error: 'Nicht authentifiziert' }, { status: 401 });
   }
   
   try {
-    const actionsStart = Date.now();
     const actions = await getCustomActionsWithRequest(req, auth.username);
-    const actionsTime = Date.now() - actionsStart;
-    const totalTime = Date.now() - totalStart;
-    
-    if (totalTime > 200) {
-      console.log(`[API/CustomActions] GET total: ${totalTime}ms (actions query: ${actionsTime}ms)`);
-    }
-    
     return NextResponse.json({ actions });
   } catch (error: any) {
     console.error('[API/CustomActions] GET error:', error);

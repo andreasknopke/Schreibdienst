@@ -22,6 +22,11 @@ interface Dictation {
   priority: 'normal' | 'urgent' | 'stat';
   status: 'pending' | 'processing' | 'completed' | 'error';
   mode: 'befund' | 'arztbrief';
+  // Neue Felder
+  bemerkung?: string;
+  termin?: string;
+  fachabteilung?: string;
+  berechtigte?: string; // JSON array of usernames
   raw_transcript?: string; // Pure Transkription vor LLM-Korrektur
   segments?: string; // JSON with word-level timestamps for highlighting
   transcript?: string;
@@ -303,7 +308,13 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [viewMode, setViewMode] = useState<'mine' | 'all'>(isSecretariat ? 'all' : 'mine');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [userFilter, setUserFilter] = useState<string>('');
+  const [fachabteilungFilter, setFachabteilungFilter] = useState<string>('');
   const [availableUsers, setAvailableUsers] = useState<string[]>([]);
+  const [availableFachabteilungen, setAvailableFachabteilungen] = useState<string[]>([]);
+  
+  // Sortierung
+  const [sortField, setSortField] = useState<'created_at' | 'termin' | 'priority' | 'fachabteilung' | 'username'>('created_at');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   
   // View toggle: queue or archive
   const [currentView, setCurrentView] = useState<'queue' | 'archive'>('queue');
@@ -400,6 +411,14 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       if (!res.ok) throw new Error('Laden fehlgeschlagen');
       const data = await res.json();
       setDictations(data);
+      
+      // Extrahiere verfügbare Fachabteilungen aus den geladenen Daten
+      const fachabteilungen = new Set<string>();
+      data.forEach((d: Dictation) => {
+        if (d.fachabteilung) fachabteilungen.add(d.fachabteilung);
+      });
+      setAvailableFachabteilungen(Array.from(fachabteilungen).sort());
+      
       setError(null);
     } catch (err: any) {
       setError(err.message);
@@ -407,6 +426,46 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       setLoading(false);
     }
   }, [username, viewMode, canViewAll, isSecretariat, statusFilter, userFilter]);
+  
+  // Gefilterte und sortierte Diktate
+  const filteredAndSortedDictations = useMemo(() => {
+    let result = [...dictations];
+    
+    // Filter nach Fachabteilung
+    if (fachabteilungFilter) {
+      result = result.filter(d => d.fachabteilung === fachabteilungFilter);
+    }
+    
+    // Sortierung
+    result.sort((a, b) => {
+      let comparison = 0;
+      
+      switch (sortField) {
+        case 'created_at':
+          comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+          break;
+        case 'termin':
+          const aTermin = a.termin ? new Date(a.termin).getTime() : 0;
+          const bTermin = b.termin ? new Date(b.termin).getTime() : 0;
+          comparison = aTermin - bTermin;
+          break;
+        case 'priority':
+          const priorityOrder = { stat: 0, urgent: 1, normal: 2 };
+          comparison = priorityOrder[a.priority] - priorityOrder[b.priority];
+          break;
+        case 'fachabteilung':
+          comparison = (a.fachabteilung || '').localeCompare(b.fachabteilung || '');
+          break;
+        case 'username':
+          comparison = a.username.localeCompare(b.username);
+          break;
+      }
+      
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+    
+    return result;
+  }, [dictations, fachabteilungFilter, sortField, sortDirection]);
 
   // Check worker status
   const checkWorkerStatus = useCallback(async () => {
@@ -1058,6 +1117,42 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                       <option value="error">Fehler</option>
                     </select>
                   </div>
+                  {availableFachabteilungen.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Abteilung:</span>
+                      <select
+                        className="input py-1 text-sm"
+                        value={fachabteilungFilter}
+                        onChange={(e) => setFachabteilungFilter(e.target.value)}
+                      >
+                        <option value="">Alle</option>
+                        {availableFachabteilungen.map(fa => (
+                          <option key={fa} value={fa}>{fa}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Sortieren:</span>
+                    <select
+                      className="input py-1 text-sm"
+                      value={sortField}
+                      onChange={(e) => setSortField(e.target.value as any)}
+                    >
+                      <option value="created_at">Erstelldatum</option>
+                      <option value="termin">Termin</option>
+                      <option value="priority">Priorität</option>
+                      <option value="fachabteilung">Fachabteilung</option>
+                      <option value="username">Benutzer</option>
+                    </select>
+                    <button
+                      className="btn btn-sm btn-outline"
+                      onClick={() => setSortDirection(d => d === 'asc' ? 'desc' : 'asc')}
+                      title={sortDirection === 'asc' ? 'Aufsteigend' : 'Absteigend'}
+                    >
+                      {sortDirection === 'asc' ? '↑' : '↓'}
+                    </button>
+                  </div>
                 </>
               )}
             </div>
@@ -1068,17 +1163,265 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       {error && <div className="alert alert-error">{error}</div>}
 
       {/* Dictation List */}
-      {dictations.length === 0 ? (
+      {filteredAndSortedDictations.length === 0 ? (
         <div className="card">
           <div className="card-body text-center py-8 text-gray-500">
             Keine Diktate in der Warteschlange
           </div>
         </div>
+      ) : isSecretariat ? (
+        /* Sekretariat: Tabellenansicht */
+        <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">Auftrag</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">Benutzer</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">Status</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">Priorität</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">Abteilung</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">Termin</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">Patient</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">Erstellt</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">Dauer</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600 dark:text-gray-400">Bemerkung</th>
+                  <th className="px-3 py-2 text-center font-medium text-gray-600 dark:text-gray-400">Aktion</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                {filteredAndSortedDictations.map((d) => (
+                  <tr 
+                    key={d.id}
+                    className={`cursor-pointer transition-colors ${
+                      selectedId === d.id 
+                        ? 'bg-blue-50 dark:bg-blue-900/20' 
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                    }`}
+                    onClick={() => {
+                      setSelectedId(d.id);
+                      if (d.status === 'completed') {
+                        setIsFullscreen(true);
+                      }
+                    }}
+                  >
+                    <td className="px-3 py-2 font-medium">{d.order_number}</td>
+                    <td className="px-3 py-2">
+                      <span className="px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                        {d.username}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2"><StatusBadge status={d.status} /></td>
+                    <td className="px-3 py-2"><PriorityBadge priority={d.priority} /></td>
+                    <td className="px-3 py-2">{d.fachabteilung || '-'}</td>
+                    <td className="px-3 py-2">
+                      {d.termin ? new Date(d.termin).toLocaleString('de-DE', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      }) : '-'}
+                    </td>
+                    <td className="px-3 py-2 max-w-32 truncate" title={d.patient_name}>{d.patient_name || '-'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{formatDate(d.created_at)}</td>
+                    <td className="px-3 py-2">{formatDuration(d.audio_duration_seconds)}</td>
+                    <td className="px-3 py-2 max-w-40 truncate" title={d.bemerkung}>{d.bemerkung || '-'}</td>
+                    <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-center gap-1">
+                        {d.status === 'completed' && (
+                          <button
+                            className={`btn btn-xs ${copyFeedback === d.id ? 'btn-success' : 'btn-outline'}`}
+                            onClick={() => handleCopy(getCombinedText(d), d.id)}
+                            title="Text kopieren"
+                          >
+                            {copyFeedback === d.id ? '✓' : '📋'}
+                          </button>
+                        )}
+                        {d.status === 'completed' && d.change_score !== undefined && (
+                          <ChangeIndicatorDot score={d.change_score} />
+                        )}
+                        {d.status === 'error' && (
+                          <button
+                            className="btn btn-xs btn-outline"
+                            onClick={() => handleRetry(d.id)}
+                            title="Erneut versuchen"
+                          >
+                            🔄
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          
+          {/* Anzahl angezeigt */}
+          <div className="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-400">
+            {filteredAndSortedDictations.length} von {dictations.length} Diktat(en)
+          </div>
+          
+          {/* Detail View für Sekretariat (Fullscreen Modal) */}
+          {selectedDictation && (
+            <div className={`card ${
+              isFullscreen 
+                ? 'fixed inset-4 z-50 overflow-auto' 
+                : 'hidden'
+            }`}>
+              {/* Fullscreen backdrop */}
+              {isFullscreen && (
+                <div 
+                  className="fixed inset-0 bg-black/50 -z-10" 
+                  onClick={() => { setIsFullscreen(false); setSelectedId(null); }}
+                />
+              )}
+              <div className="card-body space-y-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="font-medium text-lg">{selectedDictation.order_number}</h3>
+                    <div className="flex items-center gap-2 mt-1">
+                      <PriorityBadge priority={selectedDictation.priority} />
+                      <StatusBadge status={selectedDictation.status} />
+                      <span className="px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                        👤 {selectedDictation.username}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="btn btn-sm btn-outline"
+                      onClick={() => setIsFullscreen(!isFullscreen)}
+                    >
+                      {isFullscreen ? '⊡' : '⊞'}
+                    </button>
+                    <button
+                      className="text-gray-400 hover:text-gray-600 text-xl"
+                      onClick={() => { setSelectedId(null); setIsFullscreen(false); }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                {/* Metadata */}
+                <div className="text-sm text-gray-600 dark:text-gray-400 grid grid-cols-2 gap-x-4 gap-y-1">
+                  <p><strong>Erstellt:</strong> {formatDate(selectedDictation.created_at)}</p>
+                  {selectedDictation.completed_at && (
+                    <p><strong>Fertig:</strong> {formatDate(selectedDictation.completed_at)}</p>
+                  )}
+                  <p><strong>Dauer:</strong> {formatDuration(selectedDictation.audio_duration_seconds)}</p>
+                  <p><strong>Typ:</strong> {selectedDictation.mode === 'befund' ? 'Befund' : 'Arztbrief'}</p>
+                  {selectedDictation.patient_name && (
+                    <p><strong>Patient:</strong> {selectedDictation.patient_name}</p>
+                  )}
+                  {selectedDictation.patient_dob && (
+                    <p><strong>Geb.:</strong> {new Date(selectedDictation.patient_dob).toLocaleDateString('de-DE')}</p>
+                  )}
+                  {selectedDictation.fachabteilung && (
+                    <p><strong>Fachabteilung:</strong> {selectedDictation.fachabteilung}</p>
+                  )}
+                  {selectedDictation.termin && (
+                    <p><strong>Termin:</strong> {new Date(selectedDictation.termin).toLocaleString('de-DE')}</p>
+                  )}
+                  {selectedDictation.berechtigte && (
+                    <p><strong>Berechtigte:</strong> {(() => {
+                      try {
+                        const list = JSON.parse(selectedDictation.berechtigte);
+                        return Array.isArray(list) ? list.join(', ') : selectedDictation.berechtigte;
+                      } catch {
+                        return selectedDictation.berechtigte;
+                      }
+                    })()}</p>
+                  )}
+                  {selectedDictation.bemerkung && (
+                    <p className="col-span-2"><strong>Bemerkung:</strong> {selectedDictation.bemerkung}</p>
+                  )}
+                </div>
+
+                {/* Error message */}
+                {selectedDictation.status === 'error' && selectedDictation.error_message && (
+                  <div className="alert alert-error text-sm">
+                    {selectedDictation.error_message}
+                  </div>
+                )}
+
+                {/* Processing indicator */}
+                {selectedDictation.status === 'processing' && (
+                  <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                    <Spinner size={16} />
+                    <span>Wird verarbeitet...</span>
+                  </div>
+                )}
+
+                {/* Completed content - direct to EditableTextWithMitlesen */}
+                {selectedDictation.status === 'completed' && (
+                  <EditableTextWithMitlesen
+                    text={editedTexts.corrected_text ?? selectedDictation.corrected_text ?? selectedDictation.transcript ?? ''}
+                    rawTranscript={selectedDictation.raw_transcript}
+                    segments={selectedDictation.segments}
+                    audioUrl={audioUrl}
+                    isPlaying={isPlaying}
+                    audioCurrentTime={audioCurrentTime}
+                    onTextChange={(text) => {
+                      setEditedTexts(prev => ({ ...prev, corrected_text: text }));
+                      setHasUnsavedChanges(true);
+                    }}
+                    onCopy={() => handleCopy(getCombinedTextEdited(), selectedDictation.id)}
+                    copyFeedback={copyFeedback === selectedDictation.id}
+                    changeScore={selectedDictation.change_score}
+                    isFullscreen={isFullscreen}
+                    dictationId={selectedDictation.id}
+                    textareaRef={textareaRef}
+                  />
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-2 pt-2 border-t flex-wrap">
+                  {selectedDictation.status === 'completed' && (
+                    <>
+                      <button
+                        className={`btn btn-sm flex-1 ${copyFeedback === selectedDictation.id ? 'btn-success' : 'btn-primary'}`}
+                        onClick={() => handleCopy(getCombinedTextEdited(), selectedDictation.id)}
+                      >
+                        {copyFeedback === selectedDictation.id ? '✓ Kopiert!' : '📋 In Zwischenablage'}
+                      </button>
+                      {hasUnsavedChanges && (
+                        <button
+                          className="btn btn-sm btn-warning"
+                          onClick={handleSave}
+                        >
+                          💾 Speichern
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {selectedDictation.status === 'error' && (
+                    <button
+                      className="btn btn-sm btn-outline"
+                      onClick={() => handleRetry(selectedDictation.id)}
+                    >
+                      🔄 Erneut versuchen
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-sm btn-outline text-red-600"
+                    onClick={() => handleDelete(selectedDictation.id)}
+                  >
+                    🗑️ Löschen
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
+        /* Normale Benutzer: Kartenansicht */
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* List */}
           <div className="space-y-2">
-            {dictations.map((d) => (
+            {filteredAndSortedDictations.map((d) => (
               <div
                 key={d.id}
                 className={`card cursor-pointer transition-all ${
@@ -1119,6 +1462,18 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             <span className="truncate max-w-32">{d.patient_name}</span>
                           </>
                         )}
+                        {d.fachabteilung && (
+                          <>
+                            <span>·</span>
+                            <span className="text-blue-600 dark:text-blue-400">{d.fachabteilung}</span>
+                          </>
+                        )}
+                        {d.termin && (
+                          <>
+                            <span>·</span>
+                            <span className="text-orange-600 dark:text-orange-400">📅 {new Date(d.termin).toLocaleDateString('de-DE')}</span>
+                          </>
+                        )}
                         {d.status === 'completed' && d.change_score !== undefined && (
                           <>
                             <span>·</span>
@@ -1126,6 +1481,11 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                           </>
                         )}
                       </div>
+                      {d.bemerkung && (
+                        <div className="text-xs text-gray-400 mt-1 truncate" title={d.bemerkung}>
+                          💬 {d.bemerkung}
+                        </div>
+                      )}
                     </div>
                     
                     {d.status === 'completed' && (
@@ -1206,6 +1566,25 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   )}
                   {selectedDictation.patient_dob && (
                     <p><strong>Geb.:</strong> {new Date(selectedDictation.patient_dob).toLocaleDateString('de-DE')}</p>
+                  )}
+                  {selectedDictation.fachabteilung && (
+                    <p><strong>Fachabteilung:</strong> {selectedDictation.fachabteilung}</p>
+                  )}
+                  {selectedDictation.termin && (
+                    <p><strong>Termin:</strong> {new Date(selectedDictation.termin).toLocaleString('de-DE')}</p>
+                  )}
+                  {selectedDictation.berechtigte && (
+                    <p><strong>Berechtigte:</strong> {(() => {
+                      try {
+                        const list = JSON.parse(selectedDictation.berechtigte);
+                        return Array.isArray(list) ? list.join(', ') : selectedDictation.berechtigte;
+                      } catch {
+                        return selectedDictation.berechtigte;
+                      }
+                    })()}</p>
+                  )}
+                  {selectedDictation.bemerkung && (
+                    <p><strong>Bemerkung:</strong> {selectedDictation.bemerkung}</p>
                   )}
                 </div>
 

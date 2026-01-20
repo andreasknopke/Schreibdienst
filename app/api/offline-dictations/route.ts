@@ -22,13 +22,8 @@ export const runtime = 'nodejs';
 
 // GET: List dictations for user or get single dictation
 export async function GET(req: NextRequest) {
-  const requestStart = Date.now();
-  console.log('[API/Offline] GET request started');
-  
   try {
-    const initStart = Date.now();
     await initOfflineDictationTableWithRequest(req);
-    console.log(`[API/Offline] Table init took ${Date.now() - initStart}ms`);
     
     const { searchParams } = new URL(req.url);
     const username = searchParams.get('username');
@@ -41,17 +36,13 @@ export async function GET(req: NextRequest) {
     
     // Get list of users with dictations
     if (listUsers === 'true') {
-      const queryStart = Date.now();
       const users = await getDictationUsersWithRequest(req);
-      console.log(`[API/Offline] listUsers query took ${Date.now() - queryStart}ms`);
       return NextResponse.json(users);
     }
     
     // Get queue statistics
     if (stats === 'true') {
-      const queryStart = Date.now();
       const queueStats = await getQueueStatsWithRequest(req);
-      console.log(`[API/Offline] stats query took ${Date.now() - queryStart}ms`);
       return NextResponse.json(queueStats);
     }
     
@@ -59,9 +50,7 @@ export async function GET(req: NextRequest) {
     if (id) {
       const includeAudio = searchParams.get('audio') === 'true';
       const extractPayload = searchParams.get('extract') === 'true';
-      const queryStart = Date.now();
       const dictation = await getDictationByIdWithRequest(req, parseInt(id), includeAudio);
-      console.log(`[API/Offline] getDictationById query took ${Date.now() - queryStart}ms`);
       if (!dictation) {
         return NextResponse.json({ error: 'Dictation not found' }, { status: 404 });
       }
@@ -101,9 +90,7 @@ export async function GET(req: NextRequest) {
     
     // Get all dictations (for users with permission)
     if (all === 'true') {
-      const queryStart = Date.now();
       const dictations = await getAllDictationsWithRequest(req, statusFilter || undefined, userFilter || undefined);
-      console.log(`[API/Offline] getAllDictations query took ${Date.now() - queryStart}ms, count=${dictations.length}`);
       return NextResponse.json(dictations);
     }
     
@@ -112,9 +99,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Username required' }, { status: 400 });
     }
     
-    const queryStart = Date.now();
     const dictations = await getUserDictationsWithRequest(req, username);
-    console.log(`[API/Offline] getUserDictations query took ${Date.now() - queryStart}ms, count=${dictations.length}`);
     return NextResponse.json(dictations);
   } catch (error: any) {
     console.error('[Offline Dictations] GET error:', error);
@@ -137,6 +122,11 @@ export async function POST(req: NextRequest) {
     const priority = (formData.get('priority') as DictationPriority) || 'normal';
     const mode = (formData.get('mode') as 'befund' | 'arztbrief') || 'befund';
     const duration = parseFloat(formData.get('duration') as string) || 0;
+    const bemerkung = formData.get('bemerkung') as string | null;
+    const termin = formData.get('termin') as string | null;
+    const fachabteilung = formData.get('fachabteilung') as string | null;
+    const berechtigteRaw = formData.get('berechtigte') as string | null;
+    const berechtigte = berechtigteRaw ? JSON.parse(berechtigteRaw) : undefined;
     
     if (!username || !audioFile || !orderNumber) {
       return NextResponse.json(
@@ -175,6 +165,10 @@ export async function POST(req: NextRequest) {
       patientDob: patientDob || undefined,
       priority,
       mode,
+      bemerkung: bemerkung || undefined,
+      termin: termin || undefined,
+      fachabteilung: fachabteilung || undefined,
+      berechtigte: berechtigte || undefined,
     });
     
     console.log(`[Offline Dictations] Created dictation #${id} for user ${username}, order ${orderNumber}`);

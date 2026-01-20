@@ -29,6 +29,10 @@ export default function OfflineDictationPage() {
     patientDob?: string;
     priority: 'normal' | 'urgent' | 'stat';
     mode: 'befund' | 'arztbrief';
+    bemerkung?: string;
+    termin?: string;
+    fachabteilung?: string;
+    berechtigte?: string[];
   }) => {
     const formData = new FormData();
     formData.append('username', username || '');
@@ -39,6 +43,10 @@ export default function OfflineDictationPage() {
     formData.append('mode', data.mode);
     if (data.patientName) formData.append('patientName', data.patientName);
     if (data.patientDob) formData.append('patientDob', data.patientDob);
+    if (data.bemerkung) formData.append('bemerkung', data.bemerkung);
+    if (data.termin) formData.append('termin', data.termin);
+    if (data.fachabteilung) formData.append('fachabteilung', data.fachabteilung);
+    if (data.berechtigte) formData.append('berechtigte', JSON.stringify(data.berechtigte));
 
     const res = await fetchWithDbToken('/api/offline-dictations', {
       method: 'POST',

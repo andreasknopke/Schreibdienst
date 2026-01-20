@@ -121,7 +121,7 @@ function getUniqueCorrectWords(dictionary: { entries: DictionaryEntry[] }): stri
 }
 
 // Transkriptions-Provider auswählen
-type TranscriptionProvider = 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper';
+type TranscriptionProvider = 'whisperx' | 'elevenlabs' | 'mistral';
 
 // Session-Cache für Gradio (vermeidet wiederholtes Login)
 let gradioSessionCache: {
@@ -242,7 +242,7 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
       meta: { _type: 'gradio.FileData' }
     };
     
-    // Language for WhisperX Gradio - must match dropdown choices, conversion to ISO code happens in transcriber.py
+    // Language for WhisperX Gradio - must match dropdown options (full name, not ISO code)
     const languageCode = 'German';
 
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
@@ -257,8 +257,7 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
           languageCode,  // language (ISO code)
           modelToUse,    // model_name (from runtime config)
           "cuda",        // device
-          initialPrompt || "", // medical dictionary terms for better recognition
-          speedMode === 'turbo' // skip_alignment: true für Online (turbo), false für Offline (precision)
+          initialPrompt || "" // medical dictionary terms for better recognition
         ]
       }),
     });
@@ -527,7 +526,6 @@ export async function POST(request: NextRequest) {
     const form = await request.formData();
     const file = form.get('file');
     const username = form.get('username') as string | null;
-    const speedModeParam = form.get('speed_mode') as string | null;
     
     if (!file || !(file instanceof Blob)) {
       console.error('[Error] Invalid file:', file);
@@ -536,7 +534,7 @@ export async function POST(request: NextRequest) {
 
     const filename = (file as File).name || 'audio.webm';
     const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
-    console.log(`[Input] File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type || 'unknown'}, User: ${username || 'unknown'}, Speed: ${speedModeParam || 'default'}`);
+    console.log(`[Input] File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type || 'unknown'}, User: ${username || 'unknown'}`);
 
     // Lade Wörterbuch für initial_prompt bei WhisperX
     // Begrenzt auf MAX_PROMPT_WORDS wichtigste Begriffe um Halluzinationen zu vermeiden
@@ -567,15 +565,12 @@ export async function POST(request: NextRequest) {
 
     // Get whisper model from runtime config (Online-Transkription)
     // For online mode, use whisperModel directly (full HuggingFace path)
-    const whisperModel = runtimeConfig.whisperModel || 'guillaumekln/faster-whisper-large-v2';
+    const whisperModel = runtimeConfig.whisperModel || 'deepdml/faster-whisper-large-v3-german-2';
     console.log(`[Config] WhisperX Online Model: ${whisperModel} (from config)`);
 
-    // Speed mode: turbo für minimale Latenz (kein Alignment), precision für Wort-Timestamps
-    // Online-Diktat sollte immer turbo verwenden
-    const speedMode: 'turbo' | 'precision' | 'auto' = 
-      (speedModeParam === 'precision' ? 'precision' : 
-       speedModeParam === 'auto' ? 'auto' : 'turbo') as 'turbo' | 'precision' | 'auto';
-    console.log(`[Config] Speed Mode: ${speedMode} (${speedModeParam ? 'from request' : 'default turbo for online'})`);
+    // Online-Transkription nutzt Turbo-Modus für minimale Latenz
+    const speedMode: 'turbo' | 'precision' | 'auto' = 'turbo';
+    console.log(`[Config] Speed Mode: ${speedMode} (optimized for live transcription)`);
 
     // Transkription mit gewähltem Provider
     let result;
@@ -586,22 +581,6 @@ export async function POST(request: NextRequest) {
     } else if (provider === 'mistral') {
       console.log('Using Mistral AI Voxtral as primary provider');
       result = await transcribeWithMistral(file, filename);
-    } else if (provider === 'fast_whisper') {
-      // Fast Whisper ist ein reiner WebSocket-Server (RealtimeSTT)
-      // Für Server-seitige Transkription müssen wir auf WhisperX zurückfallen
-      // Echtzeit-Streaming funktioniert nur Client-seitig im Browser
-      console.log('Fast Whisper (WebSocket) not available server-side, falling back to WhisperX');
-      try {
-        result = await transcribeWithWhisperX(file, filename, initialPrompt, whisperModel, speedMode);
-      } catch (whisperError: any) {
-        console.warn('WhisperX failed, trying ElevenLabs fallback:', whisperError.message);
-        if (process.env.ELEVENLABS_API_KEY) {
-          console.log('Falling back to ElevenLabs...');
-          result = await transcribeWithElevenLabs(file, filename);
-        } else {
-          throw whisperError;
-        }
-      }
     } else {
       // WhisperX ist Standard, mit Fallback zu ElevenLabs
       console.log('Using WhisperX as primary provider');

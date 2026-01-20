@@ -117,10 +117,6 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   // ", Klammer auf, " → " ("  and  ", Klammer zu, " → ") "
   { pattern: /[,\s]*\bklammer\s+auf\b[,\s]*/gi, replacement: ' (' },
   { pattern: /[,\s]*\bklammer\s+zu\b[,\s]*/gi, replacement: ') ' },
-  // "klammern" alleine (ohne "auf") = Klammer auf (umgangssprachlich)
-  { pattern: /[,\s]*\bklammern\b(?!\s*(auf|zu))[,\s]*/gi, replacement: ' (' },
-  // "Xklammer zu" - Whisper schreibt manchmal zusammen, z.B. "Histoklammer zu" → "Histo)"
-  { pattern: /(\w+)klammer\s+zu\b[,\s]*/gi, replacement: '$1) ' },
   { pattern: /\bin\s+klammern\s+/gi, replacement: '(' }, // "in Klammern XYZ" - opening only, closing handled separately
   
   // Punctuation with preceding comma removal - ",[ ]Doppelpunkt" → ":"
@@ -129,21 +125,7 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   { pattern: /,\s*semikolon\b/gi, replacement: ';' },
   { pattern: /,\s*fragezeichen\b/gi, replacement: '?' },
   { pattern: /,\s*ausrufezeichen\b/gi, replacement: '!' },
-  // ", Punkt." → "." (mit nachfolgendem Punkt) - muss vor dem allgemeinen Pattern kommen
-  { pattern: /,\s*punkt\s*\./gi, replacement: '.' },
   { pattern: /,\s*punkt\b(?!\s*(eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|\d))/gi, replacement: '.' },
-  
-  // "Punkt" and "Komma" as control words when surrounded by punctuation
-  // ". Punkt." → "." (redundant spoken punctuation)
-  // ". Punkt " → ". " (Punkt as control word after sentence end)
-  // "? Punkt." → "?" etc.
-  { pattern: /([.!?])\s*punkt\s*\./gi, replacement: '$1' },  // ". Punkt." → "."
-  { pattern: /([.!?])\s*punkt\s+/gi, replacement: '$1 ' },   // ". Punkt " → ". "
-  { pattern: /([.!?])\s*komma\s*[.,]/gi, replacement: '$1' }, // ". Komma," → "."
-  
-  // Standalone "Punkt." at sentence boundary (after space or at start)
-  // This catches "... Text. Punkt." → "... Text."
-  { pattern: /\.\s+punkt\s*\./gi, replacement: '.' },
   
   // Punctuation - FIRST handle compound words ending with punctuation command
   // e.g., "Diagnosedoppelpunkt" → "Diagnose:"

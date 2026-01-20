@@ -20,6 +20,11 @@ export interface OfflineDictation {
   priority: DictationPriority;
   status: DictationStatus;
   mode: 'befund' | 'arztbrief';
+  // Zusätzliche Metadaten
+  bemerkung?: string;
+  termin?: Date;
+  fachabteilung?: string;
+  berechtigte?: string; // JSON array of usernames
   // Results
   raw_transcript?: string; // Pure Transkription vor LLM-Korrektur
   segments?: string; // JSON array with word-level timestamps for highlighting
@@ -145,6 +150,56 @@ export async function initOfflineDictationTable(): Promise<void> {
     }
   }
   
+  // Migrate existing tables to add bemerkung column
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN bemerkung TEXT AFTER mode`);
+    console.log('[DB] ✓ Added bemerkung column');
+  } catch (e: any) {
+    if (!e.message?.includes('Duplicate column')) {
+      console.log('[DB] bemerkung column already exists');
+    }
+  }
+  
+  // Migrate existing tables to add termin column
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN termin DATETIME NULL AFTER bemerkung`);
+    console.log('[DB] ✓ Added termin column');
+  } catch (e: any) {
+    if (!e.message?.includes('Duplicate column')) {
+      console.log('[DB] termin column already exists');
+    }
+  }
+  
+  // Migrate existing tables to add fachabteilung column
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN fachabteilung VARCHAR(255) AFTER termin`);
+    console.log('[DB] ✓ Added fachabteilung column');
+  } catch (e: any) {
+    if (!e.message?.includes('Duplicate column')) {
+      console.log('[DB] fachabteilung column already exists');
+    }
+  }
+  
+  // Migrate existing tables to add berechtigte column
+  try {
+    await db.execute(`ALTER TABLE offline_dictations ADD COLUMN berechtigte TEXT AFTER fachabteilung`);
+    console.log('[DB] ✓ Added berechtigte column');
+  } catch (e: any) {
+    if (!e.message?.includes('Duplicate column')) {
+      console.log('[DB] berechtigte column already exists');
+    }
+  }
+  
+  // Add index for fachabteilung
+  try {
+    await db.execute(`CREATE INDEX idx_fachabteilung ON offline_dictations(fachabteilung)`);
+    console.log('[DB] ✓ Added fachabteilung index');
+  } catch (e: any) {
+    if (!e.message?.includes('Duplicate key')) {
+      console.log('[DB] fachabteilung index already exists');
+    }
+  }
+  
   // Initialize correction log table
   await db.execute(`
     CREATE TABLE IF NOT EXISTS correction_log (
@@ -181,12 +236,16 @@ export async function createOfflineDictation(
     patientDob?: string;
     priority: DictationPriority;
     mode: 'befund' | 'arztbrief';
+    bemerkung?: string;
+    termin?: string;
+    fachabteilung?: string;
+    berechtigte?: string[];
   }
 ): Promise<number> {
   const result = await execute(
     `INSERT INTO offline_dictations 
-      (username, audio_data, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob, priority, mode, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+      (username, audio_data, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob, priority, mode, bemerkung, termin, fachabteilung, berechtigte, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
     [
       data.username,
       data.audioData,
@@ -196,7 +255,11 @@ export async function createOfflineDictation(
       data.patientName || null,
       data.patientDob || null,
       data.priority,
-      data.mode
+      data.mode,
+      data.bemerkung || null,
+      data.termin || null,
+      data.fachabteilung || null,
+      data.berechtigte ? JSON.stringify(data.berechtigte) : null
     ]
   );
   return result.insertId;
@@ -207,7 +270,8 @@ export async function getUserDictations(username: string, includeArchived: boole
   const archivedCondition = includeArchived ? '' : 'AND (archived IS NULL OR archived = FALSE)';
   return query(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
+            priority, status, mode, bemerkung, termin, fachabteilung, berechtigte,
+            raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
             change_score, error_message, archived, archived_at, archived_by,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
@@ -245,7 +309,8 @@ export async function getAllDictations(statusFilter?: DictationStatus, userFilte
   
   return query(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
+            priority, status, mode, bemerkung, termin, fachabteilung, berechtigte,
+            raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
             change_score, error_message, archived, archived_at, archived_by,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
@@ -490,7 +555,8 @@ export async function getArchivedDictations(filters?: {
   
   return query(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
+            priority, status, mode, bemerkung, termin, fachabteilung, berechtigte,
+            raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
             change_score, error_message, archived, archived_at, archived_by,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
@@ -526,13 +592,10 @@ function getPoolKeyFromRequest(request: NextRequest): string {
 export async function initOfflineDictationTableWithRequest(request: NextRequest): Promise<void> {
   const poolKey = getPoolKeyFromRequest(request);
   
-  // Only initialize once per pool - fast path without DB access
+  // Only initialize once per pool
   if (tableInitializedPerPool.get(poolKey)) {
     return;
   }
-  
-  const initStart = Date.now();
-  console.log(`[DB] Initializing offline_dictations table for pool: ${poolKey}...`);
   
   const db = await getPoolForRequest(request);
   
@@ -646,7 +709,7 @@ export async function initOfflineDictationTableWithRequest(request: NextRequest)
   }
   
   tableInitializedPerPool.set(poolKey, true);
-  console.log(`[DB] ✓ Offline dictations table initialized in ${Date.now() - initStart}ms (${poolKey})`);
+  console.log(`[DB] ✓ Offline dictations table ready (${poolKey})`);
 }
 
 // Create a new offline dictation with Request context
@@ -662,13 +725,17 @@ export async function createOfflineDictationWithRequest(
     patientDob?: string;
     priority: DictationPriority;
     mode: 'befund' | 'arztbrief';
+    bemerkung?: string;
+    termin?: string;
+    fachabteilung?: string;
+    berechtigte?: string[];
   }
 ): Promise<number> {
   const db = await getPoolForRequest(request);
   const [result] = await db.execute(
     `INSERT INTO offline_dictations 
-      (username, audio_data, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob, priority, mode, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+      (username, audio_data, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob, priority, mode, bemerkung, termin, fachabteilung, berechtigte, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
     [
       data.username,
       data.audioData,
@@ -678,7 +745,11 @@ export async function createOfflineDictationWithRequest(
       data.patientName || null,
       data.patientDob || null,
       data.priority,
-      data.mode
+      data.mode,
+      data.bemerkung || null,
+      data.termin || null,
+      data.fachabteilung || null,
+      data.berechtigte ? JSON.stringify(data.berechtigte) : null
     ]
   );
   return (result as any).insertId;
@@ -690,16 +761,12 @@ export async function getUserDictationsWithRequest(
   username: string,
   includeArchived: boolean = false
 ): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
-  const start = Date.now();
-  const poolStart = Date.now();
   const db = await getPoolForRequest(request);
-  const poolTime = Date.now() - poolStart;
-  
   const archivedCondition = includeArchived ? '' : 'AND (archived IS NULL OR archived = FALSE)';
-  const queryStart = Date.now();
   const [rows] = await db.execute(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
+            priority, status, mode, bemerkung, termin, fachabteilung, berechtigte,
+            raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
             change_score, error_message, archived, archived_at, archived_by,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
@@ -713,13 +780,6 @@ export async function getUserDictationsWithRequest(
        created_at DESC`,
     [username]
   );
-  const queryTime = Date.now() - queryStart;
-  const totalTime = Date.now() - start;
-  
-  if (totalTime > 100) {
-    console.log(`[OfflineDb] getUserDictations: pool=${poolTime}ms, query=${queryTime}ms, total=${totalTime}ms, rows=${(rows as any[]).length}`);
-  }
-  
   return rows as Omit<OfflineDictation, 'audio_data'>[];
 }
 
@@ -730,11 +790,7 @@ export async function getAllDictationsWithRequest(
   userFilter?: string,
   includeArchived: boolean = false
 ): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
-  const start = Date.now();
-  const poolStart = Date.now();
   const db = await getPoolForRequest(request);
-  const poolTime = Date.now() - poolStart;
-  
   const conditions: string[] = [];
   const params: string[] = [];
   
@@ -753,10 +809,10 @@ export async function getAllDictationsWithRequest(
   
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   
-  const queryStart = Date.now();
   const [rows] = await db.execute(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
+            priority, status, mode, bemerkung, termin, fachabteilung, berechtigte,
+            raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
             change_score, error_message, archived, archived_at, archived_by,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
@@ -770,13 +826,6 @@ export async function getAllDictationsWithRequest(
        created_at DESC`,
     params
   );
-  const queryTime = Date.now() - queryStart;
-  const totalTime = Date.now() - start;
-  
-  if (totalTime > 100) {
-    console.log(`[OfflineDb] getAllDictations: pool=${poolTime}ms, query=${queryTime}ms, total=${totalTime}ms, rows=${(rows as any[]).length}`);
-  }
-  
   return rows as Omit<OfflineDictation, 'audio_data'>[];
 }
 
@@ -1069,7 +1118,8 @@ export async function getArchivedDictationsWithRequest(
   
   const [rows] = await db.execute(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
-            priority, status, mode, raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
+            priority, status, mode, bemerkung, termin, fachabteilung, berechtigte,
+            raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
             change_score, error_message, archived, archived_at, archived_by,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 

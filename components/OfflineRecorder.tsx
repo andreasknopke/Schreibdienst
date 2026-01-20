@@ -12,8 +12,14 @@ interface OfflineRecorderProps {
     patientDob?: string;
     priority: 'normal' | 'urgent' | 'stat';
     mode: 'befund' | 'arztbrief';
+    bemerkung?: string;
+    termin?: string;
+    fachabteilung?: string;
+    berechtigte?: string[];
   }) => Promise<void>;
   onCancel?: () => void;
+  availableUsers?: string[]; // Liste der verfügbaren Benutzer für Berechtigte
+  availableDepartments?: string[]; // Liste der verfügbaren Fachabteilungen
 }
 
 // Erlaubte Audio-Formate
@@ -35,7 +41,7 @@ const ALLOWED_AUDIO_TYPES = [
 // Accept all common audio extensions - server can handle various codecs
 const ALLOWED_EXTENSIONS = '.mp3,.wav,.aiff,.aif,.webm,.ogg,.opus,.m4a';
 
-export default function OfflineRecorder({ username, onSubmit, onCancel }: OfflineRecorderProps) {
+export default function OfflineRecorder({ username, onSubmit, onCancel, availableUsers = [], availableDepartments = [] }: OfflineRecorderProps) {
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -51,6 +57,10 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
   const [patientDob, setPatientDob] = useState('');
   const [priority, setPriority] = useState<'normal' | 'urgent' | 'stat'>('normal');
   const [mode] = useState<'befund' | 'arztbrief'>('arztbrief'); // Immer Arztbrief-Modus
+  const [bemerkung, setBemerkung] = useState('');
+  const [termin, setTermin] = useState('');
+  const [fachabteilung, setFachabteilung] = useState('');
+  const [berechtigte, setBerechtigte] = useState<string[]>([]);
   
   // UI state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -499,6 +509,10 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
         patientDob: patientDob || undefined,
         priority,
         mode,
+        bemerkung: bemerkung.trim() || undefined,
+        termin: termin || undefined,
+        fachabteilung: fachabteilung || undefined,
+        berechtigte: berechtigte.length > 0 ? berechtigte : undefined,
       });
       
       // Reset form after successful submit
@@ -507,6 +521,10 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
       setPatientName('');
       setPatientDob('');
       setPriority('normal');
+      setBemerkung('');
+      setTermin('');
+      setFachabteilung('');
+      setBerechtigte([]);
       
     } catch (err: any) {
       setError(err.message || 'Fehler beim Speichern');
@@ -807,6 +825,85 @@ export default function OfflineRecorder({ username, onSubmit, onCancel }: Offlin
                   className="input w-full"
                   value={patientDob}
                   onChange={(e) => setPatientDob(e.target.value)}
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-1">Termin (optional)</label>
+                <input
+                  type="datetime-local"
+                  className="input w-full"
+                  value={termin}
+                  onChange={(e) => setTermin(e.target.value)}
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-1">Fachabteilung (optional)</label>
+                {availableDepartments.length > 0 ? (
+                  <select
+                    className="select w-full"
+                    value={fachabteilung}
+                    onChange={(e) => setFachabteilung(e.target.value)}
+                  >
+                    <option value="">-- Bitte wählen --</option>
+                    {availableDepartments.map(dept => (
+                      <option key={dept} value={dept}>{dept}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    className="input w-full"
+                    value={fachabteilung}
+                    onChange={(e) => setFachabteilung(e.target.value)}
+                    placeholder="z.B. Radiologie, Innere Medizin"
+                  />
+                )}
+              </div>
+              
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium mb-1">Berechtigte (optional)</label>
+                {availableUsers.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 p-2 border rounded-lg bg-gray-50 dark:bg-gray-800 min-h-[42px]">
+                    {availableUsers.map(user => (
+                      <label key={user} className="flex items-center gap-1 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={berechtigte.includes(user)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setBerechtigte([...berechtigte, user]);
+                            } else {
+                              setBerechtigte(berechtigte.filter(u => u !== user));
+                            }
+                          }}
+                          className="checkbox checkbox-sm"
+                        />
+                        {user}
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    className="input w-full"
+                    value={berechtigte.join(', ')}
+                    onChange={(e) => setBerechtigte(e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                    placeholder="Benutzernamen, kommagetrennt"
+                  />
+                )}
+                <p className="text-xs text-gray-500 mt-1">Wer außer Ihnen darf dieses Diktat bearbeiten</p>
+              </div>
+              
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium mb-1">Bemerkung (optional)</label>
+                <textarea
+                  className="textarea w-full"
+                  rows={2}
+                  value={bemerkung}
+                  onChange={(e) => setBemerkung(e.target.value)}
+                  placeholder="Zusätzliche Hinweise oder Notizen..."
                 />
               </div>
             </div>

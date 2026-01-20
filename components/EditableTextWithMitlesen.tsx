@@ -71,9 +71,82 @@ interface EditableTextWithMitlesenProps {
 
 /**
  * Normalizes a word for comparison (lowercase, remove punctuation)
+ * Special handling for numbers and dates:
+ * - Dates like "18.09.2025" are split into their numeric parts for matching
+ * - Numbers with separators (e.g., "1,5" or "1.000") keep their digits
  */
 function normalizeWord(word: string): string {
-  return word.toLowerCase().replace(/[.,!?;:"""„''()\[\]<>«»–—\-\/\\@#$%^&*+=|~`]/g, '').trim();
+  const lower = word.toLowerCase().trim();
+  
+  // Check if this is primarily a number/date (contains digits)
+  if (/\d/.test(lower)) {
+    // For dates like "18.09.2025" or "18.09." - extract just the digits
+    // This helps match with spoken numbers
+    const digitsOnly = lower.replace(/\D/g, '');
+    if (digitsOnly.length > 0) {
+      return digitsOnly;
+    }
+  }
+  
+  // For regular words: remove punctuation but keep umlauts and letters
+  return lower.replace(/[.,!?;:"""„''()\[\]<>«»–—\-\/\\@#$%^&*+=|~`]/g, '').trim();
+}
+
+/**
+ * Convert German spoken numbers to digits for better matching
+ * This helps match "achtzehnter" with "18"
+ */
+const GERMAN_NUMBER_WORDS: Record<string, string> = {
+  'null': '0', 'eins': '1', 'ein': '1', 'eine': '1', 'einer': '1', 'einem': '1', 'einen': '1',
+  'zwei': '2', 'zwo': '2', 'drei': '3', 'vier': '4', 'fünf': '5', 
+  'sechs': '6', 'sieben': '7', 'acht': '8', 'neun': '9', 'zehn': '10',
+  'elf': '11', 'zwölf': '12', 'dreizehn': '13', 'vierzehn': '14', 'fünfzehn': '15',
+  'sechzehn': '16', 'siebzehn': '17', 'achtzehn': '18', 'neunzehn': '19', 'zwanzig': '20',
+  'einundzwanzig': '21', 'zweiundzwanzig': '22', 'dreiundzwanzig': '23', 'dreissig': '30', 'dreißig': '30',
+  // Ordinal forms (for dates)
+  'erste': '1', 'erster': '1', 'ersten': '1', 'erstem': '1',
+  'zweite': '2', 'zweiter': '2', 'zweiten': '2', 'zweitem': '2',
+  'dritte': '3', 'dritter': '3', 'dritten': '3', 'drittem': '3',
+  'vierte': '4', 'vierter': '4', 'vierten': '4', 'viertem': '4',
+  'fünfte': '5', 'fünfter': '5', 'fünften': '5', 'fünftem': '5',
+  'sechste': '6', 'sechster': '6', 'sechsten': '6', 'sechstem': '6',
+  'siebte': '7', 'siebter': '7', 'siebten': '7', 'siebtem': '7',
+  'achte': '8', 'achter': '8', 'achten': '8', 'achtem': '8',
+  'neunte': '9', 'neunter': '9', 'neunten': '9', 'neuntem': '9',
+  'zehnte': '10', 'zehnter': '10', 'zehnten': '10', 'zehntem': '10',
+  'elfte': '11', 'elfter': '11', 'elften': '11', 'elftem': '11',
+  'zwölfte': '12', 'zwölfter': '12', 'zwölften': '12', 'zwölftem': '12',
+  'dreizehnte': '13', 'dreizehnter': '13', 'dreizehnten': '13',
+  'vierzehnte': '14', 'vierzehnter': '14', 'vierzehnten': '14',
+  'fünfzehnte': '15', 'fünfzehnter': '15', 'fünfzehnten': '15',
+  'sechzehnte': '16', 'sechzehnter': '16', 'sechzehnten': '16',
+  'siebzehnte': '17', 'siebzehnter': '17', 'siebzehnten': '17',
+  'achtzehnte': '18', 'achtzehnter': '18', 'achtzehnten': '18', 'achtzehntem': '18',
+  'neunzehnte': '19', 'neunzehnter': '19', 'neunzehnten': '19',
+  'zwanzigste': '20', 'zwanzigster': '20', 'zwanzigsten': '20',
+  // Months
+  'januar': '01', 'februar': '02', 'märz': '03', 'april': '04', 'mai': '05', 'juni': '06',
+  'juli': '07', 'august': '08', 'september': '09', 'oktober': '10', 'november': '11', 'dezember': '12',
+  // Years
+  'zweitausend': '2000', 'zweitausendzwanzig': '2020', 'zweitausendeinundzwanzig': '2021',
+  'zweitausendzweiundzwanzig': '2022', 'zweitausenddreiundzwanzig': '2023',
+  'zweitausendvierundzwanzig': '2024', 'zweitausendfünfundzwanzig': '2025',
+  'zweitausendsechsundzwanzig': '2026', 'zweitausendsiebenundzwanzig': '2027',
+};
+
+/**
+ * Enhanced normalization that also converts German number words to digits
+ */
+function normalizeWordForMatching(word: string): string {
+  const basic = normalizeWord(word);
+  
+  // Check if it's a known German number word
+  const numberValue = GERMAN_NUMBER_WORDS[basic];
+  if (numberValue) {
+    return numberValue;
+  }
+  
+  return basic;
 }
 
 /**
@@ -88,7 +161,7 @@ function parseWords(text: string): ParsedWord[] {
   while ((match = regex.exec(text)) !== null) {
     words.push({
       word: match[0],
-      normalized: normalizeWord(match[0]),
+      normalized: normalizeWordForMatching(match[0]),
       charPos: match.index,
       index: index++
     });
@@ -110,7 +183,7 @@ function extractOriginalWords(segments: TranscriptSegment[]): OriginalWord[] {
         if (word.start !== undefined && word.end !== undefined) {
           words.push({
             word: word.word,
-            normalized: normalizeWord(word.word),
+            normalized: normalizeWordForMatching(word.word),
             start: word.start,
             end: word.end,
             index: index++,
@@ -561,14 +634,26 @@ export default function EditableTextWithMitlesen({
       localCharPos += text.length;
     }
     
-    // Build list of words with their diff status and character positions
-    const wordsWithDiffStatus: { word: string; isAdded: boolean; isManual: boolean; isWhitespace: boolean; charPos: number }[] = [];
+    // Build list of words with their diff status, character positions, and original words
+    const wordsWithDiffStatus: { word: string; isAdded: boolean; isManual: boolean; isWhitespace: boolean; charPos: number; originalWord?: string }[] = [];
     let currentCharPos = 0;
     
-    for (const part of llmDiff) {
-      if (part.removed) continue;
+    // Track removed words to pair with added words (for showing original in tooltip)
+    // Use a queue to properly pair removed words with their replacements
+    let pendingRemovedWords: string[] = [];
+    
+    for (let partIdx = 0; partIdx < llmDiff.length; partIdx++) {
+      const part = llmDiff[partIdx];
+      
+      if (part.removed) {
+        // Collect removed words - these are the originals before LLM correction
+        const removedTokens = (part.value || '').split(/\s+/).filter(t => t.length > 0);
+        pendingRemovedWords.push(...removedTokens);
+        continue;
+      }
       
       const tokens = part.value?.split(/(\s+)/) || [];
+      
       for (const token of tokens) {
         if (token.length === 0) continue;
         
@@ -582,15 +667,31 @@ export default function EditableTextWithMitlesen({
           }
         }
         
+        // For added words, try to pair with a removed word (the original)
+        // This allows showing "Original: X" in tooltip when hovering over changed words
+        let originalWord: string | undefined;
+        if (part.added && !isWhitespace) {
+          if (pendingRemovedWords.length > 0) {
+            originalWord = pendingRemovedWords.shift();
+          }
+        }
+        
         wordsWithDiffStatus.push({
           word: token,
           isAdded: !isWhitespace && part.added === true,
           isManual: !isWhitespace && isManual,
           isWhitespace,
-          charPos: currentCharPos
+          charPos: currentCharPos,
+          originalWord
         });
         
         currentCharPos += token.length;
+      }
+      
+      // Only clear pending removed words when we hit an unchanged part
+      // This allows multi-word replacements to work correctly
+      if (!part.added && !part.removed) {
+        pendingRemovedWords = [];
       }
     }
     
@@ -599,11 +700,16 @@ export default function EditableTextWithMitlesen({
 
   // Build a map of diff status for each word based on character position
   // This ensures only the specific word instance is marked, not all identical words
+  // Also includes originalWord for tooltip display
   const wordDiffStatusMap = useMemo(() => {
-    const map = new Map<number, { isAdded: boolean; isManual: boolean }>();
+    const map = new Map<number, { isAdded: boolean; isManual: boolean; originalWord?: string }>();
     for (const item of diffResult.wordsWithDiffStatus) {
       if (!item.isWhitespace) {
-        map.set(item.charPos, { isAdded: item.isAdded, isManual: item.isManual });
+        map.set(item.charPos, { 
+          isAdded: item.isAdded, 
+          isManual: item.isManual,
+          originalWord: item.originalWord
+        });
       }
     }
     return map;
@@ -639,8 +745,9 @@ export default function EditableTextWithMitlesen({
       
       // Get diff status for styling (only if showDiff is on) - now by character position
       let diffClass = '';
+      let diffStatus: { isAdded: boolean; isManual: boolean; originalWord?: string } | undefined;
       if (showDiff) {
-        const diffStatus = wordDiffStatusMap.get(tokenCharPos);
+        diffStatus = wordDiffStatusMap.get(tokenCharPos);
         if (diffStatus?.isManual) {
           diffClass = 'bg-blue-200 text-blue-900 dark:bg-blue-600 dark:text-white font-medium rounded px-0.5 ';
         } else if (diffStatus?.isAdded) {
@@ -649,6 +756,19 @@ export default function EditableTextWithMitlesen({
       }
       
       wordIdx++;
+      
+      // Build tooltip: show original word if changed, timestamp as fallback
+      let tooltipText: string | undefined;
+      if (showDiff && diffStatus?.originalWord) {
+        // Show original word for changed/added words
+        tooltipText = `Original: "${diffStatus.originalWord}"`;
+      } else if (showDiff && diffStatus?.isAdded && !diffStatus?.originalWord) {
+        // Word was added without a corresponding removed word
+        tooltipText = 'Neu hinzugefügt';
+      } else if (tsWord) {
+        // Fallback to timestamp for unchanged words
+        tooltipText = `${tsWord.start.toFixed(1)}s${tsWord.isInterpolated ? ' (geschätzt)' : ''}`;
+      }
       
       elements.push(
         <span
@@ -662,7 +782,7 @@ export default function EditableTextWithMitlesen({
                 ? 'text-gray-400 dark:text-gray-500 ' 
                 : ''
           }${tsWord?.isInterpolated ? 'italic ' : ''}cursor-pointer transition-colors duration-100`}
-          title={tsWord ? `${tsWord.start.toFixed(1)}s${tsWord.isInterpolated ? ' (geschätzt)' : ''}` : undefined}
+          title={tooltipText}
         >
           {token}
         </span>

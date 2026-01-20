@@ -35,6 +35,12 @@ interface Template {
   field: BefundField;
 }
 
+// Runtime Config Interface
+interface RuntimeConfig {
+  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper';
+  fastWhisperWsUrl?: string;
+}
+
 export default function HomePage() {
   const { username, autoCorrect, defaultMode, getAuthHeader, getDbTokenHeader } = useAuth();
   const [recording, setRecording] = useState(false);
@@ -46,6 +52,28 @@ export default function HomePage() {
   const streamRef = useRef<MediaStream | null>(null);
   const allChunksRef = useRef<BlobPart[]>([]);
   const transcriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Fast Whisper WebSocket State
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
+  const fastWhisperWsRef = useRef<WebSocket | null>(null);
+  const fastWhisperAudioContextRef = useRef<AudioContext | null>(null);
+  const fastWhisperProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const fastWhisperStreamRef = useRef<MediaStream | null>(null);
+  
+  // Fast Whisper: Akkumulierte finale Texte (wird bei jedem finalen Satz erweitert)
+  const fastWhisperFinalTextRef = useRef<string>("");
+  const fastWhisperFinalMethodikRef = useRef<string>("");
+  const fastWhisperFinalBeurteilungRef = useRef<string>("");
+  
+  // Fast Whisper: Wort-für-Wort Anzeige - trackt stabile Wörter aus Partials
+  const fastWhisperLastPartialRef = useRef<string>("");
+  const fastWhisperPartialCountRef = useRef<number>(0); // Zählt wie oft der gleiche Partial kam
+  const fastWhisperStableWordsRef = useRef<string>(""); // Bestätigte Wörter aus Partials
+  const fastWhisperStableMethodikRef = useRef<string>("");
+  const fastWhisperStableBeurteilungRef = useRef<string>("");
+  
+  // SSL-Zertifikat Status für Fast Whisper
+  const [sslCertWarning, setSslCertWarning] = useState<{ show: boolean; serverUrl: string } | null>(null);
   
   // Mikrofonpegel-Visualisierung
   const [audioLevel, setAudioLevel] = useState(0);
@@ -130,6 +158,48 @@ export default function HomePage() {
   const [templateMode, setTemplateMode] = useState(false);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
 
+  // Wörterbuch-Einträge für Echtzeit-Korrektur und Initial Prompt
+  interface DictionaryEntry {
+    wrong: string;
+    correct: string;
+    useInPrompt?: boolean;
+  }
+  const [dictionaryEntries, setDictionaryEntries] = useState<DictionaryEntry[]>([]);
+
+  // Wörterbuch laden
+  const fetchDictionary = useCallback(async () => {
+    if (!username) return;
+    try {
+      const response = await fetch('/api/dictionary', {
+        headers: { 
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        }
+      });
+      const data = await response.json();
+      if (data.entries) {
+        setDictionaryEntries(data.entries);
+        console.log('[Dictionary] Loaded', data.entries.length, 'entries for real-time correction');
+      }
+    } catch (error) {
+      console.error('[Dictionary] Load error:', error);
+    }
+  }, [username, getAuthHeader, getDbTokenHeader]);
+
+  // Wörterbuch-Ersetzungen auf Text anwenden (clientseitig)
+  const applyDictionaryToText = useCallback((text: string): string => {
+    if (dictionaryEntries.length === 0 || !text) return text;
+    
+    let result = text;
+    for (const entry of dictionaryEntries) {
+      // Case-insensitive Ersetzung mit Wortgrenzen
+      const escaped = entry.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
+      result = result.replace(regex, entry.correct);
+    }
+    return result;
+  }, [dictionaryEntries]);
+
   // Templates laden
   const fetchTemplates = useCallback(async () => {
     if (!username) return;
@@ -158,6 +228,64 @@ export default function HomePage() {
       setMode(defaultMode);
     }
   }, [defaultMode]);
+
+  // Runtime Config laden (für Fast Whisper WebSocket URL)
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const res = await fetchWithDbToken('/api/config');
+        const data = await res.json();
+        if (data.config) {
+          const config = {
+            transcriptionProvider: data.config.transcriptionProvider,
+            fastWhisperWsUrl: data.envInfo?.fastWhisperWsUrl,
+          };
+          setRuntimeConfig(config);
+          console.log('[Config] Loaded - Provider:', data.config.transcriptionProvider);
+          
+          // Bei Fast Whisper mit WSS: SSL-Zertifikat prüfen
+          if (config.transcriptionProvider === 'fast_whisper' && config.fastWhisperWsUrl) {
+            let wsUrl = config.fastWhisperWsUrl;
+            // HTTPS-Seiten erfordern wss://
+            if (typeof window !== 'undefined' && window.location.protocol === 'https:' && wsUrl.startsWith('ws://')) {
+              wsUrl = wsUrl.replace('ws://', 'wss://');
+            }
+            
+            if (wsUrl.startsWith('wss://')) {
+              // Teste WebSocket-Verbindung
+              console.log('[SSL Check] Testing WSS connection to', wsUrl);
+              const testWs = new WebSocket(wsUrl);
+              const timeout = setTimeout(() => {
+                testWs.close();
+                // Timeout = wahrscheinlich Zertifikatsproblem
+                const serverUrl = wsUrl.replace('wss://', 'https://').replace('ws://', 'http://');
+                setSslCertWarning({ show: true, serverUrl });
+                console.warn('[SSL Check] Connection timeout - certificate may need acceptance');
+              }, 3000);
+              
+              testWs.onopen = () => {
+                clearTimeout(timeout);
+                testWs.close();
+                setSslCertWarning(null);
+                console.log('[SSL Check] ✓ WSS connection successful');
+              };
+              
+              testWs.onerror = () => {
+                clearTimeout(timeout);
+                testWs.close();
+                const serverUrl = wsUrl.replace('wss://', 'https://').replace('ws://', 'http://');
+                setSslCertWarning({ show: true, serverUrl });
+                console.warn('[SSL Check] Connection error - certificate may need acceptance');
+              };
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[Config] Could not load runtime config');
+      }
+    };
+    loadConfig();
+  }, []);
 
   // WhisperX Warmup beim Start - lädt Modell vor für minimale Latenz
   useEffect(() => {
@@ -194,6 +322,13 @@ export default function HomePage() {
     }
   }, [username, mode, fetchTemplates]);
 
+  // Wörterbuch beim Start laden (für Echtzeit-Korrektur bei Fast Whisper)
+  useEffect(() => {
+    if (username) {
+      fetchDictionary();
+    }
+  }, [username, fetchDictionary]);
+
   // Event-Listener für Template-Aktualisierungen (wenn Templates im Modal geändert werden)
   useEffect(() => {
     const handleTemplatesChanged = () => {
@@ -222,6 +357,8 @@ export default function HomePage() {
       if (username) {
         fd.append('username', username);
       }
+      // Online-Diktat: Turbo-Modus (kein Alignment, schnellere Antwort)
+      fd.append('speed_mode', 'turbo');
       const res = await fetchWithDbToken('/api/transcribe', { method: 'POST', body: fd });
       if (!res.ok) throw new Error(`Transkription fehlgeschlagen (${res.status})`);
       const data = await res.json();
@@ -627,6 +764,271 @@ export default function HomePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [startRecording, stopRecording, handleReset]);
 
+  // Schnelle LLM-Fachwort-Korrektur
+  // Schnelle LLM-Fachwort-Korrektur (mit Halluzinations-Filter auf Server-Seite)
+  const quickCorrectWithLLM = useCallback(async (text: string): Promise<string> => {
+    try {
+      // Fachwörter aus Textbausteinen extrahieren
+      const referenceTerms = templates
+        .map(t => t.content)
+        .join(' ')
+        .split(/\s+/)
+        .filter(word => word.length > 3)
+        .filter((word, index, self) => self.indexOf(word) === index); // Unique
+      
+      // Wörterbuch-Korrekturen formatieren
+      const dictionaryCorrections = dictionaryEntries
+        .slice(0, 100) // Max 100 Einträge (reduziert für weniger Halluzinationen)
+        .map(entry => ({ wrong: entry.wrong, correct: entry.correct }));
+      
+      const response = await fetch('/api/quick-correct', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        },
+        body: JSON.stringify({ 
+          text,
+          referenceTerms: referenceTerms.slice(0, 100), // Max 100 (reduziert)
+          dictionaryCorrections
+        })
+      });
+      
+      if (!response.ok) {
+        console.warn('[QuickCorrect] API error:', response.status);
+        return text;
+      }
+      
+      const data = await response.json();
+      
+      // Server hat Halluzination gefiltert
+      if (data.filtered) {
+        console.log('[QuickCorrect] Server filtered hallucination');
+        return text;
+      }
+      
+      if (data.changed) {
+        console.log('[QuickCorrect] LLM corrected:', text, '→', data.corrected);
+      }
+      return data.corrected || text;
+    } catch (error) {
+      console.warn('[QuickCorrect] Error:', error);
+      return text;
+    }
+  }, [templates, dictionaryEntries, getAuthHeader, getDbTokenHeader]);
+
+  // Ref um zu tracken ob der letzte Text mit Punkt endete (für Groß-/Kleinschreibung)
+  const fastWhisperEndsWithPeriodRef = useRef<boolean>(true); // Start mit true = erster Buchstabe groß
+
+  // Fast Whisper WebSocket Transkription Handler
+  // Diktat-Modus: Kein automatisches Satzende, "Punkt" als Sprachbefehl
+  const handleFastWhisperTranscript = useCallback(async (text: string, isFinal: boolean) => {
+    if (!text) return;
+    
+    // Partials ignorieren - nur finale Sätze anzeigen
+    if (!isFinal) {
+      return;
+    }
+    
+    console.log('[FastWhisper] FINAL:', text);
+    
+    // Diktat-Logik: Sprachbefehle erkennen und Satzenden verarbeiten
+    let processedText = text.trim();
+    let endsWithPeriod = false;
+    
+    // Prüfe ob der Text NUR "Punkt" ist (als separater Sprachbefehl)
+    const isOnlyPunkt = /^punkt[.!?]?$/i.test(processedText);
+    
+    if (isOnlyPunkt) {
+      // "Punkt" wurde als eigener Satz diktiert - füge Punkt zum vorherigen Text hinzu
+      console.log('[FastWhisper] Separater Punkt-Befehl erkannt');
+      
+      const getFinalRef = () => {
+        if (mode === 'befund') {
+          switch (activeField) {
+            case 'methodik': return fastWhisperFinalMethodikRef;
+            case 'beurteilung': return fastWhisperFinalBeurteilungRef;
+            default: return fastWhisperFinalTextRef;
+          }
+        }
+        return fastWhisperFinalTextRef;
+      };
+      
+      const getExistingRef = () => {
+        if (mode === 'befund') {
+          switch (activeField) {
+            case 'methodik': return existingMethodikRef;
+            case 'beurteilung': return existingBeurteilungRef;
+            default: return existingTextRef;
+          }
+        }
+        return existingTextRef;
+      };
+      
+      const setText = (value: string) => {
+        if (mode === 'befund') {
+          switch (activeField) {
+            case 'methodik': setMethodik(value); break;
+            case 'beurteilung': setBeurteilung(value); break;
+            default: setTranscript(value); break;
+          }
+        } else {
+          setTranscript(value);
+        }
+      };
+      
+      const finalRef = getFinalRef();
+      const existingRef = getExistingRef();
+      
+      // Punkt an den letzten Text anhängen (ohne Leerzeichen)
+      if (finalRef.current) {
+        finalRef.current = finalRef.current.replace(/\s*$/, '') + '.';
+      }
+      
+      // Nächster Satz beginnt groß
+      fastWhisperEndsWithPeriodRef.current = true;
+      
+      // Anzeige aktualisieren
+      const displayText = [existingRef.current, finalRef.current].filter(p => p.trim()).join(' ');
+      setText(displayText);
+      return; // Fertig, kein weiterer Text zu verarbeiten
+    }
+    
+    // Ersetze "Punkt" überall im Text durch echten Punkt
+    // Verschiedene Muster die der Server senden kann:
+    // 1. "Text, Punkt, weiter" → ", Punkt," zwischen Kommas
+    // 2. "Text Punkt. Weiter" → " Punkt." mit automatischem Punkt
+    // 3. "Text Punkt Weiter" → " Punkt " vor Großbuchstabe
+    // 4. "Text Punkt" → am Ende
+    
+    // Ersetze alle Varianten von "Punkt" als Sprachbefehl
+    // Pattern: Punkt umgeben von Satzzeichen, Leerzeichen, oder am Ende
+    const punktPatterns = [
+      // ", Punkt," oder ", Punkt " → "."
+      { pattern: /,\s*punkt\s*,?\s*/gi, replacement: '. ' },
+      // " Punkt." oder " Punkt. " → "."
+      { pattern: /\s+punkt\s*\.\s*/gi, replacement: '. ' },
+      // " Punkt " gefolgt von Großbuchstabe → ". "
+      { pattern: /\s+punkt\s+(?=[A-ZÄÖÜ])/gi, replacement: '. ' },
+      // " Punkt" am Ende → "."
+      { pattern: /\s+punkt\s*$/i, replacement: '.' },
+    ];
+    
+    for (const { pattern, replacement } of punktPatterns) {
+      if (pattern.test(processedText)) {
+        processedText = processedText.replace(pattern, replacement);
+        console.log('[FastWhisper] Punkt-Befehl erkannt und ersetzt');
+      }
+    }
+    
+    // Bereinige doppelte Leerzeichen und Punkte
+    processedText = processedText.replace(/\s+/g, ' ').replace(/\.+/g, '.').trim();
+    
+    // Prüfe ob "Punkt" explizit diktiert wurde (dann bleibt der Punkt)
+    const hadExplicitPunkt = /punkt/i.test(text);
+    
+    // Entferne automatische Satzzeichen am Ende (wenn KEIN expliziter Punkt-Befehl)
+    // Der Server fügt bei Pausen automatisch Punkte ein, die wollen wir nicht
+    if (!hadExplicitPunkt) {
+      processedText = processedText.replace(/[.!?]+\s*$/, '').trim();
+    }
+    
+    // Prüfe ob der Text mit Punkt endet
+    endsWithPeriod = /\.\s*$/.test(processedText);
+    
+    // Groß-/Kleinschreibung basierend auf vorherigem Satzende
+    if (!fastWhisperEndsWithPeriodRef.current && processedText.length > 0) {
+      // Vorheriger Text endete ohne Punkt → klein schreiben (außer Eigennamen/Nomen)
+      // Wir machen nur den ersten Buchstaben klein, da Nomen im Deutschen groß bleiben sollten
+      // Das LLM kann das später korrigieren wenn nötig
+      const firstChar = processedText[0];
+      // Nur Kleinschreibung wenn es ein typischer Satzanfang ist (Artikel, Pronomen, etc.)
+      const lowercaseWords = ['der', 'die', 'das', 'ein', 'eine', 'es', 'er', 'sie', 'wir', 'ich', 'und', 'oder', 'aber', 'sowie', 'als', 'wenn', 'da', 'dort', 'hier', 'nach', 'bei', 'mit', 'ohne', 'für', 'zu', 'im', 'am', 'an', 'auf', 'in'];
+      const firstWord = processedText.split(/\s+/)[0].toLowerCase();
+      if (lowercaseWords.includes(firstWord)) {
+        processedText = firstChar.toLowerCase() + processedText.slice(1);
+      }
+    }
+    
+    // Update des Refs für den nächsten Satz
+    fastWhisperEndsWithPeriodRef.current = endsWithPeriod;
+    
+    // Wörterbuch-Ersetzungen anwenden
+    let correctedText = applyDictionaryToText(processedText);
+    if (correctedText !== processedText) {
+      console.log('[FastWhisper] Dictionary corrected:', processedText, '->', correctedText);
+    }
+    
+    // Schnelle LLM-Fachwort-Korrektur (async, nicht blockierend für UX)
+    // OHNE Referenz-Begriffe um Halluzinationen zu vermeiden
+    const llmCorrectedPromise = quickCorrectWithLLM(correctedText);
+    
+    // Finaler Satz: Zum akkumulierten Text hinzufügen
+    const getFinalRef = () => {
+      if (mode === 'befund') {
+        switch (activeField) {
+          case 'methodik': return fastWhisperFinalMethodikRef;
+          case 'beurteilung': return fastWhisperFinalBeurteilungRef;
+          default: return fastWhisperFinalTextRef;
+        }
+      }
+      return fastWhisperFinalTextRef;
+    };
+    
+    const getExistingRef = () => {
+      if (mode === 'befund') {
+        switch (activeField) {
+          case 'methodik': return existingMethodikRef;
+          case 'beurteilung': return existingBeurteilungRef;
+          default: return existingTextRef;
+        }
+      }
+      return existingTextRef;
+    };
+    
+    const setText = (value: string) => {
+      if (mode === 'befund') {
+        switch (activeField) {
+          case 'methodik': setMethodik(value); break;
+          case 'beurteilung': setBeurteilung(value); break;
+          default: setTranscript(value); break;
+        }
+      } else {
+        setTranscript(value);
+      }
+    };
+    
+    const finalRef = getFinalRef();
+    const existingRef = getExistingRef();
+    
+    // Text akkumulieren (erst mit Wörterbuch-Korrektur)
+    finalRef.current = finalRef.current 
+      ? finalRef.current + ' ' + correctedText 
+      : correctedText;
+    
+    // Anzeige aktualisieren
+    const updateDisplay = () => {
+      const displayText = [existingRef.current, finalRef.current].filter(p => p.trim()).join(' ');
+      setText(displayText);
+    };
+    
+    updateDisplay();
+    
+    // LLM-Korrektur im Hintergrund abwarten und dann ersetzen
+    const llmCorrected = await llmCorrectedPromise;
+    if (llmCorrected !== correctedText) {
+      // Ersetze den letzten Satz im finalRef mit der LLM-korrigierten Version
+      const parts = finalRef.current.split(' ' + correctedText);
+      if (parts.length > 1) {
+        finalRef.current = parts[0] + ' ' + llmCorrected + parts.slice(1).join(' ' + correctedText);
+      } else if (finalRef.current === correctedText) {
+        finalRef.current = llmCorrected;
+      }
+      updateDisplay();
+    }
+  }, [mode, activeField, applyDictionaryToText, quickCorrectWithLLM]);
+
   async function startRecording() {
     setError(null);
     // Bestehenden Text behalten
@@ -641,7 +1043,170 @@ export default function HomePage() {
       lastMethodikRef.current = "";
       lastBeurteilungRef.current = "";
     }
+
+    // Fast Whisper WebSocket Modus
+    if (runtimeConfig?.transcriptionProvider === 'fast_whisper' && runtimeConfig.fastWhisperWsUrl) {
+      // Finale Text-Refs zurücksetzen für neue Session
+      fastWhisperFinalTextRef.current = "";
+      fastWhisperFinalMethodikRef.current = "";
+      fastWhisperFinalBeurteilungRef.current = "";
+      
+      // Stable-Words-Refs zurücksetzen für Wort-für-Wort Anzeige
+      fastWhisperStableWordsRef.current = "";
+      fastWhisperStableMethodikRef.current = "";
+      fastWhisperStableBeurteilungRef.current = "";
+      fastWhisperLastPartialRef.current = "";
+      fastWhisperPartialCountRef.current = 0;
+      
+      // Diktat-Modus: Erster Buchstabe groß (wie Satzanfang)
+      fastWhisperEndsWithPeriodRef.current = true;
+      
+      let wsUrl = runtimeConfig.fastWhisperWsUrl;
+      
+      // HTTPS-Seiten erfordern wss:// (WebSocket Secure)
+      // Automatisch konvertieren wenn nötig
+      if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+        if (wsUrl.startsWith('ws://')) {
+          wsUrl = wsUrl.replace('ws://', 'wss://');
+          console.log('[FastWhisper] Converted to secure WebSocket:', wsUrl);
+        }
+      }
+      
+      console.log('[FastWhisper] Starting WebSocket recording to', wsUrl);
+      
+      try {
+        // WebSocket verbinden
+        const ws = new WebSocket(wsUrl);
+        fastWhisperWsRef.current = ws;
+        
+        ws.onopen = async () => {
+          console.log('[FastWhisper] WebSocket connected');
+          
+          // Initial Prompt aus Wörterbuch senden (Einträge mit useInPrompt=true)
+          const promptWords = dictionaryEntries
+            .filter(e => e.useInPrompt && e.correct)
+            .map(e => e.correct);
+          
+          if (promptWords.length > 0) {
+            const initialPrompt = promptWords.join(', ');
+            console.log('[FastWhisper] Sending initial_prompt with', promptWords.length, 'words');
+            ws.send(JSON.stringify({ type: 'set_prompt', text: initialPrompt }));
+          }
+          
+          try {
+            // Mikrofon-Stream holen
+            const stream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                sampleRate: 16000,
+                channelCount: 1,
+                echoCancellation: true,
+                noiseSuppression: true,
+              }
+            });
+            fastWhisperStreamRef.current = stream;
+            
+            // AudioContext für Resampling und Audio-Level
+            const audioContext = new AudioContext({ sampleRate: 16000 });
+            fastWhisperAudioContextRef.current = audioContext;
+            
+            const source = audioContext.createMediaStreamSource(stream);
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            analyserRef.current = analyser;
+            
+            // Audio Level Monitor
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            const updateLevel = () => {
+              if (!analyserRef.current || !fastWhisperWsRef.current) return;
+              analyserRef.current.getByteFrequencyData(dataArray);
+              const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+              setAudioLevel(Math.min(100, (average / 128) * 100));
+              animationFrameRef.current = requestAnimationFrame(updateLevel);
+            };
+            updateLevel();
+            
+            // ScriptProcessorNode für Audio-Chunks
+            const processor = audioContext.createScriptProcessor(4096, 1, 1);
+            fastWhisperProcessorRef.current = processor;
+            
+            processor.onaudioprocess = (e) => {
+              if (!fastWhisperWsRef.current || fastWhisperWsRef.current.readyState !== WebSocket.OPEN) return;
+              
+              const inputData = e.inputBuffer.getChannelData(0);
+              
+              // Konvertiere Float32Array zu Int16Array für RealtimeSTT
+              const int16Data = new Int16Array(inputData.length);
+              for (let i = 0; i < inputData.length; i++) {
+                const s = Math.max(-1, Math.min(1, inputData[i]));
+                int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+              }
+              
+              // Sende als Binary
+              fastWhisperWsRef.current.send(int16Data.buffer);
+            };
+            
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+            
+            setRecording(true);
+          } catch (micError: any) {
+            console.error('[FastWhisper] Microphone error:', micError);
+            setError('Mikrofon-Zugriff fehlgeschlagen: ' + micError.message);
+            ws.close();
+          }
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            // RealtimeSTT sendet verschiedene Formate
+            let text: string = '';
+            let isFinal: boolean = false;
+            
+            if (typeof event.data === 'string') {
+              if (event.data.startsWith('{')) {
+                const data = JSON.parse(event.data);
+                text = data.text || data.transcript || '';
+                // Verschiedene Flags für "final" je nach Server-Implementierung
+                isFinal = data.is_final || data.final || data.type === 'final' || data.message_type === 'FinalTranscript' || false;
+              } else {
+                // Plain text wird als final behandelt
+                text = event.data;
+                isFinal = true;
+              }
+            }
+            
+            if (text && text.trim()) {
+              handleFastWhisperTranscript(text.trim(), isFinal);
+            }
+          } catch (e) {
+            console.warn('[FastWhisper] Parse error:', e);
+          }
+        };
+        
+        ws.onerror = (event) => {
+          console.error('[FastWhisper] WebSocket error:', event);
+          // Bei selbst-signierten Zertifikaten muss das Zertifikat erst im Browser akzeptiert werden
+          const serverUrl = wsUrl.replace('wss://', 'https://').replace('ws://', 'http://');
+          setSslCertWarning({ show: true, serverUrl });
+          setError(`Verbindung fehlgeschlagen - SSL-Zertifikat muss akzeptiert werden (siehe Hinweis oben)`);
+        };
+        
+        ws.onclose = () => {
+          console.log('[FastWhisper] WebSocket closed');
+        };
+        
+      } catch (wsError: any) {
+        console.error('[FastWhisper] Connection error:', wsError);
+        const serverUrl = wsUrl.replace('wss://', 'https://').replace('ws://', 'http://');
+        setSslCertWarning({ show: true, serverUrl });
+        setError('Fast Whisper Verbindung fehlgeschlagen - SSL-Zertifikat prüfen');
+      }
+      
+      return;
+    }
     
+    // Standard MediaRecorder Modus (für andere Provider)
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     streamRef.current = stream;
     
@@ -697,7 +1262,49 @@ export default function HomePage() {
   }
 
   async function stopRecording() {
-    // Stoppe die Intervalle
+    // Fast Whisper WebSocket Modus stoppen
+    if (runtimeConfig?.transcriptionProvider === 'fast_whisper') {
+      console.log('[FastWhisper] Stopping WebSocket recording');
+      
+      // Stream stoppen
+      if (fastWhisperStreamRef.current) {
+        fastWhisperStreamRef.current.getTracks().forEach(track => track.stop());
+        fastWhisperStreamRef.current = null;
+      }
+      
+      // Processor trennen
+      if (fastWhisperProcessorRef.current) {
+        fastWhisperProcessorRef.current.disconnect();
+        fastWhisperProcessorRef.current = null;
+      }
+      
+      // AudioContext schließen
+      if (fastWhisperAudioContextRef.current) {
+        fastWhisperAudioContextRef.current.close();
+        fastWhisperAudioContextRef.current = null;
+      }
+      
+      // WebSocket schließen
+      if (fastWhisperWsRef.current) {
+        fastWhisperWsRef.current.close();
+        fastWhisperWsRef.current = null;
+      }
+      
+      // Animation Frame stoppen
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      
+      setAudioLevel(0);
+      setRecording(false);
+      
+      // Bei Fast Whisper: Direkt Korrektur anbieten (kein finaler Transkriptions-Chunk nötig)
+      setPendingCorrection(true);
+      return;
+    }
+    
+    // Standard Modus: Stoppe die Intervalle
     if (transcriptionIntervalRef.current) {
       clearInterval(transcriptionIntervalRef.current);
       transcriptionIntervalRef.current = null;
@@ -1768,6 +2375,43 @@ export default function HomePage() {
           </div>
         </div>
       </div>
+
+      {/* SSL-Zertifikat Warnung für Fast Whisper */}
+      {sslCertWarning?.show && (
+        <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded-lg p-4 shadow-md">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">🔐</span>
+            <div className="flex-1">
+              <h3 className="font-semibold text-amber-800 dark:text-amber-200 mb-1">
+                SSL-Zertifikat muss akzeptiert werden
+              </h3>
+              <p className="text-sm text-amber-700 dark:text-amber-300 mb-3">
+                Der Fast Whisper Server verwendet ein selbst-signiertes Zertifikat. 
+                Bevor die Echtzeit-Transkription funktioniert, musst du das Zertifikat im Browser akzeptieren.
+              </p>
+              <div className="flex items-center gap-3">
+                <a
+                  href={sslCertWarning.serverUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary text-sm py-1.5 px-4"
+                >
+                  🔗 Zertifikat akzeptieren
+                </a>
+                <span className="text-xs text-amber-600 dark:text-amber-400">
+                  → Klicke &quot;Erweitert&quot; → &quot;Weiter zu ...&quot; → dann diese Seite neu laden
+                </span>
+              </div>
+              <button 
+                onClick={() => setSslCertWarning(null)}
+                className="mt-2 text-xs text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 underline"
+              >
+                Hinweis ausblenden
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Textbaustein-Hinweis wenn aktiv */}
       {templateMode && selectedTemplate && !recording && (

@@ -716,10 +716,11 @@ export async function getUserDictationsWithRequest(
 ): Promise<Omit<OfflineDictation, 'audio_data'>[]> {
   const db = await getPoolForRequest(request);
   const archivedCondition = includeArchived ? '' : 'AND (archived IS NULL OR archived = FALSE)';
+  // OPTIMIZED: Only fetch fields needed for list view
+  // Exclude large TEXT fields (raw_transcript, segments, transcript, corrected_text, etc.)
   const [rows] = await db.execute(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
             priority, status, mode, bemerkung, termin, fachabteilung, berechtigte,
-            raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
             change_score, error_message, archived, archived_at, archived_by,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 
@@ -762,10 +763,12 @@ export async function getAllDictationsWithRequest(
   
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   
+  // OPTIMIZED: Only fetch fields needed for list view
+  // Exclude large TEXT fields (raw_transcript, segments, transcript, corrected_text, etc.)
+  // These are fetched on-demand when opening a specific dictation
   const [rows] = await db.execute(
     `SELECT id, username, audio_mime_type, audio_duration_seconds, order_number, patient_name, patient_dob,
             priority, status, mode, bemerkung, termin, fachabteilung, berechtigte,
-            raw_transcript, segments, transcript, methodik, befund, beurteilung, corrected_text, 
             change_score, error_message, archived, archived_at, archived_by,
             created_at, processing_started_at, completed_at
      FROM offline_dictations 

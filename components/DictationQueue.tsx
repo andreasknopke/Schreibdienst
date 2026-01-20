@@ -373,6 +373,10 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [parsedSegments, setParsedSegments] = useState<TranscriptSegment[]>([]);
   const mitlesenRef = useRef<HTMLDivElement>(null);
   
+  // Selected dictation details - loaded on demand to avoid fetching large TEXT fields in list
+  const [selectedDictationDetails, setSelectedDictationDetails] = useState<Dictation | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  
   // Playback speed control
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
@@ -543,6 +547,26 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       setAudioLoading(false);
     }
   }, [audioUrl]);
+
+  // Load full dictation details on demand (TEXT fields not included in list query for performance)
+  const loadDictationDetails = useCallback(async (id: number) => {
+    setDetailsLoading(true);
+    try {
+      const res = await fetchWithDbToken(`/api/offline-dictations?id=${id}`);
+      if (res.ok) {
+        const details = await res.json();
+        setSelectedDictationDetails(details);
+      } else {
+        console.error('Failed to load dictation details');
+        setSelectedDictationDetails(null);
+      }
+    } catch (err) {
+      console.error('Error loading dictation details:', err);
+      setSelectedDictationDetails(null);
+    } finally {
+      setDetailsLoading(false);
+    }
+  }, []);
   
   // Audio control functions
   const togglePlayPause = () => {
@@ -914,53 +938,65 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   // Use ref to track previous selectedId to avoid resetting on polling updates
   const prevSelectedIdRef = useRef<number | null>(null);
   
+  // Load dictation details when selection changes
   useEffect(() => {
-    // Only initialize when selectedId actually changes, not on every dictations poll
+    // Only load when selectedId actually changes
     if (selectedId === prevSelectedIdRef.current) return;
     prevSelectedIdRef.current = selectedId;
     
-    const selected = dictations.find(d => d.id === selectedId);
-    if (selected && selected.status === 'completed') {
-      const initialText = selected.corrected_text || selected.transcript || '';
+    // Reset states on selection change
+    setIsReverted(false);
+    setApplyFormatting(false);
+    setHasUnsavedChanges(false);
+    setShowMitlesen(false);
+    setShowDiffView(false);
+    setFormattedRawText('');
+    setParsedSegments([]);
+    setEditedTexts({ methodik: '', befund: '', beurteilung: '', corrected_text: '' });
+    setSavedText('');
+    
+    if (selectedId) {
+      // Clear previous details while loading
+      setSelectedDictationDetails(null);
+      loadDictationDetails(selectedId);
+    } else {
+      setSelectedDictationDetails(null);
+    }
+  }, [selectedId, loadDictationDetails]);
+  
+  // Initialize edited texts when dictation details are loaded
+  useEffect(() => {
+    if (!selectedDictationDetails) return;
+    
+    if (selectedDictationDetails.status === 'completed') {
+      const initialText = selectedDictationDetails.corrected_text || selectedDictationDetails.transcript || '';
       setEditedTexts({
-        methodik: selected.methodik || '',
-        befund: selected.befund || '',
-        beurteilung: selected.beurteilung || '',
+        methodik: selectedDictationDetails.methodik || '',
+        befund: selectedDictationDetails.befund || '',
+        beurteilung: selectedDictationDetails.beurteilung || '',
         corrected_text: initialText
       });
-      setSavedText(initialText); // Track the initial/saved state
-      setIsReverted(false); // Reset revert state when selection changes
-      setApplyFormatting(false); // Reset formatting toggle when selection changes
-      setHasUnsavedChanges(false); // Reset unsaved changes when selection changes
-      setShowMitlesen(false); // Reset Mitlesen mode when selection changes
-      setShowDiffView(false); // Reset diff view when selection changes
+      setSavedText(initialText);
       
       // Calculate formatted raw text for diff comparison
-      if (selected.raw_transcript) {
-        const formatted = preprocessTranscription(selected.raw_transcript);
+      if (selectedDictationDetails.raw_transcript) {
+        const formatted = preprocessTranscription(selectedDictationDetails.raw_transcript);
         setFormattedRawText(formatted);
-      } else {
-        setFormattedRawText('');
       }
       
       // Parse segments for word-level highlighting
-      if (selected.segments) {
+      if (selectedDictationDetails.segments) {
         try {
-          const segments = JSON.parse(selected.segments);
+          const segments = JSON.parse(selectedDictationDetails.segments);
           if (Array.isArray(segments)) {
             setParsedSegments(segments);
-          } else {
-            setParsedSegments([]);
           }
         } catch (e) {
           console.warn('Could not parse segments:', e);
-          setParsedSegments([]);
         }
-      } else {
-        setParsedSegments([]);
       }
     }
-  }, [selectedId, dictations]);
+  }, [selectedDictationDetails]);
 
   // Get combined text for copy (uses edited values) - always Arztbrief mode
   const getCombinedTextEdited = useCallback((): string => {
@@ -978,7 +1014,9 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     );
   }
 
-  const selectedDictation = dictations.find(d => d.id === selectedId);
+  const selectedDictationFromList = dictations.find(d => d.id === selectedId);
+  // Use details (with TEXT fields) when loaded, fallback to list data for basic info
+  const selectedDictation = selectedDictationDetails || selectedDictationFromList;
   const pendingCount = dictations.filter(d => d.status === 'pending').length;
   const processingCount = dictations.filter(d => d.status === 'processing').length;
 
@@ -1281,6 +1319,13 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
               onClick={() => { setIsFullscreen(false); setSelectedId(null); }}
             />
             <div className="card-body space-y-4">
+              {/* Loading indicator for details */}
+              {detailsLoading && (
+                <div className="flex items-center justify-center py-4">
+                  <Spinner size={20} />
+                  <span className="ml-2 text-sm text-gray-500">Lade Details...</span>
+                </div>
+              )}
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="font-medium text-lg">{selectedDictation.order_number}</h3>
@@ -1753,6 +1798,13 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                 />
               )}
               <div className="card-body space-y-4">
+                {/* Loading indicator for details */}
+                {detailsLoading && (
+                  <div className="flex items-center justify-center py-4">
+                    <Spinner size={20} />
+                    <span className="ml-2 text-sm text-gray-500">Lade Details...</span>
+                  </div>
+                )}
                 <div className="flex items-start justify-between">
                   <div>
                     <h3 className="font-medium text-lg">{selectedDictation.order_number}</h3>

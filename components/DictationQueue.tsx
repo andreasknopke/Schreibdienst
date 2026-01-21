@@ -304,8 +304,8 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<number | null>(null);
   const [workerStatus, setWorkerStatus] = useState<{ isProcessing: boolean } | null>(null);
-  // Sekretariat always views all, regular users start with 'mine'
-  const [viewMode, setViewMode] = useState<'mine' | 'all'>(isSecretariat ? 'all' : 'mine');
+  // Users with canViewAll start with 'all', regular users start with 'mine'
+  const [viewMode, setViewMode] = useState<'mine' | 'all'>(canViewAll ? 'all' : 'mine');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [userFilter, setUserFilter] = useState<string>('');
   const [fachabteilungFilter, setFachabteilungFilter] = useState<string>('');
@@ -383,7 +383,8 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
 
   // Load available users for filter
   const loadUsers = useCallback(async () => {
-    if (!canViewAll && !isSecretariat) return;
+    // Only load user list if user can view all dictations
+    if (!canViewAll) return;
     try {
       const res = await fetchWithDbToken('/api/offline-dictations?listUsers=true');
       if (res.ok) {
@@ -393,14 +394,16 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     } catch {
       // Ignore errors
     }
-  }, [canViewAll, isSecretariat]);
+  }, [canViewAll]);
 
   // Load dictations
   const loadDictations = useCallback(async () => {
     try {
       let url = `/api/offline-dictations`;
       
-      if ((viewMode === 'all' && canViewAll) || isSecretariat) {
+      // canViewAll determines if user can see all dictations
+      // isSecretariat only affects UI (table view), not data filtering
+      if (viewMode === 'all' && canViewAll) {
         url += `?all=true`;
         if (statusFilter) {
           url += `&status=${statusFilter}`;
@@ -409,7 +412,11 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
           url += `&user=${encodeURIComponent(userFilter)}`;
         }
       } else {
+        // Filter to own dictations only
         url += `?username=${encodeURIComponent(username)}`;
+        if (statusFilter) {
+          url += `&status=${statusFilter}`;
+        }
       }
       
       const res = await fetchWithDbToken(url);
@@ -430,7 +437,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     } finally {
       setLoading(false);
     }
-  }, [username, viewMode, canViewAll, isSecretariat, statusFilter, userFilter]);
+  }, [username, viewMode, canViewAll, statusFilter, userFilter]);
   
   // Gefilterte und sortierte Diktate
   const filteredAndSortedDictations = useMemo(() => {

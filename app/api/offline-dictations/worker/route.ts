@@ -376,11 +376,48 @@ async function doublePrecisionMerge(
     if (!res.ok) throw new Error(`Mistral API error: ${res.status}`);
     const data = await res.json();
     finalText = data.choices?.[0]?.message?.content?.trim() || result1.text;
-  } else {
-    // LM Studio or fallback
-    console.warn('[Worker DoublePrecision] LM Studio not supported for merge, using first transcription');
-    modelName = 'lmstudio';
+  } else if (llmProvider === 'lmstudio') {
+    // LM Studio support for merge
+    const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
+    modelName = runtimeConfig.lmstudioModel || 'local-model';
     modelProvider = 'lmstudio';
+    
+    console.log(`[Worker DoublePrecision] Using LM Studio for merge: ${lmStudioUrl}, model: ${modelName}`);
+    
+    try {
+      const res = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [
+            { role: 'system', content: mergePrompt },
+            { role: 'user', content: 'Erstelle den finalen Text.' }
+          ],
+          temperature: 0.1,
+        }),
+      });
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[Worker DoublePrecision] LM Studio API error: ${res.status} - ${errorText.substring(0, 200)}`);
+        throw new Error(`LM Studio API error: ${res.status}`);
+      }
+      
+      const data = await res.json();
+      finalText = data.choices?.[0]?.message?.content?.trim() || result1.text;
+      console.log(`[Worker DoublePrecision] ✓ LM Studio merge complete`);
+    } catch (lmError: any) {
+      console.error(`[Worker DoublePrecision] LM Studio merge failed: ${lmError.message}, falling back to first transcription`);
+      finalText = result1.text;
+    }
+  } else {
+    // Unknown provider - fallback
+    console.warn(`[Worker DoublePrecision] Unknown LLM provider "${llmProvider}", using first transcription`);
+    modelName = 'fallback';
+    modelProvider = 'none';
     finalText = result1.text;
   }
   

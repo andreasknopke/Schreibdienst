@@ -182,7 +182,7 @@ export default function OfflineDictationPage() {
                 <input
                   type="file"
                   ref={audioInputRef}
-                  accept="audio/*,.wav,.mp3,.ogg,.webm,.m4a"
+                  accept={expectedAudioFile ? `.${expectedAudioFile.split('.').pop()},audio/*` : 'audio/*,.wav,.mp3,.ogg,.webm,.m4a'}
                   className="file-input file-input-sm file-input-bordered w-44"
                   title={expectedAudioFile ? `Audio: ${expectedAudioFile}` : 'Audio-Datei'}
                 />
@@ -195,8 +195,8 @@ export default function OfflineDictationPage() {
                 </button>
               </div>
               {expectedAudioFile && (
-                <div className="text-xs text-gray-500 dark:text-gray-400">
-                  Audio-Datei: <span className="font-mono">{expectedAudioFile}</span>
+                <div className="text-xs text-blue-600 dark:text-blue-400 font-medium">
+                  🔊 Wähle: <span className="font-mono bg-blue-100 dark:bg-blue-900 px-1 rounded">{expectedAudioFile}</span>
                 </div>
               )}
             </div>

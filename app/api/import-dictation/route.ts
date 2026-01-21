@@ -179,8 +179,21 @@ export async function POST(request: NextRequest) {
       console.warn(`[Import] Audio compression failed, using original: ${compressError.message}`);
     }
     
-    // Calculate audio duration (rough estimate based on file size)
-    const estimatedDuration = Math.round(audioBuffer.length / 32000);
+    // Calculate audio duration based on format
+    // WebM/OGG are compressed (~10-20 KB/s), WAV is uncompressed (~32 KB/s for 16kHz mono 16-bit)
+    let estimatedDuration: number;
+    if (audioMimeType.includes('webm') || audioMimeType.includes('ogg')) {
+      // WebM/OGG: roughly 10-15 KB per second
+      estimatedDuration = Math.round(audioBuffer.length / 12000);
+    } else if (audioMimeType.includes('mp3') || audioMimeType.includes('mpeg')) {
+      // MP3: roughly 16 KB per second at 128kbps
+      estimatedDuration = Math.round(audioBuffer.length / 16000);
+    } else {
+      // WAV: roughly 32 KB per second at 16kHz mono 16-bit
+      estimatedDuration = Math.round(audioBuffer.length / 32000);
+    }
+    
+    console.log(`[Import] Estimated duration: ${estimatedDuration}s (${(audioBuffer.length / 1024).toFixed(1)} KB, ${audioMimeType})`);
     
     // Create dictation in database
     const dictationId = await createOfflineDictationWithRequest(request, {
@@ -201,11 +214,20 @@ export async function POST(request: NextRequest) {
     
     console.log(`[Import] ✓ Created dictation #${dictationId} for user ${metadata.username}, order ${metadata.orderNumber}`);
     
-    // Trigger worker to process
-    fetch(new URL('/api/offline-dictations/worker', request.url), {
-      method: 'POST',
-      headers: request.headers,
-    }).catch(() => {});
+    // Trigger worker to process - use internal fetch with same cookies
+    const workerUrl = new URL('/api/offline-dictations/worker', request.url);
+    try {
+      const workerRes = await fetch(workerUrl, {
+        method: 'POST',
+        headers: {
+          'Cookie': request.headers.get('cookie') || '',
+          'Content-Type': 'application/json',
+        },
+      });
+      console.log(`[Import] Worker triggered: ${workerRes.status}`);
+    } catch (workerErr: any) {
+      console.warn(`[Import] Worker trigger failed: ${workerErr.message}`);
+    }
     
     return NextResponse.json({
       success: true,

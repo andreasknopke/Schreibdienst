@@ -6,6 +6,7 @@
  */
 
 import { diffWordsWithSpace } from 'diff';
+import { DictionaryEntry } from './dictionaryDb';
 
 export interface TranscriptionResult {
   text: string;
@@ -105,9 +106,23 @@ export function mergeTranscriptionsWithMarkers(
 
 /**
  * Erstellt den System-Prompt für das LLM zur Auflösung der Unterschiede
+ * Optimiert für MedGamma-27B (4K quantisiert)
  */
-export function createMergePrompt(merged: MergedResult): string {
-  return `Du bist ein medizinischer Transkriptions-Experte. Dir werden zwei Transkriptionen desselben Audiodiktats präsentiert, mit markierten Unterschieden.
+export function createMergePrompt(merged: MergedResult, dictionaryEntries?: DictionaryEntry[]): string {
+  // Build dictionary section if entries exist with useInPrompt=true
+  let dictionarySection = '';
+  if (dictionaryEntries && dictionaryEntries.length > 0) {
+    const promptEntries = dictionaryEntries.filter(e => e.useInPrompt);
+    if (promptEntries.length > 0) {
+      const dictLines = promptEntries.map(e => `"${e.wrong}" → "${e.correct}"`).join(', ');
+      dictionarySection = `
+
+WÖRTERBUCH (HÖCHSTE PRIORITÄT - immer anwenden):
+${dictLines}`;
+    }
+  }
+
+  return `Du bist ein medizinischer Transkriptions-Experte. Zwei Whisper-Modelle haben dasselbe Diktat transkribiert. Wähle bei jedem Unterschied die KORREKTE Version.${dictionarySection}
 
 TRANSKRIPTION A (${merged.provider1}):
 ${merged.text1}
@@ -115,20 +130,32 @@ ${merged.text1}
 TRANSKRIPTION B (${merged.provider2}):
 ${merged.text2}
 
-MERGED TEXT MIT MARKIERTEN UNTERSCHIEDEN:
+MARKIERTE UNTERSCHIEDE:
 ${merged.mergedTextWithMarkers}
 
-DEINE AUFGABE:
-- Analysiere jeden markierten Unterschied (<<<A: ... | B: ...>>>)
-- Wähle für jeden Unterschied die Version, die im medizinischen Kontext am sinnvollsten ist
-- Berücksichtige Grammatik, medizinische Terminologie und logischen Zusammenhang
-- Erstelle den finalen, zusammenhängenden Text
+ENTSCHEIDUNGSREGELN für <<<A: ... | B: ...>>>:
 
-WICHTIGE REGELN:
-1. Gib NUR den finalen Text zurück - KEINE Erklärungen, Kommentare oder Einleitungen
-2. Der Text muss vollständig und grammatisch korrekt sein
-3. Behalte alle korrekten Teile bei, die nicht markiert sind
-4. Bei [FEHLT] entscheide, ob das Wort/die Phrase notwendig ist oder weggelassen werden sollte
+1. WÖRTERBUCH ZUERST: Falls ein Wort im Wörterbuch steht, verwende die korrekte Form.
+
+2. ECHTE WÖRTER BEVORZUGEN:
+   ✓ "Gelenkbefall" (echtes Wort) statt "Gelenkbüffel" (Unsinn)
+   ✓ "Vaskulitis" statt "Voskulitis"/"Vaskelytis"
+   ✓ "Daktylitis" statt "Dachlitiden"/"Daphnitiden"
+   ✓ "Arthralgien" statt "Atragien"/"Arthrogäne"
+
+3. MEDIZINISCHE FACHBEGRIFFE:
+   - Psoriasis (nicht Diasis)
+   - Skyrizi = Risankizumab (nicht Sky Ritzy, Eschkei)
+   - Celecoxib (nicht Silikoxid, Xelokoksin)
+   - MTX = Methotrexat (nicht M-Ticks)
+   - IL-17-Blockade (nicht ER-17, ihr 17)
+   - JAK-Inhibitoren (nicht Yakubitor)
+   - Uveitis (nicht Ovitiden)
+
+4. RHEUMATOLOGIE-KONTEXT:
+   Gelenkbefall, axialer Befall, Biologika, Basistherapie, HLA-B27, ISG, OSG
+
+AUSGABE: NUR den korrigierten Text. KEINE Erklärungen.
 
 FINALER TEXT:`;
 }

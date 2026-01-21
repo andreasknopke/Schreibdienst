@@ -279,7 +279,8 @@ async function doublePrecisionMerge(
   request: NextRequest,
   dictationId: number,
   result1: TranscriptionResult,
-  result2: TranscriptionResult
+  result2: TranscriptionResult,
+  dictionaryEntries?: DictionaryEntry[]
 ): Promise<{ text: string; segments?: any[] }> {
   console.log(`[Worker DoublePrecision] Merging transcriptions from ${result1.provider} and ${result2.provider}`);
   
@@ -318,7 +319,11 @@ async function doublePrecisionMerge(
   
   console.log('[Worker DoublePrecision] Differences found, sending to LLM for resolution');
   
-  const mergePrompt = createMergePrompt(merged);
+  const mergePrompt = createMergePrompt(merged, dictionaryEntries);
+  if (dictionaryEntries && dictionaryEntries.length > 0) {
+    const promptEntries = dictionaryEntries.filter(e => e.useInPrompt).length;
+    console.log(`[Worker DoublePrecision] Dictionary included in merge prompt: ${promptEntries} entries with useInPrompt`);
+  }
   
   let finalText: string;
   let modelName: string;
@@ -456,12 +461,14 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, dictationI
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
   const provider = runtimeConfig.transcriptionProvider;
   
-  // Lade Wörterbuch für initial_prompt bei WhisperX
+  // Lade Wörterbuch für initial_prompt bei WhisperX und für Double Precision Merge
   // Nur Einträge mit useInPrompt=true werden verwendet
   let initialPrompt: string | undefined;
+  let dictionaryEntries: DictionaryEntry[] = [];
   if (username && provider !== 'elevenlabs' && provider !== 'mistral') {
     try {
       const dictionary = await loadDictionaryWithRequest(request, username);
+      dictionaryEntries = dictionary.entries;
       // Extrahiere einzigartige korrekte Wörter nur von Einträgen mit useInPrompt=true
       const correctWords = new Set<string>();
       for (const entry of dictionary.entries) {
@@ -522,8 +529,8 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, dictationI
     
     console.log(`[Worker DoublePrecision] Got transcriptions: ${result1.provider}=${result1.text.length} chars, ${result2.provider}=${result2.text.length} chars`);
     
-    // Merge the transcriptions
-    return doublePrecisionMerge(request, dictationId, result1, result2);
+    // Merge the transcriptions with dictionary for LLM context
+    return doublePrecisionMerge(request, dictationId, result1, result2, dictionaryEntries);
   }
   
   // ElevenLabs jetzt im Offline-Modus unterstützt mit Word-Level Timestamps für Mitlesefunktion
@@ -1056,6 +1063,7 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
 }
 
 // Correct text using LLM
+// Optimiert für MedGamma-27B (4K quantisiert)
 async function correctText(request: NextRequest, text: string, username: string, patientName?: string, dictionaryEntries?: DictionaryEntry[]): Promise<string> {
   const llmConfig = await getLLMConfig(request);
   
@@ -1069,15 +1077,13 @@ async function correctText(request: NextRequest, text: string, username: string,
   let dictionaryPromptSection = '';
   if (dictionaryEntries && dictionaryEntries.length > 0) {
     const dictionaryLines = dictionaryEntries.map(e => 
-      `  "${e.wrong}" → "${e.correct}"`
-    ).join('\n');
+      `"${e.wrong}" → "${e.correct}"`
+    ).join(', ');
     dictionaryPromptSection = `
 
-BENUTZERWÖRTERBUCH - Bekannte Korrekturen:
-Die folgenden Wörter werden häufig falsch transkribiert. Wenn du im Text ein Wort findest, 
-das einem dieser falschen Wörter entspricht oder sehr ähnlich klingt, korrigiere es zum richtigen Begriff,
-sofern es im medizinischen Kontext Sinn ergibt:
-${dictionaryLines}`;
+WÖRTERBUCH (HÖCHSTE PRIORITÄT - immer anwenden):
+${dictionaryLines}
+Wende diese Korrekturen an, wenn du ein Wort findest das gleich oder phonetisch ähnlich klingt.`;
     console.log(`[Worker] Dictionary added to LLM prompt: ${dictionaryEntries.length} entries`);
   }
   
@@ -1086,14 +1092,8 @@ ${dictionaryLines}`;
   if (patientName && patientName.trim()) {
     patientNamePromptSection = `
 
-PATIENTENNAME - Korrektur phonetisch ähnlicher Namen:
-Der Text handelt vom Patienten: "${patientName}"
-Wenn im Text ein Name erwähnt wird, der phonetisch ähnlich klingt wie "${patientName}" 
-(z.B. durch Transkriptionsfehler), ersetze diesen durch den korrekten Namen: "${patientName}"
-Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
-- Falsche Schreibweisen des Nachnamens
-- Ähnlich klingende Namen (z.B. "Müller" statt "Miller", "Maier" statt "Mayer")
-- Durch Spracherkennung verstümmelte Namen`;
+PATIENTENNAME: "${patientName}"
+Korrigiere alle phonetisch ähnlichen Namen zu diesem korrekten Namen.`;
     console.log(`[Worker] Patient name added to LLM prompt: "${patientName}"`);
   }
   

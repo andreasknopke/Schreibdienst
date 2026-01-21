@@ -14,7 +14,7 @@ import {
   logDoublePrecisionCorrectionWithRequest,
 } from '@/lib/correctionLogDb';
 import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath, RuntimeConfig } from '@/lib/configDb';
-import { loadDictionaryWithRequest } from '@/lib/dictionaryDb';
+import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription } from '@/lib/textFormatting';
 import { compressAudioForSpeech, normalizeAudioForWhisper } from '@/lib/audioCompression';
@@ -171,7 +171,7 @@ export async function processDictation(request: NextRequest, dictationId: number
     
     // Always use Arztbrief mode - no field parsing
     const textBeforeLLM = preprocessedText;
-    const correctedText = await correctText(request, preprocessedText, dictation.username, dictation.patient_name);
+    const correctedText = await correctText(request, preprocessedText, dictation.username, dictation.patient_name, dictionaryEntries);
     
     // Log LLM correction
     if (correctedText !== textBeforeLLM) {
@@ -1056,12 +1056,30 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
 }
 
 // Correct text using LLM
-async function correctText(request: NextRequest, text: string, username: string, patientName?: string): Promise<string> {
+async function correctText(request: NextRequest, text: string, username: string, patientName?: string, dictionaryEntries?: DictionaryEntry[]): Promise<string> {
   const llmConfig = await getLLMConfig(request);
   
   // Load runtime config to get custom prompt addition
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
   const promptAddition = runtimeConfig.llmPromptAddition?.trim();
+  
+  // Build dictionary prompt section for LLM hints (words to correct if similar found)
+  // Note: Dictionary corrections are also applied programmatically in preprocessTranscription()
+  // The LLM section here catches phonetically similar words that aren't exact matches
+  let dictionaryPromptSection = '';
+  if (dictionaryEntries && dictionaryEntries.length > 0) {
+    const dictionaryLines = dictionaryEntries.map(e => 
+      `  "${e.wrong}" → "${e.correct}"`
+    ).join('\n');
+    dictionaryPromptSection = `
+
+BENUTZERWÖRTERBUCH - Bekannte Korrekturen:
+Die folgenden Wörter werden häufig falsch transkribiert. Wenn du im Text ein Wort findest, 
+das einem dieser falschen Wörter entspricht oder sehr ähnlich klingt, korrigiere es zum richtigen Begriff,
+sofern es im medizinischen Kontext Sinn ergibt:
+${dictionaryLines}`;
+    console.log(`[Worker] Dictionary added to LLM prompt: ${dictionaryEntries.length} entries`);
+  }
   
   // Build patient name section for LLM to correct phonetically similar names
   let patientNamePromptSection = '';
@@ -1079,8 +1097,8 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
     console.log(`[Worker] Patient name added to LLM prompt: "${patientName}"`);
   }
   
-  // Note: Dictionary corrections are now applied programmatically in preprocessTranscription()
-  // This saves tokens and ensures deterministic corrections
+  // Combine all prompt additions
+  const promptSuffix = (dictionaryPromptSection + patientNamePromptSection + (promptAddition ? `\n\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : '')).trim();
   
   // Full system prompt for OpenAI or single-chunk processing
   const systemPrompt = `Du bist ein medizinischer Diktat-Korrektur-Assistent. Deine EINZIGE Aufgabe ist die sprachliche Korrektur diktierter medizinischer Texte.
@@ -1124,7 +1142,7 @@ HAUPTAUFGABEN:
    - "neuer Absatz" → Absatzumbruch (Leerzeile)
    - "neue Zeile" → Zeilenumbruch
    - "Punkt", "Komma", "Doppelpunkt" → entsprechendes Satzzeichen
-${patientNamePromptSection}${promptAddition ? `\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : ''}
+${promptSuffix ? `\n${promptSuffix}` : ''}
 
 KRITISCH - AUSGABEFORMAT:
 - Gib AUSSCHLIESSLICH den korrigierten Text zurück - NICHTS ANDERES!
@@ -1174,7 +1192,7 @@ REGELN:
    - "Klammer zu" → ")"
 4. Entferne "lösche das letzte Wort/Satz" und das entsprechende Wort/Satz
 5. Entferne Füllwörter wie "ähm", "äh"
-${patientNamePromptSection}${promptAddition ? `\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : ''}
+${promptSuffix ? `\n${promptSuffix}` : ''}
 
 WICHTIG - DATUMSFORMATE:
 - Datumsangaben wie "18.09.2025" NICHT ändern - sie sind bereits korrekt!

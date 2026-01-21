@@ -2194,17 +2194,36 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                     </div>
                     
                     {/* Revert/Re-Correct Buttons */}
-                    {selectedDictation.raw_transcript && (
-                      <div className="flex gap-2">
-                        {!isReverted ? (
+                    <div className="flex gap-2 flex-wrap">
+                      {!isReverted ? (
+                        <>
+                          {selectedDictation.raw_transcript && (
+                            <button
+                              className="btn btn-sm btn-outline"
+                              onClick={handleRevert}
+                              title="Zur reinen Transkription zurückkehren (vor LLM-Korrektur)"
+                            >
+                              ↩️ Zur Transkription
+                            </button>
+                          )}
                           <button
-                            className="btn btn-sm btn-outline flex-1"
-                            onClick={handleRevert}
-                            title="Zur reinen Transkription zurückkehren"
+                            className="btn btn-sm btn-primary"
+                            onClick={handleReCorrect}
+                            disabled={isReCorrecting}
+                            title="LLM-Korrektur erneut durchführen (auf aktuellem Text)"
                           >
-                            ↩️ Zur Transkription
+                            {isReCorrecting ? (
+                              <>
+                                <Spinner size={12} className="mr-1" />
+                                Korrigiere...
+                              </>
+                            ) : (
+                              '🔄 Erneut korrigieren'
+                            )}
                           </button>
-                        ) : (
+                        </>
+                      ) : (
+                        <>
                           <button
                             className="btn btn-sm btn-primary flex-1"
                             onClick={handleReCorrect}
@@ -2220,8 +2239,6 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                               '✨ Neu korrigieren'
                             )}
                           </button>
-                        )}
-                        {isReverted && (
                           <label 
                             className="flex items-center gap-1.5 text-xs cursor-pointer select-none px-2 py-1 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
                             title="Sprachbefehle wie 'Punkt eins', 'Nächster Punkt', 'Absatz' anwenden"
@@ -2234,9 +2251,9 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             />
                             <span className="text-gray-600 dark:text-gray-400">Formatierung</span>
                           </label>
-                        )}
-                      </div>
-                    )}
+                        </>
+                      )}
+                    </div>
                     
                     {/* Diff legend when active */}
                     {showDiffView && !isReverted && (

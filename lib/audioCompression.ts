@@ -34,6 +34,109 @@ async function checkFfmpegAvailable(): Promise<boolean> {
   });
 }
 
+// Check if ffprobe is available
+let ffprobeAvailable: boolean | null = null;
+
+async function checkFfprobeAvailable(): Promise<boolean> {
+  if (ffprobeAvailable !== null) return ffprobeAvailable;
+  
+  return new Promise((resolve) => {
+    const proc = spawn('ffprobe', ['-version']);
+    proc.on('error', () => {
+      console.log('[AudioCompression] ffprobe not available');
+      ffprobeAvailable = false;
+      resolve(false);
+    });
+    proc.on('close', (code) => {
+      ffprobeAvailable = code === 0;
+      if (ffprobeAvailable) {
+        console.log('[AudioCompression] ffprobe available');
+      }
+      resolve(ffprobeAvailable);
+    });
+  });
+}
+
+/**
+ * Get the actual duration of an audio file using ffprobe
+ * Returns duration in seconds, or 0 if unable to determine
+ */
+export async function getAudioDuration(audioBuffer: Buffer, mimeType: string = 'audio/wav'): Promise<number> {
+  if (!(await checkFfprobeAvailable())) {
+    console.log('[AudioCompression] ffprobe not available, cannot determine duration');
+    return 0;
+  }
+  
+  const tempId = randomUUID();
+  const ext = mimeType.includes('webm') ? '.webm' : 
+              mimeType.includes('ogg') ? '.ogg' :
+              mimeType.includes('mp3') ? '.mp3' :
+              mimeType.includes('mp4') ? '.m4a' :
+              mimeType.includes('opus') ? '.opus' : '.wav';
+  const tempInput = join(tmpdir(), `duration-${tempId}${ext}`);
+  
+  try {
+    // Write input to temp file
+    await writeFile(tempInput, audioBuffer);
+    
+    return new Promise<number>((resolve) => {
+      const proc = spawn('ffprobe', [
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        tempInput
+      ]);
+      
+      let output = '';
+      let errorOutput = '';
+      
+      proc.stdout.on('data', (data) => {
+        output += data.toString();
+      });
+      
+      proc.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+      });
+      
+      proc.on('close', async (code) => {
+        // Clean up temp file
+        try {
+          await unlink(tempInput);
+        } catch {}
+        
+        if (code === 0 && output.trim()) {
+          const duration = parseFloat(output.trim());
+          if (!isNaN(duration) && isFinite(duration) && duration > 0) {
+            console.log(`[AudioCompression] Audio duration: ${duration.toFixed(2)}s`);
+            resolve(duration);
+            return;
+          }
+        }
+        
+        console.log(`[AudioCompression] Could not determine duration (code: ${code}, error: ${errorOutput.substring(0, 100)})`);
+        resolve(0);
+      });
+      
+      proc.on('error', () => {
+        resolve(0);
+      });
+      
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        proc.kill();
+        resolve(0);
+      }, 5000);
+    });
+  } catch (err) {
+    console.error('[AudioCompression] Error getting audio duration:', err);
+    // Clean up on error
+    try {
+      await unlink(tempInput);
+    } catch {}
+    return 0;
+  }
+}
+
 /**
  * Detect SpeaKING proprietary format (WAV with format 0x0028)
  */

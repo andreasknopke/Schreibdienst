@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createOfflineDictationWithRequest } from '@/lib/offlineDictationDb';
-import { compressAudioForSpeech } from '@/lib/audioCompression';
+import { compressAudioForSpeech, getAudioDuration } from '@/lib/audioCompression';
 import { XMLParser } from 'fast-xml-parser';
 import { processDictation } from '@/app/api/offline-dictations/worker/route';
 
@@ -180,28 +180,35 @@ export async function POST(request: NextRequest) {
       console.warn(`[Import] Audio compression failed, using original: ${compressError.message}`);
     }
     
-    // Calculate audio duration based on format
-    // WebM/OGG are compressed (~10-20 KB/s), WAV is uncompressed (~32 KB/s for 16kHz mono 16-bit)
-    let estimatedDuration: number;
-    if (audioMimeType.includes('webm') || audioMimeType.includes('ogg')) {
-      // WebM/OGG: roughly 10-15 KB per second
-      estimatedDuration = Math.round(audioBuffer.length / 12000);
-    } else if (audioMimeType.includes('mp3') || audioMimeType.includes('mpeg')) {
-      // MP3: roughly 16 KB per second at 128kbps
-      estimatedDuration = Math.round(audioBuffer.length / 16000);
-    } else {
-      // WAV: roughly 32 KB per second at 16kHz mono 16-bit
-      estimatedDuration = Math.round(audioBuffer.length / 32000);
+    // Get actual audio duration using ffprobe
+    let actualDuration = 0;
+    try {
+      actualDuration = await getAudioDuration(finalAudioBuffer, finalMimeType);
+      if (actualDuration > 0) {
+        console.log(`[Import] Detected audio duration: ${actualDuration.toFixed(2)}s`);
+      } else {
+        // Fallback to estimate if ffprobe fails
+        if (audioMimeType.includes('webm') || audioMimeType.includes('ogg')) {
+          actualDuration = Math.round(audioBuffer.length / 12000);
+        } else if (audioMimeType.includes('mp3') || audioMimeType.includes('mpeg')) {
+          actualDuration = Math.round(audioBuffer.length / 16000);
+        } else {
+          actualDuration = Math.round(audioBuffer.length / 32000);
+        }
+        console.log(`[Import] Fallback estimated duration: ${actualDuration}s`);
+      }
+    } catch (durationError: any) {
+      console.warn(`[Import] Error detecting audio duration: ${durationError.message}`);
+      // Use estimate as fallback
+      actualDuration = Math.round(audioBuffer.length / 32000);
     }
-    
-    console.log(`[Import] Estimated duration: ${estimatedDuration}s (${(audioBuffer.length / 1024).toFixed(1)} KB, ${audioMimeType})`);
     
     // Create dictation in database
     const dictationId = await createOfflineDictationWithRequest(request, {
       username: metadata.username,
       audioData: finalAudioBuffer,
       audioMimeType: finalMimeType,
-      audioDuration: estimatedDuration,
+      audioDuration: actualDuration,
       orderNumber: metadata.orderNumber,
       patientName: metadata.patientName,
       patientDob: metadata.patientDob,
@@ -213,7 +220,7 @@ export async function POST(request: NextRequest) {
       berechtigte: metadata.berechtigte,
     });
     
-    console.log(`[Import] ✓ Created dictation #${dictationId} for user ${metadata.username}, order ${metadata.orderNumber}`);
+    console.log(`[Import] ✓ Created dictation #${dictationId} for user ${metadata.username}, order ${metadata.orderNumber}, duration: ${actualDuration.toFixed(1)}s`);
     
     // Process the dictation directly in the background (fire and forget)
     // We don't await this - it runs asynchronously after the response is sent

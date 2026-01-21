@@ -16,7 +16,7 @@ import {
 } from '@/lib/offlineDictationDb';
 import { logManualCorrectionWithRequest, initCorrectionLogTableWithRequest } from '@/lib/correctionLogDb';
 import { calculateChangeScore } from '@/lib/changeScore';
-import { compressAudioForSpeech } from '@/lib/audioCompression';
+import { compressAudioForSpeech, getAudioDuration } from '@/lib/audioCompression';
 
 export const runtime = 'nodejs';
 
@@ -155,11 +155,27 @@ export async function POST(req: NextRequest) {
       console.warn(`[Offline Dictations] Audio compression failed, using original: ${compressError.message}`);
     }
     
+    // Get actual audio duration using ffprobe if not provided or 0
+    let actualDuration = duration;
+    if (actualDuration <= 0) {
+      console.log(`[Offline Dictations] Duration not provided (${duration}), reading from audio file...`);
+      try {
+        actualDuration = await getAudioDuration(audioBuffer, audioMimeType);
+        if (actualDuration > 0) {
+          console.log(`[Offline Dictations] Detected audio duration: ${actualDuration.toFixed(2)}s`);
+        } else {
+          console.warn(`[Offline Dictations] Could not detect audio duration, using 0`);
+        }
+      } catch (durationError: any) {
+        console.warn(`[Offline Dictations] Error detecting audio duration: ${durationError.message}`);
+      }
+    }
+    
     const id = await createOfflineDictationWithRequest(req, {
       username,
       audioData: audioBuffer,
       audioMimeType: audioMimeType,
-      audioDuration: duration,
+      audioDuration: actualDuration,
       orderNumber,
       patientName: patientName || undefined,
       patientDob: patientDob || undefined,
@@ -171,7 +187,7 @@ export async function POST(req: NextRequest) {
       berechtigte: berechtigte || undefined,
     });
     
-    console.log(`[Offline Dictations] Created dictation #${id} for user ${username}, order ${orderNumber}`);
+    console.log(`[Offline Dictations] Created dictation #${id} for user ${username}, order ${orderNumber}, duration: ${actualDuration.toFixed(1)}s`);
     
     return NextResponse.json({ id, message: 'Dictation queued for processing' });
   } catch (error: any) {

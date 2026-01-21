@@ -575,22 +575,13 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
   const whisperUrl = process.env.WHISPER_SERVICE_URL || 'http://localhost:5000';
   const isGradio = whisperUrl.includes(':7860');
   
-  // Normalize audio to WAV PCM to handle problematic formats (Opus-in-WAV, etc.)
-  // This ensures WhisperX can process any audio format
-  let normalizedFile = file;
-  let normalizedMimeType = file.type || 'audio/webm';
+  // WhisperX/Gradio can handle webm, mp3, ogg natively - no need to convert
+  // Only normalize if the original format fails (as fallback)
+  let audioFile = file;
+  let audioMimeType = file.type || 'audio/webm';
+  const originalSize = file.size;
   
-  try {
-    const audioBuffer = Buffer.from(await file.arrayBuffer());
-    const normalized = await normalizeAudioForWhisper(audioBuffer, file.type || 'audio/webm');
-    if (normalized.normalized) {
-      normalizedFile = new Blob([normalized.data], { type: normalized.mimeType });
-      normalizedMimeType = normalized.mimeType;
-      console.log(`[Worker] Audio normalized to ${normalizedMimeType} (${normalized.data.length} bytes)`);
-    }
-  } catch (normError: any) {
-    console.warn(`[Worker] Audio normalization failed, using original: ${normError.message}`);
-  }
+  console.log(`[Worker] Using original audio format: ${audioMimeType} (${(originalSize / 1024).toFixed(1)} KB)`);
   
   if (isGradio) {
     // Get auth credentials
@@ -647,15 +638,15 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
       'audio/mp4': 'm4a',
       'audio/x-m4a': 'm4a',
     };
-    const fileExt = mimeToExt[normalizedMimeType] || 'webm';
+    const fileExt = mimeToExt[audioMimeType] || 'webm';
     const fileName = `audio.${fileExt}`;
-    console.log(`[Worker] Using filename: ${fileName} for MIME type: ${normalizedMimeType}`);
+    console.log(`[Worker] Using filename: ${fileName} for MIME type: ${audioMimeType}`);
     
     // Upload file (use normalized version)
     const uploadFormData = new FormData();
-    uploadFormData.append('files', normalizedFile, fileName);
+    uploadFormData.append('files', audioFile, fileName);
     
-    console.log(`[Worker] Uploading audio to Gradio: size=${normalizedFile.size}, type=${normalizedMimeType}`);
+    console.log(`[Worker] Uploading audio to Gradio: size=${audioFile.size}, type=${audioMimeType}`);
     
     const uploadRes = await fetch(`${whisperUrl}/gradio_api/upload?upload_id=${Date.now()}`, {
       method: 'POST',
@@ -693,7 +684,7 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     // Note: Gradio API expects 6 parameters - the 6th is skip_alignment (false for offline/precision mode)
     const gradioRequestBody = {
       data: [
-        { path: filePath, orig_name: fileName, size: normalizedFile.size, mime_type: normalizedMimeType, meta: { _type: 'gradio.FileData' } },
+        { path: filePath, orig_name: fileName, size: audioFile.size, mime_type: audioMimeType, meta: { _type: 'gradio.FileData' } },
         languageCode,
         whisperModel,
         "cuda",
@@ -873,8 +864,8 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
   
   // FastAPI implementation - use normalized file
   const formData = new FormData();
-  const fastApiExt = normalizedMimeType === 'audio/wav' ? 'wav' : 'webm';
-  formData.append('file', normalizedFile, `audio.${fastApiExt}`);
+  const fastApiExt = audioMimeType === 'audio/wav' ? 'wav' : 'webm';
+  formData.append('file', audioFile, `audio.${fastApiExt}`);
   formData.append('language', 'de');
   formData.append('align', 'true');
   
@@ -979,7 +970,7 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
   const { data: normalizedData, mimeType: normalizedMime, normalized } = 
     await normalizeAudioForWhisper(audioBuffer, mimeType);
   if (normalized) {
-    audioBuffer = normalizedData;
+    audioBuffer = Buffer.from(normalizedData);
     mimeType = normalizedMime;
     console.log(`[Worker Mistral] Converted to WAV: ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB`);
   } else {

@@ -12,8 +12,8 @@ function LayoutContent({ children }: { children: ReactNode }) {
   const { isLoggedIn, canViewAllDictations } = useAuth();
   const pathname = usePathname();
   
-  // Sekretariat auf Offline-Seite bekommt volle Breite
-  const isFullWidth = pathname === '/offline' && canViewAllDictations;
+  // Offline-Seite bekommt volle Breite (für alle Benutzer mit Tabellenansicht)
+  const isFullWidth = pathname === '/offline';
 
   if (!isLoggedIn) {
     return (

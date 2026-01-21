@@ -379,7 +379,7 @@ async function doublePrecisionMerge(
   } else if (llmProvider === 'lmstudio') {
     // LM Studio support for merge
     const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
-    modelName = runtimeConfig.lmstudioModel || 'local-model';
+    modelName = process.env.LLM_STUDIO_MODEL || 'local-model';
     modelProvider = 'lmstudio';
     
     console.log(`[Worker DoublePrecision] Using LM Studio for merge: ${lmStudioUrl}, model: ${modelName}`);

@@ -648,13 +648,15 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     const languageCode = 'German';
     
     // Build request body for logging
+    // Note: Gradio API expects 6 parameters - the 6th is skip_alignment (false for offline/precision mode)
     const gradioRequestBody = {
       data: [
         { path: filePath, orig_name: fileName, size: normalizedFile.size, mime_type: normalizedMimeType, meta: { _type: 'gradio.FileData' } },
         languageCode,
         whisperModel,
         "cuda",
-        initialPrompt || "" // medical dictionary terms for better recognition
+        initialPrompt || "", // medical dictionary terms for better recognition
+        false // skip_alignment: false for offline/precision mode (enables word-level timestamps)
       ]
     };
     

@@ -14,8 +14,8 @@ export default function OfflineDictationPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [isImporting, setIsImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
-  const xmlInputRef = useRef<HTMLInputElement>(null);
-  const audioInputRef = useRef<HTMLInputElement>(null);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
+  const [importPath, setImportPath] = useState('');
 
   // Update tab when role changes
   useEffect(() => {
@@ -24,27 +24,22 @@ export default function OfflineDictationPage() {
     }
   }, [isSecretariat]);
 
-  // Import dictation from SpeaKING XML
+  // Import dictation from SpeaKING .dictation file path
   const handleImport = useCallback(async () => {
-    const xmlFile = xmlInputRef.current?.files?.[0];
-    const audioFile = audioInputRef.current?.files?.[0];
-
-    if (!xmlFile || !audioFile) {
-      setImportError('Bitte XML und Audio-Datei auswählen');
+    if (!importPath.trim()) {
+      setImportError('Bitte Pfad zur .dictation Datei angeben');
       return;
     }
 
     setIsImporting(true);
     setImportError(null);
+    setImportSuccess(null);
 
     try {
-      const formData = new FormData();
-      formData.append('xml', xmlFile);
-      formData.append('audio', audioFile);
-
       const res = await fetchWithDbToken('/api/import-dictation', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: importPath.trim() }),
       });
 
       if (!res.ok) {
@@ -55,19 +50,22 @@ export default function OfflineDictationPage() {
       const result = await res.json();
       console.log('[Import] Success:', result);
 
-      // Clear file inputs
-      if (xmlInputRef.current) xmlInputRef.current.value = '';
-      if (audioInputRef.current) audioInputRef.current.value = '';
+      // Clear path input
+      setImportPath('');
 
-      // Refresh queue
+      // Show success and refresh queue
+      setImportSuccess(`Diktat ${result.metadata?.orderNumber || '#' + result.dictationId} importiert`);
       setRefreshKey(k => k + 1);
+      
+      // Clear success after 3 seconds
+      setTimeout(() => setImportSuccess(null), 3000);
     } catch (err: any) {
       console.error('[Import] Error:', err);
       setImportError(err.message);
     } finally {
       setIsImporting(false);
     }
-  }, []);
+  }, [importPath]);
 
   // Submit a new dictation
   const handleSubmit = useCallback(async (data: {
@@ -134,34 +132,33 @@ export default function OfflineDictationPage() {
             <div className="flex items-center justify-between flex-wrap gap-2">
               <h2 className="font-medium text-lg">📋 Sekretariat - Diktat-Übersicht</h2>
               
-              {/* XML Import Section */}
+              {/* Path Import Section */}
               <div className="flex items-center gap-2 flex-wrap">
                 <input
-                  type="file"
-                  ref={xmlInputRef}
-                  accept=".xml"
-                  className="file-input file-input-sm file-input-bordered w-36"
-                  title="XML-Datei"
-                />
-                <input
-                  type="file"
-                  ref={audioInputRef}
-                  accept="audio/*,.wav,.mp3,.ogg,.webm,.m4a"
-                  className="file-input file-input-sm file-input-bordered w-36"
-                  title="Audio-Datei"
+                  type="text"
+                  value={importPath}
+                  onChange={(e) => setImportPath(e.target.value)}
+                  placeholder="/pfad/zur/datei.dictation"
+                  className="input input-sm input-bordered w-64 font-mono text-xs"
+                  onKeyDown={(e) => e.key === 'Enter' && handleImport()}
                 />
                 <button
                   onClick={handleImport}
-                  disabled={isImporting}
+                  disabled={isImporting || !importPath.trim()}
                   className="px-3 py-1.5 rounded-lg text-sm font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200 hover:bg-green-200 dark:hover:bg-green-800 disabled:opacity-50"
                 >
-                  {isImporting ? '⏳ Import...' : '📥 XML Import'}
+                  {isImporting ? '⏳ Import...' : '📥 Import'}
                 </button>
               </div>
             </div>
             {importError && (
               <div className="mt-2 text-sm text-red-600 dark:text-red-400">
                 ⚠️ {importError}
+              </div>
+            )}
+            {importSuccess && (
+              <div className="mt-2 text-sm text-green-600 dark:text-green-400">
+                ✓ {importSuccess}
               </div>
             )}
           </div>

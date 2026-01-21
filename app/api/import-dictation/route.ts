@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createOfflineDictationWithRequest } from '@/lib/offlineDictationDb';
 import { compressAudioForSpeech } from '@/lib/audioCompression';
 import { XMLParser } from 'fast-xml-parser';
+import { promises as fs } from 'fs';
+import path from 'path';
 
 export const runtime = 'nodejs';
 
@@ -114,30 +116,36 @@ function parseSpeaKINGXml(xmlContent: string): {
 }
 
 /**
- * Import a dictation from SpeaKING XML format
- * Expects multipart form data with:
- * - xml: The XML file
- * - audio: The audio file
+ * Import a dictation from SpeaKING .dictation file
+ * Expects JSON body with:
+ * - path: Path to the .dictation XML file (audio file is read from same directory)
  */
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData();
+    const body = await request.json();
+    const dictationPath = body.path as string;
     
-    const xmlFile = formData.get('xml') as File | null;
-    const audioFile = formData.get('audio') as File | null;
-    
-    if (!xmlFile) {
-      return NextResponse.json({ error: 'XML file is required' }, { status: 400 });
+    if (!dictationPath) {
+      return NextResponse.json({ error: 'Pfad zur .dictation Datei erforderlich' }, { status: 400 });
     }
     
-    if (!audioFile) {
-      return NextResponse.json({ error: 'Audio file is required' }, { status: 400 });
+    // Verify file exists and has correct extension
+    if (!dictationPath.endsWith('.dictation')) {
+      return NextResponse.json({ error: 'Datei muss .dictation Endung haben' }, { status: 400 });
     }
+    
+    // Read XML file
+    let xmlContent: string;
+    try {
+      xmlContent = await fs.readFile(dictationPath, 'utf-8');
+    } catch (err: any) {
+      console.error(`[Import] Cannot read file: ${err.message}`);
+      return NextResponse.json({ error: `Datei nicht lesbar: ${dictationPath}` }, { status: 400 });
+    }
+    
+    console.log(`[Import] Parsing XML file: ${dictationPath} (${xmlContent.length} chars)`);
     
     // Parse XML
-    const xmlContent = await xmlFile.text();
-    console.log(`[Import] Parsing XML file: ${xmlFile.name} (${xmlContent.length} chars)`);
-    
     let metadata;
     try {
       metadata = parseSpeaKINGXml(xmlContent);
@@ -146,19 +154,43 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `XML parse error: ${parseError.message}` }, { status: 400 });
     }
     
+    if (!metadata.audioFilename) {
+      return NextResponse.json({ error: 'Keine Audio-Datei im XML referenziert' }, { status: 400 });
+    }
+    
     console.log(`[Import] Parsed metadata:`, {
       orderNumber: metadata.orderNumber,
       username: metadata.username,
       priority: metadata.priority,
       patientName: metadata.patientName,
-      fachabteilung: metadata.fachabteilung,
+      audioFilename: metadata.audioFilename,
     });
     
-    // Read audio file
-    const audioBuffer = Buffer.from(await audioFile.arrayBuffer());
-    const audioMimeType = audioFile.type || 'audio/wav';
+    // Construct audio file path (same directory as .dictation file)
+    const dirPath = path.dirname(dictationPath);
+    const audioPath = path.join(dirPath, metadata.audioFilename);
     
-    console.log(`[Import] Audio file: ${audioFile.name}, ${(audioBuffer.length / 1024).toFixed(1)} KB, type: ${audioMimeType}`);
+    // Read audio file
+    let audioBuffer: Buffer;
+    try {
+      audioBuffer = await fs.readFile(audioPath);
+    } catch (err: any) {
+      console.error(`[Import] Cannot read audio file: ${err.message}`);
+      return NextResponse.json({ error: `Audio-Datei nicht gefunden: ${metadata.audioFilename}` }, { status: 400 });
+    }
+    
+    // Determine MIME type from extension
+    const ext = path.extname(metadata.audioFilename).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      '.webm': 'audio/webm',
+      '.wav': 'audio/wav',
+      '.mp3': 'audio/mpeg',
+      '.ogg': 'audio/ogg',
+      '.m4a': 'audio/mp4',
+    };
+    const audioMimeType = mimeTypes[ext] || 'audio/wav';
+    
+    console.log(`[Import] Audio file: ${metadata.audioFilename}, ${(audioBuffer.length / 1024).toFixed(1)} KB, type: ${audioMimeType}`);
     
     // Compress audio for storage
     let finalAudioBuffer = audioBuffer;
@@ -178,9 +210,7 @@ export async function POST(request: NextRequest) {
       console.warn(`[Import] Audio compression failed, using original: ${compressError.message}`);
     }
     
-    // Calculate audio duration (rough estimate based on file size if we can't decode)
-    // For WAV at 16kHz mono 16-bit: ~32KB per second
-    // For compressed OGG: ~6-12KB per second
+    // Calculate audio duration (rough estimate based on file size)
     const estimatedDuration = Math.round(audioBuffer.length / 32000);
     
     // Create dictation in database
@@ -193,7 +223,7 @@ export async function POST(request: NextRequest) {
       patientName: metadata.patientName,
       patientDob: metadata.patientDob,
       priority: metadata.priority,
-      mode: 'befund', // Default to befund, could be extended
+      mode: 'befund',
       bemerkung: metadata.bemerkung,
       termin: metadata.termin,
       fachabteilung: metadata.fachabteilung,

@@ -18,7 +18,7 @@ import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription } from '@/lib/textFormatting';
 import { compressAudioForSpeech, normalizeAudioForWhisper } from '@/lib/audioCompression';
-import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult } from '@/lib/doublePrecision';
+import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes max for processing
@@ -115,7 +115,14 @@ export async function processDictation(request: NextRequest, dictationId: number
     const audioData = new Uint8Array(dictation.audio_data);
     const audioBlob = new Blob([audioData], { type: dictation.audio_mime_type });
     console.log(`[Worker] Audio blob created: size=${audioBlob.size}, type=${audioBlob.type}, originalMime=${dictation.audio_mime_type}`);
-    const transcriptionResult = await transcribeAudio(request, audioBlob, dictationId, dictation.username);
+    const transcriptionResult = await transcribeAudio(
+      request, 
+      audioBlob, 
+      dictationId, 
+      dictation.username,
+      dictation.patient_name,
+      dictation.patient_dob
+    );
     
     if (!transcriptionResult.text) {
       throw new Error('Transcription returned empty text');
@@ -171,7 +178,14 @@ export async function processDictation(request: NextRequest, dictationId: number
     
     // Always use Arztbrief mode - no field parsing
     const textBeforeLLM = preprocessedText;
-    const correctedText = await correctText(request, preprocessedText, dictation.username, dictation.patient_name, dictionaryEntries);
+    const correctedText = await correctText(
+      request, 
+      preprocessedText, 
+      dictation.username, 
+      dictation.patient_name, 
+      dictation.patient_dob,
+      dictionaryEntries
+    );
     
     // Log LLM correction
     if (correctedText !== textBeforeLLM) {
@@ -280,7 +294,7 @@ async function doublePrecisionMerge(
   dictationId: number,
   result1: TranscriptionResult,
   result2: TranscriptionResult,
-  dictionaryEntries?: DictionaryEntry[]
+  mergeContext?: MergeContext
 ): Promise<{ text: string; segments?: any[] }> {
   console.log(`[Worker DoublePrecision] Merging transcriptions from ${result1.provider} and ${result2.provider}`);
   
@@ -319,10 +333,13 @@ async function doublePrecisionMerge(
   
   console.log('[Worker DoublePrecision] Differences found, sending to LLM for resolution');
   
-  const mergePrompt = createMergePrompt(merged, dictionaryEntries);
-  if (dictionaryEntries && dictionaryEntries.length > 0) {
-    const promptEntries = dictionaryEntries.filter(e => e.useInPrompt).length;
+  const mergePrompt = createMergePrompt(merged, mergeContext);
+  if (mergeContext?.dictionaryEntries && mergeContext.dictionaryEntries.length > 0) {
+    const promptEntries = mergeContext.dictionaryEntries.filter(e => e.useInPrompt).length;
     console.log(`[Worker DoublePrecision] Dictionary included in merge prompt: ${promptEntries} entries with useInPrompt`);
+  }
+  if (mergeContext?.patientName || mergeContext?.doctorName) {
+    console.log(`[Worker DoublePrecision] Context: Patient=${mergeContext.patientName || 'n/a'}, DOB=${mergeContext.patientDob || 'n/a'}, Doctor=${mergeContext.doctorName || 'n/a'}`);
   }
   
   let finalText: string;
@@ -456,10 +473,26 @@ async function doublePrecisionMerge(
   return { text: finalText, segments: result1.segments };
 }
 
+// Helper function to extract doctor surname from username (remove trailing numbers)
+function extractDoctorName(username: string): string {
+  // Remove trailing numbers (e.g., "Mueller2" -> "Mueller")
+  return username.replace(/\d+$/, '');
+}
+
 // Transcribe audio using the same logic as the transcribe API
-async function transcribeAudio(request: NextRequest, audioBlob: Blob, dictationId: number, username?: string): Promise<{ text: string; segments?: any[] }> {
+async function transcribeAudio(
+  request: NextRequest, 
+  audioBlob: Blob, 
+  dictationId: number, 
+  username?: string,
+  patientName?: string,
+  patientDob?: string
+): Promise<{ text: string; segments?: any[] }> {
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
   const provider = runtimeConfig.transcriptionProvider;
+  
+  // Extract doctor name from username
+  const doctorName = username ? extractDoctorName(username) : undefined;
   
   // Lade Wörterbuch für initial_prompt bei WhisperX und für Double Precision Merge
   // Nur Einträge mit useInPrompt=true werden verwendet
@@ -529,8 +562,14 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, dictationI
     
     console.log(`[Worker DoublePrecision] Got transcriptions: ${result1.provider}=${result1.text.length} chars, ${result2.provider}=${result2.text.length} chars`);
     
-    // Merge the transcriptions with dictionary for LLM context
-    return doublePrecisionMerge(request, dictationId, result1, result2, dictionaryEntries);
+    // Merge the transcriptions with full context for LLM
+    const mergeContext: MergeContext = {
+      dictionaryEntries,
+      patientName,
+      patientDob,
+      doctorName,
+    };
+    return doublePrecisionMerge(request, dictationId, result1, result2, mergeContext);
   }
   
   // ElevenLabs jetzt im Offline-Modus unterstützt mit Word-Level Timestamps für Mitlesefunktion
@@ -1064,8 +1103,18 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
 
 // Correct text using LLM
 // Optimiert für MedGamma-27B (4K quantisiert)
-async function correctText(request: NextRequest, text: string, username: string, patientName?: string, dictionaryEntries?: DictionaryEntry[]): Promise<string> {
+async function correctText(
+  request: NextRequest, 
+  text: string, 
+  username: string, 
+  patientName?: string, 
+  patientDob?: string,
+  dictionaryEntries?: DictionaryEntry[]
+): Promise<string> {
   const llmConfig = await getLLMConfig(request);
+  
+  // Extract doctor name from username (remove trailing numbers)
+  const doctorName = extractDoctorName(username);
   
   // Load runtime config to get custom prompt addition
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
@@ -1087,18 +1136,29 @@ Wende diese Korrekturen an, wenn du ein Wort findest das gleich oder phonetisch 
     console.log(`[Worker] Dictionary added to LLM prompt: ${dictionaryEntries.length} entries`);
   }
   
-  // Build patient name section for LLM to correct phonetically similar names
-  let patientNamePromptSection = '';
+  // Build context section for patient and doctor names
+  let contextPromptSection = '';
+  const contextParts: string[] = [];
   if (patientName && patientName.trim()) {
-    patientNamePromptSection = `
+    contextParts.push(`Patient: ${patientName}`);
+  }
+  if (patientDob && patientDob.trim()) {
+    contextParts.push(`Geb.: ${patientDob}`);
+  }
+  if (doctorName) {
+    contextParts.push(`Arzt: Dr. ${doctorName}`);
+  }
+  if (contextParts.length > 0) {
+    contextPromptSection = `
 
-PATIENTENNAME: "${patientName}"
-Korrigiere alle phonetisch ähnlichen Namen zu diesem korrekten Namen.`;
-    console.log(`[Worker] Patient name added to LLM prompt: "${patientName}"`);
+DIKTAT-KONTEXT:
+${contextParts.join(', ')}
+Korrigiere phonetisch ähnliche Namen zu diesen korrekten Schreibweisen.`;
+    console.log(`[Worker] Context added to LLM prompt: ${contextParts.join(', ')}`);
   }
   
   // Combine all prompt additions
-  const promptSuffix = (dictionaryPromptSection + patientNamePromptSection + (promptAddition ? `\n\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : '')).trim();
+  const promptSuffix = (dictionaryPromptSection + contextPromptSection + (promptAddition ? `\n\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : '')).trim();
   
   // Full system prompt for OpenAI or single-chunk processing
   const systemPrompt = `Du bist ein medizinischer Diktat-Korrektur-Assistent. Deine EINZIGE Aufgabe ist die sprachliche Korrektur diktierter medizinischer Texte.

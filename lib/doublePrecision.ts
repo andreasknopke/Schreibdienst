@@ -105,10 +105,25 @@ export function mergeTranscriptionsWithMarkers(
 }
 
 /**
+ * Zusätzliche Kontextinformationen für den Merge-Prompt
+ */
+export interface MergeContext {
+  dictionaryEntries?: DictionaryEntry[];
+  patientName?: string;
+  patientDob?: string;
+  doctorName?: string;
+}
+
+/**
  * Erstellt den System-Prompt für das LLM zur Auflösung der Unterschiede
  * Optimiert für MedGamma-27B (4K quantisiert)
  */
-export function createMergePrompt(merged: MergedResult, dictionaryEntries?: DictionaryEntry[]): string {
+export function createMergePrompt(merged: MergedResult, context?: MergeContext): string {
+  const dictionaryEntries = context?.dictionaryEntries;
+  const patientName = context?.patientName;
+  const patientDob = context?.patientDob;
+  const doctorName = context?.doctorName;
+
   // Build dictionary section if entries exist with useInPrompt=true
   let dictionarySection = '';
   if (dictionaryEntries && dictionaryEntries.length > 0) {
@@ -122,7 +137,21 @@ ${dictLines}`;
     }
   }
 
-  return `Du bist ein medizinischer Transkriptions-Experte. Zwei Whisper-Modelle haben dasselbe Diktat transkribiert. Wähle bei jedem Unterschied die KORREKTE Version.${dictionarySection}
+  // Build context section for patient and doctor
+  let contextSection = '';
+  const contextParts: string[] = [];
+  if (patientName) contextParts.push(`Patient: ${patientName}`);
+  if (patientDob) contextParts.push(`Geb.: ${patientDob}`);
+  if (doctorName) contextParts.push(`Arzt: Dr. ${doctorName}`);
+  if (contextParts.length > 0) {
+    contextSection = `
+
+DIKTAT-KONTEXT:
+${contextParts.join(', ')}
+Korrigiere phonetisch ähnliche Namen zu diesen korrekten Schreibweisen.`;
+  }
+
+  return `Du bist ein medizinischer Transkriptions-Experte. Zwei Whisper-Modelle haben dasselbe Diktat transkribiert. Wähle bei jedem Unterschied die KORREKTE Version.${dictionarySection}${contextSection}
 
 TRANSKRIPTION A (${merged.provider1}):
 ${merged.text1}
@@ -135,25 +164,20 @@ ${merged.mergedTextWithMarkers}
 
 ENTSCHEIDUNGSREGELN für <<<A: ... | B: ...>>>:
 
-1. WÖRTERBUCH ZUERST: Falls ein Wort im Wörterbuch steht, verwende die korrekte Form.
+1. WÖRTERBUCH/KONTEXT ZUERST: Nutze Wörterbuch und Diktat-Kontext (Patientenname, Arztname).
 
 2. ECHTE WÖRTER BEVORZUGEN:
-   ✓ "Gelenkbefall" (echtes Wort) statt "Gelenkbüffel" (Unsinn)
-   ✓ "Vaskulitis" statt "Voskulitis"/"Vaskelytis"
-   ✓ "Daktylitis" statt "Dachlitiden"/"Daphnitiden"
-   ✓ "Arthralgien" statt "Atragien"/"Arthrogäne"
+   ✓ "Gelenkbefall" statt "Gelenkbüffel"
+   ✓ "Vaskulitis" statt "Voskulitis"
+   ✓ "Daktylitis" statt "Dachlitiden"
+   ✓ "Arthralgien" statt "Atragien"
 
-3. MEDIZINISCHE FACHBEGRIFFE:
-   - Psoriasis (nicht Diasis)
-   - Skyrizi = Risankizumab (nicht Sky Ritzy, Eschkei)
-   - Celecoxib (nicht Silikoxid, Xelokoksin)
-   - MTX = Methotrexat (nicht M-Ticks)
-   - IL-17-Blockade (nicht ER-17, ihr 17)
-   - JAK-Inhibitoren (nicht Yakubitor)
-   - Uveitis (nicht Ovitiden)
-
-4. RHEUMATOLOGIE-KONTEXT:
-   Gelenkbefall, axialer Befall, Biologika, Basistherapie, HLA-B27, ISG, OSG
+3. MEDIZINISCHE FACHBEGRIFFE (alle Fachgebiete):
+   RHEUMATOLOGIE: Psoriasis, Skyrizi, Celecoxib, MTX, IL-17, JAK-Inhibitoren, Biologika, HLA-B27
+   KARDIOLOGIE: Myokardinfarkt, Koronarangiographie, Ejektionsfraktion, Vorhofflimmern, Stent
+   CHIRURGIE: Laparoskopie, Cholezystektomie, Appendektomie, Anastomose, Drainage
+   INNERE: Gastroskopie, Koloskopie, Sonographie, Aszites, Hepatomegalie, Splenomegalie
+   GYNÄKOLOGIE: Hysterektomie, Adnexe, Zervix, Endometriose, Mammographie
 
 AUSGABE: NUR den korrigierten Text. KEINE Erklärungen.
 

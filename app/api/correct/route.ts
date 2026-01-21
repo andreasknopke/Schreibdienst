@@ -623,7 +623,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { text, previousCorrectedText, befundFields, suggestBeurteilung, methodik, befund, username } = body as { 
+    const { text, previousCorrectedText, befundFields, suggestBeurteilung, methodik, befund, username, patientName } = body as { 
       text?: string; 
       previousCorrectedText?: string;
       befundFields?: BefundFields;
@@ -631,10 +631,11 @@ export async function POST(req: NextRequest) {
       methodik?: string;
       befund?: string;
       username?: string;
+      patientName?: string;
     };
     
     // Load dictionary for this user (using request context for dynamic DB support)
-    console.log(`[Correct] Loading dictionary for user: ${username || 'anonymous'}`);
+    console.log(`[Correct] Loading dictionary for user: ${username || 'anonymous'}${patientName ? `, patient: ${patientName}` : ''}`);
     const dictionary = username ? await loadDictionaryWithRequest(req, username) : { entries: [] };
     const dictionaryEntries = dictionary.entries;
     console.log(`[Correct] Dictionary loaded: ${dictionaryEntries.length} entries`);
@@ -672,9 +673,25 @@ ${dictionaryLines}`;
       console.log(`[Correct] Dictionary added to LLM prompt: ${dictionaryEntries.length} entries`);
     }
     
+    // Build patient name section for LLM to correct phonetically similar names
+    let patientNamePromptSection = '';
+    if (patientName && patientName.trim()) {
+      patientNamePromptSection = `
+
+PATIENTENNAME - Korrektur phonetisch ähnlicher Namen:
+Der Text handelt vom Patienten: "${patientName}"
+Wenn im Text ein Name erwähnt wird, der phonetisch ähnlich klingt wie "${patientName}" 
+(z.B. durch Transkriptionsfehler), ersetze diesen durch den korrekten Namen: "${patientName}"
+Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
+- Falsche Schreibweisen des Nachnamens
+- Ähnlich klingende Namen (z.B. "Müller" statt "Miller", "Maier" statt "Mayer")
+- Durch Spracherkennung verstümmelte Namen`;
+      console.log(`[Correct] Patient name added to LLM prompt: "${patientName}"`);
+    }
+    
     // Note: Dictionary is now applied programmatically above, so we don't need it in the prompt
     // for deterministic corrections. The LLM section above is for catching similar words.
-    const promptSuffix = (dictionaryPromptSection + (promptAddition ? `\n\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : '')).trim();
+    const promptSuffix = (dictionaryPromptSection + patientNamePromptSection + (promptAddition ? `\n\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : '')).trim();
     
     // Combine system prompt with dictionary and custom additions
     const enhancedSystemPrompt = promptSuffix 

@@ -90,8 +90,8 @@ function parseGradioSSE(sseText: string): { success: boolean; data?: any; error?
 let isProcessing = false;
 let lastProcessTime = 0;
 
-// Process a single dictation
-async function processDictation(request: NextRequest, dictationId: number): Promise<void> {
+// Process a single dictation - exported for direct use from other handlers
+export async function processDictation(request: NextRequest, dictationId: number): Promise<void> {
   console.log(`[Worker] Processing dictation #${dictationId}`);
   
   const dictation = await getDictationByIdWithRequest(request, dictationId, true);
@@ -171,7 +171,7 @@ async function processDictation(request: NextRequest, dictationId: number): Prom
     
     // Always use Arztbrief mode - no field parsing
     const textBeforeLLM = preprocessedText;
-    const correctedText = await correctText(request, preprocessedText, dictation.username);
+    const correctedText = await correctText(request, preprocessedText, dictation.username, dictation.patient_name);
     
     // Log LLM correction
     if (correctedText !== textBeforeLLM) {
@@ -1056,12 +1056,28 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
 }
 
 // Correct text using LLM
-async function correctText(request: NextRequest, text: string, username: string): Promise<string> {
+async function correctText(request: NextRequest, text: string, username: string, patientName?: string): Promise<string> {
   const llmConfig = await getLLMConfig(request);
   
   // Load runtime config to get custom prompt addition
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
   const promptAddition = runtimeConfig.llmPromptAddition?.trim();
+  
+  // Build patient name section for LLM to correct phonetically similar names
+  let patientNamePromptSection = '';
+  if (patientName && patientName.trim()) {
+    patientNamePromptSection = `
+
+PATIENTENNAME - Korrektur phonetisch ähnlicher Namen:
+Der Text handelt vom Patienten: "${patientName}"
+Wenn im Text ein Name erwähnt wird, der phonetisch ähnlich klingt wie "${patientName}" 
+(z.B. durch Transkriptionsfehler), ersetze diesen durch den korrekten Namen: "${patientName}"
+Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
+- Falsche Schreibweisen des Nachnamens
+- Ähnlich klingende Namen (z.B. "Müller" statt "Miller", "Maier" statt "Mayer")
+- Durch Spracherkennung verstümmelte Namen`;
+    console.log(`[Worker] Patient name added to LLM prompt: "${patientName}"`);
+  }
   
   // Note: Dictionary corrections are now applied programmatically in preprocessTranscription()
   // This saves tokens and ensures deterministic corrections
@@ -1108,7 +1124,7 @@ HAUPTAUFGABEN:
    - "neuer Absatz" → Absatzumbruch (Leerzeile)
    - "neue Zeile" → Zeilenumbruch
    - "Punkt", "Komma", "Doppelpunkt" → entsprechendes Satzzeichen
-${promptAddition ? `\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : ''}
+${patientNamePromptSection}${promptAddition ? `\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : ''}
 
 KRITISCH - AUSGABEFORMAT:
 - Gib AUSSCHLIESSLICH den korrigierten Text zurück - NICHTS ANDERES!
@@ -1158,7 +1174,7 @@ REGELN:
    - "Klammer zu" → ")"
 4. Entferne "lösche das letzte Wort/Satz" und das entsprechende Wort/Satz
 5. Entferne Füllwörter wie "ähm", "äh"
-${promptAddition ? `\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : ''}
+${patientNamePromptSection}${promptAddition ? `\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : ''}
 
 WICHTIG - DATUMSFORMATE:
 - Datumsangaben wie "18.09.2025" NICHT ändern - sie sind bereits korrekt!

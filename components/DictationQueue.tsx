@@ -833,7 +833,8 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           text: textToCorrect,
-          username: selected.username
+          username: selected.username,
+          patientName: selected.patient_name
         }),
       });
       

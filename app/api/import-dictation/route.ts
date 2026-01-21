@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createOfflineDictationWithRequest } from '@/lib/offlineDictationDb';
 import { compressAudioForSpeech } from '@/lib/audioCompression';
 import { XMLParser } from 'fast-xml-parser';
+import { processDictation } from '@/app/api/offline-dictations/worker/route';
 
 export const runtime = 'nodejs';
 
@@ -214,24 +215,16 @@ export async function POST(request: NextRequest) {
     
     console.log(`[Import] ✓ Created dictation #${dictationId} for user ${metadata.username}, order ${metadata.orderNumber}`);
     
-    // Trigger worker to process - use internal fetch with same cookies
-    const workerUrl = new URL('/api/offline-dictations/worker', request.url);
-    try {
-      const workerRes = await fetch(workerUrl, {
-        method: 'POST',
-        headers: {
-          'Cookie': request.headers.get('cookie') || '',
-          'Content-Type': 'application/json',
-        },
-      });
-      console.log(`[Import] Worker triggered: ${workerRes.status}`);
-    } catch (workerErr: any) {
-      console.warn(`[Import] Worker trigger failed: ${workerErr.message}`);
-    }
+    // Process the dictation directly in the background (fire and forget)
+    // We don't await this - it runs asynchronously after the response is sent
+    processDictation(request, dictationId)
+      .then(() => console.log(`[Import] ✓ Dictation #${dictationId} processed successfully`))
+      .catch(err => console.error(`[Import] ✗ Dictation #${dictationId} processing failed: ${err.message}`));
     
     return NextResponse.json({
       success: true,
       dictationId,
+      message: 'Diktat importiert und Verarbeitung gestartet.',
       metadata: {
         orderNumber: metadata.orderNumber,
         username: metadata.username,

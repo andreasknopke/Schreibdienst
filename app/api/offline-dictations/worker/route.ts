@@ -630,18 +630,29 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     // Language for WhisperX Gradio - must match dropdown options (full name, not ISO code)
     const languageCode = 'German';
     
+    // Build request body for logging
+    const gradioRequestBody = {
+      data: [
+        { path: filePath, orig_name: fileName, size: normalizedFile.size, mime_type: normalizedMimeType, meta: { _type: 'gradio.FileData' } },
+        languageCode,
+        whisperModel,
+        "cuda",
+        initialPrompt || "" // medical dictionary terms for better recognition
+      ]
+    };
+    
+    // Log the complete Gradio API request
+    console.log(`[Worker Gradio Request] ===== START PROCESS API CALL =====`);
+    console.log(`[Worker Gradio Request] URL: ${whisperUrl}/gradio_api/call/start_process`);
+    console.log(`[Worker Gradio Request] Method: POST`);
+    console.log(`[Worker Gradio Request] Headers: { 'Content-Type': 'application/json', 'Cookie': '${sessionCookie}' }`);
+    console.log(`[Worker Gradio Request] Body: ${JSON.stringify(gradioRequestBody, null, 2)}`);
+    console.log(`[Worker Gradio Request] ================================`);
+    
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Cookie': sessionCookie },
-      body: JSON.stringify({
-        data: [
-          { path: filePath, orig_name: fileName, size: normalizedFile.size, mime_type: normalizedMimeType, meta: { _type: 'gradio.FileData' } },
-          languageCode,
-          whisperModel,
-          "cuda",
-          initialPrompt || "" // medical dictionary terms for better recognition
-        ]
-      }),
+      body: JSON.stringify(gradioRequestBody),
     });
     
     if (!processRes.ok) {
@@ -653,7 +664,14 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     console.log(`[Worker] Gradio process started: event_id=${processData.event_id}`);
     
     // Get result
-    const resultRes = await fetch(`${whisperUrl}/gradio_api/call/start_process/${processData.event_id}`, {
+    const resultUrl = `${whisperUrl}/gradio_api/call/start_process/${processData.event_id}`;
+    console.log(`[Worker Gradio Request] ===== GET RESULT API CALL =====`);
+    console.log(`[Worker Gradio Request] URL: ${resultUrl}`);
+    console.log(`[Worker Gradio Request] Method: GET`);
+    console.log(`[Worker Gradio Request] Headers: { 'Cookie': '${sessionCookie}' }`);
+    console.log(`[Worker Gradio Request] ==============================`);
+    
+    const resultRes = await fetch(resultUrl, {
       headers: { 'Cookie': sessionCookie },
     });
     

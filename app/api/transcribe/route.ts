@@ -308,22 +308,33 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
     // Language for WhisperX Gradio - must match dropdown choices, conversion to ISO code happens in transcriber.py
     const languageCode = 'German';
 
+    // Build request body for logging
+    const gradioRequestBody = {
+      data: [
+        fileDataObj,   // file
+        languageCode,  // language (ISO code)
+        modelToUse,    // model_name (from runtime config)
+        "cuda",        // device
+        initialPrompt || "", // medical dictionary terms for better recognition
+        speedMode === 'turbo' // skip_alignment: true für Online (turbo), false für Offline (precision)
+      ]
+    };
+    
+    // Log the complete Gradio API request
+    console.log(`[Gradio Request] ===== START PROCESS API CALL =====`);
+    console.log(`[Gradio Request] URL: ${whisperUrl}/gradio_api/call/start_process`);
+    console.log(`[Gradio Request] Method: POST`);
+    console.log(`[Gradio Request] Headers: { 'Content-Type': 'application/json', 'Cookie': '${sessionCookie}' }`);
+    console.log(`[Gradio Request] Body: ${JSON.stringify(gradioRequestBody, null, 2)}`);
+    console.log(`[Gradio Request] ================================`);
+    
     const processRes = await fetch(`${whisperUrl}/gradio_api/call/start_process`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Cookie': sessionCookie,
       },
-      body: JSON.stringify({
-        data: [
-          fileDataObj,   // file
-          languageCode,  // language (ISO code)
-          modelToUse,    // model_name (from runtime config)
-          "cuda",        // device
-          initialPrompt || "", // medical dictionary terms for better recognition
-          speedMode === 'turbo' // skip_alignment: true für Online (turbo), false für Offline (precision)
-        ]
-      }),
+      body: JSON.stringify(gradioRequestBody),
     });
     
     if (!processRes.ok) {
@@ -335,8 +346,14 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
     const eventId = processData.event_id;
     
     // Step 4: Poll for result using SSE endpoint
+    const resultUrl = `${whisperUrl}/gradio_api/call/start_process/${eventId}`;
+    console.log(`[Gradio Request] ===== GET RESULT API CALL =====`);
+    console.log(`[Gradio Request] URL: ${resultUrl}`);
+    console.log(`[Gradio Request] Method: GET`);
+    console.log(`[Gradio Request] Headers: { 'Cookie': '${sessionCookie}' }`);
+    console.log(`[Gradio Request] ==============================`);
     
-    const resultRes = await fetch(`${whisperUrl}/gradio_api/call/start_process/${eventId}`, {
+    const resultRes = await fetch(resultUrl, {
       headers: {
         'Cookie': sessionCookie,
       },

@@ -15,7 +15,9 @@ export default function OfflineDictationPage() {
   const [isImporting, setIsImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
-  const [importPath, setImportPath] = useState('');
+  const [expectedAudioFile, setExpectedAudioFile] = useState<string | null>(null);
+  const dictationInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
 
   // Update tab when role changes
   useEffect(() => {
@@ -24,10 +26,40 @@ export default function OfflineDictationPage() {
     }
   }, [isSecretariat]);
 
-  // Import dictation from SpeaKING .dictation file path
+  // When .dictation file is selected, parse it to show expected audio filename
+  const handleDictationFileChange = useCallback(async () => {
+    const file = dictationInputRef.current?.files?.[0];
+    if (!file) {
+      setExpectedAudioFile(null);
+      return;
+    }
+    
+    try {
+      const xmlContent = await file.text();
+      const match = xmlContent.match(/<filename>([^<]+)<\/filename>/);
+      if (match) {
+        setExpectedAudioFile(match[1]);
+        setImportError(null);
+      } else {
+        setExpectedAudioFile(null);
+        setImportError('Keine Audio-Datei im XML referenziert');
+      }
+    } catch {
+      setExpectedAudioFile(null);
+    }
+  }, []);
+
+  // Import dictation from uploaded files
   const handleImport = useCallback(async () => {
-    if (!importPath.trim()) {
-      setImportError('Bitte Pfad zur .dictation Datei angeben');
+    const dictationFile = dictationInputRef.current?.files?.[0];
+    const audioFile = audioInputRef.current?.files?.[0];
+
+    if (!dictationFile) {
+      setImportError('Bitte .dictation Datei auswählen');
+      return;
+    }
+    if (!audioFile) {
+      setImportError(`Bitte Audio-Datei auswählen${expectedAudioFile ? ` (${expectedAudioFile})` : ''}`);
       return;
     }
 
@@ -36,10 +68,13 @@ export default function OfflineDictationPage() {
     setImportSuccess(null);
 
     try {
+      const formData = new FormData();
+      formData.append('xml', dictationFile);
+      formData.append('audio', audioFile);
+
       const res = await fetchWithDbToken('/api/import-dictation', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: importPath.trim() }),
+        body: formData,
       });
 
       if (!res.ok) {
@@ -50,8 +85,10 @@ export default function OfflineDictationPage() {
       const result = await res.json();
       console.log('[Import] Success:', result);
 
-      // Clear path input
-      setImportPath('');
+      // Clear file inputs
+      if (dictationInputRef.current) dictationInputRef.current.value = '';
+      if (audioInputRef.current) audioInputRef.current.value = '';
+      setExpectedAudioFile(null);
 
       // Show success and refresh queue
       setImportSuccess(`Diktat ${result.metadata?.orderNumber || '#' + result.dictationId} importiert`);
@@ -65,7 +102,7 @@ export default function OfflineDictationPage() {
     } finally {
       setIsImporting(false);
     }
-  }, [importPath]);
+  }, [expectedAudioFile]);
 
   // Submit a new dictation
   const handleSubmit = useCallback(async (data: {
@@ -132,24 +169,36 @@ export default function OfflineDictationPage() {
             <div className="flex items-center justify-between flex-wrap gap-2">
               <h2 className="font-medium text-lg">📋 Sekretariat - Diktat-Übersicht</h2>
               
-              {/* Path Import Section */}
+              {/* File Import Section */}
               <div className="flex items-center gap-2 flex-wrap">
                 <input
-                  type="text"
-                  value={importPath}
-                  onChange={(e) => setImportPath(e.target.value)}
-                  placeholder="/pfad/zur/datei.dictation"
-                  className="input input-sm input-bordered w-64 font-mono text-xs"
-                  onKeyDown={(e) => e.key === 'Enter' && handleImport()}
+                  type="file"
+                  ref={dictationInputRef}
+                  accept=".dictation,.xml"
+                  onChange={handleDictationFileChange}
+                  className="file-input file-input-sm file-input-bordered w-44"
+                  title=".dictation Datei"
+                />
+                <input
+                  type="file"
+                  ref={audioInputRef}
+                  accept="audio/*,.wav,.mp3,.ogg,.webm,.m4a"
+                  className="file-input file-input-sm file-input-bordered w-44"
+                  title={expectedAudioFile ? `Audio: ${expectedAudioFile}` : 'Audio-Datei'}
                 />
                 <button
                   onClick={handleImport}
-                  disabled={isImporting || !importPath.trim()}
+                  disabled={isImporting}
                   className="px-3 py-1.5 rounded-lg text-sm font-medium bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200 hover:bg-green-200 dark:hover:bg-green-800 disabled:opacity-50"
                 >
                   {isImporting ? '⏳ Import...' : '📥 Import'}
                 </button>
               </div>
+              {expectedAudioFile && (
+                <div className="text-xs text-gray-500 dark:text-gray-400">
+                  Audio-Datei: <span className="font-mono">{expectedAudioFile}</span>
+                </div>
+              )}
             </div>
             {importError && (
               <div className="mt-2 text-sm text-red-600 dark:text-red-400">

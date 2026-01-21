@@ -97,47 +97,50 @@ export default function OfflineDictationPage() {
     );
   }
 
-  // Regular user view - recording and own queue (same table UI as Sekretariat)
+  // Regular user view - recording and own queue
   return (
-    <div className="flex flex-col h-[calc(100vh-12rem)] space-y-4">
-      {/* Header with tabs */}
-      <div className="card shrink-0">
-        <div className="card-body py-3">
-          <div className="flex items-center justify-between">
-            <h2 className="font-medium text-lg">📋 Meine Diktate</h2>
+    <div className="space-y-4">
+      {/* Tab Navigation */}
+      <div className="card">
+        <div className="card-body py-2">
+          <div className="flex gap-2">
             <button
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${
                 activeTab === 'record'
-                  ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200'
-                  : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200'
+                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200'
+                  : 'hover:bg-gray-100 dark:hover:bg-gray-800'
               }`}
-              onClick={() => setActiveTab(activeTab === 'record' ? 'queue' : 'record')}
+              onClick={() => setActiveTab('record')}
             >
-              {activeTab === 'record' ? '✕ Schließen' : '🎙️ Neue Aufnahme'}
+              🎙️ Neue Aufnahme
+            </button>
+            <button
+              className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${
+                activeTab === 'queue'
+                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200'
+                  : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+              }`}
+              onClick={() => setActiveTab('queue')}
+            >
+              📋 Meine Diktate
             </button>
           </div>
         </div>
       </div>
 
-      {/* Recorder (collapsible) */}
-      {activeTab === 'record' && (
-        <div className="card shrink-0">
-          <OfflineRecorder
-            username={username}
-            onSubmit={handleSubmit}
-          />
-        </div>
-      )}
-
-      {/* Queue - same table view as Sekretariat, but filtered to own dictations */}
-      <div className="flex-1 min-h-0 flex flex-col">
+      {/* Tab Content */}
+      {activeTab === 'record' ? (
+        <OfflineRecorder
+          username={username}
+          onSubmit={handleSubmit}
+        />
+      ) : (
         <DictationQueue
           key={refreshKey}
           username={username}
           canViewAll={false}
-          isSecretariat={true}
         />
-      </div>
+      )}
     </div>
   );
 }

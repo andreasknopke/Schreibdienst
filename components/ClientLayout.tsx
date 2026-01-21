@@ -9,11 +9,11 @@ import UserMenu from '@/components/UserMenu';
 import LoginForm from '@/components/LoginForm';
 
 function LayoutContent({ children }: { children: ReactNode }) {
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, canViewAllDictations } = useAuth();
   const pathname = usePathname();
   
-  // Offline-Seite bekommt volle Breite für Tabellenansicht
-  const isFullWidth = pathname === '/offline';
+  // Sekretariat auf Offline-Seite bekommt volle Breite
+  const isFullWidth = pathname === '/offline' && canViewAllDictations;
 
   if (!isLoggedIn) {
     return (

@@ -23,6 +23,69 @@ import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes max for processing
 
+/**
+ * Parst eine Gradio SSE-Antwort und extrahiert Daten oder Fehler
+ * SSE Format:
+ *   event: complete\ndata: [...] - Erfolg
+ *   event: error\ndata: {...} - Fehler mit Details
+ *   event: error\ndata: null - Fehler ohne Details
+ */
+function parseGradioSSE(sseText: string): { success: boolean; data?: any; error?: string } {
+  // Log the raw SSE response for debugging
+  console.log(`[Worker Gradio SSE] Raw response (${sseText.length} chars):\n${sseText.substring(0, 1000)}`);
+  
+  // Split into lines and parse events
+  const lines = sseText.split('\n');
+  let currentEvent = '';
+  let currentData = '';
+  
+  for (const line of lines) {
+    if (line.startsWith('event:')) {
+      currentEvent = line.substring(6).trim();
+    } else if (line.startsWith('data:')) {
+      currentData = line.substring(5).trim();
+    }
+  }
+  
+  console.log(`[Worker Gradio SSE] Parsed - Event: "${currentEvent}", Data preview: ${currentData.substring(0, 200)}`);
+  
+  // Check for error event
+  if (currentEvent === 'error') {
+    let errorMessage = 'Unknown Gradio error';
+    
+    if (currentData && currentData !== 'null') {
+      try {
+        const errorObj = JSON.parse(currentData);
+        // Gradio error format may vary
+        errorMessage = errorObj.message || errorObj.error || errorObj.detail || JSON.stringify(errorObj);
+      } catch {
+        errorMessage = currentData;
+      }
+    }
+    
+    console.error(`[Worker Gradio SSE] ✗ Error event received: ${errorMessage}`);
+    return { success: false, error: errorMessage };
+  }
+  
+  // Check for complete event with data
+  if (currentEvent === 'complete' || currentData.startsWith('[')) {
+    const dataMatch = sseText.match(/data:\s*(\[.*\])/s);
+    if (dataMatch) {
+      try {
+        const data = JSON.parse(dataMatch[1]);
+        return { success: true, data };
+      } catch (e) {
+        console.error(`[Worker Gradio SSE] ✗ Failed to parse data JSON: ${e}`);
+        return { success: false, error: `JSON parse error: ${e}` };
+      }
+    }
+  }
+  
+  // Unknown format
+  console.error(`[Worker Gradio SSE] ✗ Unexpected response format. Event: "${currentEvent}", Data: "${currentData.substring(0, 100)}"`);
+  return { success: false, error: `Unexpected SSE format: event=${currentEvent}, data=${currentData.substring(0, 100)}` };
+}
+
 // Worker state - avoid concurrent processing
 let isProcessing = false;
 let lastProcessTime = 0;
@@ -596,17 +659,15 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
     
     if (!resultRes.ok) throw new Error(`Gradio result failed (${resultRes.status})`);
     
-    // Parse SSE response
+    // Parse SSE response with improved error handling
     const resultText = await resultRes.text();
+    const sseResult = parseGradioSSE(resultText);
     
-    // SSE format: "event: complete\ndata: [...]"
-    const dataMatch = resultText.match(/data:\s*(\[.*\])/s);
-    if (!dataMatch) {
-      console.error(`[Worker] Gradio response parsing failed. Raw response: ${resultText.substring(0, 500)}`);
-      throw new Error(`Could not parse Gradio response: ${resultText.substring(0, 200)}`);
+    if (!sseResult.success) {
+      throw new Error(`Gradio SSE error: ${sseResult.error}`);
     }
     
-    const resultData = JSON.parse(dataMatch[1]);
+    const resultData = sseResult.data;
     
     // DEBUG: Log the entire resultData structure to understand Gradio's output format
     console.log(`[Worker] Gradio resultData length: ${resultData.length}`);

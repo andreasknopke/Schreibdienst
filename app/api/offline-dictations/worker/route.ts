@@ -459,17 +459,22 @@ async function transcribeAudio(request: NextRequest, audioBlob: Blob, dictationI
     let result2: TranscriptionResult;
     
     if (mode === 'parallel') {
-      // Parallel execution
+      // Parallel execution - both use initialPrompt for consistent results
       const [r1, r2] = await Promise.all([
         transcribeWithProvider(request, audioBlob, provider, initialPrompt, primaryWhisperModel),
-        transcribeWithProvider(request, audioBlob, secondProvider, undefined, dpWhisperModel),
+        transcribeWithProvider(request, audioBlob, secondProvider, initialPrompt, dpWhisperModel),
       ]);
       result1 = r1;
       result2 = r2;
     } else {
       // Sequential execution
       result1 = await transcribeWithProvider(request, audioBlob, provider, initialPrompt, primaryWhisperModel);
-      result2 = await transcribeWithProvider(request, audioBlob, secondProvider, undefined, dpWhisperModel);
+      
+      // Small delay to allow GPU resources to be released
+      console.log(`[Worker DoublePrecision] First transcription complete, starting second...`);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      result2 = await transcribeWithProvider(request, audioBlob, secondProvider, initialPrompt, dpWhisperModel);
     }
     
     // If both providers are whisperx with different models, update provider names for clarity

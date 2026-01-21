@@ -1599,6 +1599,70 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                 </div>
               )}
 
+              {/* Revert/Re-Correct Buttons - Sekretariat Fullscreen */}
+              {selectedDictation.status === 'completed' && (
+                <div className="flex gap-2 flex-wrap">
+                  {!isReverted ? (
+                    <>
+                      {selectedDictation.raw_transcript && (
+                        <button
+                          className="btn btn-sm btn-outline"
+                          onClick={handleRevert}
+                          title="Zur reinen Transkription zurückkehren (vor LLM-Korrektur)"
+                        >
+                          ↩️ Zur Transkription
+                        </button>
+                      )}
+                      <button
+                        className="btn btn-sm btn-primary"
+                        onClick={handleReCorrect}
+                        disabled={isReCorrecting}
+                        title="LLM-Korrektur erneut durchführen (auf aktuellem Text)"
+                      >
+                        {isReCorrecting ? (
+                          <>
+                            <Spinner size={12} className="mr-1" />
+                            Korrigiere...
+                          </>
+                        ) : (
+                          '🔄 Erneut korrigieren'
+                        )}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="btn btn-sm btn-primary flex-1"
+                        onClick={handleReCorrect}
+                        disabled={isReCorrecting}
+                        title="Erneut mit KI korrigieren"
+                      >
+                        {isReCorrecting ? (
+                          <>
+                            <Spinner size={12} className="mr-1" />
+                            Korrigiere...
+                          </>
+                        ) : (
+                          '✨ Neu korrigieren'
+                        )}
+                      </button>
+                      <label 
+                        className="flex items-center gap-1.5 text-xs cursor-pointer select-none px-2 py-1 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                        title="Sprachbefehle wie 'Punkt eins', 'Nächster Punkt', 'Absatz' anwenden"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={applyFormatting}
+                          onChange={(e) => handleApplyFormattingToggle(e.target.checked)}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-gray-600 dark:text-gray-400">Formatierung</span>
+                      </label>
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* Actions */}
               <div className="flex gap-2 pt-2 border-t flex-wrap">
                 {selectedDictation.status === 'completed' && (

@@ -235,6 +235,13 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
         }
       }
       
+      // Log authentication attempt
+      console.log(`[Gradio Auth] ===== LOGIN ATTEMPT =====`);
+      console.log(`[Gradio Auth] URL: ${whisperUrl}/login`);
+      console.log(`[Gradio Auth] Username: "${authUser || '(not set)'}"`);
+      console.log(`[Gradio Auth] Password: "${authPass ? authPass.substring(0, 3) + '***' : '(not set)'}"`);
+      console.log(`[Gradio Auth] ENV vars with WHISPER: ${Object.keys(process.env).filter(k => k.includes('WHISPER')).join(', ') || 'none'}`);
+      
       // Step 1: Login to get session cookie
       const loginBody = `username=${encodeURIComponent(authUser || '')}&password=${encodeURIComponent(authPass || '')}`;
       
@@ -246,14 +253,19 @@ async function transcribeWithWhisperX(file: Blob, filename: string, initialPromp
         body: loginBody,
       });
       
+      console.log(`[Gradio Auth] Login response: ${loginRes.status} ${loginRes.statusText}`);
+      
       if (!loginRes.ok) {
         const errorText = await loginRes.text();
+        console.error(`[Gradio Auth] ✗ Login failed: ${errorText.substring(0, 200)}`);
         throw new Error(`Gradio login failed (${loginRes.status}): ${errorText}`);
       }
       
       // Get session cookie from response
       const setCookieHeader = loginRes.headers.get('set-cookie');
       sessionCookie = setCookieHeader?.split(';')[0] || '';
+      console.log(`[Gradio Auth] ✓ Login successful, cookie: ${sessionCookie.substring(0, 50)}...`);
+      console.log(`[Gradio Auth] ================================`);
       
       // Cache die Session
       gradioSessionCache = {

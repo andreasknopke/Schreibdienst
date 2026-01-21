@@ -563,15 +563,32 @@ async function transcribeWithWhisperX(request: NextRequest, file: Blob, initialP
         }
       }
     }
-        // Login
+    
+    // Log authentication attempt
+    console.log(`[Worker Gradio Auth] ===== LOGIN ATTEMPT =====`);
+    console.log(`[Worker Gradio Auth] URL: ${whisperUrl}/login`);
+    console.log(`[Worker Gradio Auth] Username: "${authUser || '(not set)'}"`);
+    console.log(`[Worker Gradio Auth] Password: "${authPass ? authPass.substring(0, 3) + '***' : '(not set)'}"`);
+    console.log(`[Worker Gradio Auth] ENV vars with WHISPER: ${Object.keys(process.env).filter(k => k.includes('WHISPER')).join(', ') || 'none'}`);
+    
+    // Login
     const loginRes = await fetch(`${whisperUrl}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `username=${encodeURIComponent(authUser || '')}&password=${encodeURIComponent(authPass || '')}`,
     });
     
-    if (!loginRes.ok) throw new Error(`Gradio login failed (${loginRes.status})`);
+    console.log(`[Worker Gradio Auth] Login response: ${loginRes.status} ${loginRes.statusText}`);
+    
+    if (!loginRes.ok) {
+      const errorBody = await loginRes.text();
+      console.error(`[Worker Gradio Auth] ✗ Login failed: ${errorBody.substring(0, 200)}`);
+      throw new Error(`Gradio login failed (${loginRes.status}): ${errorBody.substring(0, 100)}`);
+    }
+    
     const sessionCookie = loginRes.headers.get('set-cookie')?.split(';')[0] || '';
+    console.log(`[Worker Gradio Auth] ✓ Login successful, cookie: ${sessionCookie.substring(0, 50)}...`);
+    console.log(`[Worker Gradio Auth] ================================`);
     
     // Determine the correct file extension based on MIME type
     const mimeToExt: Record<string, string> = {

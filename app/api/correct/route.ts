@@ -991,7 +991,11 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
 
     try {
       // Check if we should use chunked processing for LM Studio
-      if (llmConfig.provider === 'lmstudio' && !previousCorrectedText) {
+      // Exception: Heretic model is large enough (24B) to handle full text like API models
+      const isHereticModel = llmConfig.model === MISTRAL_HERETIC_MODEL;
+      const shouldUseChunking = llmConfig.provider === 'lmstudio' && !isHereticModel && !previousCorrectedText;
+      
+      if (shouldUseChunking) {
         // Split text into chunks for smaller models
         const chunks = splitTextIntoChunks(preprocessedText, LM_STUDIO_MAX_SENTENCES);
         

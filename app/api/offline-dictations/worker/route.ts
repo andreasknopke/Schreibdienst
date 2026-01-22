@@ -1356,7 +1356,11 @@ KRITISCH - AUSGABEFORMAT:
   let result: string;
   
   // For LM Studio: Use chunked processing for longer texts
-  if (llmConfig.provider === 'lmstudio') {
+  // Exception: Heretic model is large enough (24B) to handle full text like API models
+  const isHereticModel = llmConfig.model === MISTRAL_HERETIC_MODEL;
+  const shouldUseChunking = llmConfig.provider === 'lmstudio' && !isHereticModel;
+  
+  if (shouldUseChunking) {
     const chunks = splitTextIntoChunks(text, LM_STUDIO_MAX_SENTENCES);
     
     if (chunks.length > 1) {

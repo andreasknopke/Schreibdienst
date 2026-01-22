@@ -550,3 +550,66 @@ export function preprocessTranscription(text: string, dictionaryEntries?: Dictio
   
   return result;
 }
+
+/**
+ * Remove Markdown formatting from text.
+ * Used to clean up LLM output that may contain unwanted formatting.
+ * 
+ * Removes:
+ * - Bold: **text** or __text__
+ * - Italic: *text* or _text_
+ * - Headers: # ## ### etc.
+ * - Code: `code` or ```code```
+ * - Strikethrough: ~~text~~
+ * - Links: [text](url)
+ * 
+ * @param text - Text potentially containing Markdown formatting
+ * @returns Clean text without Markdown formatting
+ */
+export function removeMarkdownFormatting(text: string): string {
+  if (!text) return text;
+  
+  let result = text;
+  
+  // Remove bold: **text** or __text__
+  result = result.replace(/\*\*([^*]+)\*\*/g, '$1');
+  result = result.replace(/__([^_]+)__/g, '$1');
+  
+  // Remove italic: *text* or _text_ (be careful not to affect underscores in words)
+  // Only match single asterisks not preceded/followed by another asterisk
+  result = result.replace(/(?<!\*)\*(?!\*)([^*]+)(?<!\*)\*(?!\*)/g, '$1');
+  // Only match underscores at word boundaries
+  result = result.replace(/(?<=\s|^)_([^_]+)_(?=\s|$|[.,;:!?])/g, '$1');
+  
+  // Remove strikethrough: ~~text~~
+  result = result.replace(/~~([^~]+)~~/g, '$1');
+  
+  // Remove inline code: `code`
+  result = result.replace(/`([^`]+)`/g, '$1');
+  
+  // Remove code blocks: ```code```
+  result = result.replace(/```[\s\S]*?```/g, (match) => {
+    // Extract the code content without the backticks
+    return match.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
+  });
+  
+  // Remove headers: # ## ### #### ##### ###### at start of lines
+  result = result.replace(/^#{1,6}\s+/gm, '');
+  
+  // Remove links but keep text: [text](url) → text
+  result = result.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  
+  // Remove reference links: [text][ref] → text
+  result = result.replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1');
+  
+  // Remove images: ![alt](url) → (remove completely or keep alt)
+  result = result.replace(/!\[([^\]]*)\]\([^)]+\)/g, '');
+  
+  // Clean up multiple spaces that may have been created
+  result = result.replace(/  +/g, ' ');
+  
+  // Clean up multiple newlines
+  result = result.replace(/\n{3,}/g, '\n\n');
+  
+  return result.trim();
+}

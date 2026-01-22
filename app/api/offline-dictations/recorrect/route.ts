@@ -13,7 +13,7 @@ import {
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
-import { preprocessTranscription } from '@/lib/textFormatting';
+import { preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFormatting';
 import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 
 export const runtime = 'nodejs';
@@ -247,7 +247,10 @@ async function doublePrecisionMerge(
     finalText = result1.text;
   }
   
-  console.log(`[ReCorrect DoublePrecision] ✓ Merged text length: ${finalText.length} chars`);
+  // Remove any Markdown formatting that the LLM may have added despite instructions
+  finalText = removeMarkdownFormatting(finalText);
+  
+  console.log(`[ReCorrect DoublePrecision] ✓ Merged text length: ${finalText.length} chars (after Markdown cleanup)`);
   
   // Log double precision correction
   try {

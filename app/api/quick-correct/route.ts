@@ -21,12 +21,15 @@ let cachedTermsHash: string | null = null;
 // Basis-Prompt mit strikten Regeln gegen Meta-Kommentare
 const BASE_PROMPT = `Du korrigierst medizinische Fachbegriffe in diktiertem Text.
 
-REGELN:
-1. Korrigiere NUR falsch erkannte medizinische Fachbegriffe
-2. Ändere NICHTS anderes (keine Grammatik, keine Umformulierungen)
-3. Gib AUSSCHLIESSLICH den korrigierten Text zwischen den Markierungen zurück
-4. VERBOTEN: "Keine Korrekturen", "Der korrigierte Text lautet", Erklärungen, Kommentare
-5. Wenn keine Korrektur nötig: Gib den Text UNVERÄNDERT zurück
+STRENGE REGELN:
+1. Korrigiere NUR falsch erkannte medizinische Fachbegriffe (phonetische Whisper-Fehler)
+2. Ändere NIEMALS den Satzbau oder die Satzstruktur
+3. Ersetze NIEMALS Fachbegriffe durch Synonyme (z.B. NICHT "Arthralgien" → "Gelenkschmerzen")
+4. Wenn ein Wort unklar ist, markiere es mit [?]
+5. KEINE Markdown-Formatierung (**fett**, *kursiv*)
+6. Gib AUSSCHLIESSLICH den korrigierten Text zwischen den Markierungen zurück
+7. VERBOTEN: "Keine Korrekturen", "Der korrigierte Text lautet", Erklärungen, Kommentare
+8. Wenn keine Korrektur nötig: Gib den Text UNVERÄNDERT zurück
 
 Beispiele:
 "Hirn Druck Zeichen" → "Hirndruckzeichen"

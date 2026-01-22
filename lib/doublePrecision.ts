@@ -153,6 +153,13 @@ Korrigiere phonetisch ähnliche Namen zu diesen korrekten Schreibweisen.`;
 
   return `Du bist ein medizinischer Transkriptions-Experte. Zwei Whisper-Modelle haben dasselbe Diktat transkribiert. Wähle bei jedem Unterschied die KORREKTE Version.${dictionarySection}${contextSection}
 
+DEINE AUFGABE - NUR DIESE KORREKTUREN:
+• Korrigiere AUSSCHLIESSLICH Whisper-Fehler (phonetische Fehler, Verhörer)
+• Korrigiere Rechtschreibung und Zeichensetzung
+• Ändere NIEMALS den Satzbau oder die Satzstruktur
+• Ersetze NIEMALS medizinische Fachbegriffe durch Synonyme
+• Wenn ein Wort in beiden Versionen unklar/unverständlich ist, markiere es mit [?]
+
 TRANSKRIPTION A (${merged.provider1}):
 ${merged.text1}
 
@@ -179,7 +186,13 @@ ENTSCHEIDUNGSREGELN für <<<A: ... | B: ...>>>:
    INNERE: Gastroskopie, Koloskopie, Sonographie, Aszites, Hepatomegalie, Splenomegalie
    GYNÄKOLOGIE: Hysterektomie, Adnexe, Zervix, Endometriose, Mammographie
 
-AUSGABE: NUR den korrigierten Text. KEINE Erklärungen.
+VERBOTEN:
+• KEINE Änderung des Satzbaus oder der Wortreihenfolge
+• KEINE Ersetzung von Fachbegriffen durch Synonyme (z.B. NICHT "Arthralgien" → "Gelenkschmerzen")
+• KEINE Markdown-Formatierung (**fett**, *kursiv*, # Überschriften)
+• KEINE Erklärungen oder Kommentare
+
+AUSGABE: NUR den korrigierten Text. Reiner, unformatierter Fließtext.
 
 FINALER TEXT:`;
 }

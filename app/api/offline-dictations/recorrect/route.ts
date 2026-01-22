@@ -97,7 +97,7 @@ async function getLLMConfig(request: NextRequest): Promise<{ provider: string; m
   if (provider === 'lmstudio') {
     return {
       provider: 'lmstudio',
-      model: process.env.LLM_STUDIO_MODEL || 'local-model'
+      model: runtimeConfig.lmStudioModelOverride || process.env.LLM_STUDIO_MODEL || 'local-model'
     };
   }
   
@@ -328,7 +328,7 @@ REGELN:
 2. Korrigiere falsch transkribierte medizinische Fachbegriffe
 3. Wandle ausgeschriebene Zahlen in Ziffern um: "acht Millimeter" → "8 mm"
 4. Behalte den Stil des Diktierenden bei
-5. Gib AUSSCHLIESSLICH den korrigierten Text zurück - keine Erklärungen!${dictionaryPromptSection}${contextPromptSection}${promptAddition ? `\n\nZUSÄTZLICH:\n${promptAddition}` : ''}`;
+5. Gib AUSSCHLIESSLICH den korrigierten Text zurück - keine Erklärungen!${dictionaryPromptSection}${contextPromptSection}${promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : ''}`;
 
   const userMessage = `<<<DIKTAT_START>>>\n${text}\n<<<DIKTAT_ENDE>>>`;
   

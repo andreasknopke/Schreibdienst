@@ -1227,7 +1227,7 @@ Korrigiere phonetisch ähnliche Namen zu diesen korrekten Schreibweisen.`;
   }
   
   // Combine all prompt additions
-  const promptSuffix = (dictionaryPromptSection + contextPromptSection + (promptAddition ? `\n\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : '')).trim();
+  const promptSuffix = (dictionaryPromptSection + contextPromptSection + (promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : '')).trim();
   
   // Full system prompt for OpenAI or single-chunk processing
   const systemPrompt = `Du bist ein medizinischer Diktat-Korrektur-Assistent. Deine EINZIGE Aufgabe ist die sprachliche Korrektur diktierter medizinischer Texte.
@@ -1429,7 +1429,7 @@ async function getLLMConfig(request: NextRequest) {
       provider: 'lmstudio' as const,
       baseUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
       apiKey: 'lm-studio',
-      model: process.env.LLM_STUDIO_MODEL || 'local-model'
+      model: runtimeConfig.lmStudioModelOverride || process.env.LLM_STUDIO_MODEL || 'local-model'
     };
   }
   

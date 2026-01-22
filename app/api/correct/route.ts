@@ -731,7 +731,7 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
     
     // Note: Dictionary is now applied programmatically above, so we don't need it in the prompt
     // for deterministic corrections. The LLM section above is for catching similar words.
-    const promptSuffix = (dictionaryPromptSection + patientNamePromptSection + (promptAddition ? `\n\nZUSÄTZLICHE ANWEISUNGEN:\n${promptAddition}` : '')).trim();
+    const promptSuffix = (dictionaryPromptSection + patientNamePromptSection + (promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : '')).trim();
     
     // Combine system prompt with dictionary and custom additions
     const enhancedSystemPrompt = promptSuffix 

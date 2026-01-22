@@ -16,7 +16,7 @@ async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; 
       provider: 'lmstudio',
       baseUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
       apiKey: 'lm-studio',
-      model: process.env.LLM_STUDIO_MODEL || 'local-model'
+      model: runtimeConfig.lmStudioModelOverride || process.env.LLM_STUDIO_MODEL || 'local-model'
     };
   }
   

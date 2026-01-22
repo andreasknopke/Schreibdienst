@@ -524,8 +524,8 @@ async function transcribeAudio(
     const mode = runtimeConfig.doublePrecisionMode || 'parallel';
     // Use specific whisper model for double precision if configured and second provider is whisperx
     const dpWhisperModel = secondProvider === 'whisperx' ? runtimeConfig.doublePrecisionWhisperModel : undefined;
-    // Primary whisper model (used when primary provider is whisperx)
-    const primaryWhisperModel = provider === 'whisperx' ? runtimeConfig.whisperModel : undefined;
+    // Primary whisper model (used when primary provider is whisperx) - use OFFLINE model for offline worker
+    const primaryWhisperModel = provider === 'whisperx' ? runtimeConfig.whisperOfflineModel : undefined;
     
     // Detect if we're comparing two different WhisperX models
     const isTwoWhisperModels = provider === 'whisperx' && secondProvider === 'whisperx';

@@ -372,6 +372,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [autoScrollMitlesen, setAutoScrollMitlesen] = useState(false); // User controls auto-scroll
   const [parsedSegments, setParsedSegments] = useState<TranscriptSegment[]>([]);
   const mitlesenRef = useRef<HTMLDivElement>(null);
+  const [rawTranscriptCollapsed, setRawTranscriptCollapsed] = useState(false); // Collapse raw transcript panel
   
   // Selected dictation details - loaded on demand to avoid fetching large TEXT fields in list
   const [selectedDictationDetails, setSelectedDictationDetails] = useState<Dictation | null>(null);
@@ -1531,20 +1532,30 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                     </div>
                   )}
                   
-                  {/* Mitlesen Panel */}
+                  {/* Mitlesen Panel - einklappbar */}
                   {showMitlesen && parsedSegments.length > 0 && (
                     <div 
                       ref={mitlesenRef}
-                      className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 max-h-48 overflow-auto border border-yellow-200 dark:border-yellow-800"
+                      className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 border border-yellow-200 dark:border-yellow-800"
                     >
-                      <div className="text-sm font-medium mb-2 flex items-center gap-2">
-                        📖 Originaltranskript (Mitlesen)
-                        <span className="text-xs text-gray-500">
-                          - Klicke auf ein Wort zum Springen
+                      <div 
+                        className="text-sm font-medium flex items-center justify-between cursor-pointer select-none"
+                        onClick={() => setRawTranscriptCollapsed(!rawTranscriptCollapsed)}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`transform transition-transform ${rawTranscriptCollapsed ? '' : 'rotate-90'}`}>▶</span>
+                          📖 Originaltranskript (Mitlesen)
+                          <span className="text-xs text-gray-500">
+                            - Klicke auf ein Wort zum Springen
+                          </span>
+                        </div>
+                        <span className="text-xs text-gray-400">
+                          {rawTranscriptCollapsed ? '(eingeklappt)' : '(einklappen)'}
                         </span>
                       </div>
-                      <div className="text-sm leading-relaxed">
-                        {parsedSegments.map((segment, segIdx) => (
+                      {!rawTranscriptCollapsed && (
+                        <div className="text-sm leading-relaxed mt-2 max-h-48 overflow-auto">
+                          {parsedSegments.map((segment, segIdx) => (
                           <span key={segIdx}>
                             {segment.words ? (
                               segment.words.map((word, wordIdx) => {
@@ -1573,23 +1584,19 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             )}
                           </span>
                         ))}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   )}
                   
-                  {/* View Toggle */}
+                  {/* View Toggle - nur Diff-Button als Toggle */}
                   <div className="flex items-center gap-2">
                     <button
-                      className={`btn btn-xs ${!showDiffView ? 'btn-primary' : 'btn-outline'}`}
-                      onClick={() => setShowDiffView(false)}
-                    >
-                      ✏️ Bearbeiten
-                    </button>
-                    <button
                       className={`btn btn-xs ${showDiffView ? 'btn-primary' : 'btn-outline'}`}
-                      onClick={() => setShowDiffView(true)}
+                      onClick={() => setShowDiffView(!showDiffView)}
+                      title="Zeigt Unterschiede zwischen Original und KI-Korrektur"
                     >
-                      🔍 Diff-Ansicht
+                      🔍 {showDiffView ? 'Diff aus' : 'Diff-Ansicht'}
                     </button>
                   </div>
                   

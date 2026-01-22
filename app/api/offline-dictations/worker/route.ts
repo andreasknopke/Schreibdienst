@@ -1385,9 +1385,12 @@ async function getLLMConfig(request: NextRequest) {
 
 // Function to clean LLM output from prompt artifacts
 function cleanLLMOutput(text: string): string {
-  if (!text) return text;
+  if (!text) return '';
   
-  let cleaned = text
+  // Ensure text is a string
+  const textStr = typeof text === 'string' ? text : String(text);
+  
+  let cleaned = textStr
     // Remove marker tags
     .replace(/<<<DIKTAT_START>>>/g, '')
     .replace(/<<<DIKTAT_ENDE>>>/g, '')
@@ -1517,7 +1520,17 @@ async function callLLM(
     throw new Error(`LLM API error (${res.status}): ${errorText.substring(0, 100)}`);
   }
   const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() || '';
+  const content = data.choices?.[0]?.message?.content;
+  // Ensure content is a string before calling .trim()
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+  // If content is an array (some LLM APIs return this), join it
+  if (Array.isArray(content)) {
+    return content.map(c => typeof c === 'string' ? c : JSON.stringify(c)).join('').trim();
+  }
+  // Fallback: convert to string if possible
+  return content ? String(content).trim() : '';
 }
 
 // POST: Trigger worker to process pending dictations

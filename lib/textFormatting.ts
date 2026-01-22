@@ -567,9 +567,10 @@ export function preprocessTranscription(text: string, dictionaryEntries?: Dictio
  * @returns Clean text without Markdown formatting
  */
 export function removeMarkdownFormatting(text: string): string {
-  if (!text) return text;
+  if (!text) return '';
   
-  let result = text;
+  // Ensure text is a string
+  let result = typeof text === 'string' ? text : String(text);
   
   // Remove bold: **text** or __text__
   result = result.replace(/\*\*([^*]+)\*\*/g, '$1');

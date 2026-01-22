@@ -61,9 +61,13 @@ function levenshteinDistance(str1: string, str2: string): number {
 export function calculateChangeScore(original: string, corrected: string): number {
   if (!original || !corrected) return 0;
   
+  // Ensure both parameters are strings
+  const originalStr = typeof original === 'string' ? original : String(original || '');
+  const correctedStr = typeof corrected === 'string' ? corrected : String(corrected || '');
+  
   // Normalisiere Texte (entferne überschüssige Whitespaces)
-  const normalizedOriginal = original.trim().replace(/\s+/g, ' ');
-  const normalizedCorrected = corrected.trim().replace(/\s+/g, ' ');
+  const normalizedOriginal = originalStr.trim().replace(/\s+/g, ' ');
+  const normalizedCorrected = correctedStr.trim().replace(/\s+/g, ' ');
   
   if (normalizedOriginal === normalizedCorrected) return 0;
   if (normalizedOriginal.length === 0) return 100;

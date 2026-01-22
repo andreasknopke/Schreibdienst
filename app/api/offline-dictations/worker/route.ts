@@ -1343,6 +1343,9 @@ KRITISCH - AUSGABEFORMAT:
   // Use robust cleanup function for final result
   let cleaned = cleanLLMOutput(result);
   
+  // Remove any Markdown formatting that the LLM may have added despite instructions
+  cleaned = removeMarkdownFormatting(cleaned);
+  
   // Note: Dictionary corrections are already applied in preprocessTranscription()
   // No need for cleanupText here anymore
   return cleaned;

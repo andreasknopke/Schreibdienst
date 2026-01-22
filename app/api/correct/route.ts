@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { loadDictionaryWithRequest } from '@/lib/dictionaryDb';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { calculateChangeScore } from '@/lib/changeScore';
-import { preprocessTranscription } from '@/lib/textFormatting';
+import { preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFormatting';
 
 export const runtime = 'nodejs';
 
@@ -288,6 +288,9 @@ function cleanLLMOutput(text: string, originalChunk?: string): string | null {
       (cleaned.startsWith('„') && cleaned.endsWith('"'))) {
     cleaned = cleaned.slice(1, -1).trim();
   }
+  
+  // Remove any Markdown formatting that the LLM may have added despite instructions
+  cleaned = removeMarkdownFormatting(cleaned);
   
   return cleaned;
 }

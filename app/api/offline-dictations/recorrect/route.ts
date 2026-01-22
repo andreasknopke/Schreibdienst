@@ -395,6 +395,9 @@ REGELN:
     }
   }
   
+  // Remove any Markdown formatting that the LLM may have added despite instructions
+  correctedText = removeMarkdownFormatting(correctedText);
+  
   return correctedText;
 }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
+import { removeMarkdownFormatting } from '@/lib/textFormatting';
 
 export const runtime = 'nodejs';
 
@@ -257,6 +258,9 @@ export async function POST(request: NextRequest) {
     
     // Bereinige Output (manchmal fügt das Modell Zusätze hinzu)
     corrected = corrected.split('\n')[0].trim();
+    
+    // Remove any Markdown formatting that the LLM may have added despite instructions
+    corrected = removeMarkdownFormatting(corrected);
     
     // Wenn leer → Original zurück
     if (!corrected) {

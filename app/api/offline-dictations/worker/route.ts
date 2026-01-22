@@ -1143,11 +1143,14 @@ Wende diese Korrekturen an, wenn du ein Wort findest das gleich oder phonetisch 
   // Build context section for patient and doctor names
   let contextPromptSection = '';
   const contextParts: string[] = [];
-  if (patientName && patientName.trim()) {
-    contextParts.push(`Patient: ${patientName}`);
+  // Ensure patientName and patientDob are strings before calling .trim()
+  const patientNameStr = typeof patientName === 'string' ? patientName : '';
+  const patientDobStr = typeof patientDob === 'string' ? patientDob : '';
+  if (patientNameStr && patientNameStr.trim()) {
+    contextParts.push(`Patient: ${patientNameStr}`);
   }
-  if (patientDob && patientDob.trim()) {
-    contextParts.push(`Geb.: ${patientDob}`);
+  if (patientDobStr && patientDobStr.trim()) {
+    contextParts.push(`Geb.: ${patientDobStr}`);
   }
   if (doctorName) {
     contextParts.push(`Arzt: Dr. ${doctorName}`);

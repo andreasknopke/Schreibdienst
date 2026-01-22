@@ -24,6 +24,49 @@ export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes max for processing
 
 /**
+ * GPU Memory Warmup - Loads a tiny model in LM Studio to free GPU memory before Whisper
+ * 
+ * When both WhisperX and LM Studio are used, the larger LM Studio model can block GPU memory.
+ * By loading a tiny model (google/gemma-3-1b) first, LM Studio releases the GPU memory,
+ * allowing Whisper to load without CUDA OUT OF MEMORY errors.
+ */
+async function warmupGpuForWhisper(): Promise<void> {
+  const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
+  const warmupModel = 'google/gemma-3-1b';
+  
+  console.log(`[Worker GPU Warmup] Sending warmup request to LM Studio with tiny model: ${warmupModel}`);
+  
+  try {
+    const res = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: warmupModel,
+        messages: [
+          { role: 'user', content: 'initialize' }
+        ],
+        max_tokens: 1,
+        temperature: 0,
+      }),
+    });
+    
+    if (res.ok) {
+      console.log(`[Worker GPU Warmup] ✓ Warmup successful - GPU memory should be freed`);
+    } else {
+      const errorText = await res.text();
+      console.warn(`[Worker GPU Warmup] Warmup returned ${res.status}: ${errorText.substring(0, 100)}`);
+    }
+  } catch (err: any) {
+    console.warn(`[Worker GPU Warmup] Warmup failed (non-fatal): ${err.message}`);
+  }
+  
+  // Small delay to allow GPU memory to be released
+  await new Promise(resolve => setTimeout(resolve, 500));
+}
+
+/**
  * Parst eine Gradio SSE-Antwort und extrahiert Daten oder Fehler
  * SSE Format:
  *   event: complete\ndata: [...] - Erfolg
@@ -494,6 +537,16 @@ async function transcribeAudio(
 ): Promise<{ text: string; segments?: any[] }> {
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
   const provider = runtimeConfig.transcriptionProvider;
+  
+  // GPU Warmup: When using WhisperX with LM Studio, load a tiny model first to free GPU memory
+  // This prevents CUDA OUT OF MEMORY errors when switching between LLM and Whisper
+  // Note: This is done ONCE at the start, NOT between double precision transcriptions
+  const needsWhisper = provider === 'whisperx' || provider === 'fast_whisper' || 
+    (runtimeConfig.doublePrecisionEnabled && runtimeConfig.doublePrecisionSecondProvider === 'whisperx');
+  const usesLmStudio = runtimeConfig.llmProvider === 'lmstudio';
+  if (needsWhisper && usesLmStudio) {
+    await warmupGpuForWhisper();
+  }
   
   // Extract doctor name from username
   const doctorName = username ? extractDoctorName(username) : undefined;

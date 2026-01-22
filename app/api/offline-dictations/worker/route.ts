@@ -23,6 +23,9 @@ import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult,
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes max for processing
 
+// Special model that needs specific configuration (12000 context, temperature=0)
+const MISTRAL_HERETIC_MODEL = 'mistral-small-3.2-24b-instruct-2506-text-only-heretic';
+
 /**
  * GPU Memory Warmup - Loads a tiny model in LM Studio to free GPU memory before Whisper
  * 
@@ -448,7 +451,12 @@ async function doublePrecisionMerge(
     modelName = process.env.LLM_STUDIO_MODEL || 'local-model';
     modelProvider = 'lmstudio';
     
-    console.log(`[Worker DoublePrecision] Using LM Studio for merge: ${lmStudioUrl}, model: ${modelName}`);
+    // Special handling for mistral-small heretic model: 12000 context, temperature=0
+    const isHereticModel = modelName === MISTRAL_HERETIC_MODEL;
+    const temperature = isHereticModel ? 0 : 0.1;
+    const maxTokens = isHereticModel ? 12000 : undefined;
+    
+    console.log(`[Worker DoublePrecision] Using LM Studio for merge: ${lmStudioUrl}, model: ${modelName}${isHereticModel ? ' (heretic config: temp=0, ctx=12000)' : ''}`);
     
     try {
       const res = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
@@ -462,7 +470,8 @@ async function doublePrecisionMerge(
             { role: 'system', content: mergePrompt },
             { role: 'user', content: 'Erstelle den finalen Text.' }
           ],
-          temperature: 0.1,
+          temperature,
+          ...(maxTokens && { max_tokens: maxTokens }),
         }),
       });
       
@@ -1553,11 +1562,14 @@ async function callLLM(
     headers['Authorization'] = `Bearer ${config.apiKey}`;
   }
   
+  // Special handling for mistral-small heretic model: 12000 context, temperature=0
+  const isHereticModel = config.model === MISTRAL_HERETIC_MODEL;
+  
   const body: any = {
     model: config.model,
     messages,
-    temperature: 0.3,
-    max_tokens: 2000,
+    temperature: isHereticModel ? 0 : 0.3,
+    max_tokens: isHereticModel ? 12000 : 2000,
   };
   
   if (options.jsonMode && config.provider === 'openai') {

@@ -6,6 +6,9 @@ import { preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFor
 
 export const runtime = 'nodejs';
 
+// Special model that needs specific configuration (12000 context, temperature=0)
+const MISTRAL_HERETIC_MODEL = 'mistral-small-3.2-24b-instruct-2506-text-only-heretic';
+
 // LLM Provider configuration
 type LLMProvider = 'openai' | 'lmstudio' | 'mistral';
 
@@ -308,7 +311,11 @@ async function callLLM(
   messages: { role: string; content: string }[],
   options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}
 ): Promise<{ content: string; tokens?: { input: number; output: number } }> {
-  const { temperature = 0.3, maxTokens = 2000, jsonMode = false } = options;
+  // Special handling for mistral-small heretic model: 12000 context, temperature=0
+  const isHereticModel = config.model === MISTRAL_HERETIC_MODEL;
+  const temperature = isHereticModel ? 0 : (options.temperature ?? 0.3);
+  const maxTokens = isHereticModel ? 12000 : (options.maxTokens ?? 2000);
+  const jsonMode = options.jsonMode ?? false;
   
   const fullUrl = `${config.baseUrl}/v1/chat/completions`;
   
@@ -316,7 +323,7 @@ async function callLLM(
   console.log(`[LLM] Provider: ${config.provider}`);
   console.log(`[LLM] Base URL: ${config.baseUrl}`);
   console.log(`[LLM] Full URL: ${fullUrl}`);
-  console.log(`[LLM] Model: ${config.model}`);
+  console.log(`[LLM] Model: ${config.model}${isHereticModel ? ' (heretic config: temp=0, ctx=12000)' : ''}`);
   console.log(`[LLM] Environment LLM_STUDIO_URL: ${process.env.LLM_STUDIO_URL || '(not set)'}`);
   console.log(`[LLM] Temperature: ${temperature}, MaxTokens: ${maxTokens}`);
   

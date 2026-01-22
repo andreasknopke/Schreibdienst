@@ -19,6 +19,9 @@ import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult,
 export const runtime = 'nodejs';
 export const maxDuration = 120; // 2 minutes max
 
+// Special model that needs specific configuration (12000 context, temperature=0)
+const MISTRAL_HERETIC_MODEL = 'mistral-small-3.2-24b-instruct-2506-text-only-heretic';
+
 /**
  * Parse Double Precision log to extract both transcriptions
  * Format:
@@ -217,7 +220,12 @@ async function doublePrecisionMerge(
     modelName = process.env.LLM_STUDIO_MODEL || 'local-model';
     modelProvider = 'lmstudio';
     
-    console.log(`[ReCorrect DoublePrecision] Using LM Studio: ${lmStudioUrl}, model: ${modelName}`);
+    // Special handling for mistral-small heretic model: 12000 context, temperature=0
+    const isHereticModel = modelName === MISTRAL_HERETIC_MODEL;
+    const temperature = isHereticModel ? 0 : 0.1;
+    const maxTokens = isHereticModel ? 12000 : undefined;
+    
+    console.log(`[ReCorrect DoublePrecision] Using LM Studio: ${lmStudioUrl}, model: ${modelName}${isHereticModel ? ' (heretic config: temp=0, ctx=12000)' : ''}`);
     
     const res = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
       method: 'POST',
@@ -228,7 +236,8 @@ async function doublePrecisionMerge(
           { role: 'system', content: mergePrompt },
           { role: 'user', content: 'Erstelle den finalen Text.' }
         ],
-        temperature: 0.1,
+        temperature,
+        ...(maxTokens && { max_tokens: maxTokens }),
       }),
     });
     
@@ -376,6 +385,11 @@ REGELN:
   } else if (llmConfig.provider === 'lmstudio') {
     const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
     
+    // Special handling for mistral-small heretic model: 12000 context, temperature=0
+    const isHereticModel = llmConfig.model === MISTRAL_HERETIC_MODEL;
+    const temperature = isHereticModel ? 0 : 0.1;
+    const maxTokens = isHereticModel ? 12000 : undefined;
+    
     const res = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -385,7 +399,8 @@ REGELN:
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage }
         ],
-        temperature: 0.1,
+        temperature,
+        ...(maxTokens && { max_tokens: maxTokens }),
       }),
     });
     

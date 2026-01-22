@@ -4,6 +4,9 @@ import { removeMarkdownFormatting } from '@/lib/textFormatting';
 
 export const runtime = 'nodejs';
 
+// Special model that needs specific configuration (12000 context, temperature=0)
+const MISTRAL_HERETIC_MODEL = 'mistral-small-3.2-24b-instruct-2506-text-only-heretic';
+
 /**
  * Schnelle Fachwort-Korrektur mit LM Studio (lokal)
  * Korrigiert nur medizinische Fachbegriffe, keine Grammatik/Satzbau
@@ -143,6 +146,10 @@ export async function POST(request: NextRequest) {
     }, 30000);
 
     try {
+      // Special handling for mistral-small heretic model: temperature=0
+      const isHereticModel = lmStudioModel === MISTRAL_HERETIC_MODEL;
+      const temperature = isHereticModel ? 0 : 0.1;
+      
       if (useCompletionApi) {
         // Completion API - effizienter, kein Chat-Overhead
         const prompt = `${cachedSystemPrompt}\n\n${INPUT_MARKER_START}${text}${INPUT_MARKER_END}\n\nKorrigierter Text:`;
@@ -155,7 +162,7 @@ export async function POST(request: NextRequest) {
           body: JSON.stringify({
             model: lmStudioModel,
             prompt,
-            temperature: 0.1,
+            temperature,
             max_tokens: 200,
             stop: ['\n\n', INPUT_MARKER_START, 'Input:'],
             cache_prompt: true,
@@ -177,7 +184,7 @@ export async function POST(request: NextRequest) {
               { role: 'system', content: cachedSystemPrompt },
               { role: 'user', content: userContent }
             ],
-            temperature: 0.1,
+            temperature,
             max_tokens: 200,
             cache_prompt: true,
           }),

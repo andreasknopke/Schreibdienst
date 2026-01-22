@@ -19,8 +19,8 @@ import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult,
 export const runtime = 'nodejs';
 export const maxDuration = 120; // 2 minutes max
 
-// Special model that needs specific configuration (12000 context, temperature=0)
-const MISTRAL_HERETIC_MODEL = 'mistral-small-3.2-24b-instruct-2506-text-only-heretic';
+// LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
+const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);
 
 /**
  * Parse Double Precision log to extract both transcriptions
@@ -217,15 +217,15 @@ async function doublePrecisionMerge(
     finalText = data.choices?.[0]?.message?.content?.trim() || result1.text;
   } else if (llmProvider === 'lmstudio') {
     const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
-    modelName = process.env.LLM_STUDIO_MODEL || 'local-model';
+    // Use session override if available
+    modelName = runtimeConfig.lmStudioModelOverride || process.env.LLM_STUDIO_MODEL || 'local-model';
     modelProvider = 'lmstudio';
     
-    // Special handling for mistral-small heretic model: 12000 context, temperature=0
-    const isHereticModel = modelName === MISTRAL_HERETIC_MODEL;
-    const temperature = isHereticModel ? 0 : 0.1;
-    const maxTokens = isHereticModel ? 12000 : undefined;
+    // LM Studio uses fixed max tokens
+    const temperature = 0.1;
+    const maxTokens = LM_STUDIO_MAX_TOKENS;
     
-    console.log(`[ReCorrect DoublePrecision] Using LM Studio: ${lmStudioUrl}, model: ${modelName}${isHereticModel ? ' (heretic config: temp=0, ctx=12000)' : ''}`);
+    console.log(`[ReCorrect DoublePrecision] Using LM Studio: ${lmStudioUrl}, model: ${modelName}`);
     
     const res = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
       method: 'POST',
@@ -237,7 +237,7 @@ async function doublePrecisionMerge(
           { role: 'user', content: 'Erstelle den finalen Text.' }
         ],
         temperature,
-        ...(maxTokens && { max_tokens: maxTokens }),
+        max_tokens: maxTokens,
       }),
     });
     
@@ -385,10 +385,9 @@ REGELN:
   } else if (llmConfig.provider === 'lmstudio') {
     const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
     
-    // Special handling for mistral-small heretic model: 12000 context, temperature=0
-    const isHereticModel = llmConfig.model === MISTRAL_HERETIC_MODEL;
-    const temperature = isHereticModel ? 0 : 0.1;
-    const maxTokens = isHereticModel ? 12000 : undefined;
+    // LM Studio uses fixed max tokens
+    const temperature = 0.1;
+    const maxTokens = LM_STUDIO_MAX_TOKENS;
     
     const res = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
       method: 'POST',
@@ -400,7 +399,7 @@ REGELN:
           { role: 'user', content: userMessage }
         ],
         temperature,
-        ...(maxTokens && { max_tokens: maxTokens }),
+        max_tokens: maxTokens,
       }),
     });
     

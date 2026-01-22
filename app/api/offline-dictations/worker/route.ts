@@ -23,8 +23,8 @@ import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult,
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 minutes max for processing
 
-// Special model that needs specific configuration (12000 context, temperature=0)
-const MISTRAL_HERETIC_MODEL = 'mistral-small-3.2-24b-instruct-2506-text-only-heretic';
+// LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
+const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);
 
 /**
  * GPU Memory Warmup - Loads a tiny model in LM Studio to free GPU memory before Whisper
@@ -448,15 +448,15 @@ async function doublePrecisionMerge(
   } else if (llmProvider === 'lmstudio') {
     // LM Studio support for merge
     const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
-    modelName = process.env.LLM_STUDIO_MODEL || 'local-model';
+    // Use session override if available
+    modelName = runtimeConfig.lmStudioModelOverride || process.env.LLM_STUDIO_MODEL || 'local-model';
     modelProvider = 'lmstudio';
     
-    // Special handling for mistral-small heretic model: 12000 context, temperature=0
-    const isHereticModel = modelName === MISTRAL_HERETIC_MODEL;
-    const temperature = isHereticModel ? 0 : 0.1;
-    const maxTokens = isHereticModel ? 12000 : undefined;
+    // LM Studio uses fixed max tokens
+    const temperature = 0.1;
+    const maxTokens = LM_STUDIO_MAX_TOKENS;
     
-    console.log(`[Worker DoublePrecision] Using LM Studio for merge: ${lmStudioUrl}, model: ${modelName}${isHereticModel ? ' (heretic config: temp=0, ctx=12000)' : ''}`);
+    console.log(`[Worker DoublePrecision] Using LM Studio for merge: ${lmStudioUrl}, model: ${modelName}`);
     
     try {
       const res = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
@@ -471,7 +471,7 @@ async function doublePrecisionMerge(
             { role: 'user', content: 'Erstelle den finalen Text.' }
           ],
           temperature,
-          ...(maxTokens && { max_tokens: maxTokens }),
+          max_tokens: maxTokens,
         }),
       });
       
@@ -1355,10 +1355,8 @@ KRITISCH - AUSGABEFORMAT:
 
   let result: string;
   
-  // For LM Studio: Use chunked processing for longer texts
-  // Exception: Heretic model is large enough (24B) to handle full text like API models
-  const isHereticModel = llmConfig.model === MISTRAL_HERETIC_MODEL;
-  const shouldUseChunking = llmConfig.provider === 'lmstudio' && !isHereticModel;
+  // For LM Studio: Use chunked processing for longer texts unless API-Mode is enabled
+  const shouldUseChunking = llmConfig.provider === 'lmstudio' && !runtimeConfig.lmStudioUseApiMode;
   
   if (shouldUseChunking) {
     const chunks = splitTextIntoChunks(text, LM_STUDIO_MAX_SENTENCES);
@@ -1566,14 +1564,14 @@ async function callLLM(
     headers['Authorization'] = `Bearer ${config.apiKey}`;
   }
   
-  // Special handling for mistral-small heretic model: 12000 context, temperature=0
-  const isHereticModel = config.model === MISTRAL_HERETIC_MODEL;
+  // LM-Studio uses fixed max tokens, API providers use default
+  const isLMStudio = config.provider === 'lmstudio';
   
   const body: any = {
     model: config.model,
     messages,
-    temperature: isHereticModel ? 0 : 0.3,
-    max_tokens: isHereticModel ? 12000 : 2000,
+    temperature: 0.3,
+    max_tokens: isLMStudio ? LM_STUDIO_MAX_TOKENS : 2000,
   };
   
   if (options.jsonMode && config.provider === 'openai') {

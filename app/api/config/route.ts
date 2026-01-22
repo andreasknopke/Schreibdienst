@@ -177,6 +177,15 @@ export async function POST(request: NextRequest) {
       newConfig.doublePrecisionMode = body.doublePrecisionMode;
     }
     
+    // LM-Studio Session Override settings
+    if (typeof body.lmStudioModelOverride === 'string') {
+      newConfig.lmStudioModelOverride = body.lmStudioModelOverride;
+    }
+    
+    if (typeof body.lmStudioUseApiMode === 'boolean') {
+      newConfig.lmStudioUseApiMode = body.lmStudioUseApiMode;
+    }
+    
     await saveRuntimeConfigWithRequest(request, newConfig);
     
     return NextResponse.json({ success: true, config: newConfig });

@@ -19,6 +19,9 @@ interface RuntimeConfig {
   openaiModel?: string;
   mistralModel?: string;
   llmPromptAddition?: string;
+  // LM-Studio Session Override
+  lmStudioModelOverride?: string;
+  lmStudioUseApiMode?: boolean;
   // Double Precision Pipeline
   doublePrecisionEnabled?: boolean;
   doublePrecisionSecondProvider?: 'whisperx' | 'elevenlabs' | 'mistral';
@@ -488,6 +491,46 @@ export default function ConfigPanel() {
                 </option>
               ))}
             </select>
+          </div>
+        )}
+
+        {/* LM-Studio Model Override (nur für root) */}
+        {isRoot && config.llmProvider === 'lmstudio' && (
+          <div className="ml-6 mt-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50">
+            <label className="text-xs text-gray-500 block mb-1">
+              LM-Studio Model Override (Session)
+            </label>
+            <div className="flex gap-2 items-start">
+              <input
+                type="text"
+                value={config.lmStudioModelOverride || ''}
+                onChange={(e) => updateConfig({ lmStudioModelOverride: e.target.value })}
+                disabled={saving}
+                placeholder={`Standard: ${process.env.LLM_STUDIO_MODEL || 'meta-llama-3.1-8b-instruct'}`}
+                className="input text-sm flex-1"
+              />
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Überschreibt das LM-Studio Model für diese Session. Leer lassen für Env-Einstellung.
+            </p>
+            
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="lmStudioApiMode"
+                checked={config.lmStudioUseApiMode || false}
+                onChange={(e) => updateConfig({ lmStudioUseApiMode: e.target.checked })}
+                disabled={saving}
+                className="w-4 h-4 rounded border-gray-300"
+              />
+              <label htmlFor="lmStudioApiMode" className="text-sm cursor-pointer">
+                API-Modus (wie OpenAI)
+              </label>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Aktiviert: Prompts wie bei API-Modellen (ganzer Text auf einmal, 10.000 Max Tokens).
+              Deaktiviert: Chunked Processing für kleinere Modelle.
+            </p>
           </div>
         )}
 

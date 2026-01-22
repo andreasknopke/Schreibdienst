@@ -4,9 +4,6 @@ import { removeMarkdownFormatting } from '@/lib/textFormatting';
 
 export const runtime = 'nodejs';
 
-// Special model that needs specific configuration (12000 context, temperature=0)
-const MISTRAL_HERETIC_MODEL = 'mistral-small-3.2-24b-instruct-2506-text-only-heretic';
-
 /**
  * Schnelle Fachwort-Korrektur mit LM Studio (lokal)
  * Korrigiert nur medizinische Fachbegriffe, keine Grammatik/Satzbau
@@ -90,9 +87,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Text fehlt' }, { status: 400 });
     }
 
-    // LM Studio URL aus Umgebungsvariable
+    // Get runtime config for session overrides
+    const runtimeConfig = await getRuntimeConfigWithRequest(request);
+
+    // LM Studio URL aus Umgebungsvariable, Model aus Session-Override oder Env
     const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
-    const lmStudioModel = process.env.LLM_STUDIO_MODEL || 'meta-llama-3.1-8b-instruct';
+    const lmStudioModel = runtimeConfig.lmStudioModelOverride || process.env.LLM_STUDIO_MODEL || 'meta-llama-3.1-8b-instruct';
     const useCompletionApi = process.env.LLM_USE_COMPLETION === 'true';
 
     // Wähle nur relevante Begriffe (max 150 für bessere Korrektur)
@@ -146,9 +146,8 @@ export async function POST(request: NextRequest) {
     }, 30000);
 
     try {
-      // Special handling for mistral-small heretic model: temperature=0
-      const isHereticModel = lmStudioModel === MISTRAL_HERETIC_MODEL;
-      const temperature = isHereticModel ? 0 : 0.1;
+      // Standard temperature for LM Studio
+      const temperature = 0.1;
       
       if (useCompletionApi) {
         // Completion API - effizienter, kein Chat-Overhead

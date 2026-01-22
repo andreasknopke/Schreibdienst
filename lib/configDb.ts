@@ -33,6 +33,9 @@ export interface RuntimeConfig {
   openaiModel?: string;
   mistralModel?: string;
   llmPromptAddition?: string;
+  // LM-Studio Session Override
+  lmStudioModelOverride?: string;  // Überschreibt LLM_STUDIO_MODEL für diese Session
+  lmStudioUseApiMode?: boolean;    // true = Prompts wie API-Model (OpenAI), false = wie LM-Studio (Chunking)
   // Double Precision Pipeline
   doublePrecisionEnabled?: boolean;
   doublePrecisionSecondProvider?: 'whisperx' | 'elevenlabs' | 'mistral';
@@ -105,6 +108,12 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
           if (['parallel', 'sequential'].includes(row.config_value)) {
             config.doublePrecisionMode = row.config_value as any;
           }
+          break;
+        case 'lmStudioModelOverride':
+          config.lmStudioModelOverride = row.config_value;
+          break;
+        case 'lmStudioUseApiMode':
+          config.lmStudioUseApiMode = row.config_value === 'true';
           break;
       }
     }
@@ -192,6 +201,12 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
           if (['parallel', 'sequential'].includes(row.config_value)) {
             config.doublePrecisionMode = row.config_value as any;
           }
+          break;
+        case 'lmStudioModelOverride':
+          config.lmStudioModelOverride = row.config_value;
+          break;
+        case 'lmStudioUseApiMode':
+          config.lmStudioUseApiMode = row.config_value === 'true';
           break;
       }
     }

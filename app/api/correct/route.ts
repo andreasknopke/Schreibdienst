@@ -6,22 +6,25 @@ import { preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFor
 
 export const runtime = 'nodejs';
 
-// Special model that needs specific configuration (12000 context, temperature=0)
-const MISTRAL_HERETIC_MODEL = 'mistral-small-3.2-24b-instruct-2506-text-only-heretic';
+// LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
+const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);
 
 // LLM Provider configuration
 type LLMProvider = 'openai' | 'lmstudio' | 'mistral';
 
-async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; baseUrl: string; apiKey: string; model: string }> {
+async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; baseUrl: string; apiKey: string; model: string; useApiMode: boolean }> {
   const runtimeConfig = await getRuntimeConfigWithRequest(req);
   const provider = runtimeConfig.llmProvider;
   
   if (provider === 'lmstudio') {
+    // Use session override if set, otherwise fall back to env
+    const model = runtimeConfig.lmStudioModelOverride || process.env.LLM_STUDIO_MODEL || 'meta-llama-3.1-8b-instruct';
     return {
       provider: 'lmstudio',
       baseUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
       apiKey: 'lm-studio', // LM Studio doesn't require a real API key
-      model: process.env.LLM_STUDIO_MODEL || 'meta-llama-3.1-8b-instruct'
+      model,
+      useApiMode: runtimeConfig.lmStudioUseApiMode || false
     };
   }
   
@@ -30,7 +33,8 @@ async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; 
       provider: 'mistral',
       baseUrl: 'https://api.mistral.ai',
       apiKey: process.env.MISTRAL_API_KEY || '',
-      model: runtimeConfig.mistralModel || process.env.MISTRAL_MODEL || 'mistral-large-latest'
+      model: runtimeConfig.mistralModel || process.env.MISTRAL_MODEL || 'mistral-large-latest',
+      useApiMode: true
     };
   }
   
@@ -38,7 +42,8 @@ async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; 
     provider: 'openai',
     baseUrl: 'https://api.openai.com',
     apiKey: process.env.OPENAI_API_KEY || '',
-    model: runtimeConfig.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini'
+    model: runtimeConfig.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    useApiMode: true
   };
 }
 
@@ -304,6 +309,7 @@ interface LLMConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  useApiMode?: boolean;
 }
 
 async function callLLM(
@@ -311,10 +317,10 @@ async function callLLM(
   messages: { role: string; content: string }[],
   options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}
 ): Promise<{ content: string; tokens?: { input: number; output: number } }> {
-  // Special handling for mistral-small heretic model: 12000 context, temperature=0
-  const isHereticModel = config.model === MISTRAL_HERETIC_MODEL;
-  const temperature = isHereticModel ? 0 : (options.temperature ?? 0.3);
-  const maxTokens = isHereticModel ? 12000 : (options.maxTokens ?? 2000);
+  // LM-Studio uses 10000 max tokens, API providers use provided value or default
+  const isLMStudio = config.provider === 'lmstudio';
+  const temperature = options.temperature ?? 0.3;
+  const maxTokens = isLMStudio ? LM_STUDIO_MAX_TOKENS : (options.maxTokens ?? 2000);
   const jsonMode = options.jsonMode ?? false;
   
   const fullUrl = `${config.baseUrl}/v1/chat/completions`;
@@ -323,7 +329,7 @@ async function callLLM(
   console.log(`[LLM] Provider: ${config.provider}`);
   console.log(`[LLM] Base URL: ${config.baseUrl}`);
   console.log(`[LLM] Full URL: ${fullUrl}`);
-  console.log(`[LLM] Model: ${config.model}${isHereticModel ? ' (heretic config: temp=0, ctx=12000)' : ''}`);
+  console.log(`[LLM] Model: ${config.model}${isLMStudio ? ` (LM-Studio, API-Mode: ${config.useApiMode || false})` : ''}`);
   console.log(`[LLM] Environment LLM_STUDIO_URL: ${process.env.LLM_STUDIO_URL || '(not set)'}`);
   console.log(`[LLM] Temperature: ${temperature}, MaxTokens: ${maxTokens}`);
   
@@ -991,9 +997,8 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
 
     try {
       // Check if we should use chunked processing for LM Studio
-      // Exception: Heretic model is large enough (24B) to handle full text like API models
-      const isHereticModel = llmConfig.model === MISTRAL_HERETIC_MODEL;
-      const shouldUseChunking = llmConfig.provider === 'lmstudio' && !isHereticModel && !previousCorrectedText;
+      // API-Mode: process full text at once (like OpenAI/Mistral), otherwise use chunking for smaller models
+      const shouldUseChunking = llmConfig.provider === 'lmstudio' && !llmConfig.useApiMode && !previousCorrectedText;
       
       if (shouldUseChunking) {
         // Split text into chunks for smaller models

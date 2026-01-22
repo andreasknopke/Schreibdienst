@@ -824,6 +824,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     if (!selected) return;
     
     setIsReCorrecting(true);
+    setError(null);
     try {
       // Use the new recorrect endpoint which runs the complete pipeline:
       // 1. Re-runs Double Precision merge if two transcripts exist in logs
@@ -846,12 +847,17 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
         setIsReverted(false);
         setHasUnsavedChanges(true);
         
-        // Show info about what was done
-        if (data.hadDoublePrecision) {
-          console.log('[DictationQueue] Re-correction complete with Double Precision merge');
-        } else {
-          console.log('[DictationQueue] Re-correction complete (no Double Precision)');
-        }
+        // Show detailed info about what was done
+        const dpInfo = data.doublePrecisionReRan 
+          ? `✓ Double Precision neu durchgeführt` 
+          : (data.hadDoublePrecision ? `⚠️ Double Precision Log vorhanden aber nicht geparsed` : `ℹ️ Keine Double Precision`);
+        console.log(`[DictationQueue] Re-correction complete:`);
+        console.log(`  - ${dpInfo}`);
+        console.log(`  - LLM: ${data.llmProvider}/${data.llmModel}`);
+        console.log(`  - Change Score: ${data.changeScore}%`);
+        
+        // Show success message with details
+        alert(`Korrektur abgeschlossen!\n\n${dpInfo}\nLLM: ${data.llmProvider}/${data.llmModel}\nÄnderungsscore: ${data.changeScore}%`);
       } else {
         const errorData = await res.json();
         throw new Error(errorData.error || 'Korrektur fehlgeschlagen');

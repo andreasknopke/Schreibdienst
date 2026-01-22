@@ -34,20 +34,36 @@ export const maxDuration = 120; // 2 minutes max
  * <mergedTextWithMarkers>
  */
 function parseDoublePrecisionLog(logText: string): { text1: string; text2: string; provider1: string; provider2: string } | null {
-  // Match Transkription A
-  const matchA = logText.match(/Transkription A \(([^)]+)\):\n([\s\S]*?)\n\nTranskription B/);
-  if (!matchA) return null;
+  console.log(`[ReCorrect] Parsing Double Precision log (${logText.length} chars)`);
   
-  // Match Transkription B
-  const matchB = logText.match(/Transkription B \(([^)]+)\):\n([\s\S]*?)\n\nMarkierte Unterschiede:/);
-  if (!matchB) return null;
+  // More robust regex that handles different line break patterns
+  // Match Transkription A - capture everything until "Transkription B"
+  const matchA = logText.match(/Transkription A \(([^)]+)\):\s*\n([\s\S]*?)\n\s*\nTranskription B/);
+  if (!matchA) {
+    console.log('[ReCorrect] Failed to match Transkription A pattern');
+    console.log('[ReCorrect] Log preview:', logText.substring(0, 500));
+    return null;
+  }
   
-  return {
+  // Match Transkription B - capture everything until "Markierte Unterschiede"
+  const matchB = logText.match(/Transkription B \(([^)]+)\):\s*\n([\s\S]*?)\n\s*\nMarkierte Unterschiede:/);
+  if (!matchB) {
+    console.log('[ReCorrect] Failed to match Transkription B pattern');
+    return null;
+  }
+  
+  const result = {
     provider1: matchA[1],
     text1: matchA[2].trim(),
     provider2: matchB[1],
     text2: matchB[2].trim(),
   };
+  
+  console.log(`[ReCorrect] Successfully parsed transcripts:`);
+  console.log(`[ReCorrect]   A (${result.provider1}): ${result.text1.length} chars`);
+  console.log(`[ReCorrect]   B (${result.provider2}): ${result.text2.length} chars`);
+  
+  return result;
 }
 
 // Helper function to extract doctor surname from username
@@ -510,6 +526,9 @@ export async function POST(req: NextRequest) {
       correctedText,
       changeScore: finalChangeScore,
       hadDoublePrecision: !!doublePrecisionLog,
+      doublePrecisionReRan: !!(doublePrecisionLog && parseDoublePrecisionLog(doublePrecisionLog.text_before)),
+      llmProvider: (await getLLMConfig(req)).provider,
+      llmModel: (await getLLMConfig(req)).model,
     });
     
   } catch (error: any) {

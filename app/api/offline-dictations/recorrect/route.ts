@@ -36,34 +36,49 @@ export const maxDuration = 120; // 2 minutes max
 function parseDoublePrecisionLog(logText: string): { text1: string; text2: string; provider1: string; provider2: string } | null {
   console.log(`[ReCorrect] Parsing Double Precision log (${logText.length} chars)`);
   
-  // More robust regex that handles different line break patterns
-  // Match Transkription A - capture everything until "Transkription B"
-  const matchA = logText.match(/Transkription A \(([^)]+)\):\s*\n([\s\S]*?)\n\s*\nTranskription B/);
-  if (!matchA) {
-    console.log('[ReCorrect] Failed to match Transkription A pattern');
+  // Provider names can contain nested parentheses like "whisperx (cstr/whisper-large-v3-turbo-german-int8_float32)"
+  // So we need to match everything up to "):\n" at end of line
+  
+  // Match Transkription A - find the line, then capture provider and text
+  const headerAMatch = logText.match(/Transkription A \((.+)\):\n/);
+  if (!headerAMatch) {
+    console.log('[ReCorrect] Failed to match Transkription A header');
     console.log('[ReCorrect] Log preview:', logText.substring(0, 500));
     return null;
   }
   
-  // Match Transkription B - capture everything until "Markierte Unterschiede"
-  const matchB = logText.match(/Transkription B \(([^)]+)\):\s*\n([\s\S]*?)\n\s*\nMarkierte Unterschiede:/);
-  if (!matchB) {
-    console.log('[ReCorrect] Failed to match Transkription B pattern');
+  const provider1 = headerAMatch[1];
+  const afterHeaderA = logText.indexOf(headerAMatch[0]) + headerAMatch[0].length;
+  
+  // Find where Transkription B starts
+  const headerBMatch = logText.match(/\n\nTranskription B \((.+)\):\n/);
+  if (!headerBMatch) {
+    console.log('[ReCorrect] Failed to match Transkription B header');
     return null;
   }
   
-  const result = {
-    provider1: matchA[1],
-    text1: matchA[2].trim(),
-    provider2: matchB[1],
-    text2: matchB[2].trim(),
-  };
+  const provider2 = headerBMatch[1];
+  const startOfB = logText.indexOf(headerBMatch[0]);
+  const afterHeaderB = startOfB + headerBMatch[0].length;
+  
+  // Text A is between end of header A and start of header B
+  const text1 = logText.substring(afterHeaderA, startOfB).trim();
+  
+  // Find where "Markierte Unterschiede:" starts
+  const markierteMatch = logText.indexOf('\n\nMarkierte Unterschiede:');
+  if (markierteMatch === -1) {
+    console.log('[ReCorrect] Failed to find "Markierte Unterschiede:" section');
+    return null;
+  }
+  
+  // Text B is between end of header B and start of Markierte Unterschiede
+  const text2 = logText.substring(afterHeaderB, markierteMatch).trim();
   
   console.log(`[ReCorrect] Successfully parsed transcripts:`);
-  console.log(`[ReCorrect]   A (${result.provider1}): ${result.text1.length} chars`);
-  console.log(`[ReCorrect]   B (${result.provider2}): ${result.text2.length} chars`);
+  console.log(`[ReCorrect]   A (${provider1}): ${text1.length} chars`);
+  console.log(`[ReCorrect]   B (${provider2}): ${text2.length} chars`);
   
-  return result;
+  return { provider1, text1, provider2, text2 };
 }
 
 // Helper function to extract doctor surname from username

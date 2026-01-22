@@ -249,6 +249,7 @@ export async function processDictation(request: NextRequest, dictationId: number
     
   } catch (error: any) {
     console.error(`[Worker] ✗ Error processing dictation #${dictationId}:`, error.message);
+    console.error(`[Worker] ✗ Full stack trace:`, error.stack);
     await markDictationErrorWithRequest(request, dictationId, error.message);
     throw error;
   }

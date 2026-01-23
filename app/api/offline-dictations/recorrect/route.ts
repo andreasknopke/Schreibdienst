@@ -452,6 +452,24 @@ export async function POST(req: NextRequest) {
     
     console.log(`[ReCorrect] Starting re-correction for dictation #${dictationId}`);
     
+    // Convert patient_name and patient_dob to strings (they may come as Date objects or null from DB)
+    // Use 'any' cast because the DB may return Date objects even though TypeScript expects strings
+    const rawPatientName = dictation.patient_name as any;
+    const rawPatientDob = dictation.patient_dob as any;
+    const patientName = typeof rawPatientName === 'string' 
+      ? rawPatientName 
+      : (rawPatientName instanceof Date 
+          ? rawPatientName.toISOString().split('T')[0] 
+          : (rawPatientName ? String(rawPatientName) : undefined));
+    const patientDob = typeof rawPatientDob === 'string' 
+      ? rawPatientDob 
+      : (rawPatientDob instanceof Date 
+          ? rawPatientDob.toISOString().split('T')[0] 
+          : (rawPatientDob ? String(rawPatientDob) : undefined));
+    
+    console.log(`[ReCorrect] Patient context - name: "${patientName || '(none)'}", dob: "${patientDob || '(none)'}", username: "${dictation.username || '(none)'}"`);
+    console.log(`[ReCorrect] Raw DB types - patient_name: ${typeof rawPatientName} (${rawPatientName instanceof Date ? 'Date' : 'not Date'}), patient_dob: ${typeof rawPatientDob} (${rawPatientDob instanceof Date ? 'Date' : 'not Date'})`);
+    
     // Get correction logs to find Double Precision entries
     const logs = await getCorrectionLogByDictationIdWithRequest(req, dictationId);
     const doublePrecisionLog = logs.find(l => l.correction_type === 'doublePrecision');
@@ -461,6 +479,7 @@ export async function POST(req: NextRequest) {
       ? await loadDictionaryWithRequest(req, dictation.username) 
       : { entries: [] };
     const dictionaryEntries = dictionary.entries;
+    console.log(`[ReCorrect] Dictionary loaded: ${dictionaryEntries.length} entries for user "${dictation.username || '(none)'}"`);
     
     // Extract doctor name
     const doctorName = dictation.username ? extractDoctorName(dictation.username) : undefined;
@@ -479,8 +498,8 @@ export async function POST(req: NextRequest) {
         // Re-run Double Precision merge with current LLM settings
         const mergeContext: MergeContext = {
           dictionaryEntries,
-          patientName: dictation.patient_name,
-          patientDob: dictation.patient_dob,
+          patientName,
+          patientDob,
           doctorName,
         };
         
@@ -534,8 +553,8 @@ export async function POST(req: NextRequest) {
       req,
       preprocessedText,
       dictation.username,
-      dictation.patient_name,
-      dictation.patient_dob,
+      patientName,
+      patientDob,
       dictionaryEntries
     );
     

@@ -188,7 +188,8 @@ async function doublePrecisionMerge(
     
     if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
     const data = await res.json();
-    finalText = data.choices?.[0]?.message?.content?.trim() || result1.text;
+    const content = data.choices?.[0]?.message?.content;
+    finalText = (typeof content === 'string' ? content.trim() : (content ? String(content) : '')) || result1.text;
   } else if (llmProvider === 'mistral') {
     const apiKey = process.env.MISTRAL_API_KEY;
     if (!apiKey) throw new Error('MISTRAL_API_KEY not configured');
@@ -214,7 +215,8 @@ async function doublePrecisionMerge(
     
     if (!res.ok) throw new Error(`Mistral API error: ${res.status}`);
     const data = await res.json();
-    finalText = data.choices?.[0]?.message?.content?.trim() || result1.text;
+    const mistralContent = data.choices?.[0]?.message?.content;
+    finalText = (typeof mistralContent === 'string' ? mistralContent.trim() : (mistralContent ? String(mistralContent) : '')) || result1.text;
   } else if (llmProvider === 'lmstudio') {
     const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
     // Use session override if available
@@ -248,7 +250,8 @@ async function doublePrecisionMerge(
     }
     
     const data = await res.json();
-    finalText = data.choices?.[0]?.message?.content?.trim() || result1.text;
+    const lmContent = data.choices?.[0]?.message?.content;
+    finalText = (typeof lmContent === 'string' ? lmContent.trim() : (lmContent ? String(lmContent) : '')) || result1.text;
   } else {
     console.warn(`[ReCorrect DoublePrecision] Unknown LLM provider "${llmProvider}", using first transcription`);
     modelName = 'fallback';
@@ -312,8 +315,11 @@ async function correctText(
   // Build context section
   let contextPromptSection = '';
   const contextParts: string[] = [];
-  if (patientName?.trim()) contextParts.push(`Patient: ${patientName}`);
-  if (patientDob?.trim()) contextParts.push(`Geb.: ${patientDob}`);
+  // Ensure patientName and patientDob are strings before calling .trim()
+  const patientNameStr = typeof patientName === 'string' ? patientName : '';
+  const patientDobStr = typeof patientDob === 'string' ? patientDob : '';
+  if (patientNameStr && patientNameStr.trim()) contextParts.push(`Patient: ${patientNameStr}`);
+  if (patientDobStr && patientDobStr.trim()) contextParts.push(`Geb.: ${patientDobStr}`);
   if (doctorName) contextParts.push(`Arzt: Dr. ${doctorName}`);
   if (contextParts.length > 0) {
     contextPromptSection = `\n\nDIKTAT-KONTEXT:\n${contextParts.join(', ')}`;
@@ -356,7 +362,8 @@ REGELN:
     
     if (res.ok) {
       const data = await res.json();
-      correctedText = data.choices?.[0]?.message?.content?.trim() || text;
+      const openaiContent = data.choices?.[0]?.message?.content;
+      correctedText = (typeof openaiContent === 'string' ? openaiContent.trim() : (openaiContent ? String(openaiContent) : '')) || text;
     }
   } else if (llmConfig.provider === 'mistral') {
     const apiKey = process.env.MISTRAL_API_KEY;
@@ -380,7 +387,8 @@ REGELN:
     
     if (res.ok) {
       const data = await res.json();
-      correctedText = data.choices?.[0]?.message?.content?.trim() || text;
+      const mistralCorrContent = data.choices?.[0]?.message?.content;
+      correctedText = (typeof mistralCorrContent === 'string' ? mistralCorrContent.trim() : (mistralCorrContent ? String(mistralCorrContent) : '')) || text;
     }
   } else if (llmConfig.provider === 'lmstudio') {
     const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
@@ -405,7 +413,8 @@ REGELN:
     
     if (res.ok) {
       const data = await res.json();
-      correctedText = data.choices?.[0]?.message?.content?.trim() || text;
+      const lmCorrContent = data.choices?.[0]?.message?.content;
+      correctedText = (typeof lmCorrContent === 'string' ? lmCorrContent.trim() : (lmCorrContent ? String(lmCorrContent) : '')) || text;
     }
   }
   

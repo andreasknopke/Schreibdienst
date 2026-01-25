@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { NextRequest } from 'next/server';
+import { parseDbToken, isLegacyToken, encryptToken } from './crypto';
 
 // Database connection pool (default)
 let pool: mysql.Pool | null = null;
@@ -37,14 +38,14 @@ export interface DbCredentials {
 }
 
 // ============================================================
-// DB-Token Decoding (Server-seitig mit Buffer)
+// DB-Token Decoding (Server-seitig - unterstützt verschlüsselt und Legacy)
 // ============================================================
 export function decodeDbTokenServer(token: string): DbCredentials | null {
   try {
-    const decoded = Buffer.from(token, 'base64').toString('utf8');
-    const parsed = JSON.parse(decoded);
+    // parseDbToken unterstützt sowohl verschlüsselte als auch Legacy-Tokens
+    const parsed = parseDbToken(token);
     
-    if (!parsed.host || !parsed.user || !parsed.password || !parsed.database) {
+    if (!parsed || !parsed.host || !parsed.user || !parsed.password || !parsed.database) {
       console.error('[DB] Token ungültig: Fehlende Felder');
       return null;
     }
@@ -62,6 +63,9 @@ export function decodeDbTokenServer(token: string): DbCredentials | null {
     return null;
   }
 }
+
+// Re-export für Verwendung in anderen Modulen
+export { encryptToken, isLegacyToken } from './crypto';
 
 // ============================================================
 // Dynamischen Pool für Credentials erstellen/abrufen

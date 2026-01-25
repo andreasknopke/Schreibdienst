@@ -1,13 +1,18 @@
 "use client";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from './AuthProvider';
 import { 
   encodeDbToken, 
   saveDbToken, 
   clearDbToken, 
   hasValidDbToken,
-  getCurrentDbCredentials,
-  type DbCredentials 
+  getDbTokenInfo,
+  isLegacyToken,
+  getDbToken,
+  generateEncryptedToken,
+  checkEncryptionAvailable,
+  type DbCredentials,
+  type DbTokenInfo
 } from '@/lib/dbToken';
 
 // Props für die Komponente - wird jetzt inline im ConfigPanel angezeigt
@@ -16,10 +21,12 @@ interface DbTokenManagerProps {
 }
 
 export default function DbTokenManager({ isRoot = false }: DbTokenManagerProps) {
-  const { hasDbToken, dbCredentials } = useAuth();
-  const [isOpen, setIsOpen] = useState(false);
+  const { hasDbToken, username, password } = useAuth();
+  const [tokenInfo, setTokenInfo] = useState<DbTokenInfo | null>(null);
   const [mode, setMode] = useState<'view' | 'generate' | 'enter'>('view');
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [encryptionAvailable, setEncryptionAvailable] = useState(false);
   
   // Token Generator Form
   const [credentials, setCredentials] = useState<DbCredentials>({
@@ -31,23 +38,83 @@ export default function DbTokenManager({ isRoot = false }: DbTokenManagerProps) 
     ssl: true
   });
   const [generatedToken, setGeneratedToken] = useState('');
+  const [generatedTokenInfo, setGeneratedTokenInfo] = useState<DbTokenInfo | null>(null);
   
   // Manual Token Entry
   const [manualToken, setManualToken] = useState('');
 
-  const handleGenerateToken = () => {
+  // Token-Info beim Laden abrufen
+  useEffect(() => {
+    const info = getDbTokenInfo();
+    setTokenInfo(info);
+    
+    // Prüfe Legacy-Token und zeige Warnung
+    const token = getDbToken();
+    if (token && isLegacyToken(token)) {
+      setFeedback({
+        type: 'warning',
+        message: '⚠️ Unverschlüsseltes Legacy-Token erkannt. Bitte neues verschlüsseltes Token generieren.'
+      });
+    }
+    
+    // Prüfe ob Verschlüsselung verfügbar
+    checkEncryptionAvailable().then(setEncryptionAvailable);
+  }, []);
+
+  const handleGenerateToken = async () => {
     if (!credentials.host || !credentials.user || !credentials.password || !credentials.database) {
       setFeedback({ type: 'error', message: 'Alle Felder müssen ausgefüllt sein' });
       return;
     }
-    const token = encodeDbToken(credentials);
-    setGeneratedToken(token);
-    setFeedback({ type: 'success', message: 'Token generiert!' });
+    
+    if (!username || !password) {
+      setFeedback({ type: 'error', message: 'Authentifizierung erforderlich' });
+      return;
+    }
+    
+    setIsLoading(true);
+    setFeedback(null);
+    
+    try {
+      // Versuche verschlüsseltes Token zu generieren
+      const result = await generateEncryptedToken(credentials, username, password);
+      
+      if (result.success && result.token && result.info) {
+        setGeneratedToken(result.token);
+        setGeneratedTokenInfo(result.info);
+        setFeedback({ type: 'success', message: '🔒 Verschlüsseltes Token generiert!' });
+      } else {
+        // Fallback auf Legacy-Token wenn Verschlüsselung nicht verfügbar
+        if (!encryptionAvailable) {
+          const token = encodeDbToken(credentials);
+          setGeneratedToken(token);
+          setGeneratedTokenInfo({
+            host: credentials.host,
+            database: credentials.database,
+            user: credentials.user,
+            port: credentials.port,
+            ssl: credentials.ssl || false,
+            isEncrypted: false,
+            isLegacy: true
+          });
+          setFeedback({ 
+            type: 'warning', 
+            message: '⚠️ Legacy-Token generiert (Verschlüsselung nicht verfügbar)' 
+          });
+        } else {
+          setFeedback({ type: 'error', message: result.error || 'Token-Generierung fehlgeschlagen' });
+        }
+      }
+    } catch (error) {
+      setFeedback({ type: 'error', message: 'Fehler bei Token-Generierung' });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleActivateGeneratedToken = () => {
     if (generatedToken) {
-      const success = saveDbToken(generatedToken);
+      const success = saveDbToken(generatedToken, generatedTokenInfo || undefined);
       if (success) {
         setFeedback({ type: 'success', message: 'Token aktiviert! Seite wird neu geladen...' });
         setTimeout(() => window.location.reload(), 1500);
@@ -62,12 +129,24 @@ export default function DbTokenManager({ isRoot = false }: DbTokenManagerProps) 
       setFeedback({ type: 'error', message: 'Bitte Token eingeben' });
       return;
     }
-    const success = saveDbToken(manualToken.trim());
-    if (success) {
-      setFeedback({ type: 'success', message: 'Token aktiviert! Seite wird neu geladen...' });
-      setTimeout(() => window.location.reload(), 1500);
+    
+    // Für verschlüsselte Tokens ohne Info: wir speichern trotzdem
+    const token = manualToken.trim();
+    const isLegacy = isLegacyToken(token);
+    
+    if (isLegacy) {
+      const success = saveDbToken(token);
+      if (success) {
+        setFeedback({ type: 'success', message: 'Token aktiviert! Seite wird neu geladen...' });
+        setTimeout(() => window.location.reload(), 1500);
+      } else {
+        setFeedback({ type: 'error', message: 'Ungültiges Token-Format' });
+      }
     } else {
-      setFeedback({ type: 'error', message: 'Ungültiges Token-Format' });
+      // Verschlüsseltes Token - speichere ohne Info (wird serverseitig validiert)
+      localStorage.setItem('schreibdienst_db_token', token);
+      setFeedback({ type: 'success', message: 'Verschlüsseltes Token aktiviert! Seite wird neu geladen...' });
+      setTimeout(() => window.location.reload(), 1500);
     }
   };
 
@@ -101,16 +180,26 @@ export default function DbTokenManager({ isRoot = false }: DbTokenManagerProps) 
             <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
           </svg>
           Datenbank-Verbindung
+          {encryptionAvailable && (
+            <span className="text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-2 py-0.5 rounded-full">
+              🔒 Verschlüsselt
+            </span>
+          )}
         </h3>
 
         <div className="p-4 space-y-4">
           {/* Current Status */}
           <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-700">
             <div className="text-sm font-medium mb-1">Aktueller Status:</div>
-            {hasDbToken && dbCredentials ? (
-              <div className="text-sm text-green-600 dark:text-green-400">
-                <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-2"/>
-                Verbunden mit: <span className="font-mono">{dbCredentials.host}/{dbCredentials.database}</span>
+            {hasDbToken && tokenInfo ? (
+              <div className="space-y-1">
+                <div className="text-sm text-green-600 dark:text-green-400">
+                  <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-2"/>
+                  Verbunden mit: <span className="font-mono">{tokenInfo.host}/{tokenInfo.database}</span>
+                </div>
+                <div className="text-xs text-gray-500">
+                  {tokenInfo.isEncrypted ? '🔒 Verschlüsseltes Token' : '⚠️ Legacy-Token (unverschlüsselt)'}
+                </div>
               </div>
             ) : (
               <div className="text-sm text-gray-500">
@@ -125,6 +214,8 @@ export default function DbTokenManager({ isRoot = false }: DbTokenManagerProps) 
             <div className={`text-sm p-3 rounded-lg ${
               feedback.type === 'success' 
                 ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400' 
+                : feedback.type === 'warning'
+                ? 'bg-yellow-50 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400'
                 : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'
             }`}>
               {feedback.message}
@@ -276,13 +367,21 @@ export default function DbTokenManager({ isRoot = false }: DbTokenManagerProps) 
               
               <button
                 onClick={handleGenerateToken}
-                className="w-full btn btn-primary"
+                disabled={isLoading}
+                className="w-full btn btn-primary disabled:opacity-50"
               >
-                Token generieren
+                {isLoading ? 'Generiere...' : '🔒 Verschlüsseltes Token generieren'}
               </button>
 
               {generatedToken && (
                 <div className="space-y-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                  <div className="flex items-center gap-2 text-sm">
+                    {generatedTokenInfo?.isEncrypted ? (
+                      <span className="text-green-600 dark:text-green-400">🔒 Verschlüsselt</span>
+                    ) : (
+                      <span className="text-yellow-600 dark:text-yellow-400">⚠️ Legacy (unverschlüsselt)</span>
+                    )}
+                  </div>
                   <div>
                     <div className="flex justify-between items-center mb-1">
                       <label className="text-sm font-medium">Generiertes Token:</label>
@@ -332,7 +431,10 @@ export default function DbTokenManager({ isRoot = false }: DbTokenManagerProps) 
 
           {/* Security Hint */}
           <div className="text-xs text-gray-500 dark:text-gray-400 border-t dark:border-gray-700 pt-3 mt-3">
-            <strong>Hinweis:</strong> Das DB-Token enthält Zugangsdaten. Verwenden Sie nur sichere HTTPS-Verbindungen und teilen Sie das Token nicht öffentlich.
+            <strong>Sicherheit:</strong> {encryptionAvailable 
+              ? 'Tokens werden mit AES-256-GCM verschlüsselt. Passwörter sind nie im Klartext sichtbar.'
+              : 'JWT_SECRET nicht konfiguriert - Tokens werden unverschlüsselt gespeichert. Bitte JWT_SECRET setzen!'
+            }
           </div>
         </div>
       </div>

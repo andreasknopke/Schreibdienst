@@ -5,13 +5,14 @@ import {
   extractAndSaveDbTokenFromUrl, 
   getDbToken, 
   hasValidDbToken,
-  getCurrentDbCredentials,
-  type DbCredentials 
+  getDbTokenInfo,
+  type DbTokenInfo 
 } from '@/lib/dbToken';
 
 interface AuthContextType {
   isLoggedIn: boolean;
   username: string | null;
+  password: string | null;
   isAdmin: boolean;
   canViewAllDictations: boolean;
   autoCorrect: boolean;
@@ -21,7 +22,7 @@ interface AuthContextType {
   logout: () => void;
   getAuthHeader: () => string;
   getDbTokenHeader: () => Record<string, string>;
-  dbCredentials: DbCredentials | null;
+  dbTokenInfo: DbTokenInfo | null;
   hasDbToken: boolean;
 }
 
@@ -199,7 +200,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{ 
       isLoggedIn, 
-      username, 
+      username,
+      password,
       isAdmin, 
       canViewAllDictations, 
       autoCorrect,
@@ -209,7 +211,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout, 
       getAuthHeader,
       getDbTokenHeader,
-      dbCredentials: getCurrentDbCredentials(),
+      dbTokenInfo: getDbTokenInfo(),
       hasDbToken: hasValidDbToken()
     }}>
       {children}

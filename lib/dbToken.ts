@@ -1,5 +1,8 @@
 // DB-Token Utility für dynamische Datenbankverbindungen
-// Ermöglicht Multi-Tenant-Architekturen basierend auf Base64-kodierten Tokens
+// Ermöglicht Multi-Tenant-Architekturen basierend auf verschlüsselten Tokens
+// 
+// WICHTIG: Tokens werden jetzt mit AES-256-GCM verschlüsselt (wie in CuraFlow)
+// Legacy Base64-Tokens werden noch unterstützt, aber neue Tokens sind verschlüsselt
 
 export interface DbCredentials {
   host: string;
@@ -10,7 +13,19 @@ export interface DbCredentials {
   ssl?: boolean;
 }
 
+// Info-Objekt für verschlüsselte Tokens (ohne Passwort)
+export interface DbTokenInfo {
+  host: string;
+  database: string;
+  user: string;
+  port: number;
+  ssl: boolean;
+  isEncrypted: boolean;
+  isLegacy: boolean;
+}
+
 const DB_TOKEN_KEY = 'schreibdienst_db_token';
+const DB_TOKEN_INFO_KEY = 'schreibdienst_db_token_info'; // Speichert Info ohne Passwort
 const IDB_NAME = 'SchreibdienstConfig';
 const IDB_STORE = 'config';
 
@@ -86,8 +101,31 @@ const deleteFromIndexedDB = async (key: string): Promise<void> => {
 // Token Encoding/Decoding (Frontend - Browser)
 // ============================================================
 
+/**
+ * Prüft ob ein Token ein Legacy-Token (unverschlüsselt, Base64) ist
+ */
+export const isLegacyToken = (token: string): boolean => {
+  try {
+    const decoded = atob(token);
+    const parsed = JSON.parse(decoded);
+    return parsed && parsed.host && parsed.user && parsed.database;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Dekodiert ein Legacy-Token (nur für unverschlüsselte Tokens)
+ * Für verschlüsselte Tokens wird null zurückgegeben - diese können nur serverseitig dekodiert werden
+ */
 export const decodeDbToken = (token: string): DbCredentials | null => {
   try {
+    // Nur Legacy-Tokens können im Frontend dekodiert werden
+    if (!isLegacyToken(token)) {
+      console.log('[dbToken] Verschlüsseltes Token - kann nur serverseitig dekodiert werden');
+      return null;
+    }
+    
     const decoded = atob(token);
     const parsed = JSON.parse(decoded);
     
@@ -110,7 +148,12 @@ export const decodeDbToken = (token: string): DbCredentials | null => {
   }
 };
 
+/**
+ * DEPRECATED: Erstellt ein Legacy-Token (unverschlüsselt)
+ * Verwende stattdessen generateEncryptedToken() für neue Tokens
+ */
 export const encodeDbToken = (credentials: DbCredentials): string => {
+  console.warn('[dbToken] ⚠️ encodeDbToken ist deprecated - verwende generateEncryptedToken() für verschlüsselte Tokens');
   const json = JSON.stringify({
     host: credentials.host,
     user: credentials.user,
@@ -126,14 +169,45 @@ export const encodeDbToken = (credentials: DbCredentials): string => {
 // Token Storage (localStorage + IndexedDB)
 // ============================================================
 
-export const saveDbToken = (token: string): boolean => {
-  const credentials = decodeDbToken(token);
-  if (!credentials) {
+/**
+ * Speichert ein Token (verschlüsselt oder Legacy) zusammen mit Info
+ */
+export const saveDbToken = (token: string, info?: DbTokenInfo): boolean => {
+  // Bei Legacy-Tokens: versuche Credentials zu extrahieren
+  if (isLegacyToken(token)) {
+    const credentials = decodeDbToken(token);
+    if (!credentials) {
+      return false;
+    }
+    localStorage.setItem(DB_TOKEN_KEY, token);
+    saveToIndexedDB(DB_TOKEN_KEY, token);
+    // Info speichern (ohne Passwort)
+    const tokenInfo: DbTokenInfo = {
+      host: credentials.host,
+      database: credentials.database,
+      user: credentials.user,
+      port: credentials.port,
+      ssl: credentials.ssl || false,
+      isEncrypted: false,
+      isLegacy: true
+    };
+    localStorage.setItem(DB_TOKEN_INFO_KEY, JSON.stringify(tokenInfo));
+    saveToIndexedDB(DB_TOKEN_INFO_KEY, JSON.stringify(tokenInfo));
+    console.log('[dbToken] Legacy-Token gespeichert für:', credentials.host);
+    return true;
+  }
+  
+  // Verschlüsseltes Token - benötigt Info-Objekt
+  if (!info) {
+    console.error('[dbToken] Verschlüsseltes Token benötigt info-Objekt');
     return false;
   }
+  
   localStorage.setItem(DB_TOKEN_KEY, token);
   saveToIndexedDB(DB_TOKEN_KEY, token);
-  console.log('[dbToken] Token gespeichert für:', credentials.host);
+  localStorage.setItem(DB_TOKEN_INFO_KEY, JSON.stringify(info));
+  saveToIndexedDB(DB_TOKEN_INFO_KEY, JSON.stringify(info));
+  console.log('[dbToken] Verschlüsseltes Token gespeichert für:', info.host);
   return true;
 };
 
@@ -166,14 +240,67 @@ export const syncDbTokenFromIndexedDB = async (): Promise<string | null> => {
 export const clearDbToken = (): void => {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(DB_TOKEN_KEY);
+  localStorage.removeItem(DB_TOKEN_INFO_KEY);
   deleteFromIndexedDB(DB_TOKEN_KEY);
+  deleteFromIndexedDB(DB_TOKEN_INFO_KEY);
   console.log('[dbToken] Token gelöscht');
 };
 
+/**
+ * Prüft ob ein gültiges Token vorhanden ist
+ * Funktioniert für verschlüsselte und Legacy-Tokens
+ */
 export const hasValidDbToken = (): boolean => {
   const token = getDbToken();
   if (!token) return false;
-  return decodeDbToken(token) !== null;
+  
+  // Bei Legacy-Tokens: dekodieren
+  if (isLegacyToken(token)) {
+    return decodeDbToken(token) !== null;
+  }
+  
+  // Bei verschlüsselten Tokens: prüfe ob Info vorhanden
+  const infoStr = localStorage.getItem(DB_TOKEN_INFO_KEY);
+  return !!infoStr;
+};
+
+/**
+ * Gibt Token-Info zurück (ohne Passwort)
+ * Funktioniert für verschlüsselte und Legacy-Tokens
+ */
+export const getDbTokenInfo = (): DbTokenInfo | null => {
+  if (typeof window === 'undefined') return null;
+  
+  const token = getDbToken();
+  if (!token) return null;
+  
+  // Versuche gespeicherte Info zu laden
+  const infoStr = localStorage.getItem(DB_TOKEN_INFO_KEY);
+  if (infoStr) {
+    try {
+      return JSON.parse(infoStr);
+    } catch {
+      // Info ungültig
+    }
+  }
+  
+  // Fallback für Legacy-Tokens ohne gespeicherte Info
+  if (isLegacyToken(token)) {
+    const credentials = decodeDbToken(token);
+    if (credentials) {
+      return {
+        host: credentials.host,
+        database: credentials.database,
+        user: credentials.user,
+        port: credentials.port,
+        ssl: credentials.ssl || false,
+        isEncrypted: false,
+        isLegacy: true
+      };
+    }
+  }
+  
+  return null;
 };
 
 // ============================================================
@@ -204,5 +331,93 @@ export const extractAndSaveDbTokenFromUrl = (): boolean => {
 export const getCurrentDbCredentials = (): DbCredentials | null => {
   const token = getDbToken();
   if (!token) return null;
-  return decodeDbToken(token);
+  // Nur für Legacy-Tokens möglich
+  if (isLegacyToken(token)) {
+    return decodeDbToken(token);
+  }
+  // Für verschlüsselte Tokens: keine Credentials im Frontend verfügbar
+  return null;
+};
+
+// ============================================================
+// Verschlüsselte Token-Generierung über API
+// ============================================================
+
+export interface GenerateTokenResult {
+  success: boolean;
+  token?: string;
+  info?: DbTokenInfo;
+  error?: string;
+}
+
+/**
+ * Generiert ein verschlüsseltes DB-Token über die Server-API
+ * Erfordert Root-Authentifizierung
+ */
+export const generateEncryptedToken = async (
+  credentials: DbCredentials,
+  authUsername: string,
+  authPassword: string
+): Promise<GenerateTokenResult> => {
+  try {
+    const response = await fetch('/api/db-token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Basic ' + btoa(`${authUsername}:${authPassword}`)
+      },
+      body: JSON.stringify({
+        host: credentials.host,
+        user: credentials.user,
+        password: credentials.password,
+        database: credentials.database,
+        port: credentials.port || 3306,
+        ssl: credentials.ssl !== false
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: data.error || 'Token-Generierung fehlgeschlagen'
+      };
+    }
+
+    const info: DbTokenInfo = {
+      host: data.info.host,
+      database: data.info.database,
+      user: data.info.user,
+      port: data.info.port,
+      ssl: data.info.ssl,
+      isEncrypted: true,
+      isLegacy: false
+    };
+
+    return {
+      success: true,
+      token: data.token,
+      info
+    };
+  } catch (error) {
+    console.error('[dbToken] API-Aufruf fehlgeschlagen:', error);
+    return {
+      success: false,
+      error: 'Netzwerkfehler bei Token-Generierung'
+    };
+  }
+};
+
+/**
+ * Prüft ob Verschlüsselung auf dem Server verfügbar ist
+ */
+export const checkEncryptionAvailable = async (): Promise<boolean> => {
+  try {
+    const response = await fetch('/api/db-token');
+    const data = await response.json();
+    return data.encryptionEnabled === true;
+  } catch {
+    return false;
+  }
 };

@@ -1318,6 +1318,15 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             🔄
                           </button>
                         )}
+                        {d.status === 'error' && (
+                          <button
+                            className="btn btn-xs btn-outline text-red-600"
+                            onClick={() => handleDelete(d.id)}
+                            title="Fehlgeschlagenes Diktat löschen"
+                          >
+                            🗑️
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1824,6 +1833,19 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                         }}
                       >
                         🔄
+                      </button>
+                    )}
+                    
+                    {d.status === 'error' && (
+                      <button
+                        className="btn btn-sm btn-outline text-red-600"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(d.id);
+                        }}
+                        title="Löschen"
+                      >
+                        🗑️
                       </button>
                     )}
                   </div>

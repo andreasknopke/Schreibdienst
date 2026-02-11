@@ -117,6 +117,80 @@ function splitTextIntoChunks(text: string, maxSentences: number = 5): string[] {
 // Configuration for chunked processing
 const LM_STUDIO_MAX_SENTENCES = 8; // Process max 7-8 sentences at a time for small models
 
+// Max characters per chunk for cloud LLMs (Mistral, OpenAI) to avoid timeouts
+const CLOUD_LLM_MAX_CHARS = 40000;
+
+// Split text into chunks by character limit, breaking at sentence boundaries
+function splitTextIntoChunksByCharLimit(text: string, maxChars: number = CLOUD_LLM_MAX_CHARS): string[] {
+  if (!text || text.trim().length === 0) return [''];
+  if (text.length <= maxChars) return [text];
+
+  // Use same smart sentence splitting as splitTextIntoChunks
+  const sentences: string[] = [];
+  let currentSentence = '';
+  let i = 0;
+
+  while (i < text.length) {
+    const char = text[i];
+    currentSentence += char;
+
+    if (char === '.' || char === '!' || char === '?') {
+      const nextChar = text[i + 1] || '';
+      const prevChars = currentSentence.slice(-4, -1);
+      const isDate = /\d$/.test(prevChars) || /^\d/.test(nextChar);
+      const isAbbreviation = /\b(Dr|Mr|Fr|Hr|Prof|bzw|z\.B|u\.a|d\.h|etc|ca|vs|Nr|Tel|Str|inkl|ggf|evtl|usw|etc)\.$/.test(currentSentence);
+
+      if (!isDate && !isAbbreviation) {
+        while (i + 1 < text.length && /[\s"')\]]/.test(text[i + 1])) {
+          i++;
+          currentSentence += text[i];
+        }
+        if (currentSentence.trim()) {
+          sentences.push(currentSentence);
+        }
+        currentSentence = '';
+      }
+    }
+    i++;
+  }
+
+  if (currentSentence.trim()) {
+    sentences.push(currentSentence);
+  }
+
+  if (sentences.length === 0) {
+    return [text];
+  }
+
+  // Group sentences into chunks respecting character limit
+  const chunks: string[] = [];
+  let currentChunk = '';
+
+  for (const sentence of sentences) {
+    if (sentence.length > maxChars) {
+      if (currentChunk.trim()) {
+        chunks.push(currentChunk.trim());
+        currentChunk = '';
+      }
+      chunks.push(sentence.trim());
+      continue;
+    }
+
+    if (currentChunk.length + sentence.length > maxChars && currentChunk.trim()) {
+      chunks.push(currentChunk.trim());
+      currentChunk = '';
+    }
+
+    currentChunk += sentence;
+  }
+
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+
+  return chunks.length > 0 ? chunks : [text];
+}
+
 // Simplified system prompt for chunk processing (no examples to avoid leaking into output)
 const CHUNK_SYSTEM_PROMPT = `Du bist ein medizinischer Diktat-Korrektur-Assistent.
 
@@ -1085,7 +1159,73 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
         }
       }
       
-      // Standard processing (single chunk or OpenAI)
+      // Standard processing (single chunk or OpenAI/Mistral)
+      // Check if cloud LLM needs chunking for very long texts
+      const needsCloudChunking = !previousCorrectedText && preprocessedText.length > CLOUD_LLM_MAX_CHARS && llmConfig.provider !== 'lmstudio';
+      
+      if (needsCloudChunking) {
+        const cloudChunks = splitTextIntoChunksByCharLimit(preprocessedText, CLOUD_LLM_MAX_CHARS);
+        console.log(`[Chunked] Cloud LLM (${llmConfig.provider}): Text too long (${preprocessedText.length} chars), splitting into ${cloudChunks.length} chunks of max ${CLOUD_LLM_MAX_CHARS} chars`);
+        
+        // Use simplified chunk prompt with dictionary and custom additions if available
+        const cloudChunkSystemPrompt = promptSuffix 
+          ? `${CHUNK_SYSTEM_PROMPT}\n\n${promptSuffix}`
+          : CHUNK_SYSTEM_PROMPT;
+        
+        const correctedChunks: string[] = [];
+        let totalInputTokens = 0;
+        let totalOutputTokens = 0;
+        
+        for (let i = 0; i < cloudChunks.length; i++) {
+          const chunk = cloudChunks[i];
+          console.log(`[Cloud Chunk ${i + 1}/${cloudChunks.length}] Processing ${chunk.length} chars`);
+          
+          const chunkMessage = `<<<DIKTAT_START>>>${chunk}<<<DIKTAT_ENDE>>>`;
+          
+          // Calculate maxTokens for this chunk
+          const chunkEstimatedTokens = Math.ceil(chunk.length / 4);
+          const chunkMaxTokens = Math.min(16000, Math.max(2000, Math.ceil(chunkEstimatedTokens * 1.5)));
+          
+          const chunkResult = await callLLM(llmConfig, 
+            [
+              { role: 'system', content: cloudChunkSystemPrompt },
+              { role: 'user', content: chunkMessage }
+            ],
+            { temperature: 0.3, maxTokens: chunkMaxTokens }
+          );
+          
+          let correctedChunk = cleanLLMOutput(chunkResult.content || chunk, chunk);
+          
+          if (correctedChunk === null || !correctedChunk.trim()) {
+            console.log(`[Cloud Chunk ${i + 1}] Warning: Empty result, using original`);
+            correctedChunk = chunk;
+          }
+          
+          correctedChunks.push(correctedChunk);
+          
+          if (chunkResult.tokens) {
+            totalInputTokens += chunkResult.tokens.input;
+            totalOutputTokens += chunkResult.tokens.output;
+          }
+        }
+        
+        const correctedText = correctedChunks
+          .join('\n\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .replace(/[^\S\n]+/g, ' ')
+          .trim();
+        
+        const changeScore = calculateChangeScore(text || '', correctedText);
+        
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        const tokens = totalInputTokens || totalOutputTokens ? `${totalInputTokens}/${totalOutputTokens}` : 'unknown';
+        console.log(`[Success] Cloud chunked: Duration: ${duration}s, Tokens (in/out): ${tokens}, Output: ${correctedText.length} chars, Change: ${changeScore}%`);
+        console.log('=== LLM Correction Complete ===\n');
+        
+        return NextResponse.json({ correctedText, changeScore });
+      }
+      
+      // Single request processing
       const userMessage = previousCorrectedText 
         ? `Bisheriger korrigierter Text:\n<<<BEREITS_KORRIGIERT>>>${previousCorrectedText}<<<ENDE_KORRIGIERT>>>\n\nNeuer diktierter Text zum Korrigieren und Anfügen:\n<<<DIKTAT_START>>>${preprocessedText}<<<DIKTAT_ENDE>>>\n\nGib den vollständigen korrigierten Text zurück (bisheriger + neuer Text).`
         : `<<<DIKTAT_START>>>${preprocessedText}<<<DIKTAT_ENDE>>>`;

@@ -1401,11 +1401,49 @@ KRITISCH - AUSGABEFORMAT:
       ]);
     }
   } else {
-    // OpenAI or Mistral: Process all at once
-    result = await callLLM(llmConfig, [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: `<<<DIKTAT_START>>>${text}<<<DIKTAT_ENDE>>>` }
-    ]);
+    // OpenAI or Mistral: Check if text needs chunking to avoid timeouts
+    const needsCloudChunking = text.length > CLOUD_LLM_MAX_CHARS;
+    
+    if (needsCloudChunking) {
+      const chunks = splitTextIntoChunksByCharLimit(text, CLOUD_LLM_MAX_CHARS);
+      console.log(`[Worker] Cloud LLM (${llmConfig.provider}): Text too long (${text.length} chars), splitting into ${chunks.length} chunks of max ${CLOUD_LLM_MAX_CHARS} chars`);
+      
+      const correctedChunks: string[] = [];
+      
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        console.log(`[Worker] Cloud chunk ${i + 1}/${chunks.length}: ${chunk.length} chars`);
+        
+        const chunkResult = await callLLM(llmConfig, [
+          { role: 'system', content: chunkSystemPrompt },
+          { role: 'user', content: `<<<DIKTAT_START>>>${chunk}<<<DIKTAT_ENDE>>>` }
+        ]);
+        
+        // Use robust cleanup function
+        let cleanedChunk = cleanLLMOutput(chunkResult);
+        
+        // If cleanup resulted in empty string, use original chunk
+        if (!cleanedChunk.trim()) {
+          console.log(`[Worker] Cloud chunk ${i + 1}: Warning - Empty result, using original`);
+          cleanedChunk = chunk;
+        }
+        
+        correctedChunks.push(cleanedChunk);
+      }
+      
+      // Join chunks - preserve paragraph breaks, normalize other whitespace
+      result = correctedChunks
+        .join('\n\n')  // Join chunks with paragraph break
+        .replace(/\n{3,}/g, '\n\n')  // Max 2 newlines (1 empty line)
+        .replace(/[^\S\n]+/g, ' ')  // Normalize spaces but keep newlines
+        .trim();
+    } else {
+      // Text fits in a single request
+      result = await callLLM(llmConfig, [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `<<<DIKTAT_START>>>${text}<<<DIKTAT_ENDE>>>` }
+      ]);
+    }
   }
   
   // Use robust cleanup function for final result
@@ -1513,6 +1551,9 @@ function cleanLLMOutput(text: string): string {
 // Split text into chunks of sentences for smaller models (LM Studio)
 const LM_STUDIO_MAX_SENTENCES = 10;
 
+// Max characters per chunk for cloud LLMs (Mistral, OpenAI) to avoid timeouts
+const CLOUD_LLM_MAX_CHARS = 40000;
+
 function splitTextIntoChunks(text: string, maxSentences: number = LM_STUDIO_MAX_SENTENCES): string[] {
   if (!text || text.trim().length === 0) return [''];
   
@@ -1549,6 +1590,80 @@ function splitTextIntoChunks(text: string, maxSentences: number = LM_STUDIO_MAX_
     }
   }
   
+  return chunks.length > 0 ? chunks : [text];
+}
+
+// Split text into chunks by character limit, breaking at sentence boundaries
+function splitTextIntoChunksByCharLimit(text: string, maxChars: number = CLOUD_LLM_MAX_CHARS): string[] {
+  if (!text || text.trim().length === 0) return [''];
+  if (text.length <= maxChars) return [text];
+
+  // Split by sentence-ending punctuation while keeping the punctuation
+  const sentenceRegex = /([^.!?]*[.!?]+[\s"')\]]*)/g;
+  const sentences: string[] = [];
+  let match;
+  let lastIndex = 0;
+
+  while ((match = sentenceRegex.exec(text)) !== null) {
+    sentences.push(match[1]);
+    lastIndex = sentenceRegex.lastIndex;
+  }
+
+  // Add any remaining text that doesn't end with punctuation
+  if (lastIndex < text.length) {
+    const remaining = text.slice(lastIndex).trim();
+    if (remaining) {
+      sentences.push(remaining);
+    }
+  }
+
+  // If no sentences were found, do a hard split at maxChars on whitespace
+  if (sentences.length === 0) {
+    const chunks: string[] = [];
+    let pos = 0;
+    while (pos < text.length) {
+      if (pos + maxChars >= text.length) {
+        chunks.push(text.slice(pos).trim());
+        break;
+      }
+      // Find last whitespace within maxChars
+      let splitAt = text.lastIndexOf(' ', pos + maxChars);
+      if (splitAt <= pos) splitAt = pos + maxChars;
+      chunks.push(text.slice(pos, splitAt).trim());
+      pos = splitAt;
+    }
+    return chunks.filter(c => c.length > 0);
+  }
+
+  // Group sentences into chunks respecting character limit
+  const chunks: string[] = [];
+  let currentChunk = '';
+
+  for (const sentence of sentences) {
+    // If a single sentence is longer than maxChars, add it as its own chunk
+    if (sentence.length > maxChars) {
+      if (currentChunk.trim()) {
+        chunks.push(currentChunk.trim());
+        currentChunk = '';
+      }
+      chunks.push(sentence.trim());
+      continue;
+    }
+
+    // If adding this sentence would exceed the limit, start a new chunk
+    if (currentChunk.length + sentence.length > maxChars && currentChunk.trim()) {
+      chunks.push(currentChunk.trim());
+      currentChunk = '';
+    }
+
+    currentChunk += sentence;
+  }
+
+  // Don't forget the last chunk
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+
   return chunks.length > 0 ? chunks : [text];
 }
 

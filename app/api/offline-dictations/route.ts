@@ -16,7 +16,7 @@ import {
 } from '@/lib/offlineDictationDb';
 import { logManualCorrectionWithRequest, initCorrectionLogTableWithRequest } from '@/lib/correctionLogDb';
 import { calculateChangeScore } from '@/lib/changeScore';
-import { compressAudioForSpeech, getAudioDuration } from '@/lib/audioCompression';
+import { compressAudioForSpeech, getAudioDuration, convertAudioForPlayback } from '@/lib/audioCompression';
 
 export const runtime = 'nodejs';
 
@@ -73,6 +73,14 @@ export async function GET(req: NextRequest) {
               contentType = 'application/octet-stream';
               console.log(`[Offline Dictations] Extracted payload: ${audioBuffer.length} bytes`);
             }
+          }
+        } else {
+          // Convert OGG/Opus to MP3 for browser playback (Safari doesn't support OGG)
+          const playbackResult = await convertAudioForPlayback(audioBuffer, contentType);
+          audioBuffer = playbackResult.data;
+          contentType = playbackResult.mimeType;
+          if (playbackResult.converted) {
+            console.log(`[Offline Dictations] Converted audio for playback: ${contentType}`);
           }
         }
         

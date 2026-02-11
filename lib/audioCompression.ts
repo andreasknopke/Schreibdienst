@@ -367,6 +367,74 @@ function formatBytes(bytes: number): string {
 }
 
 /**
+ * Convert audio to MP3 for browser playback
+ * OGG/Opus is not supported in Safari, so we convert to MP3 for universal compatibility
+ * 
+ * @param audioBuffer - Original audio data as Buffer
+ * @param mimeType - Original MIME type
+ * @returns Converted MP3 audio data, or original if FFmpeg unavailable or format already compatible
+ */
+export async function convertAudioForPlayback(
+  audioBuffer: Buffer,
+  mimeType: string
+): Promise<{ data: Buffer; mimeType: string; converted: boolean }> {
+  // Only convert OGG/Opus - other formats are generally supported
+  if (!mimeType.includes('ogg') && !mimeType.includes('opus')) {
+    return { data: audioBuffer, mimeType, converted: false };
+  }
+  
+  // Check if FFmpeg is available
+  const hasFfmpeg = await checkFfmpegAvailable();
+  if (!hasFfmpeg) {
+    console.log('[AudioPlayback] FFmpeg not available, returning original OGG');
+    return { data: audioBuffer, mimeType, converted: false };
+  }
+  
+  // Generate temp file paths
+  const tempId = randomUUID();
+  const inputPath = join(tmpdir(), `audio_play_in_${tempId}.ogg`);
+  const outputPath = join(tmpdir(), `audio_play_out_${tempId}.mp3`);
+  
+  try {
+    // Write input file
+    await writeFile(inputPath, audioBuffer);
+    
+    // Convert to MP3 for universal browser compatibility
+    console.log(`[AudioPlayback] Converting OGG/Opus to MP3 for browser playback...`);
+    await runFfmpeg([
+      '-i', inputPath,
+      '-vn',                    // No video
+      '-acodec', 'libmp3lame',  // MP3 codec
+      '-b:a', '64k',            // 64kbps (sufficient for speech)
+      '-ar', '22050',           // 22kHz sample rate
+      '-ac', '1',               // Mono
+      '-y',                     // Overwrite output
+      outputPath
+    ]);
+    
+    // Read converted file
+    const mp3Buffer = await readFile(outputPath);
+    console.log(`[AudioPlayback] Converted OGG → MP3: ${formatBytes(audioBuffer.length)} → ${formatBytes(mp3Buffer.length)}`);
+    
+    return { 
+      data: mp3Buffer, 
+      mimeType: 'audio/mpeg', 
+      converted: true 
+    };
+    
+  } catch (error: any) {
+    console.error(`[AudioPlayback] Conversion failed: ${error.message}`);
+    // Return original on failure
+    return { data: audioBuffer, mimeType, converted: false };
+    
+  } finally {
+    // Cleanup temp files
+    await safeUnlink(inputPath);
+    await safeUnlink(outputPath);
+  }
+}
+
+/**
  * Normalize audio to a format that WhisperX can handle
  * Converts problematic formats (like Opus-in-WAV) to standard WAV PCM
  * 

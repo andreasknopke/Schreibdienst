@@ -541,15 +541,23 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
         return;
       }
       
-      const blob = await res.blob();
-      if (blob.size === 0) {
+      // Get Content-Type from response header to ensure correct MIME type
+      const contentType = res.headers.get('Content-Type') || 'audio/webm';
+      const arrayBuffer = await res.arrayBuffer();
+      
+      if (arrayBuffer.byteLength === 0) {
         setAudioError('Audio wurde gelöscht');
         return;
       }
       
+      // Create blob with explicit MIME type from server response
+      const blob = new Blob([arrayBuffer], { type: contentType });
+      console.log(`[Audio] Loaded blob: size=${blob.size}, type=${blob.type}`);
+      
       const url = URL.createObjectURL(blob);
       setAudioUrl(url);
     } catch (err) {
+      console.error('[Audio] Load error:', err);
       setAudioError('Fehler beim Laden');
     } finally {
       setAudioLoading(false);

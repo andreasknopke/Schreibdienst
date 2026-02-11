@@ -1583,33 +1583,62 @@ async function callLLM(
     body.response_format = { type: 'json_object' };
   }
   
-  const res = await fetch(`${config.baseUrl}/v1/chat/completions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  const fullUrl = `${config.baseUrl}/v1/chat/completions`;
+  const totalInputChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+  console.log(`[Worker LLM] Calling ${config.provider} at ${fullUrl}, model: ${config.model}, input: ${totalInputChars} chars`);
   
-  if (!res.ok) {
-    const errorText = await res.text();
-    console.error(`[Worker] LLM API error (${res.status}): ${errorText.substring(0, 200)}`);
-    throw new Error(`LLM API error (${res.status}): ${errorText.substring(0, 100)}`);
+  // Add timeout - 5 minutes for very long texts, 2 minutes for normal
+  const timeoutMs = totalInputChars > 20000 ? 300000 : 120000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+    console.error(`[Worker LLM] Request TIMEOUT after ${timeoutMs / 1000}s for ${config.provider}`);
+  }, timeoutMs);
+  
+  try {
+    const startTime = Date.now();
+    const res = await fetch(fullUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    
+    clearTimeout(timeoutId);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`[Worker LLM] API error (${res.status}) after ${elapsed}s: ${errorText.substring(0, 200)}`);
+      throw new Error(`LLM API error (${res.status}): ${errorText.substring(0, 100)}`);
+    }
+    
+    const data = await res.json();
+    const finishReason = data.choices?.[0]?.finish_reason;
+    const tokens = data.usage ? `in=${data.usage.prompt_tokens}, out=${data.usage.completion_tokens}` : 'unknown';
+    console.log(`[Worker LLM] Response OK in ${elapsed}s, tokens: ${tokens}, finish_reason: ${finishReason}`);
+    if (finishReason === 'length') {
+      console.error(`[Worker LLM] ⚠️ TRUNCATION DETECTED: Model stopped due to max_tokens limit! Output was cut off.`);
+    }
+    const content = data.choices?.[0]?.message?.content;
+    // Ensure content is a string before calling .trim()
+    if (typeof content === 'string') {
+      return content.trim();
+    }
+    // If content is an array (some LLM APIs return this), join it
+    if (Array.isArray(content)) {
+      return content.map(c => typeof c === 'string' ? c : JSON.stringify(c)).join('').trim();
+    }
+    // Fallback: convert to string if possible
+    return content ? String(content).trim() : '';
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`LLM request timeout after ${timeoutMs / 1000}s (provider: ${config.provider}, input: ${totalInputChars} chars)`);
+    }
+    console.error(`[Worker LLM] Fetch error for ${config.provider} at ${fullUrl}: ${error.message}`);
+    throw error;
   }
-  const data = await res.json();
-  const finishReason = data.choices?.[0]?.finish_reason;
-  if (finishReason === 'length') {
-    console.error(`[Worker] ⚠️ TRUNCATION DETECTED: Model stopped due to max_tokens limit! Output was cut off.`);
-  }
-  const content = data.choices?.[0]?.message?.content;
-  // Ensure content is a string before calling .trim()
-  if (typeof content === 'string') {
-    return content.trim();
-  }
-  // If content is an array (some LLM APIs return this), join it
-  if (Array.isArray(content)) {
-    return content.map(c => typeof c === 'string' ? c : JSON.stringify(c)).join('').trim();
-  }
-  // Fallback: convert to string if possible
-  return content ? String(content).trim() : '';
 }
 
 // POST: Trigger worker to process pending dictations

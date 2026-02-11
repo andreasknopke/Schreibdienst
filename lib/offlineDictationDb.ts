@@ -212,13 +212,17 @@ export async function initOfflineDictationTable(): Promise<void> {
   }
   
   // Migrate TEXT columns to LONGTEXT to prevent truncation of long dictations
-  const textToLongtextColumns = ['raw_transcript', 'transcript', 'methodik', 'befund', 'beurteilung', 'corrected_text'];
-  for (const col of textToLongtextColumns) {
-    try {
-      await db.execute(`ALTER TABLE offline_dictations MODIFY COLUMN ${col} LONGTEXT`);
-    } catch (e: any) {
-      // Ignore errors (column might not exist yet, or already LONGTEXT)
-    }
+  // Use single ALTER TABLE statement to minimize connection pool usage
+  try {
+    await db.execute(`ALTER TABLE offline_dictations
+      MODIFY COLUMN raw_transcript LONGTEXT,
+      MODIFY COLUMN transcript LONGTEXT,
+      MODIFY COLUMN methodik LONGTEXT,
+      MODIFY COLUMN befund LONGTEXT,
+      MODIFY COLUMN beurteilung LONGTEXT,
+      MODIFY COLUMN corrected_text LONGTEXT`);
+  } catch (e: any) {
+    // Ignore errors (columns might not exist yet, or already LONGTEXT)
   }
   console.log('[DB] ✓ Ensured text columns are LONGTEXT');
   
@@ -754,13 +758,17 @@ export async function initOfflineDictationTableWithRequest(request: NextRequest)
   }
 
   // Migrate TEXT columns to LONGTEXT to prevent truncation of long dictations
-  const textToLongtextColumns = ['raw_transcript', 'transcript', 'methodik', 'befund', 'beurteilung', 'corrected_text'];
-  for (const col of textToLongtextColumns) {
-    try {
-      await db.execute(`ALTER TABLE offline_dictations MODIFY COLUMN ${col} LONGTEXT`);
-    } catch (e: any) {
-      // Ignore errors
-    }
+  // Use single ALTER TABLE statement to minimize connection pool usage
+  try {
+    await db.execute(`ALTER TABLE offline_dictations
+      MODIFY COLUMN raw_transcript LONGTEXT,
+      MODIFY COLUMN transcript LONGTEXT,
+      MODIFY COLUMN methodik LONGTEXT,
+      MODIFY COLUMN befund LONGTEXT,
+      MODIFY COLUMN beurteilung LONGTEXT,
+      MODIFY COLUMN corrected_text LONGTEXT`);
+  } catch (e: any) {
+    // Ignore errors (columns might not exist yet, or already LONGTEXT)
   }
   console.log(`[DB] ✓ Ensured text columns are LONGTEXT (${poolKey})`);
 

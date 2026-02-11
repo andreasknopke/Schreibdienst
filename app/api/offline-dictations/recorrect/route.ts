@@ -22,6 +22,76 @@ export const maxDuration = 120; // 2 minutes max
 // LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
 const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);
 
+// Max characters per chunk for cloud LLMs (Mistral, OpenAI) to avoid timeouts
+const CLOUD_LLM_MAX_CHARS = 40000;
+
+// Split text into chunks by character limit, breaking at sentence boundaries
+function splitTextIntoChunksByCharLimit(text: string, maxChars: number = CLOUD_LLM_MAX_CHARS): string[] {
+  if (!text || text.trim().length === 0) return [''];
+  if (text.length <= maxChars) return [text];
+
+  const sentences: string[] = [];
+  let currentSentence = '';
+  let i = 0;
+
+  while (i < text.length) {
+    const char = text[i];
+    currentSentence += char;
+
+    if (char === '.' || char === '!' || char === '?') {
+      const nextChar = text[i + 1] || '';
+      const prevChars = currentSentence.slice(-4, -1);
+      const isDate = /\d$/.test(prevChars) || /^\d/.test(nextChar);
+      const isAbbreviation = /\b(Dr|Mr|Fr|Hr|Prof|bzw|z\.B|u\.a|d\.h|etc|ca|vs|Nr|Tel|Str|inkl|ggf|evtl|usw)\.$/.test(currentSentence);
+
+      if (!isDate && !isAbbreviation) {
+        while (i + 1 < text.length && /[\s"')\]]/.test(text[i + 1])) {
+          i++;
+          currentSentence += text[i];
+        }
+        if (currentSentence.trim()) {
+          sentences.push(currentSentence);
+        }
+        currentSentence = '';
+      }
+    }
+    i++;
+  }
+
+  if (currentSentence.trim()) {
+    sentences.push(currentSentence);
+  }
+
+  if (sentences.length === 0) return [text];
+
+  const chunks: string[] = [];
+  let currentChunk = '';
+
+  for (const sentence of sentences) {
+    if (sentence.length > maxChars) {
+      if (currentChunk.trim()) {
+        chunks.push(currentChunk.trim());
+        currentChunk = '';
+      }
+      chunks.push(sentence.trim());
+      continue;
+    }
+
+    if (currentChunk.length + sentence.length > maxChars && currentChunk.trim()) {
+      chunks.push(currentChunk.trim());
+      currentChunk = '';
+    }
+
+    currentChunk += sentence;
+  }
+
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+
+  return chunks.length > 0 ? chunks : [text];
+}
+
 /**
  * Parse Double Precision log to extract both transcriptions
  * Format:
@@ -336,59 +406,91 @@ REGELN:
 4. Behalte den Stil des Diktierenden bei
 5. Gib AUSSCHLIESSLICH den korrigierten Text zurück - keine Erklärungen!${dictionaryPromptSection}${contextPromptSection}${promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : ''}`;
 
-  const userMessage = `<<<DIKTAT_START>>>\n${text}\n<<<DIKTAT_ENDE>>>`;
+  // Helper to call a cloud LLM (OpenAI/Mistral) for a single chunk
+  async function callCloudLLM(prompt: string, chunkText: string): Promise<string> {
+    const chunkUserMessage = `<<<DIKTAT_START>>>\n${chunkText}\n<<<DIKTAT_ENDE>>>`;
+    let url = '';
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    
+    if (llmConfig.provider === 'openai') {
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) return chunkText;
+      url = 'https://api.openai.com/v1/chat/completions';
+      headers['Authorization'] = `Bearer ${apiKey}`;
+    } else if (llmConfig.provider === 'mistral') {
+      const apiKey = process.env.MISTRAL_API_KEY;
+      if (!apiKey) return chunkText;
+      url = 'https://api.mistral.ai/v1/chat/completions';
+      headers['Authorization'] = `Bearer ${apiKey}`;
+    } else {
+      return chunkText;
+    }
+    
+    // Add timeout - 5 minutes for very long texts, 2 minutes for normal
+    const totalChars = prompt.length + chunkText.length;
+    const timeoutMs = totalChars > 20000 ? 300000 : 120000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      console.error(`[ReCorrect] Request TIMEOUT after ${timeoutMs / 1000}s for ${llmConfig.provider}`);
+    }, timeoutMs);
+    
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: llmConfig.model,
+          messages: [
+            { role: 'system', content: prompt },
+            { role: 'user', content: chunkUserMessage }
+          ],
+          temperature: 0.1,
+        }),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (res.ok) {
+        const data = await res.json();
+        const content = data.choices?.[0]?.message?.content;
+        return (typeof content === 'string' ? content.trim() : (content ? String(content) : '')) || chunkText;
+      }
+      return chunkText;
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error(`LLM request timeout after ${timeoutMs / 1000}s (provider: ${llmConfig.provider}, input: ${totalChars} chars)`);
+      }
+      throw error;
+    }
+  }
   
   let correctedText = text;
   
-  if (llmConfig.provider === 'openai') {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return text;
-    
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: llmConfig.model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage }
-        ],
-        temperature: 0.1,
-      }),
-    });
-    
-    if (res.ok) {
-      const data = await res.json();
-      const openaiContent = data.choices?.[0]?.message?.content;
-      correctedText = (typeof openaiContent === 'string' ? openaiContent.trim() : (openaiContent ? String(openaiContent) : '')) || text;
-    }
-  } else if (llmConfig.provider === 'mistral') {
-    const apiKey = process.env.MISTRAL_API_KEY;
-    if (!apiKey) return text;
-    
-    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: llmConfig.model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage }
-        ],
-        temperature: 0.1,
-      }),
-    });
-    
-    if (res.ok) {
-      const data = await res.json();
-      const mistralCorrContent = data.choices?.[0]?.message?.content;
-      correctedText = (typeof mistralCorrContent === 'string' ? mistralCorrContent.trim() : (mistralCorrContent ? String(mistralCorrContent) : '')) || text;
+  if (llmConfig.provider === 'openai' || llmConfig.provider === 'mistral') {
+    // Check if text needs chunking
+    if (text.length > CLOUD_LLM_MAX_CHARS) {
+      const chunks = splitTextIntoChunksByCharLimit(text, CLOUD_LLM_MAX_CHARS);
+      console.log(`[ReCorrect] Cloud LLM (${llmConfig.provider}): Text too long (${text.length} chars), splitting into ${chunks.length} chunks of max ${CLOUD_LLM_MAX_CHARS} chars`);
+      
+      const correctedChunks: string[] = [];
+      
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        console.log(`[ReCorrect] Cloud chunk ${i + 1}/${chunks.length}: ${chunk.length} chars`);
+        const result = await callCloudLLM(systemPrompt, chunk);
+        correctedChunks.push(result);
+      }
+      
+      correctedText = correctedChunks
+        .join('\n\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/[^\S\n]+/g, ' ')
+        .trim();
+    } else {
+      correctedText = await callCloudLLM(systemPrompt, text);
     }
   } else if (llmConfig.provider === 'lmstudio') {
     const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
@@ -404,7 +506,7 @@ REGELN:
         model: llmConfig.model,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage }
+          { role: 'user', content: `<<<DIKTAT_START>>>\n${text}\n<<<DIKTAT_ENDE>>>` }
         ],
         temperature,
         max_tokens: maxTokens,

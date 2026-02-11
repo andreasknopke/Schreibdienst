@@ -393,18 +393,18 @@ export async function convertAudioForPlayback(
   // Generate temp file paths
   const tempId = randomUUID();
   const inputPath = join(tmpdir(), `audio_play_in_${tempId}.ogg`);
-  const outputPath = join(tmpdir(), `audio_play_out_${tempId}.mp3`);
+  const outputPath = join(tmpdir(), `audio_play_out_${tempId}.m4a`);
   
   try {
     // Write input file
     await writeFile(inputPath, audioBuffer);
     
-    // Convert to MP3 for universal browser compatibility
-    console.log(`[AudioPlayback] Converting OGG/Opus to MP3 for browser playback...`);
+    // Convert to AAC/M4A for universal browser compatibility (AAC is always available in FFmpeg)
+    console.log(`[AudioPlayback] Converting OGG/Opus to AAC for browser playback...`);
     await runFfmpeg([
       '-i', inputPath,
       '-vn',                    // No video
-      '-acodec', 'libmp3lame',  // MP3 codec
+      '-acodec', 'aac',         // AAC codec (universally available)
       '-b:a', '64k',            // 64kbps (sufficient for speech)
       '-ar', '22050',           // 22kHz sample rate
       '-ac', '1',               // Mono
@@ -413,12 +413,12 @@ export async function convertAudioForPlayback(
     ]);
     
     // Read converted file
-    const mp3Buffer = await readFile(outputPath);
-    console.log(`[AudioPlayback] Converted OGG → MP3: ${formatBytes(audioBuffer.length)} → ${formatBytes(mp3Buffer.length)}`);
+    const aacBuffer = await readFile(outputPath);
+    console.log(`[AudioPlayback] Converted OGG → AAC: ${formatBytes(audioBuffer.length)} → ${formatBytes(aacBuffer.length)}`);
     
     return { 
-      data: mp3Buffer, 
-      mimeType: 'audio/mpeg', 
+      data: aacBuffer, 
+      mimeType: 'audio/mp4', 
       converted: true 
     };
     

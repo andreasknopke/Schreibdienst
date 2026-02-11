@@ -59,6 +59,7 @@ export async function GET(req: NextRequest) {
       if (includeAudio && dictation.audio_data) {
         let audioBuffer = Buffer.from(dictation.audio_data);
         let contentType = dictation.audio_mime_type || 'audio/webm';
+        console.log(`[Offline Dictations] Audio request: id=${id}, originalMime=${contentType}, size=${audioBuffer.length}`);
         
         // If extract=true, try to extract payload from SpeaKING/WAV format
         if (extractPayload) {
@@ -75,20 +76,19 @@ export async function GET(req: NextRequest) {
             }
           }
         } else {
-          // Convert OGG/Opus to MP3 for browser playback (Safari doesn't support OGG)
+          // Convert OGG/Opus to AAC for browser playback (Safari doesn't support OGG)
+          console.log(`[Offline Dictations] Attempting audio conversion for playback...`);
           const playbackResult = await convertAudioForPlayback(audioBuffer, contentType);
           audioBuffer = playbackResult.data;
           contentType = playbackResult.mimeType;
-          if (playbackResult.converted) {
-            console.log(`[Offline Dictations] Converted audio for playback: ${contentType}`);
-          }
+          console.log(`[Offline Dictations] Conversion result: converted=${playbackResult.converted}, newMime=${contentType}`);
         }
         
         return new Response(audioBuffer, {
           headers: {
             'Content-Type': contentType,
             'Content-Length': audioBuffer.length.toString(),
-            'Cache-Control': 'private, max-age=3600',
+            'Cache-Control': 'no-cache',  // Disable caching for debugging
           },
         });
       }

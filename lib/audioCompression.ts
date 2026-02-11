@@ -401,6 +401,22 @@ export async function convertAudioForPlayback(
     console.log(`[AudioPlayback] Audio header bytes: ${header.toString('hex')}`);
     console.log(`[AudioPlayback] Audio header ascii: ${header.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}`);
     
+    // Also check bytes around offset 1000 to see if there's corruption
+    if (audioBuffer.length > 1100) {
+      const sample = audioBuffer.subarray(1000, 1016);
+      console.log(`[AudioPlayback] Sample at byte 1000: ${sample.toString('hex')}`);
+    }
+    
+    // Check if the buffer contains valid OGG pages by scanning for "OggS" signatures
+    let oggPageCount = 0;
+    for (let i = 0; i < Math.min(audioBuffer.length, 50000); i++) {
+      if (audioBuffer[i] === 0x4F && audioBuffer[i+1] === 0x67 && 
+          audioBuffer[i+2] === 0x67 && audioBuffer[i+3] === 0x53) {
+        oggPageCount++;
+      }
+    }
+    console.log(`[AudioPlayback] OGG page signatures found in first 50KB: ${oggPageCount}`);
+    
     // Write input file
     await writeFile(inputPath, audioBuffer);
     
@@ -410,10 +426,13 @@ export async function convertAudioForPlayback(
     console.log(`[AudioPlayback] Wrote ${fileStats.size} bytes to temp file`);
     
     // Convert to AAC/M4A for universal browser compatibility (AAC is always available in FFmpeg)
-    // Use error tolerance flags to handle corrupted OGG files (CRC mismatches)
+    // Use aggressive error tolerance flags to handle corrupted OGG files (CRC mismatches)
     console.log(`[AudioPlayback] Converting OGG/Opus to AAC for browser playback...`);
     await runFfmpeg([
+      '-hide_banner',
+      '-loglevel', 'error',
       '-err_detect', 'ignore_err',  // Ignore CRC and other errors
+      '-fflags', '+genpts+igndts+discardcorrupt',  // Generate timestamps, ignore corrupt frames
       '-i', inputPath,
       '-vn',                    // No video
       '-acodec', 'aac',         // AAC codec (universally available)
@@ -435,7 +454,41 @@ export async function convertAudioForPlayback(
     };
     
   } catch (error: any) {
-    console.error(`[AudioPlayback] Conversion failed: ${error.message}`);
+    console.error(`[AudioPlayback] First attempt failed: ${error.message}`);
+    
+    // Try alternative approach: force format detection and ignore container errors
+    try {
+      console.log(`[AudioPlayback] Trying alternative conversion with relaxed parsing...`);
+      await runFfmpeg([
+        '-hide_banner',
+        '-v', 'warning',
+        '-fflags', '+genpts+igndts',
+        '-flags', '+low_delay',
+        '-strict', '-2',
+        '-f', 'ogg',              // Force OGG format  
+        '-i', inputPath,
+        '-af', 'aresample=async=1',  // Resample to fix timing issues
+        '-vn',
+        '-acodec', 'aac',
+        '-b:a', '64k',
+        '-ar', '22050',
+        '-ac', '1',
+        '-y',
+        outputPath
+      ]);
+      
+      const aacBuffer = await readFile(outputPath);
+      console.log(`[AudioPlayback] Alternative conversion succeeded: ${formatBytes(aacBuffer.length)}`);
+      
+      return { 
+        data: aacBuffer, 
+        mimeType: 'audio/mp4', 
+        converted: true 
+      };
+    } catch (err2: any) {
+      console.error(`[AudioPlayback] All conversion attempts failed: ${err2.message}`);
+    }
+    
     // Return original on failure
     return { data: audioBuffer, mimeType, converted: false };
     

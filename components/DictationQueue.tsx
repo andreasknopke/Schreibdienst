@@ -845,8 +845,12 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
           ...prev,
           corrected_text: data.correctedText || selected.raw_transcript
         }));
+        setSavedText(data.correctedText || selected.raw_transcript);
         setIsReverted(false);
-        setHasUnsavedChanges(true);
+        setHasUnsavedChanges(false);
+        
+        // Reload dictation details from DB to stay in sync
+        loadDictationDetails(selected.id);
         
         // Show detailed info about what was done
         const dpInfo = data.doublePrecisionReRan 
@@ -868,7 +872,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     } finally {
       setIsReCorrecting(false);
     }
-  }, [selectedId, dictations]);
+  }, [selectedId, dictations, loadDictationDetails]);
 
   // Save corrected text to database
   const handleSave = useCallback(async () => {

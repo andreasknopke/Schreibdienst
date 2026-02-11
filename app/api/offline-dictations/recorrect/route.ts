@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   getDictationByIdWithRequest,
   initOfflineDictationTableWithRequest,
+  updateCorrectedTextWithRequest,
 } from '@/lib/offlineDictationDb';
 import {
   getCorrectionLogByDictationIdWithRequest,
@@ -683,6 +684,10 @@ export async function POST(req: NextRequest) {
     // Calculate final change score (from raw transcript to final)
     const rawTranscript = dictation.raw_transcript || dictation.transcript || '';
     const finalChangeScore = calculateChangeScore(rawTranscript, correctedText);
+    
+    // Save corrected text to database immediately
+    await updateCorrectedTextWithRequest(req, dictationId, correctedText, finalChangeScore);
+    console.log(`[ReCorrect] ✓ Saved to DB - dictation #${dictationId}`);
     
     console.log(`[ReCorrect] ✓ Complete - Final text: ${correctedText.length} chars, change score: ${finalChangeScore}%`);
     

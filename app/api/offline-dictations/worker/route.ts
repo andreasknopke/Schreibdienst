@@ -1571,8 +1571,13 @@ async function callLLM(
     model: config.model,
     messages,
     temperature: 0.3,
-    max_tokens: isLMStudio ? LM_STUDIO_MAX_TOKENS : 2000,
   };
+  
+  // Only send max_tokens for LM-Studio (local models need explicit limit)
+  // Cloud providers (OpenAI, Mistral) use their model's default maximum - sending max_tokens can cause truncation
+  if (isLMStudio) {
+    body.max_tokens = LM_STUDIO_MAX_TOKENS;
+  }
   
   if (options.jsonMode && config.provider === 'openai') {
     body.response_format = { type: 'json_object' };
@@ -1590,6 +1595,10 @@ async function callLLM(
     throw new Error(`LLM API error (${res.status}): ${errorText.substring(0, 100)}`);
   }
   const data = await res.json();
+  const finishReason = data.choices?.[0]?.finish_reason;
+  if (finishReason === 'length') {
+    console.error(`[Worker] ⚠️ TRUNCATION DETECTED: Model stopped due to max_tokens limit! Output was cut off.`);
+  }
   const content = data.choices?.[0]?.message?.content;
   // Ensure content is a string before calling .trim()
   if (typeof content === 'string') {

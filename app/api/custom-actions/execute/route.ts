@@ -60,12 +60,19 @@ async function callLLM(
     headers['Authorization'] = `Bearer ${config.apiKey}`;
   }
   
+  const isLMStudio = config.provider === 'lmstudio';
+  
   const body: any = {
     model: config.model,
     messages,
     temperature,
-    max_tokens: maxTokens,
   };
+  
+  // Only send max_tokens for LM-Studio (local models need explicit limit)
+  // Cloud providers (OpenAI, Mistral) use their model's default maximum - sending max_tokens can cause truncation
+  if (isLMStudio) {
+    body.max_tokens = maxTokens;
+  }
   
   console.log(`[CustomAction LLM] Request: ${config.baseUrl}/v1/chat/completions`);
   
@@ -83,7 +90,12 @@ async function callLLM(
   
   const data = await res.json();
   const content = data.choices?.[0]?.message?.content?.trim() || '';
+  const finishReason = data.choices?.[0]?.finish_reason;
   const tokens = data.usage ? { input: data.usage.prompt_tokens, output: data.usage.completion_tokens } : undefined;
+  
+  if (finishReason === 'length') {
+    console.error(`[CustomAction LLM] ⚠️ TRUNCATION DETECTED: Model stopped due to max_tokens limit! Output was cut off.`);
+  }
   
   return { content, tokens };
 }

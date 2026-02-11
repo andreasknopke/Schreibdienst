@@ -396,12 +396,24 @@ export async function convertAudioForPlayback(
   const outputPath = join(tmpdir(), `audio_play_out_${tempId}.m4a`);
   
   try {
+    // Log first bytes to verify data integrity
+    const header = audioBuffer.subarray(0, 16);
+    console.log(`[AudioPlayback] Audio header bytes: ${header.toString('hex')}`);
+    console.log(`[AudioPlayback] Audio header ascii: ${header.toString('ascii').replace(/[^\x20-\x7E]/g, '.')}`);
+    
     // Write input file
     await writeFile(inputPath, audioBuffer);
     
+    // Verify file was written correctly
+    const { stat } = await import('fs/promises');
+    const fileStats = await stat(inputPath);
+    console.log(`[AudioPlayback] Wrote ${fileStats.size} bytes to temp file`);
+    
     // Convert to AAC/M4A for universal browser compatibility (AAC is always available in FFmpeg)
+    // Use error tolerance flags to handle corrupted OGG files (CRC mismatches)
     console.log(`[AudioPlayback] Converting OGG/Opus to AAC for browser playback...`);
     await runFfmpeg([
+      '-err_detect', 'ignore_err',  // Ignore CRC and other errors
       '-i', inputPath,
       '-vn',                    // No video
       '-acodec', 'aac',         // AAC codec (universally available)

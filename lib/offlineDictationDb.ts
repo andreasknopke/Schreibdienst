@@ -82,10 +82,10 @@ const DETAIL_COLUMNS = `
 const PRIORITY_ORDER = `FIELD(priority, 'stat', 'urgent', 'normal')`;
 
 // ============================================================
-// Table initialization (once per pool, cached)
+// Table initialization (once per pool, deduplicated via Promise)
 // ============================================================
 
-const tableInitializedPerPool = new Map<string, boolean>();
+const tableInitPromises = new Map<string, Promise<void>>();
 
 function poolKeyFromRequest(request?: NextRequest): string {
   if (request) {
@@ -102,7 +102,22 @@ function poolKeyFromRequest(request?: NextRequest): string {
 }
 
 async function _initTables(db: mysql.Pool, poolKey: string): Promise<void> {
-  if (tableInitializedPerPool.get(poolKey)) return;
+  // Deduplicate: if init is already running or done for this pool, reuse that Promise
+  const existing = tableInitPromises.get(poolKey);
+  if (existing) return existing;
+
+  const promise = _doInitTables(db, poolKey);
+  tableInitPromises.set(poolKey, promise);
+  try {
+    await promise;
+  } catch (err) {
+    // On failure, allow retry next time
+    tableInitPromises.delete(poolKey);
+    throw err;
+  }
+}
+
+async function _doInitTables(db: mysql.Pool, poolKey: string): Promise<void> {
 
   // ── Main table (no audio_data, no segments – those live in separate tables) ──
   await db.execute(`
@@ -263,7 +278,6 @@ async function _initTables(db: mysql.Pool, poolKey: string): Promise<void> {
     }
   }
 
-  tableInitializedPerPool.set(poolKey, true);
   console.log(`[DB] ✓ All tables ready (${poolKey})`);
 }
 

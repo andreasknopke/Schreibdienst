@@ -4,6 +4,7 @@ import {
   getUserDictationsWithRequest,
   getAllDictationsWithRequest,
   getDictationByIdWithRequest,
+  getAudioDataWithRequest,
   deleteDictationWithRequest,
   deleteAudioDataWithRequest,
   retryDictationWithRequest,
@@ -50,15 +51,16 @@ export async function GET(req: NextRequest) {
     if (id) {
       const includeAudio = searchParams.get('audio') === 'true';
       const extractPayload = searchParams.get('extract') === 'true';
-      const dictation = await getDictationByIdWithRequest(req, parseInt(id), includeAudio);
-      if (!dictation) {
-        return NextResponse.json({ error: 'Dictation not found' }, { status: 404 });
-      }
+      const dictationId = parseInt(id);
       
-      // If audio requested, return as binary stream
-      if (includeAudio && dictation.audio_data) {
-        let audioBuffer = Buffer.from(dictation.audio_data);
-        let contentType = dictation.audio_mime_type || 'audio/webm';
+      // If audio requested, fetch from separate audio table
+      if (includeAudio) {
+        const audioResult = await getAudioDataWithRequest(req, dictationId);
+        if (!audioResult) {
+          return NextResponse.json({ error: 'Audio not found' }, { status: 404 });
+        }
+        let audioBuffer = Buffer.from(audioResult.audio_data);
+        let contentType = audioResult.audio_mime_type || 'audio/webm';
         
         // If extract=true, try to extract payload from SpeaKING/WAV format
         if (extractPayload) {
@@ -85,6 +87,11 @@ export async function GET(req: NextRequest) {
         });
       }
       
+      // Return full detail data (includes text fields + segments)
+      const dictation = await getDictationByIdWithRequest(req, dictationId);
+      if (!dictation) {
+        return NextResponse.json({ error: 'Dictation not found' }, { status: 404 });
+      }
       return NextResponse.json(dictation);
     }
     

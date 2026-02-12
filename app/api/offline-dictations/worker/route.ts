@@ -5,6 +5,7 @@ import {
   completeDictationWithRequest,
   markDictationErrorWithRequest,
   getDictationByIdWithRequest,
+  getAudioDataWithRequest,
   initOfflineDictationTableWithRequest,
   updateAudioDataWithRequest,
 } from '@/lib/offlineDictationDb';
@@ -140,16 +141,19 @@ let lastProcessTime = 0;
 export async function processDictation(request: NextRequest, dictationId: number): Promise<void> {
   console.log(`[Worker] Processing dictation #${dictationId}`);
   
-  const dictation = await getDictationByIdWithRequest(request, dictationId, true);
+  // Load metadata (without audio – fetched separately from dictation_audio table)
+  const dictation = await getDictationByIdWithRequest(request, dictationId);
   if (!dictation) {
     throw new Error(`Dictation #${dictationId} not found`);
   }
   
-  console.log(`[Worker] Dictation #${dictationId} loaded: audio_data=${dictation.audio_data ? dictation.audio_data.length + ' bytes' : 'NULL'}, mime=${dictation.audio_mime_type}`);
-  
-  if (!dictation.audio_data) {
+  // Load audio from separate table
+  const audioResult = await getAudioDataWithRequest(request, dictationId);
+  if (!audioResult) {
     throw new Error(`Dictation #${dictationId} has no audio data`);
   }
+  
+  console.log(`[Worker] Dictation #${dictationId} loaded: audio_data=${audioResult.audio_data.length} bytes, mime=${audioResult.audio_mime_type}`);
   
   // Mark as processing
   await markDictationProcessingWithRequest(request, dictationId);
@@ -158,9 +162,9 @@ export async function processDictation(request: NextRequest, dictationId: number
     // Step 1: Transcribe audio
     console.log(`[Worker] Transcribing dictation #${dictationId}...`);
     // Convert Buffer to Uint8Array for Blob compatibility
-    const audioData = new Uint8Array(dictation.audio_data);
-    const audioBlob = new Blob([audioData], { type: dictation.audio_mime_type });
-    console.log(`[Worker] Audio blob created: size=${audioBlob.size}, type=${audioBlob.type}, originalMime=${dictation.audio_mime_type}`);
+    const audioData = new Uint8Array(audioResult.audio_data);
+    const audioBlob = new Blob([audioData], { type: audioResult.audio_mime_type });
+    console.log(`[Worker] Audio blob created: size=${audioBlob.size}, type=${audioBlob.type}, originalMime=${audioResult.audio_mime_type}`);
     const transcriptionResult = await transcribeAudio(
       request, 
       audioBlob, 
@@ -276,8 +280,8 @@ export async function processDictation(request: NextRequest, dictationId: number
     console.log(`[Worker] Compressing audio for #${dictationId}...`);
     try {
       const compressionResult = await compressAudioForSpeech(
-        Buffer.from(dictation.audio_data),
-        dictation.audio_mime_type
+        Buffer.from(audioResult.audio_data),
+        audioResult.audio_mime_type
       );
       
       if (compressionResult.compressed) {

@@ -1,33 +1,33 @@
 import { NextRequest } from 'next/server';
-import { getPool, query, execute, getPoolForRequest } from './db';
+import { getPool, getPoolForRequest } from './db';
+import mysql from 'mysql2/promise';
 
-// Correction types
+// ============================================================
+// Types
+// ============================================================
+
 export type CorrectionType = 'textFormatting' | 'llm' | 'doublePrecision' | 'manual';
 
-// Correction Log Entry
 export interface CorrectionLogEntry {
   id: number;
   dictation_id: number;
   correction_type: CorrectionType;
-  // For LLM and Double Precision corrections
   model_name?: string;
-  model_provider?: string; // 'openai', 'mistral', 'lmstudio'
-  // For manual corrections
+  model_provider?: string;
   username?: string;
-  // Text changes
   text_before: string;
   text_after: string;
-  change_score?: number; // 0-100 score
-  // Timestamps
+  change_score?: number;
   created_at: Date;
 }
 
-/**
- * Initialize correction log table with automatic migration
- */
+// ============================================================
+// Table init (table creation is handled in offlineDictationDb._initTables)
+// These exist for backward-compat with routes that call initCorrectionLogTable*
+// ============================================================
+
 export async function initCorrectionLogTable(): Promise<void> {
   const db = await getPool();
-  
   await db.execute(`
     CREATE TABLE IF NOT EXISTS correction_log (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -46,16 +46,10 @@ export async function initCorrectionLogTable(): Promise<void> {
       FOREIGN KEY (dictation_id) REFERENCES offline_dictations(id) ON DELETE CASCADE
     )
   `);
-  
-  console.log('[DB] ✓ Correction log table ready');
 }
 
-/**
- * Initialize correction log table with request context
- */
 export async function initCorrectionLogTableWithRequest(req: NextRequest): Promise<void> {
   const db = await getPoolForRequest(req);
-  
   await db.execute(`
     CREATE TABLE IF NOT EXISTS correction_log (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -74,233 +68,106 @@ export async function initCorrectionLogTableWithRequest(req: NextRequest): Promi
       FOREIGN KEY (dictation_id) REFERENCES offline_dictations(id) ON DELETE CASCADE
     )
   `);
-  
-  console.log('[DB] ✓ Correction log table ready');
 }
 
-/**
- * Log a text formatting correction
- */
-export async function logTextFormattingCorrection(
+// ============================================================
+// Internal helpers (pool parameter → zero duplication)
+// ============================================================
+
+async function _logCorrection(
+  db: mysql.Pool,
   dictationId: number,
+  type: CorrectionType,
   textBefore: string,
   textAfter: string,
-  changeScore?: number
+  opts?: { modelName?: string; modelProvider?: string; username?: string; changeScore?: number }
 ): Promise<number> {
-  const result = await execute(
-    `INSERT INTO correction_log 
-      (dictation_id, correction_type, text_before, text_after, change_score)
-     VALUES (?, 'textFormatting', ?, ?, ?)`,
-    [dictationId, textBefore, textAfter, changeScore ?? null]
-  );
-  return result.insertId;
-}
-
-/**
- * Log an LLM correction
- */
-export async function logLLMCorrection(
-  dictationId: number,
-  textBefore: string,
-  textAfter: string,
-  modelName: string,
-  modelProvider: string,
-  changeScore?: number
-): Promise<number> {
-  const result = await execute(
-    `INSERT INTO correction_log 
-      (dictation_id, correction_type, model_name, model_provider, text_before, text_after, change_score)
-     VALUES (?, 'llm', ?, ?, ?, ?, ?)`,
-    [dictationId, modelName, modelProvider, textBefore, textAfter, changeScore ?? null]
-  );
-  return result.insertId;
-}
-
-/**
- * Log a double precision correction
- */
-export async function logDoublePrecisionCorrection(
-  dictationId: number,
-  textBefore: string,
-  textAfter: string,
-  modelName: string,
-  modelProvider: string,
-  changeScore?: number
-): Promise<number> {
-  const result = await execute(
-    `INSERT INTO correction_log 
-      (dictation_id, correction_type, model_name, model_provider, text_before, text_after, change_score)
-     VALUES (?, 'doublePrecision', ?, ?, ?, ?, ?)`,
-    [dictationId, modelName, modelProvider, textBefore, textAfter, changeScore ?? null]
-  );
-  return result.insertId;
-}
-
-/**
- * Log a manual correction
- */
-export async function logManualCorrection(
-  dictationId: number,
-  textBefore: string,
-  textAfter: string,
-  username: string,
-  changeScore?: number
-): Promise<number> {
-  const result = await execute(
-    `INSERT INTO correction_log 
-      (dictation_id, correction_type, username, text_before, text_after, change_score)
-     VALUES (?, 'manual', ?, ?, ?, ?)`,
-    [dictationId, username, textBefore, textAfter, changeScore ?? null]
-  );
-  return result.insertId;
-}
-
-/**
- * Get all correction logs for a dictation
- */
-export async function getCorrectionLogByDictationId(dictationId: number): Promise<CorrectionLogEntry[]> {
-  return query<CorrectionLogEntry>(
-    `SELECT * FROM correction_log WHERE dictation_id = ? ORDER BY created_at ASC`,
-    [dictationId]
-  );
-}
-
-/**
- * Get correction log statistics for a dictation
- */
-export async function getCorrectionLogStats(dictationId: number): Promise<{
-  totalCorrections: number;
-  byType: { [key in CorrectionType]?: number };
-}> {
-  const rows = await query<{ correction_type: CorrectionType; count: number }>(
-    `SELECT correction_type, COUNT(*) as count FROM correction_log WHERE dictation_id = ? GROUP BY correction_type`,
-    [dictationId]
-  );
-  
-  const stats = {
-    totalCorrections: 0,
-    byType: {} as { [key in CorrectionType]?: number }
-  };
-  
-  for (const row of rows) {
-    const correctionType = row.correction_type as CorrectionType;
-    stats.byType[correctionType] = row.count;
-    stats.totalCorrections += row.count;
-  }
-  
-  return stats;
-}
-
-// Request-based versions for use in API routes
-
-export async function logTextFormattingCorrectionWithRequest(
-  req: NextRequest,
-  dictationId: number,
-  textBefore: string,
-  textAfter: string,
-  changeScore?: number
-): Promise<number> {
-  const db = await getPoolForRequest(req);
   const [result] = await db.execute(
     `INSERT INTO correction_log 
-      (dictation_id, correction_type, text_before, text_after, change_score)
-     VALUES (?, 'textFormatting', ?, ?, ?)`,
-    [dictationId, textBefore, textAfter, changeScore ?? null]
+      (dictation_id, correction_type, model_name, model_provider, username, text_before, text_after, change_score)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      dictationId, type,
+      opts?.modelName ?? null, opts?.modelProvider ?? null, opts?.username ?? null,
+      textBefore, textAfter, opts?.changeScore ?? null,
+    ]
   ) as any;
   return result.insertId;
 }
 
-export async function logLLMCorrectionWithRequest(
-  req: NextRequest,
-  dictationId: number,
-  textBefore: string,
-  textAfter: string,
-  modelName: string,
-  modelProvider: string,
-  changeScore?: number
-): Promise<number> {
-  const db = await getPoolForRequest(req);
-  const [result] = await db.execute(
-    `INSERT INTO correction_log 
-      (dictation_id, correction_type, model_name, model_provider, text_before, text_after, change_score)
-     VALUES (?, 'llm', ?, ?, ?, ?, ?)`,
-    [dictationId, modelName, modelProvider, textBefore, textAfter, changeScore ?? null]
-  ) as any;
-  return result.insertId;
-}
-
-export async function logDoublePrecisionCorrectionWithRequest(
-  req: NextRequest,
-  dictationId: number,
-  textBefore: string,
-  textAfter: string,
-  modelName: string,
-  modelProvider: string,
-  changeScore?: number
-): Promise<number> {
-  const db = await getPoolForRequest(req);
-  const [result] = await db.execute(
-    `INSERT INTO correction_log 
-      (dictation_id, correction_type, model_name, model_provider, text_before, text_after, change_score)
-     VALUES (?, 'doublePrecision', ?, ?, ?, ?, ?)`,
-    [dictationId, modelName, modelProvider, textBefore, textAfter, changeScore ?? null]
-  ) as any;
-  return result.insertId;
-}
-
-export async function logManualCorrectionWithRequest(
-  req: NextRequest,
-  dictationId: number,
-  textBefore: string,
-  textAfter: string,
-  username: string,
-  changeScore?: number
-): Promise<number> {
-  const db = await getPoolForRequest(req);
-  const [result] = await db.execute(
-    `INSERT INTO correction_log 
-      (dictation_id, correction_type, username, text_before, text_after, change_score)
-     VALUES (?, 'manual', ?, ?, ?, ?)`,
-    [dictationId, username, textBefore, textAfter, changeScore ?? null]
-  ) as any;
-  return result.insertId;
-}
-
-export async function getCorrectionLogByDictationIdWithRequest(
-  req: NextRequest,
-  dictationId: number
-): Promise<CorrectionLogEntry[]> {
-  const db = await getPoolForRequest(req);
+async function _getLogsByDictation(db: mysql.Pool, dictationId: number): Promise<CorrectionLogEntry[]> {
   const [rows] = await db.execute(
     `SELECT * FROM correction_log WHERE dictation_id = ? ORDER BY created_at ASC`,
     [dictationId]
-  ) as any;
-  return rows;
+  );
+  return rows as CorrectionLogEntry[];
 }
 
-export async function getCorrectionLogStatsWithRequest(
-  req: NextRequest,
-  dictationId: number
-): Promise<{
-  totalCorrections: number;
-  byType: { [key in CorrectionType]?: number };
-}> {
-  const db = await getPoolForRequest(req);
-  const [rows] = await db.execute(
+async function _getLogStats(db: mysql.Pool, dictationId: number) {
+  const [rows] = await db.execute<any[]>(
     `SELECT correction_type, COUNT(*) as count FROM correction_log WHERE dictation_id = ? GROUP BY correction_type`,
     [dictationId]
-  ) as any;
-  
-  const stats = {
-    totalCorrections: 0,
-    byType: {} as { [key in CorrectionType]?: number }
-  };
-  
+  );
+  const stats = { totalCorrections: 0, byType: {} as { [key in CorrectionType]?: number } };
   for (const row of rows) {
-    const correctionType = row.correction_type as CorrectionType;
-    stats.byType[correctionType] = row.count;
+    stats.byType[row.correction_type as CorrectionType] = row.count;
     stats.totalCorrections += row.count;
   }
-  
   return stats;
+}
+
+// ============================================================
+// Public API – Default pool
+// ============================================================
+
+export function logTextFormattingCorrection(dictationId: number, textBefore: string, textAfter: string, changeScore?: number) {
+  return getPool().then(db => _logCorrection(db, dictationId, 'textFormatting', textBefore, textAfter, { changeScore }));
+}
+
+export function logLLMCorrection(dictationId: number, textBefore: string, textAfter: string, modelName: string, modelProvider: string, changeScore?: number) {
+  return getPool().then(db => _logCorrection(db, dictationId, 'llm', textBefore, textAfter, { modelName, modelProvider, changeScore }));
+}
+
+export function logDoublePrecisionCorrection(dictationId: number, textBefore: string, textAfter: string, modelName: string, modelProvider: string, changeScore?: number) {
+  return getPool().then(db => _logCorrection(db, dictationId, 'doublePrecision', textBefore, textAfter, { modelName, modelProvider, changeScore }));
+}
+
+export function logManualCorrection(dictationId: number, textBefore: string, textAfter: string, username: string, changeScore?: number) {
+  return getPool().then(db => _logCorrection(db, dictationId, 'manual', textBefore, textAfter, { username, changeScore }));
+}
+
+export function getCorrectionLogByDictationId(dictationId: number) {
+  return getPool().then(db => _getLogsByDictation(db, dictationId));
+}
+
+export function getCorrectionLogStats(dictationId: number) {
+  return getPool().then(db => _getLogStats(db, dictationId));
+}
+
+// ============================================================
+// Public API – Request-based (dynamic pool via DB-Token)
+// ============================================================
+
+export function logTextFormattingCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, changeScore?: number) {
+  return getPoolForRequest(req).then(db => _logCorrection(db, dictationId, 'textFormatting', textBefore, textAfter, { changeScore }));
+}
+
+export function logLLMCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, modelName: string, modelProvider: string, changeScore?: number) {
+  return getPoolForRequest(req).then(db => _logCorrection(db, dictationId, 'llm', textBefore, textAfter, { modelName, modelProvider, changeScore }));
+}
+
+export function logDoublePrecisionCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, modelName: string, modelProvider: string, changeScore?: number) {
+  return getPoolForRequest(req).then(db => _logCorrection(db, dictationId, 'doublePrecision', textBefore, textAfter, { modelName, modelProvider, changeScore }));
+}
+
+export function logManualCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, username: string, changeScore?: number) {
+  return getPoolForRequest(req).then(db => _logCorrection(db, dictationId, 'manual', textBefore, textAfter, { username, changeScore }));
+}
+
+export function getCorrectionLogByDictationIdWithRequest(req: NextRequest, dictationId: number) {
+  return getPoolForRequest(req).then(db => _getLogsByDictation(db, dictationId));
+}
+
+export function getCorrectionLogStatsWithRequest(req: NextRequest, dictationId: number) {
+  return getPoolForRequest(req).then(db => _getLogStats(db, dictationId));
 }

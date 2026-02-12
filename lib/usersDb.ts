@@ -45,7 +45,7 @@ export async function authenticateUser(username: string, password: string): Prom
   // Check database users
   try {
     const users = await query<User>(
-      'SELECT * FROM users WHERE LOWER(username) = LOWER(?)',
+      'SELECT * FROM users WHERE username = ?',
       [username]
     );
     
@@ -83,7 +83,7 @@ export async function createUser(username: string, password: string, isAdmin: bo
   try {
     // Check if user exists
     const existing = await query<User>(
-      'SELECT username FROM users WHERE LOWER(username) = LOWER(?)',
+      'SELECT username FROM users WHERE username = ?',
       [username]
     );
     
@@ -113,7 +113,7 @@ export async function deleteUser(username: string): Promise<{ success: boolean; 
 
   try {
     const result = await execute(
-      'DELETE FROM users WHERE LOWER(username) = LOWER(?)',
+      'DELETE FROM users WHERE username = ?',
       [username]
     );
     
@@ -123,7 +123,7 @@ export async function deleteUser(username: string): Promise<{ success: boolean; 
     
     // Also delete user's dictionary entries
     await execute(
-      'DELETE FROM dictionary_entries WHERE LOWER(username) = LOWER(?)',
+      'DELETE FROM dictionary_entries WHERE username = ?',
       [username]
     );
     
@@ -147,7 +147,7 @@ export async function changePassword(username: string, newPassword: string): Pro
 
   try {
     const result = await execute(
-      'UPDATE users SET password_hash = ? WHERE LOWER(username) = LOWER(?)',
+      'UPDATE users SET password_hash = ? WHERE username = ?',
       [hashPassword(newPassword), username]
     );
     
@@ -209,7 +209,7 @@ export async function updateUserPermissions(username: string, permissions: { isA
     params.push(username);
     
     const result = await execute(
-      `UPDATE users SET ${updates.join(', ')} WHERE LOWER(username) = LOWER(?)`,
+      `UPDATE users SET ${updates.join(', ')} WHERE username = ?`,
       params
     );
     
@@ -257,7 +257,7 @@ export async function authenticateUserWithRequest(
     
     const queryStart = Date.now();
     const [rows] = await db.execute<any[]>(
-      'SELECT * FROM users WHERE LOWER(username) = LOWER(?)',
+      'SELECT * FROM users WHERE username = ?',
       [username]
     );
     const queryTime = Date.now() - queryStart;
@@ -297,7 +297,7 @@ export async function getUserSettingsWithRequest(
   try {
     const db = await getPoolForRequest(request);
     const [rows] = await db.execute<any[]>(
-      'SELECT auto_correct, default_mode FROM users WHERE LOWER(username) = LOWER(?)',
+      'SELECT auto_correct, default_mode FROM users WHERE username = ?',
       [username]
     );
     
@@ -340,7 +340,7 @@ export async function updateUserSettingsWithRequest(
     
     const db = await getPoolForRequest(request);
     const [result] = await db.execute(
-      `UPDATE users SET ${updates.join(', ')} WHERE LOWER(username) = LOWER(?)`,
+      `UPDATE users SET ${updates.join(', ')} WHERE username = ?`,
       params
     );
     
@@ -404,7 +404,7 @@ export async function createUserWithRequest(
     
     // Check if user exists
     const [existing] = await db.execute<any[]>(
-      'SELECT username FROM users WHERE LOWER(username) = LOWER(?)',
+      'SELECT username FROM users WHERE username = ?',
       [username]
     );
     
@@ -436,7 +436,7 @@ export async function deleteUserWithRequest(request: NextRequest, username: stri
     const db = await getPoolForRequest(request);
     
     const [result] = await db.execute(
-      'DELETE FROM users WHERE LOWER(username) = LOWER(?)',
+      'DELETE FROM users WHERE username = ?',
       [username]
     );
     
@@ -446,7 +446,7 @@ export async function deleteUserWithRequest(request: NextRequest, username: stri
     
     // Also delete user's dictionary entries
     await db.execute(
-      'DELETE FROM dictionary_entries WHERE LOWER(username) = LOWER(?)',
+      'DELETE FROM dictionary_entries WHERE username = ?',
       [username]
     );
     
@@ -472,7 +472,7 @@ export async function changePasswordWithRequest(request: NextRequest, username: 
     const db = await getPoolForRequest(request);
     
     const [result] = await db.execute(
-      'UPDATE users SET password_hash = ? WHERE LOWER(username) = LOWER(?)',
+      'UPDATE users SET password_hash = ? WHERE username = ?',
       [hashPassword(newPassword), username]
     );
     
@@ -523,7 +523,7 @@ export async function updateUserPermissionsWithRequest(
     
     const db = await getPoolForRequest(request);
     const [result] = await db.execute(
-      `UPDATE users SET ${updates.join(', ')} WHERE LOWER(username) = LOWER(?)`,
+      `UPDATE users SET ${updates.join(', ')} WHERE username = ?`,
       params
     );
     

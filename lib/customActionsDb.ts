@@ -26,7 +26,7 @@ interface DbCustomAction {
 export async function getCustomActions(username: string): Promise<CustomAction[]> {
   try {
     const actions = await query<DbCustomAction>(
-      'SELECT id, name, icon, prompt, target_field, created_at, updated_at FROM custom_actions WHERE LOWER(username) = LOWER(?) ORDER BY name ASC',
+      'SELECT id, name, icon, prompt, target_field, created_at, updated_at FROM custom_actions WHERE username = ? ORDER BY name ASC',
       [username]
     );
     
@@ -94,7 +94,7 @@ export async function getCustomActionsWithRequest(request: NextRequest, username
     
     const queryStart = Date.now();
     const [rows] = await pool.query<any[]>(
-      'SELECT id, name, icon, prompt, target_field, created_at, updated_at FROM custom_actions WHERE LOWER(username) = LOWER(?) ORDER BY name ASC',
+      'SELECT id, name, icon, prompt, target_field, created_at, updated_at FROM custom_actions WHERE username = ? ORDER BY name ASC',
       [username]
     );
     const queryTime = Date.now() - queryStart;
@@ -140,7 +140,7 @@ export async function addCustomActionWithRequest(
     
     // Check if action with same name exists
     const [existing] = await pool.query<any[]>(
-      'SELECT id FROM custom_actions WHERE LOWER(username) = LOWER(?) AND LOWER(name) = LOWER(?)',
+      'SELECT id FROM custom_actions WHERE username = ? AND name = ?',
       [username, nameTrimmed]
     );
     
@@ -184,7 +184,7 @@ export async function updateCustomActionWithRequest(
     
     // Check if action exists and belongs to user
     const [existing] = await pool.query<any[]>(
-      'SELECT id FROM custom_actions WHERE id = ? AND LOWER(username) = LOWER(?)',
+      'SELECT id FROM custom_actions WHERE id = ? AND username = ?',
       [id, username]
     );
     
@@ -194,7 +194,7 @@ export async function updateCustomActionWithRequest(
     
     // Check if another action with same name exists
     const [duplicate] = await pool.query<any[]>(
-      'SELECT id FROM custom_actions WHERE LOWER(username) = LOWER(?) AND LOWER(name) = LOWER(?) AND id != ?',
+      'SELECT id FROM custom_actions WHERE username = ? AND name = ? AND id != ?',
       [username, nameTrimmed, id]
     );
     
@@ -225,7 +225,7 @@ export async function deleteCustomActionWithRequest(
     const pool = await getPoolForRequest(request);
     
     const [result] = await pool.execute<any>(
-      'DELETE FROM custom_actions WHERE id = ? AND LOWER(username) = LOWER(?)',
+      'DELETE FROM custom_actions WHERE id = ? AND username = ?',
       [id, username]
     );
     

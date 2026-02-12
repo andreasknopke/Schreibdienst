@@ -794,21 +794,19 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
 
   // Revert to raw transcription (before LLM correction)
   const handleRevert = useCallback(() => {
-    const selected = dictations.find(d => d.id === selectedId);
-    if (!selected?.raw_transcript) return;
+    if (!selectedDictationDetails?.raw_transcript) return;
     
     setEditedTexts(prev => ({
       ...prev,
-      corrected_text: selected.raw_transcript || ''
+      corrected_text: selectedDictationDetails.raw_transcript || ''
     }));
     setIsReverted(true);
     setApplyFormatting(false); // Reset Formatierungs-Toggle
-  }, [selectedId, dictations]);
+  }, [selectedDictationDetails]);
 
   // Formatierung auf den unkorrigierten Text anwenden/entfernen
   const handleApplyFormattingToggle = useCallback((apply: boolean) => {
-    const selected = dictations.find(d => d.id === selectedId);
-    if (!selected?.raw_transcript) return;
+    if (!selectedDictationDetails?.raw_transcript) return;
     
     setApplyFormatting(apply);
     
@@ -816,16 +814,16 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       // Formatierung anwenden
       setEditedTexts(prev => ({
         ...prev,
-        corrected_text: preprocessTranscription(selected.raw_transcript || '')
+        corrected_text: preprocessTranscription(selectedDictationDetails.raw_transcript || '')
       }));
     } else {
       // Zurück zum Original (ohne Formatierung)
       setEditedTexts(prev => ({
         ...prev,
-        corrected_text: selected.raw_transcript || ''
+        corrected_text: selectedDictationDetails.raw_transcript || ''
       }));
     }
-  }, [selectedId, dictations]);
+  }, [selectedDictationDetails]);
 
   // Re-correct with complete LLM pipeline (Double Precision + final correction)
   const handleReCorrect = useCallback(async () => {
@@ -851,9 +849,9 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
         const data = await res.json();
         setEditedTexts(prev => ({
           ...prev,
-          corrected_text: data.correctedText || selected.raw_transcript
+          corrected_text: data.correctedText || selectedDictationDetails?.raw_transcript || ''
         }));
-        setSavedText(data.correctedText || selected.raw_transcript);
+        setSavedText(data.correctedText || selectedDictationDetails?.raw_transcript || '');
         setIsReverted(false);
         setHasUnsavedChanges(false);
         

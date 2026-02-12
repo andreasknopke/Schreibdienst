@@ -23,7 +23,7 @@ interface DbDictionaryEntry {
 export async function getEntries(username: string): Promise<DictionaryEntry[]> {
   try {
     const entries = await query<DbDictionaryEntry>(
-      'SELECT wrong_word, correct_word, added_at, COALESCE(use_in_prompt, 0) as use_in_prompt, COALESCE(match_stem, 0) as match_stem FROM dictionary_entries WHERE LOWER(username) = LOWER(?) ORDER BY added_at DESC',
+      'SELECT wrong_word, correct_word, added_at, COALESCE(use_in_prompt, 0) as use_in_prompt, COALESCE(match_stem, 0) as match_stem FROM dictionary_entries WHERE username = ? ORDER BY added_at DESC',
       [username]
     );
     
@@ -40,7 +40,7 @@ export async function getEntries(username: string): Promise<DictionaryEntry[]> {
       console.log('[Dictionary] New columns not found, using basic query');
       try {
         const entries = await query<DbDictionaryEntry>(
-          'SELECT wrong_word, correct_word, added_at FROM dictionary_entries WHERE LOWER(username) = LOWER(?) ORDER BY added_at DESC',
+          'SELECT wrong_word, correct_word, added_at FROM dictionary_entries WHERE username = ? ORDER BY added_at DESC',
           [username]
         );
         
@@ -106,7 +106,7 @@ export async function updateEntryOptions(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const result = await execute(
-      'UPDATE dictionary_entries SET use_in_prompt = ?, match_stem = ? WHERE LOWER(username) = LOWER(?) AND LOWER(wrong_word) = LOWER(?)',
+      'UPDATE dictionary_entries SET use_in_prompt = ?, match_stem = ? WHERE username = ? AND wrong_word = ?',
       [useInPrompt ? 1 : 0, matchStem ? 1 : 0, username, wrong]
     );
     
@@ -126,7 +126,7 @@ export async function updateEntryOptions(
 export async function removeEntry(username: string, wrong: string): Promise<{ success: boolean; error?: string }> {
   try {
     const result = await execute(
-      'DELETE FROM dictionary_entries WHERE LOWER(username) = LOWER(?) AND LOWER(wrong_word) = LOWER(?)',
+      'DELETE FROM dictionary_entries WHERE username = ? AND wrong_word = ?',
       [username, wrong]
     );
     
@@ -338,7 +338,7 @@ export async function getEntriesWithRequest(request: NextRequest, username: stri
     }
     
     const [rows] = await db.execute<any[]>(
-      'SELECT wrong_word, correct_word, added_at, COALESCE(use_in_prompt, 0) as use_in_prompt, COALESCE(match_stem, 0) as match_stem FROM dictionary_entries WHERE LOWER(username) = LOWER(?) ORDER BY added_at DESC',
+      'SELECT wrong_word, correct_word, added_at, COALESCE(use_in_prompt, 0) as use_in_prompt, COALESCE(match_stem, 0) as match_stem FROM dictionary_entries WHERE username = ? ORDER BY added_at DESC',
       [username]
     );
     
@@ -358,7 +358,7 @@ export async function getEntriesWithRequest(request: NextRequest, username: stri
       try {
         const db = await getPoolForRequest(request);
         const [rows] = await db.execute<any[]>(
-          'SELECT wrong_word, correct_word, added_at FROM dictionary_entries WHERE LOWER(username) = LOWER(?) ORDER BY added_at DESC',
+          'SELECT wrong_word, correct_word, added_at FROM dictionary_entries WHERE username = ? ORDER BY added_at DESC',
           [username]
         );
         
@@ -427,7 +427,7 @@ export async function updateEntryOptionsWithRequest(
   try {
     const db = await getPoolForRequest(request);
     const [result] = await db.execute(
-      'UPDATE dictionary_entries SET use_in_prompt = ?, match_stem = ? WHERE LOWER(username) = LOWER(?) AND LOWER(wrong_word) = LOWER(?)',
+      'UPDATE dictionary_entries SET use_in_prompt = ?, match_stem = ? WHERE username = ? AND wrong_word = ?',
       [useInPrompt ? 1 : 0, matchStem ? 1 : 0, username, wrong]
     );
     
@@ -452,7 +452,7 @@ export async function removeEntryWithRequest(
   try {
     const db = await getPoolForRequest(request);
     const [result] = await db.execute(
-      'DELETE FROM dictionary_entries WHERE LOWER(username) = LOWER(?) AND LOWER(wrong_word) = LOWER(?)',
+      'DELETE FROM dictionary_entries WHERE username = ? AND wrong_word = ?',
       [username, wrong]
     );
     

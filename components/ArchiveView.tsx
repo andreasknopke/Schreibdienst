@@ -43,6 +43,8 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
   const [showCorrectionLog, setShowCorrectionLog] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<number | null>(null);
   const [showAllLayers, setShowAllLayers] = useState(false);
+  const [detailData, setDetailData] = useState<ArchivedDictation | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   
   // Filters
   const [filterUsername, setFilterUsername] = useState<string>('');
@@ -86,6 +88,27 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
   useEffect(() => {
     loadArchivedDictations();
   }, [loadArchivedDictations]);
+  
+  // Load detail data on demand when a dictation is selected
+  useEffect(() => {
+    if (!selectedId) { setDetailData(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        setDetailLoading(true);
+        const res = await fetchWithDbToken(`/api/offline-dictations?id=${selectedId}`);
+        if (!res.ok) throw new Error('Detail-Laden fehlgeschlagen');
+        const data = await res.json();
+        if (!cancelled) setDetailData(data);
+      } catch (err) {
+        console.error('[Archive] detail load error:', err);
+        if (!cancelled) setDetailData(null);
+      } finally {
+        if (!cancelled) setDetailLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedId]);
   
   const handleUnarchive = async (id: number) => {
     if (!confirm('Diktat wirklich wiederherstellen?')) return;
@@ -368,7 +391,7 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
                     </div>
                     <div className="text-xs text-blue-700 dark:text-blue-300 space-y-0.5">
                       <div>• Modus: {selectedDictation.mode === 'befund' ? 'Befund (3 Felder)' : 'Arztbrief'}</div>
-                      {selectedDictation.raw_transcript && <div>• Rohe Transkription verfügbar</div>}
+                      {detailData?.raw_transcript && <div>• Rohe Transkription verfügbar</div>}
                       {selectedDictation.change_score !== undefined && (
                         <div className="flex items-center gap-1">
                           • Änderungs-Score: <ChangeIndicator score={selectedDictation.change_score} size="sm" />
@@ -399,57 +422,64 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
                 </span>
               </div>
               
+              {/* Detail loading indicator */}
+              {detailLoading && showAllLayers && (
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <Spinner size={16} /> Lade Detaildaten...
+                </div>
+              )}
+              
               {/* Raw Transcript - only if showing all layers */}
-              {showAllLayers && selectedDictation.raw_transcript && (
+              {showAllLayers && detailData?.raw_transcript && (
                 <div>
                   <label className="text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center gap-2">
                     🎤 Rohe Transkription (vor Formatierung)
                   </label>
                   <textarea
                     className="mt-1 w-full p-3 rounded-lg text-sm font-mono resize-y border bg-orange-50 dark:bg-orange-900/10 border-orange-200 dark:border-orange-800 min-h-[120px]"
-                    value={selectedDictation.raw_transcript}
+                    value={detailData.raw_transcript}
                     readOnly
                   />
                 </div>
               )}
               
               {/* Befund Mode: Show all three fields */}
-              {showAllLayers && selectedDictation.mode === 'befund' && (
+              {showAllLayers && selectedDictation.mode === 'befund' && detailData && (
                 <>
-                  {selectedDictation.methodik && (
+                  {detailData.methodik && (
                     <div>
                       <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
                         📋 Methodik
                       </label>
                       <textarea
                         className="mt-1 w-full p-3 rounded-lg text-sm font-mono resize-y border bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800 min-h-[100px]"
-                        value={selectedDictation.methodik}
+                        value={detailData.methodik}
                         readOnly
                       />
                     </div>
                   )}
                   
-                  {selectedDictation.befund && (
+                  {detailData.befund && (
                     <div>
                       <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
                         📝 Befund
                       </label>
                       <textarea
                         className="mt-1 w-full p-3 rounded-lg text-sm font-mono resize-y border bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800 min-h-[150px]"
-                        value={selectedDictation.befund}
+                        value={detailData.befund}
                         readOnly
                       />
                     </div>
                   )}
                   
-                  {selectedDictation.beurteilung && (
+                  {detailData.beurteilung && (
                     <div>
                       <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
                         💡 Beurteilung/Zusammenfassung
                       </label>
                       <textarea
                         className="mt-1 w-full p-3 rounded-lg text-sm font-mono resize-y border bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800 min-h-[100px]"
-                        value={selectedDictation.beurteilung}
+                        value={detailData.beurteilung}
                         readOnly
                       />
                     </div>

@@ -24,7 +24,7 @@ interface DbTemplate {
 export async function getTemplates(username: string): Promise<Template[]> {
   try {
     const templates = await query<DbTemplate>(
-      'SELECT id, name, content, field, created_at, updated_at FROM templates WHERE LOWER(username) = LOWER(?) ORDER BY name ASC',
+      'SELECT id, name, content, field, created_at, updated_at FROM templates WHERE username = ? ORDER BY name ASC',
       [username]
     );
     
@@ -47,7 +47,7 @@ export async function getTemplatesWithRequest(request: NextRequest, username: st
   try {
     const pool = await getPoolForRequest(request);
     const [rows] = await pool.query<any[]>(
-      'SELECT id, name, content, field, created_at, updated_at FROM templates WHERE LOWER(username) = LOWER(?) ORDER BY name ASC',
+      'SELECT id, name, content, field, created_at, updated_at FROM templates WHERE username = ? ORDER BY name ASC',
       [username]
     );
     
@@ -85,7 +85,7 @@ export async function addTemplateWithRequest(
     
     // Check if template with same name exists
     const [existing] = await pool.query<any[]>(
-      'SELECT id FROM templates WHERE LOWER(username) = LOWER(?) AND LOWER(name) = LOWER(?)',
+      'SELECT id FROM templates WHERE username = ? AND name = ?',
       [username, nameTrimmed]
     );
     
@@ -124,7 +124,7 @@ export async function updateTemplateWithRequest(
     
     // Check if template belongs to user
     const [existing] = await pool.query<any[]>(
-      'SELECT id FROM templates WHERE id = ? AND LOWER(username) = LOWER(?)',
+      'SELECT id FROM templates WHERE id = ? AND username = ?',
       [id, username]
     );
     
@@ -134,7 +134,7 @@ export async function updateTemplateWithRequest(
     
     // Check if new name conflicts with another template
     const [conflict] = await pool.query<any[]>(
-      'SELECT id FROM templates WHERE LOWER(username) = LOWER(?) AND LOWER(name) = LOWER(?) AND id != ?',
+      'SELECT id FROM templates WHERE username = ? AND name = ? AND id != ?',
       [username, name.trim(), id]
     );
     
@@ -165,7 +165,7 @@ export async function deleteTemplateWithRequest(
     const pool = await getPoolForRequest(request);
     
     const [result] = await pool.execute<any>(
-      'DELETE FROM templates WHERE id = ? AND LOWER(username) = LOWER(?)',
+      'DELETE FROM templates WHERE id = ? AND username = ?',
       [id, username]
     );
     

@@ -1,0 +1,477 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-02-20T12:00:00.000Z",
+  "__export_source": "schreibdienst-docs",
+  "resources": [
+    {
+      "_id": "wrk_schreibdienst",
+      "_type": "workspace",
+      "name": "Schreibdienst API",
+      "description": "Native Insomnia-Export für Schreibdienst"
+    },
+    {
+      "_id": "env_schreibdienst_base",
+      "_type": "environment",
+      "parentId": "wrk_schreibdienst",
+      "name": "Base Environment",
+      "data": {
+        "baseUrl": "http://localhost:3000",
+        "basicAuth": "",
+        "dbToken": "",
+        "dictationId": 1
+      }
+    },
+    {
+      "_id": "grp_auth",
+      "_type": "request_group",
+      "parentId": "wrk_schreibdienst",
+      "name": "Auth & User"
+    },
+    {
+      "_id": "req_auth_login",
+      "_type": "request",
+      "parentId": "grp_auth",
+      "name": "Login",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/auth",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"username\": \"root\",\n  \"password\": \"secret\"\n}"
+      }
+    },
+    {
+      "_id": "req_users_list",
+      "_type": "request",
+      "parentId": "grp_auth",
+      "name": "Users - List",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/users",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ]
+    },
+    {
+      "_id": "req_users_create",
+      "_type": "request",
+      "parentId": "grp_auth",
+      "name": "Users - Create",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/users",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"username\": \"arzt1\",\n  \"password\": \"secret\",\n  \"isAdmin\": false,\n  \"canViewAllDictations\": false\n}"
+      }
+    },
+    {
+      "_id": "req_user_settings_get",
+      "_type": "request",
+      "parentId": "grp_auth",
+      "name": "User Settings - Get",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/users/settings",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ]
+    },
+    {
+      "_id": "req_user_settings_patch",
+      "_type": "request",
+      "parentId": "grp_auth",
+      "name": "User Settings - Patch",
+      "method": "PATCH",
+      "url": "{{ _.baseUrl }}/api/users/settings",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"autoCorrect\": true\n}"
+      }
+    },
+    {
+      "_id": "grp_transcription",
+      "_type": "request_group",
+      "parentId": "wrk_schreibdienst",
+      "name": "Transcription & Correction"
+    },
+    {
+      "_id": "req_transcribe",
+      "_type": "request",
+      "parentId": "grp_transcription",
+      "name": "Transcribe",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/transcribe",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ],
+      "body": {
+        "mimeType": "multipart/form-data",
+        "params": [
+          { "name": "file", "type": "file", "fileName": "" },
+          { "name": "username", "value": "root" },
+          { "name": "speed_mode", "value": "turbo" }
+        ]
+      }
+    },
+    {
+      "_id": "req_correct",
+      "_type": "request",
+      "parentId": "grp_transcription",
+      "name": "Correct",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/correct",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"text\": \"Diktattext...\",\n  \"username\": \"root\",\n  \"patientName\": \"Max Mustermann\"\n}"
+      }
+    },
+    {
+      "_id": "req_quick_correct",
+      "_type": "request",
+      "parentId": "grp_transcription",
+      "name": "Quick Correct",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/quick-correct",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"text\": \"Hirn Druck Zeichen\",\n  \"referenceTerms\": [\"Hirndruckzeichen\", \"Liquorräume\"],\n  \"dictionaryCorrections\": [\n    {\"wrong\": \"Liquoraus\", \"correct\": \"Liquorraum\"}\n  ]\n}"
+      }
+    },
+    {
+      "_id": "req_format",
+      "_type": "request",
+      "parentId": "grp_transcription",
+      "name": "Format",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/format",
+      "headers": [
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"text\": \"Befundtext\",\n  \"mode\": \"befund\"\n}"
+      }
+    },
+    {
+      "_id": "grp_content",
+      "_type": "request_group",
+      "parentId": "wrk_schreibdienst",
+      "name": "Dictionary, Templates, Actions"
+    },
+    {
+      "_id": "req_dictionary_get",
+      "_type": "request",
+      "parentId": "grp_content",
+      "name": "Dictionary - Get",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/dictionary",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ]
+    },
+    {
+      "_id": "req_dictionary_add",
+      "_type": "request",
+      "parentId": "grp_content",
+      "name": "Dictionary - Add",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/dictionary",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"wrong\": \"Scholecystitis\",\n  \"correct\": \"Cholecystitis\",\n  \"useInPrompt\": true,\n  \"matchStem\": false\n}"
+      }
+    },
+    {
+      "_id": "req_templates_get",
+      "_type": "request",
+      "parentId": "grp_content",
+      "name": "Templates - Get",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/templates",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ]
+    },
+    {
+      "_id": "req_template_adapt",
+      "_type": "request",
+      "parentId": "grp_content",
+      "name": "Template - Adapt",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/templates/adapt",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"template\": \"Normalweite innere und äußere Liquorräume.\",\n  \"changes\": \"Hydrocephalus e vacuo\",\n  \"field\": \"befund\",\n  \"username\": \"root\"\n}"
+      }
+    },
+    {
+      "_id": "req_custom_action_exec",
+      "_type": "request",
+      "parentId": "grp_content",
+      "name": "Custom Action - Execute",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/custom-actions/execute",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"prompt\": \"Verbessere die Formulierung\",\n  \"text\": \"Der Befund ist unklar.\",\n  \"fieldName\": \"befund\"\n}"
+      }
+    },
+    {
+      "_id": "grp_offline",
+      "_type": "request_group",
+      "parentId": "wrk_schreibdienst",
+      "name": "Offline Dictations"
+    },
+    {
+      "_id": "req_offline_create",
+      "_type": "request",
+      "parentId": "grp_offline",
+      "name": "Offline - Create",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/offline-dictations",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ],
+      "body": {
+        "mimeType": "multipart/form-data",
+        "params": [
+          { "name": "username", "value": "root" },
+          { "name": "audio", "type": "file", "fileName": "" },
+          { "name": "orderNumber", "value": "A-2026-001" },
+          { "name": "priority", "value": "normal" },
+          { "name": "mode", "value": "befund" }
+        ]
+      }
+    },
+    {
+      "_id": "req_offline_list",
+      "_type": "request",
+      "parentId": "grp_offline",
+      "name": "Offline - List User",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/offline-dictations?username=root",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ]
+    },
+    {
+      "_id": "req_worker_run",
+      "_type": "request",
+      "parentId": "grp_offline",
+      "name": "Offline Worker - Run",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/offline-dictations/worker",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ]
+    },
+    {
+      "_id": "req_worker_status",
+      "_type": "request",
+      "parentId": "grp_offline",
+      "name": "Offline Worker - Status",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/offline-dictations/worker"
+    },
+    {
+      "_id": "req_recorrect",
+      "_type": "request",
+      "parentId": "grp_offline",
+      "name": "Offline - ReCorrect",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/offline-dictations/recorrect",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"dictationId\": {{ _.dictationId }}\n}"
+      }
+    },
+    {
+      "_id": "req_import_dictation",
+      "_type": "request",
+      "parentId": "grp_offline",
+      "name": "Import Dictation",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/import-dictation",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ],
+      "body": {
+        "mimeType": "multipart/form-data",
+        "params": [
+          { "name": "xml", "type": "file", "fileName": "" },
+          { "name": "audio", "type": "file", "fileName": "" }
+        ]
+      }
+    },
+    {
+      "_id": "grp_monitoring",
+      "_type": "request_group",
+      "parentId": "wrk_schreibdienst",
+      "name": "Archive, Logs, Monitoring"
+    },
+    {
+      "_id": "req_archive_get",
+      "_type": "request",
+      "parentId": "grp_monitoring",
+      "name": "Archive - Get",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/archive",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ]
+    },
+    {
+      "_id": "req_correction_log",
+      "_type": "request",
+      "parentId": "grp_monitoring",
+      "name": "Correction Log",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/correction-log?dictationId={{ _.dictationId }}",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ]
+    },
+    {
+      "_id": "req_stats",
+      "_type": "request",
+      "parentId": "grp_monitoring",
+      "name": "Stats",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/stats",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ]
+    },
+    {
+      "_id": "req_health",
+      "_type": "request",
+      "parentId": "grp_monitoring",
+      "name": "Health",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/health"
+    },
+    {
+      "_id": "grp_config",
+      "_type": "request_group",
+      "parentId": "wrk_schreibdienst",
+      "name": "Config, Warmup, Recovery"
+    },
+    {
+      "_id": "req_config_get",
+      "_type": "request",
+      "parentId": "grp_config",
+      "name": "Config - Get",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/config",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ]
+    },
+    {
+      "_id": "req_config_post",
+      "_type": "request",
+      "parentId": "grp_config",
+      "name": "Config - Post",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/config",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"transcriptionProvider\": \"whisperx\",\n  \"llmProvider\": \"openai\",\n  \"whisperModel\": \"large-v3\"\n}"
+      }
+    },
+    {
+      "_id": "req_warmup_post",
+      "_type": "request",
+      "parentId": "grp_config",
+      "name": "Warmup - Post",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/warmup",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" }
+      ]
+    },
+    {
+      "_id": "req_whisperx_system",
+      "_type": "request",
+      "parentId": "grp_config",
+      "name": "WhisperX System - Action",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/whisperx-system",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"action\": \"system_cleanup\"\n}"
+      }
+    },
+    {
+      "_id": "grp_dbtoken",
+      "_type": "request_group",
+      "parentId": "wrk_schreibdienst",
+      "name": "DB Token"
+    },
+    {
+      "_id": "req_dbtoken_get",
+      "_type": "request",
+      "parentId": "grp_dbtoken",
+      "name": "DB Token - Get",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/db-token"
+    },
+    {
+      "_id": "req_dbtoken_post",
+      "_type": "request",
+      "parentId": "grp_dbtoken",
+      "name": "DB Token - Generate",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/db-token",
+      "headers": [
+        { "name": "Authorization", "value": "Basic {{ _.basicAuth }}" },
+        { "name": "Content-Type", "value": "application/json" }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"host\": \"mysql.example.com\",\n  \"user\": \"tenant_user\",\n  \"password\": \"secret\",\n  \"database\": \"tenant_db\",\n  \"port\": 3306,\n  \"ssl\": true\n}"
+      }
+    }
+  ]
+}

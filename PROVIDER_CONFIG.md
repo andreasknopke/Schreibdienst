@@ -2,6 +2,13 @@
 
 Diese App unterstützt flexible Transkriptions-Provider: **WhisperX** (lokal/remote) oder **ElevenLabs** (Cloud).
 
+## Repositories für lokale Provider
+
+- **WhisperX (HTTP/HTML API):** https://github.com/andreasknopke/WhisperX
+- **Whisper-Live / Fast-Whisper (WebSocket API):** https://github.com/andreasknopke/Whisper-Live
+
+Empfehlung: erst WhisperX stabil in Betrieb nehmen, danach Fast-Whisper für Realtime ergänzen.
+
 ## Konfigurations-Optionen
 
 ### ✅ Option 1: WhisperX lokal (Empfohlen)
@@ -29,6 +36,16 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 python app.py
+```
+
+**Repository-Hinweis:**
+Wenn du den Service nicht aus diesem Repo-Ordner `whisper-service/` betreiben willst, nutze das dedizierte Repo:
+
+```bash
+cd /workspaces
+git clone https://github.com/andreasknopke/WhisperX.git
+cd WhisperX
+# Start gemäß README (Docker empfohlen)
 ```
 
 ---
@@ -105,7 +122,35 @@ API-Key erhalten: https://elevenlabs.io/
 
 ---
 
-### 🔄 Option 4: WhisperX mit ElevenLabs Fallback
+### ⚡ Option 4: Fast-Whisper lokal (WebSocket / Realtime)
+
+**Vorteile:**
+- Sehr niedrige Latenz für Live-Mitlesen
+- Echtzeit-Streaming via WebSocket
+- Lokal betreibbar
+
+**Setup:**
+```bash
+# In .env.local
+TRANSCRIPTION_PROVIDER=fast_whisper
+FAST_WHISPER_WS_URL=ws://localhost:5001
+```
+
+**Installation (externes Repo):**
+```bash
+cd /workspaces
+git clone https://github.com/andreasknopke/Whisper-Live.git
+cd Whisper-Live
+# Start gemäß README (Docker oder Python)
+```
+
+**Wichtig:**
+- Fast-Whisper wird in Schreibdienst primär für Live-WebSocket genutzt.
+- Serverseitige Batch-Wege fallen bei Bedarf auf WhisperX zurück.
+
+---
+
+### 🔄 Option 5: WhisperX mit ElevenLabs Fallback
 
 **Vorteile:**
 - Primär lokal (WhisperX)

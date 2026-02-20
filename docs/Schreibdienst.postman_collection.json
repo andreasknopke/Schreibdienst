@@ -1,0 +1,807 @@
+{
+  "info": {
+    "name": "Schreibdienst API",
+    "description": "Postman Collection für Schreibdienst (Next.js API). Kann auch in Insomnia importiert werden.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "basicAuth",
+      "value": ""
+    },
+    {
+      "key": "dbToken",
+      "value": ""
+    },
+    {
+      "key": "dictationId",
+      "value": "1"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth & User",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-DB-Token",
+                "value": "{{dbToken}}",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"root\",\n  \"password\": \"secret\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/auth"
+          }
+        },
+        {
+          "name": "Users - List (admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "X-DB-Token",
+                "value": "{{dbToken}}",
+                "disabled": true
+              }
+            ],
+            "url": "{{baseUrl}}/api/users"
+          }
+        },
+        {
+          "name": "Users - Create (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"arzt1\",\n  \"password\": \"secret\",\n  \"isAdmin\": false,\n  \"canViewAllDictations\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/users"
+          }
+        },
+        {
+          "name": "User Settings - Get",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/users/settings"
+          }
+        },
+        {
+          "name": "User Settings - Patch",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"autoCorrect\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/users/settings"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transcription & Correction",
+      "item": [
+        {
+          "name": "Transcribe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "username",
+                  "type": "text",
+                  "value": "root"
+                },
+                {
+                  "key": "speed_mode",
+                  "type": "text",
+                  "value": "turbo"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/transcribe"
+          }
+        },
+        {
+          "name": "Correct",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Diktattext...\",\n  \"username\": \"root\",\n  \"patientName\": \"Max Mustermann\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/correct"
+          }
+        },
+        {
+          "name": "Quick Correct",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Hirn Druck Zeichen\",\n  \"referenceTerms\": [\"Hirndruckzeichen\", \"Liquorräume\"],\n  \"dictionaryCorrections\": [\n    {\"wrong\": \"Liquoraus\", \"correct\": \"Liquorraum\"}\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/quick-correct"
+          }
+        },
+        {
+          "name": "Format",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Befundtext\",\n  \"mode\": \"befund\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/format"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dictionary, Templates, Actions",
+      "item": [
+        {
+          "name": "Dictionary - Get",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/dictionary"
+          }
+        },
+        {
+          "name": "Dictionary - Add",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"wrong\": \"Scholecystitis\",\n  \"correct\": \"Cholecystitis\",\n  \"useInPrompt\": true,\n  \"matchStem\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/dictionary"
+          }
+        },
+        {
+          "name": "Templates - Get",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/templates"
+          }
+        },
+        {
+          "name": "Templates - Add",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"CT Schädel Standard\",\n  \"content\": \"Normalweite innere und äußere Liquorräume.\",\n  \"field\": \"befund\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/templates"
+          }
+        },
+        {
+          "name": "Templates - Adapt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"template\": \"Normalweite innere und äußere Liquorräume.\",\n  \"changes\": \"Hydrocephalus e vacuo\",\n  \"field\": \"befund\",\n  \"username\": \"root\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/templates/adapt"
+          }
+        },
+        {
+          "name": "Custom Actions - Get",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/custom-actions"
+          }
+        },
+        {
+          "name": "Custom Action - Execute",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prompt\": \"Verbessere die Formulierung\",\n  \"text\": \"Der Befund ist unklar.\",\n  \"fieldName\": \"befund\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/custom-actions/execute"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Offline Dictations",
+      "item": [
+        {
+          "name": "Offline - Create",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "username",
+                  "type": "text",
+                  "value": "root"
+                },
+                {
+                  "key": "audio",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "orderNumber",
+                  "type": "text",
+                  "value": "A-2026-001"
+                },
+                {
+                  "key": "priority",
+                  "type": "text",
+                  "value": "normal"
+                },
+                {
+                  "key": "mode",
+                  "type": "text",
+                  "value": "befund"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/offline-dictations"
+          }
+        },
+        {
+          "name": "Offline - List User",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/offline-dictations?username=root"
+          }
+        },
+        {
+          "name": "Offline - Worker Run",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/offline-dictations/worker"
+          }
+        },
+        {
+          "name": "Offline - Worker Status",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/offline-dictations/worker"
+          }
+        },
+        {
+          "name": "Offline - ReCorrect",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dictationId\": {{dictationId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/offline-dictations/recorrect"
+          }
+        },
+        {
+          "name": "Offline - Save Corrected Text",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": {{dictationId}},\n  \"action\": \"save\",\n  \"correctedText\": \"Korrigierter Text\",\n  \"changeScore\": 12.3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/offline-dictations?username=root"
+          }
+        },
+        {
+          "name": "Import Dictation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "xml",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "audio",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/import-dictation"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Archive, Logs, Monitoring",
+      "item": [
+        {
+          "name": "Archive - Get",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/archive"
+          }
+        },
+        {
+          "name": "Archive - Post",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": {{dictationId}},\n  \"archivedBy\": \"root\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/archive"
+          }
+        },
+        {
+          "name": "Correction Log",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/correction-log?dictationId={{dictationId}}"
+          }
+        },
+        {
+          "name": "Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stats"
+          }
+        },
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Config, Warmup, Recovery",
+      "item": [
+        {
+          "name": "Config - Get",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/config"
+          }
+        },
+        {
+          "name": "Config - Post (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transcriptionProvider\": \"whisperx\",\n  \"llmProvider\": \"openai\",\n  \"whisperModel\": \"large-v3\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/config"
+          }
+        },
+        {
+          "name": "Config - Migrate (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/config/migrate"
+          }
+        },
+        {
+          "name": "Warmup - Post",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/warmup"
+          }
+        },
+        {
+          "name": "Warmup - Get",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/warmup"
+          }
+        },
+        {
+          "name": "WhisperX System - Health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/whisperx-system"
+          }
+        },
+        {
+          "name": "WhisperX System - Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"system_cleanup\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/whisperx-system"
+          }
+        },
+        {
+          "name": "WhisperX Recovery Logs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/whisperx-recovery-logs?limit=50"
+          }
+        }
+      ]
+    },
+    {
+      "name": "DB Token",
+      "item": [
+        {
+          "name": "DB Token - Get",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/db-token"
+          }
+        },
+        {
+          "name": "DB Token - Generate (root)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic {{basicAuth}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"host\": \"mysql.example.com\",\n  \"user\": \"tenant_user\",\n  \"password\": \"secret\",\n  \"database\": \"tenant_db\",\n  \"port\": 3306,\n  \"ssl\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/db-token"
+          }
+        }
+      ]
+    }
+  ]
+}

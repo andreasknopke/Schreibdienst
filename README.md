@@ -83,6 +83,143 @@ npm run dev
 
 App läuft auf http://localhost:3000
 
+### Externe Repositories für lokale STT-Services
+
+Für lokale Transkriptions-Backends außerhalb dieses Repositories:
+
+1. **WhisperX (HTML API / HTTP API)**
+  - Repository: https://github.com/andreasknopke/WhisperX
+  - Zweck in Schreibdienst: serverseitige Transkription über `WHISPER_SERVICE_URL`
+2. **Fast-Whisper / Whisper-Live (WebSocket API)**
+  - Repository: https://github.com/andreasknopke/Whisper-Live
+  - Zweck in Schreibdienst: Echtzeit-Transkription über `FAST_WHISPER_WS_URL`
+
+### Empfohlene Installation (Best Practice)
+
+#### Schritt 1: WhisperX (HTTP) zuerst installieren
+
+WhisperX ist der robusteste Standardpfad für Batch-/Final-Transkription.
+
+```bash
+cd /workspaces
+git clone https://github.com/andreasknopke/WhisperX.git
+cd WhisperX
+
+# Empfohlen: gemäß Repo-README mit Docker starten
+# (alternativ venv + python app.py, je nach Repo-Doku)
+```
+
+Danach in Schreibdienst konfigurieren:
+
+```bash
+TRANSCRIPTION_PROVIDER=whisperx
+WHISPER_SERVICE_URL=http://localhost:5000
+```
+
+#### Schritt 2: Fast-Whisper/Whisper-Live (WebSocket) ergänzen
+
+Fast-Whisper eignet sich für sehr niedrige Latenz im Live-Modus.
+
+```bash
+cd /workspaces
+git clone https://github.com/andreasknopke/Whisper-Live.git
+cd Whisper-Live
+
+# Empfohlen: gemäß Repo-README starten (Docker oder Python-Startscript)
+```
+
+Danach in Schreibdienst konfigurieren:
+
+```bash
+TRANSCRIPTION_PROVIDER=fast_whisper
+FAST_WHISPER_WS_URL=ws://localhost:5001
+```
+
+### Betriebsempfehlung
+
+- **Produktion / Stabilität:** `TRANSCRIPTION_PROVIDER=whisperx`
+- **Echtzeit-Test / niedrige Latenz:** `TRANSCRIPTION_PROVIDER=fast_whisper`
+- Für robuste Entwicklungsumgebung beide Services lokal verfügbar halten.
+
+### Installation verifizieren
+
+Nach dem Start der Services:
+
+```bash
+# WhisperX (HTTP API)
+curl http://localhost:5000/health
+
+# Schreibdienst Health
+curl http://localhost:3000/api/health
+```
+
+Für Fast-Whisper (WebSocket) zusätzlich im Browser-Frontend testen:
+
+- Provider auf `fast_whisper` stellen
+- Live-Diktat starten
+- Prüfen, ob während der Aufnahme Teiltranskripte erscheinen
+
+### Port-/Service-Matrix (Quick Troubleshooting)
+
+| Dienst | Standard-Port | Protokoll | Variable | Quick-Check | Typischer Fehler | Häufige Ursache |
+|-------|---------------|-----------|----------|-------------|------------------|-----------------|
+| Schreibdienst (Next.js) | 3000 | HTTP | - | `curl http://localhost:3000/api/health` | `ECONNREFUSED localhost:3000` | App nicht gestartet (`npm run dev`) |
+| WhisperX (HTTP API) | 5000 | HTTP | `WHISPER_SERVICE_URL` | `curl http://localhost:5000/health` | `WhisperX API error / connection refused` | WhisperX läuft nicht oder falsche URL/Port |
+| Fast-Whisper / Whisper-Live | 5001 | WS/WSS | `FAST_WHISPER_WS_URL` | Live-Diktat mit `fast_whisper` starten | `WebSocket connection failed` / keine Live-Transkripte | WS-Server nicht gestartet, falsches `ws://`/`wss://`, Zertifikat/Proxy |
+
+#### Entscheidungshilfe: `whisperx` vs `fast_whisper`
+
+| Ziel | Empfohlener Provider | Warum |
+|------|----------------------|-------|
+| Stabiler Produktionsbetrieb | `whisperx` | Robuster Standardpfad für serverseitige Verarbeitung |
+| Sehr niedrige Live-Latenz | `fast_whisper` | WebSocket-Realtime mit schneller Teiltranskription |
+| Beste Fallback-Resilienz | `whisperx` (+ optional ElevenLabs Key) | Fallback-Strategie in der API bereits vorgesehen |
+| Einfaches Troubleshooting | `whisperx` | HTTP-Healthcheck (`/health`) leicht prüfbar |
+| HTTPS-Deployment mit Browser-Client | `fast_whisper` mit `wss://` | Vermeidet Mixed-Content/WS-Blockaden |
+
+#### Presets für `.env.local`
+
+**Preset A – Produktion stabil (WhisperX):**
+
+```bash
+TRANSCRIPTION_PROVIDER=whisperx
+WHISPER_SERVICE_URL=http://localhost:5000
+# Optionaler Fallback bei WhisperX-Ausfall:
+# ELEVENLABS_API_KEY=your_api_key
+```
+
+**Preset B – Realtime Entwicklung (Fast-Whisper):**
+
+```bash
+TRANSCRIPTION_PROVIDER=fast_whisper
+FAST_WHISPER_WS_URL=ws://localhost:5001
+# Für HTTPS-Umgebungen typischerweise:
+# FAST_WHISPER_WS_URL=wss://your-fast-whisper-domain
+```
+
+**Preset C – Hybrid/Fallback (WhisperX + ElevenLabs):**
+
+```bash
+TRANSCRIPTION_PROVIDER=whisperx
+WHISPER_SERVICE_URL=http://localhost:5000
+ELEVENLABS_API_KEY=your_api_key
+```
+
+Verhalten: Zuerst WhisperX, bei Nichterreichbarkeit Fallback auf ElevenLabs.
+
+#### Schnellhilfe bei häufigen Fehlern
+
+```bash
+# Port belegt / Prozess prüfen
+lsof -i :3000 -i :5000 -i :5001
+
+# Erreichbarkeit per HTTP
+curl -v http://localhost:3000/api/health
+curl -v http://localhost:5000/health
+```
+
+Wenn die App via HTTPS läuft, für Fast-Whisper in der Regel `wss://` verwenden (nicht `ws://`).
+
 ## Umgebungsvariablen
 
 ### Next.js App (.env.local)
@@ -239,6 +376,13 @@ Internet → nginx (Port 443, HTTPS) → Next.js App (Port 3000)
 ```
 
 ## Entwicklung
+
+Eine detaillierte Entwicklerdokumentation für den Einstieg und die Weiterentwicklung findest du unter:
+
+- [docs/ENTWICKLERDOKU.md](docs/ENTWICKLERDOKU.md)
+- [docs/API_REFERENZ.md](docs/API_REFERENZ.md)
+- [docs/Schreibdienst.postman_collection.json](docs/Schreibdienst.postman_collection.json)
+- [docs/Schreibdienst.insomnia.json](docs/Schreibdienst.insomnia.json)
 
 ### Projekt-Struktur
 

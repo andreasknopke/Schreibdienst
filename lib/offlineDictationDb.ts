@@ -11,7 +11,7 @@ export type DictationPriority = 'normal' | 'urgent' | 'stat';
 
 /**
  * Summary data for list views – lightweight, no large text fields.
- * Excludes: audio_data, segments, raw_transcript, methodik, befund, beurteilung.
+ * Excludes: audio_data, segments, raw_transcript, transcript, methodik, befund, beurteilung, corrected_text.
  */
 export interface DictationSummary {
   id: number;
@@ -28,8 +28,6 @@ export interface DictationSummary {
   termin?: Date;
   fachabteilung?: string;
   berechtigte?: string;
-  transcript?: string;
-  corrected_text?: string;
   change_score?: number;
   error_message?: string;
   archived?: boolean;
@@ -46,10 +44,12 @@ export interface DictationSummary {
 export interface OfflineDictation extends DictationSummary {
   audio_data?: Buffer | null;
   raw_transcript?: string;
+  transcript?: string;
   segments?: string;
   methodik?: string;
   befund?: string;
   beurteilung?: string;
+  corrected_text?: string;
 }
 
 // ============================================================
@@ -61,7 +61,7 @@ const SUMMARY_COLUMNS = `
   id, username, audio_mime_type, audio_duration_seconds, order_number,
   patient_name, patient_dob, priority, status, mode,
   bemerkung, termin, fachabteilung, berechtigte,
-  transcript, corrected_text, change_score, error_message,
+  change_score, error_message,
   archived, archived_at, archived_by,
   created_at, processing_started_at, completed_at
 `.replace(/\n/g, ' ').trim();

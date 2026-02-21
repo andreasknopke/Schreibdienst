@@ -740,6 +740,27 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     setTimeout(() => setCopyFeedback(null), 1500);
   };
 
+  const handleCopyFromList = async (d: Dictation) => {
+    try {
+      let text = getCombinedText(d);
+
+      if (!text && selectedDictationDetails?.id === d.id) {
+        text = getCombinedText(selectedDictationDetails);
+      }
+
+      if (!text) {
+        const res = await fetchWithDbToken(`/api/offline-dictations?id=${d.id}`);
+        if (!res.ok) throw new Error('Text konnte nicht geladen werden');
+        const details: Dictation = await res.json();
+        text = getCombinedText(details);
+      }
+
+      await handleCopy(text, d.id);
+    } catch (err: any) {
+      setError(err.message || 'Fehler beim Kopieren');
+    }
+  };
+
   // Open dictionary form and pre-fill with selected text if any
   const handleOpenDictForm = () => {
     // Get selected text from textarea
@@ -1310,7 +1331,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                         {d.status === 'completed' && (
                           <button
                             className={`btn btn-xs ${copyFeedback === d.id ? 'btn-success' : 'btn-outline'}`}
-                            onClick={() => handleCopy(getCombinedText(d), d.id)}
+                            onClick={() => handleCopyFromList(d)}
                             title="Text kopieren"
                           >
                             {copyFeedback === d.id ? '✓' : '📋'}
@@ -1827,7 +1848,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                         className={`btn btn-sm ${copyFeedback === d.id ? 'btn-success' : 'btn-outline'}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleCopy(getCombinedText(d), d.id);
+                          handleCopyFromList(d);
                         }}
                       >
                         {copyFeedback === d.id ? '✓' : '📋'}

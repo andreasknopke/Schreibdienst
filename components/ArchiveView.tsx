@@ -157,6 +157,10 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
   };
   
   const selectedDictation = dictations.find(d => d.id === selectedId);
+  const selectedCorrectedText =
+    (detailData && detailData.id === selectedId ? detailData.corrected_text : undefined)
+    || selectedDictation?.corrected_text
+    || '';
   
   return (
     <div className="space-y-4">
@@ -497,7 +501,7 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
                 </label>
                 <textarea
                   className="mt-1 w-full p-3 rounded-lg text-sm font-mono resize-y border bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-800 min-h-[200px]"
-                  value={selectedDictation.corrected_text || '(kein Text)'}
+                  value={selectedCorrectedText || '(kein Text)'}
                   readOnly
                 />
               </div>
@@ -509,7 +513,7 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
                 className={`btn btn-sm flex-1 ${
                   copyFeedback === selectedDictation.id ? 'btn-success' : 'btn-primary'
                 }`}
-                onClick={() => handleCopy(selectedDictation.corrected_text || '', selectedDictation.id)}
+                onClick={() => handleCopy(selectedCorrectedText, selectedDictation.id)}
               >
                 {copyFeedback === selectedDictation.id ? '✓ Kopiert!' : '📋 Kopieren'}
               </button>

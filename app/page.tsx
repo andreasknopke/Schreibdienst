@@ -2341,7 +2341,7 @@ export default function HomePage() {
             {mode === 'befund' && templates.filter(t => t.field === activeField).length > 0 && (
               <div className="flex items-center gap-1">
                 <select 
-                  className={`select text-sm py-1.5 w-auto ${templateMode ? 'border-orange-400 ring-1 ring-orange-300' : ''}`}
+                  className={`select text-sm py-1.5 max-w-[10rem] truncate ${templateMode ? 'border-orange-400 ring-1 ring-orange-300' : ''}`}
                   value={selectedTemplate?.id || ''}
                   onChange={(e) => {
                     const id = parseInt(e.target.value);
@@ -2354,7 +2354,7 @@ export default function HomePage() {
                   <option value="">📝 Baustein...</option>
                   {templates.filter(t => t.field === activeField).map(t => (
                     <option key={t.id} value={t.id}>
-                      {t.name}
+                      {t.name.length > 20 ? t.name.substring(0, 20) + '…' : t.name}
                     </option>
                   ))}
                 </select>

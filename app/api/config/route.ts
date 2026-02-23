@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
-import { getRuntimeConfigWithRequest, saveRuntimeConfigWithRequest, WHISPER_OFFLINE_MODELS, type RuntimeConfig } from '@/lib/configDb';
+import { getRuntimeConfigWithRequest, saveRuntimeConfigWithRequest, WHISPER_OFFLINE_MODELS, TRANSCRIPTION_SERVICES, parseServiceId, buildServiceId, type RuntimeConfig } from '@/lib/configDb';
 
 // Authenticate root user only
 async function getAuthenticatedRoot(request: NextRequest): Promise<boolean> {
@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
     config,
     envInfo,
     availableTranscriptionProviders: getAvailableTranscriptionProviders(envInfo),
+    availableTranscriptionServices: getAvailableTranscriptionServices(envInfo),
     availableLLMProviders: getAvailableLLMProviders(envInfo),
   });
 }
@@ -79,6 +80,34 @@ function getAvailableTranscriptionProviders(envInfo: any): { id: string; name: s
       reason: envInfo.hasMistralKey ? undefined : 'MISTRAL_API_KEY nicht konfiguriert',
     },
   ];
+}
+
+function getAvailableTranscriptionServices(envInfo: any): { id: string; name: string; available: boolean; reason?: string; isCloud: boolean }[] {
+  return TRANSCRIPTION_SERVICES.map(svc => {
+    let available = false;
+    let reason: string | undefined;
+
+    switch (svc.provider) {
+      case 'whisperx':
+        available = envInfo.hasWhisperUrl;
+        reason = available ? undefined : 'WHISPER_SERVICE_URL nicht konfiguriert';
+        break;
+      case 'fast_whisper':
+        available = envInfo.hasFastWhisperUrl;
+        reason = available ? undefined : 'FAST_WHISPER_WS_URL nicht konfiguriert';
+        break;
+      case 'elevenlabs':
+        available = envInfo.hasElevenLabsKey;
+        reason = available ? undefined : 'ELEVENLABS_API_KEY nicht konfiguriert';
+        break;
+      case 'mistral':
+        available = envInfo.hasMistralKey;
+        reason = available ? undefined : 'MISTRAL_API_KEY nicht konfiguriert';
+        break;
+    }
+
+    return { id: svc.id, name: svc.name, available, reason, isCloud: svc.isCloud };
+  });
 }
 
 function getAvailableLLMProviders(envInfo: any): { id: string; name: string; available: boolean; reason?: string }[] {
@@ -184,6 +213,44 @@ export async function POST(request: NextRequest) {
     
     if (typeof body.lmStudioUseApiMode === 'boolean') {
       newConfig.lmStudioUseApiMode = body.lmStudioUseApiMode;
+    }
+    
+    // ---- Unified Service Selections ----
+    const validServiceIds = TRANSCRIPTION_SERVICES.map(s => s.id);
+    
+    if (body.onlineService && typeof body.onlineService === 'string') {
+      if (validServiceIds.includes(body.onlineService)) {
+        newConfig.onlineService = body.onlineService;
+        // Keep legacy fields in sync for backwards compatibility
+        const parsed = parseServiceId(body.onlineService);
+        newConfig.transcriptionProvider = parsed.provider;
+        if (parsed.whisperModel) {
+          newConfig.whisperModel = parsed.whisperModel;
+        }
+      }
+    }
+    
+    if (body.offlineService && typeof body.offlineService === 'string') {
+      if (validServiceIds.includes(body.offlineService)) {
+        newConfig.offlineService = body.offlineService;
+        // Keep legacy offline model in sync
+        const parsed = parseServiceId(body.offlineService);
+        if (parsed.whisperModel) {
+          newConfig.whisperOfflineModel = parsed.whisperModel as any;
+        }
+      }
+    }
+    
+    if (body.doublePrecisionService && typeof body.doublePrecisionService === 'string') {
+      if (validServiceIds.includes(body.doublePrecisionService)) {
+        newConfig.doublePrecisionService = body.doublePrecisionService;
+        // Keep legacy fields in sync
+        const parsed = parseServiceId(body.doublePrecisionService);
+        newConfig.doublePrecisionSecondProvider = parsed.provider as any;
+        if (parsed.whisperModel) {
+          newConfig.doublePrecisionWhisperModel = parsed.whisperModel;
+        }
+      }
     }
     
     await saveRuntimeConfigWithRequest(request, newConfig);

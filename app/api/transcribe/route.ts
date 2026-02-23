@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRuntimeConfigWithRequest } from '@/lib/configDb';
+import { getRuntimeConfigWithRequest, getEffectiveOnlineService } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { normalizeAudioForWhisper } from '@/lib/audioCompression';
 
@@ -610,10 +610,11 @@ export async function POST(request: NextRequest) {
     console.log('\n=== Transcription Request Started ===')
     const requestStart = Date.now();
 
-    // Provider-Auswahl aus Runtime-Konfiguration
+    // Provider-Auswahl aus Runtime-Konfiguration (unified service)
     const runtimeConfig = await getRuntimeConfigWithRequest(request);
-    const provider = runtimeConfig.transcriptionProvider;
-    console.log(`[Config] Provider: ${provider} (from runtime config)`);
+    const onlineService = getEffectiveOnlineService(runtimeConfig);
+    const provider = onlineService.provider;
+    console.log(`[Config] Provider: ${provider} (from online service: ${runtimeConfig.onlineService || 'legacy fallback'})`);
     
     const form = await request.formData();
     const file = form.get('file');
@@ -656,10 +657,10 @@ export async function POST(request: NextRequest) {
       console.log(`[Dictionary] Using default medical terms (${initialPrompt.split(', ').length} words)`);
     }
 
-    // Get whisper model from runtime config (Online-Transkription)
+    // Get whisper model from unified online service (or legacy config)
     // For online mode, use whisperModel directly (full HuggingFace path)
-    const whisperModel = runtimeConfig.whisperModel || 'guillaumekln/faster-whisper-large-v2';
-    console.log(`[Config] WhisperX Online Model: ${whisperModel} (from config)`);
+    const whisperModel = onlineService.whisperModel || runtimeConfig.whisperModel || 'guillaumekln/faster-whisper-large-v2';
+    console.log(`[Config] WhisperX Online Model: ${whisperModel} (from online service)`);
 
     // Speed mode: turbo für minimale Latenz (kein Alignment), precision für Wort-Timestamps
     // Online-Diktat sollte immer turbo verwenden

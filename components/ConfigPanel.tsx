@@ -4,18 +4,27 @@ import { useAuth } from './AuthProvider';
 import DbTokenManager from './DbTokenManager';
 import WhisperXRecoveryLogs from './WhisperXRecoveryLogs';
 
-interface ProviderOption {
+interface TranscriptionServiceOption {
   id: string;
   name: string;
   available: boolean;
   reason?: string;
+  isCloud: boolean;
 }
 
 interface RuntimeConfig {
+  // Legacy
   transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper';
-  llmProvider: 'openai' | 'lmstudio' | 'mistral';
   whisperModel?: string;
   whisperOfflineModel?: string;
+  doublePrecisionSecondProvider?: 'whisperx' | 'elevenlabs' | 'mistral';
+  doublePrecisionWhisperModel?: string;
+  // Unified service selections
+  onlineService?: string;
+  offlineService?: string;
+  doublePrecisionService?: string;
+  // LLM
+  llmProvider: 'openai' | 'lmstudio' | 'mistral';
   openaiModel?: string;
   mistralModel?: string;
   llmPromptAddition?: string;
@@ -24,8 +33,6 @@ interface RuntimeConfig {
   lmStudioUseApiMode?: boolean;
   // Double Precision Pipeline
   doublePrecisionEnabled?: boolean;
-  doublePrecisionSecondProvider?: 'whisperx' | 'elevenlabs' | 'mistral';
-  doublePrecisionWhisperModel?: string;
   doublePrecisionMode?: 'parallel' | 'sequential';
 }
 
@@ -53,8 +60,9 @@ export default function ConfigPanel() {
   const isRoot = username?.toLowerCase() === 'root';
   const [config, setConfig] = useState<RuntimeConfig | null>(null);
   const [envInfo, setEnvInfo] = useState<EnvInfo | null>(null);
-  const [transcriptionProviders, setTranscriptionProviders] = useState<ProviderOption[]>([]);
-  const [llmProviders, setLLMProviders] = useState<ProviderOption[]>([]);
+  const [transcriptionProviders, setTranscriptionProviders] = useState<{ id: string; name: string; available: boolean; reason?: string }[]>([]);
+  const [transcriptionServices, setTranscriptionServices] = useState<TranscriptionServiceOption[]>([]);
+  const [llmProviders, setLLMProviders] = useState<{ id: string; name: string; available: boolean; reason?: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -71,6 +79,7 @@ export default function ConfigPanel() {
       setConfig(data.config);
       setEnvInfo(data.envInfo);
       setTranscriptionProviders(data.availableTranscriptionProviders || []);
+      setTranscriptionServices(data.availableTranscriptionServices || []);
       setLLMProviders(data.availableLLMProviders || []);
     } catch {
       setError('Fehler beim Laden der Konfiguration');
@@ -173,22 +182,6 @@ export default function ConfigPanel() {
     );
   }
 
-  // Whisper-Modelle für Online-Transkription (aus Model_Manager.py)
-  const whisperModels = [
-    { id: 'large-v3', name: 'Large-v3' },
-    { id: 'guillaumekln/faster-whisper-large-v2', name: 'Large-v2 (empfohlen)' },
-    { id: 'large-v2', name: 'Large-v2' },
-    { id: 'cstr/whisper-large-v3-turbo-german-int8_float32', name: 'Large-v3 Turbo German (schnell)' },
-  ];
-
-  // Whisper Offline-Modelle für Offline-Transkription (aus Model_Manager.py)
-  const whisperOfflineModels = [
-    { id: 'large-v3', name: 'Large-v3' },
-    { id: 'guillaumekln/faster-whisper-large-v2', name: 'Large-v2 (empfohlen)' },
-    { id: 'large-v2', name: 'Large-v2' },
-    { id: 'cstr/whisper-large-v3-turbo-german-int8_float32', name: 'Large-v3 Turbo German (schnell)' },
-  ];
-
   const openaiModels = [
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini (schnell, günstig)' },
     { id: 'gpt-4o', name: 'GPT-4o (beste Qualität)' },
@@ -216,99 +209,57 @@ export default function ConfigPanel() {
         </div>
       )}
 
-      {/* Transkriptions-Provider */}
-      <div className="space-y-3">
+      {/* Transkriptions-Services */}
+      <div className="space-y-4">
         <h4 className="font-medium text-sm flex items-center gap-2">
           <span>🎙️</span>
-          <span>Transkriptions-Provider</span>
+          <span>Transkriptions-Dienste</span>
         </h4>
         
-        <div className="grid gap-2">
-          {transcriptionProviders.map((provider) => (
-            <label
-              key={provider.id}
-              className={`flex items-center gap-3 p-3 rounded-lg border transition-colors cursor-pointer
-                ${config.transcriptionProvider === provider.id 
-                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' 
-                  : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}
-                ${!provider.available ? 'opacity-50 cursor-not-allowed' : ''}
-                ${!isRoot ? 'pointer-events-none' : ''}
-              `}
-            >
-              <input
-                type="radio"
-                name="transcriptionProvider"
-                value={provider.id}
-                checked={config.transcriptionProvider === provider.id}
-                onChange={() => updateConfig({ transcriptionProvider: provider.id as any })}
-                disabled={!provider.available || !isRoot || saving}
-                className="w-4 h-4 text-blue-600"
-              />
-              <div className="flex-1">
-                <div className="font-medium text-sm">{provider.name}</div>
-                {!provider.available && provider.reason && (
-                  <div className="text-xs text-gray-500">{provider.reason}</div>
-                )}
-                {provider.id === 'whisperx' && envInfo?.whisperServiceUrl && (
-                  <div className="text-xs text-gray-500 truncate">
-                    {envInfo.whisperServiceUrl}
-                  </div>
-                )}
-                {provider.id === 'fast_whisper' && envInfo?.fastWhisperWsUrl && (
-                  <div className="text-xs text-gray-500 truncate">
-                    {envInfo.fastWhisperWsUrl}
-                  </div>
-                )}
-              </div>
-              {config.transcriptionProvider === provider.id && (
-                <span className="text-green-500">✓</span>
-              )}
-            </label>
-          ))}
+        <p className="text-xs text-gray-500">
+          Wähle für Online- und Offline-Transkription jeweils einen Dienst. Cloud- und lokale Dienste können frei gemischt werden.
+        </p>
+
+        {/* Online-Transkription */}
+        <div>
+          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
+            🌐 Online-Transkription (Live-Diktat)
+          </label>
+          <select
+            value={config.onlineService || 'whisperx:guillaumekln/faster-whisper-large-v2'}
+            onChange={(e) => updateConfig({ onlineService: e.target.value })}
+            disabled={!isRoot || saving}
+            className="input text-sm w-full max-w-md"
+          >
+            {transcriptionServices.map((svc) => (
+              <option key={svc.id} value={svc.id} disabled={!svc.available}>
+                {svc.name}{svc.isCloud ? ' ☁️' : ' 💻'}{!svc.available ? ` (${svc.reason})` : ''}
+              </option>
+            ))}
+          </select>
         </div>
 
-        {/* Whisper Model Selection */}
-        {config.transcriptionProvider === 'whisperx' && (
-          <div className="ml-6 mt-2">
-            <label className="text-xs text-gray-500 block mb-1">Live-Transkription</label>
-            <select
-              value={config.whisperModel || 'guillaumekln/faster-whisper-large-v2'}
-              onChange={(e) => updateConfig({ whisperModel: e.target.value as any })}
-              disabled={!isRoot || saving}
-              className="input text-sm w-full max-w-xs"
-            >
-              {whisperModels.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {/* Whisper Offline Model Selection */}
-        {config.transcriptionProvider === 'whisperx' && (
-          <div className="ml-6 mt-3">
-            <label className="text-xs text-gray-500 block mb-1">
-              Offline-Transkription
-            </label>
-            <select
-              value={config.whisperOfflineModel || 'guillaumekln/faster-whisper-large-v2'}
-              onChange={(e) => updateConfig({ whisperOfflineModel: e.target.value as any })}
-              disabled={!isRoot || saving}
-              className="input text-sm w-full max-w-xs"
-            >
-              {whisperOfflineModels.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        {/* Offline-Transkription */}
+        <div>
+          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
+            📴 Offline-Transkription (Warteschlange)
+          </label>
+          <select
+            value={config.offlineService || 'whisperx:guillaumekln/faster-whisper-large-v2'}
+            onChange={(e) => updateConfig({ offlineService: e.target.value })}
+            disabled={!isRoot || saving}
+            className="input text-sm w-full max-w-md"
+          >
+            {transcriptionServices.map((svc) => (
+              <option key={svc.id} value={svc.id} disabled={!svc.available}>
+                {svc.name}{svc.isCloud ? ' ☁️' : ' 💻'}{!svc.available ? ` (${svc.reason})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
         
         {/* Double Precision Pipeline */}
-        <div className="mt-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50">
+        <div className="mt-2 p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50">
           <div className="flex items-center gap-3 mb-3">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -329,54 +280,25 @@ export default function ConfigPanel() {
           {config.doublePrecisionEnabled && (
             <div className="space-y-3 pt-2 border-t border-gray-200 dark:border-gray-600">
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Zweiter Provider</label>
+                <label className="text-xs text-gray-500 block mb-1">Zweiter Service</label>
                 <select
-                  value={config.doublePrecisionSecondProvider || 'elevenlabs'}
-                  onChange={(e) => updateConfig({ doublePrecisionSecondProvider: e.target.value as any })}
+                  value={config.doublePrecisionService || 'elevenlabs'}
+                  onChange={(e) => updateConfig({ doublePrecisionService: e.target.value })}
                   disabled={!isRoot || saving}
-                  className="input text-sm w-full max-w-xs"
+                  className="input text-sm w-full max-w-md"
                 >
-                  {transcriptionProviders
-                    .filter(p => p.available)
-                    .map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.name}{provider.id === config.transcriptionProvider ? ' (wie Primär)' : ''}
-                      </option>
-                    ))}
+                  {transcriptionServices.map((svc) => (
+                    <option key={svc.id} value={svc.id} disabled={!svc.available}>
+                      {svc.name}{svc.isCloud ? ' ☁️' : ' 💻'}{svc.id === config.offlineService ? ' (wie Offline-Primär)' : ''}{!svc.available ? ` (${svc.reason})` : ''}
+                    </option>
+                  ))}
                 </select>
-                {config.doublePrecisionSecondProvider === config.transcriptionProvider && config.transcriptionProvider === 'whisperx' && (
+                {config.doublePrecisionService === config.offlineService && (
                   <p className="text-xs text-blue-500 mt-1">
-                    💡 Zwei lokale Whisper-Modelle vergleichen - wähle unten verschiedene Modelle
+                    💡 Primär und Sekundär verwenden denselben Dienst — stelle sicher, dass unterschiedliche Modelle verglichen werden.
                   </p>
                 )}
               </div>
-              
-              {/* Whisper-Modell Auswahl für Double Precision, wenn Provider whisperx ist */}
-              {config.doublePrecisionSecondProvider === 'whisperx' && (
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">
-                    Whisper-Modell (zweite Transkription)
-                  </label>
-                  <select
-                    value={config.doublePrecisionWhisperModel || 'large-v2'}
-                    onChange={(e) => updateConfig({ doublePrecisionWhisperModel: e.target.value })}
-                    disabled={!isRoot || saving}
-                    className="input text-sm w-full max-w-xs"
-                  >
-                    {whisperModels.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
-                        {config.transcriptionProvider === 'whisperx' && model.id === config.whisperModel ? ' (wie Primär)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-400 mt-1">
-                    {config.transcriptionProvider === 'whisperx' && config.doublePrecisionSecondProvider === 'whisperx'
-                      ? `Primär: ${whisperModels.find(m => m.id === config.whisperModel)?.name || config.whisperModel || 'large-v3'}`
-                      : 'Whisper-Modell für zweite Transkription'}
-                  </p>
-                </div>
-              )}
               
               <div>
                 <label className="text-xs text-gray-500 block mb-1">Ausführungsmodus</label>

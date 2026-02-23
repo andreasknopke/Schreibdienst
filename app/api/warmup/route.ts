@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRuntimeConfigWithRequest } from '@/lib/configDb';
+import { getRuntimeConfigWithRequest, getEffectiveOnlineService } from '@/lib/configDb';
 
 export const runtime = 'nodejs';
 
@@ -177,8 +177,9 @@ async function warmupGradio(whisperUrl: string, whisperModel: string): Promise<{
 export async function POST(request: NextRequest) {
   // Prüfe ob WhisperX als Provider konfiguriert ist
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
-  const provider = runtimeConfig.transcriptionProvider || 'whisperx';
-  const whisperModel = runtimeConfig.whisperModel || process.env.WHISPER_MODEL || 'large-v3';
+  const onlineService = getEffectiveOnlineService(runtimeConfig);
+  const provider = onlineService.provider || 'whisperx';
+  const whisperModel = onlineService.whisperModel || runtimeConfig.whisperModel || process.env.WHISPER_MODEL || 'large-v3';
   
   if (provider !== 'whisperx') {
     console.log(`[Warmup] Skipping WhisperX warmup - using ${provider} provider`);

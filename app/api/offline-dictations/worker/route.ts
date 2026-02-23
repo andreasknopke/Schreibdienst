@@ -14,7 +14,7 @@ import {
   logLLMCorrectionWithRequest,
   logDoublePrecisionCorrectionWithRequest,
 } from '@/lib/correctionLogDb';
-import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath, RuntimeConfig } from '@/lib/configDb';
+import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath, getEffectiveOfflineService, getEffectiveDoublePrecisionService, RuntimeConfig } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFormatting';
@@ -549,13 +549,17 @@ async function transcribeAudio(
   patientDob?: string
 ): Promise<{ text: string; segments?: any[] }> {
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
-  const provider = runtimeConfig.transcriptionProvider;
+  
+  // Use unified offline service (new) or legacy provider
+  const offlineService = getEffectiveOfflineService(runtimeConfig);
+  const provider = offlineService.provider;
   
   // GPU Warmup: When using WhisperX with LM Studio, load a tiny model first to free GPU memory
   // This prevents CUDA OUT OF MEMORY errors when switching between LLM and Whisper
   // Note: This is done ONCE at the start, NOT between double precision transcriptions
+  const dpService = getEffectiveDoublePrecisionService(runtimeConfig);
   const needsWhisper = provider === 'whisperx' || provider === 'fast_whisper' || 
-    (runtimeConfig.doublePrecisionEnabled && runtimeConfig.doublePrecisionSecondProvider === 'whisperx');
+    (runtimeConfig.doublePrecisionEnabled && dpService.provider === 'whisperx');
   const usesLmStudio = runtimeConfig.llmProvider === 'lmstudio';
   if (needsWhisper && usesLmStudio) {
     await warmupGpuForWhisper();
@@ -589,13 +593,13 @@ async function transcribeAudio(
   }
   
   // Double Precision Pipeline
-  if (runtimeConfig.doublePrecisionEnabled && runtimeConfig.doublePrecisionSecondProvider) {
-    const secondProvider = runtimeConfig.doublePrecisionSecondProvider;
+  if (runtimeConfig.doublePrecisionEnabled) {
+    const secondProvider = dpService.provider;
     const mode = runtimeConfig.doublePrecisionMode || 'parallel';
     // Use specific whisper model for double precision if configured and second provider is whisperx
-    const dpWhisperModel = secondProvider === 'whisperx' ? runtimeConfig.doublePrecisionWhisperModel : undefined;
-    // Primary whisper model (used when primary provider is whisperx) - use OFFLINE model for offline worker
-    const primaryWhisperModel = provider === 'whisperx' ? runtimeConfig.whisperOfflineModel : undefined;
+    const dpWhisperModel = dpService.whisperModel;
+    // Primary whisper model (used when primary provider is whisperx) - use OFFLINE service model
+    const primaryWhisperModel = offlineService.whisperModel;
     
     // Detect if we're comparing two different WhisperX models
     const isTwoWhisperModels = provider === 'whisperx' && secondProvider === 'whisperx';

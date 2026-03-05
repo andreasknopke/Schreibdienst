@@ -196,6 +196,20 @@ vllm serve mistralai/Voxtral-Mini-3B-2507 \
 
 Der Server ist dann von Windows unter `http://localhost:8000` erreichbar.
 
+### 5. Realtime-Modell unter WSL2 (für Live-Diktat)
+
+```bash
+source ~/voxtral-env/bin/activate
+
+vllm serve mistralai/Voxtral-Mini-4B-Realtime-2602 \
+  --host 0.0.0.0 --port 8000 \
+  --tokenizer-mode mistral --config-format mistral --load-format mistral \
+  --max-model-len 8192 --enforce-eager --dtype half \
+  --gpu-memory-utilization 0.9
+```
+
+WebSocket ist dann unter `ws://localhost:8000/v1/realtime` erreichbar (WSL2 leitet Ports automatisch weiter).
+
 ---
 
 ## GPU-spezifische Flags
@@ -235,12 +249,14 @@ vllm serve mistralai/Voxtral-Mini-3B-2507 \
 
 ## Als Systemdienst (Linux)
 
-Damit der vLLM-Server beim Systemstart automatisch läuft:
+Damit der vLLM-Server beim Systemstart automatisch läuft.
+
+### Batch-Modell (3B) als Dienst
 
 ```bash
 sudo tee /etc/systemd/system/voxtral.service << 'EOF'
 [Unit]
-Description=Voxtral vLLM Transcription Server
+Description=Voxtral vLLM Transcription Server (Batch)
 After=network.target
 
 [Service]
@@ -259,19 +275,64 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF
+```
 
+### Realtime-Modell (4B) als Dienst
+
+```bash
+sudo tee /etc/systemd/system/voxtral-realtime.service << 'EOF'
+[Unit]
+Description=Voxtral vLLM Realtime Transcription Server (WebSocket)
+After=network.target
+Conflicts=voxtral.service
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=/home/$USER
+Environment="PATH=/home/$USER/voxtral-env/bin:/usr/local/bin:/usr/bin"
+ExecStart=/home/$USER/voxtral-env/bin/vllm serve mistralai/Voxtral-Mini-4B-Realtime-2602 \
+  --host 0.0.0.0 --port 8000 \
+  --tokenizer-mode mistral --config-format mistral --load-format mistral \
+  --max-model-len 8192 --enforce-eager --dtype half \
+  --gpu-memory-utilization 0.9
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+> **Hinweis:** `Conflicts=voxtral.service` stellt sicher, dass nicht beide gleichzeitig laufen (gleicher Port, gleiche GPU).
+
+### Dienst aktivieren
+
+```bash
 # $USER durch tatsächlichen Benutzernamen ersetzen, dann:
 sudo systemctl daemon-reload
+
+# Für Live-Diktat (Realtime):
+sudo systemctl enable voxtral-realtime
+sudo systemctl start voxtral-realtime
+
+# ODER für Batch-Transkription:
 sudo systemctl enable voxtral
 sudo systemctl start voxtral
 
+# Zwischen Modi wechseln:
+sudo systemctl stop voxtral-realtime && sudo systemctl start voxtral
+sudo systemctl stop voxtral && sudo systemctl start voxtral-realtime
+
 # Logs anschauen
-journalctl -u voxtral -f
+journalctl -u voxtral-realtime -f
 ```
 
 ---
 
 ## Docker-Alternative
+
+### Batch-Modell (3B)
 
 ```bash
 docker run --gpus all -p 8000:8000 \
@@ -283,6 +344,123 @@ docker run --gpus all -p 8000:8000 \
   --tokenizer-mode mistral --config-format mistral --load-format mistral \
   --max-model-len 8192 --enforce-eager --dtype half \
   --gpu-memory-utilization 0.9
+```
+
+### Realtime-Modell (4B) — für Live-Diktat
+
+```bash
+docker run --gpus all -p 8000:8000 \
+  -v ~/.cache/huggingface:/root/.cache/huggingface \
+  -e HUGGING_FACE_HUB_TOKEN=hf_xxx \
+  vllm/vllm-openai:latest \
+  --model mistralai/Voxtral-Mini-4B-Realtime-2602 \
+  --host 0.0.0.0 --port 8000 \
+  --tokenizer-mode mistral --config-format mistral --load-format mistral \
+  --max-model-len 8192 --enforce-eager --dtype half \
+  --gpu-memory-utilization 0.9
+```
+
+> Der WebSocket-Endpoint ist automatisch unter `ws://localhost:8000/v1/realtime` erreichbar.
+
+---
+
+## Realtime-Modus (Live-Diktat via WebSocket)
+
+Für Echtzeit-Transkription während des Diktierens nutzt Schreibdienst das **Realtime-Modell** über eine WebSocket-Verbindung. Text erscheint dabei live während des Sprechens.
+
+### Batch vs. Realtime — wann welches Modell?
+
+| | Batch (3B) | Realtime (4B) |
+|---|---|---|
+| **Modell** | `Voxtral-Mini-3B-2507` | `Voxtral-Mini-4B-Realtime-2602` |
+| **API** | HTTP `POST /v1/audio/transcriptions` | WebSocket `ws://…/v1/realtime` |
+| **Anwendung** | Offline-Diktat (Aufnahme → Datei → Server) | Online-Diktat (Mikrofon → Live-Text) |
+| **VRAM** | ~6-8 GB | ~8-10 GB |
+| **Latenz** | Sekunden (gesamte Datei) | Millisekunden (streaming) |
+
+> **Wichtig:** Beide Modelle können **nicht gleichzeitig** auf einer GPU laufen (gleicher Port). Starte das Modell, das zu deinem Haupt-Anwendungsfall passt. Für reines Live-Diktat → Realtime. Für nachträgliche Transkription langer Aufnahmen → Batch.
+
+### Schritt 1: Realtime-Modell starten
+
+```bash
+source ~/voxtral-env/bin/activate
+
+vllm serve mistralai/Voxtral-Mini-4B-Realtime-2602 \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --tokenizer-mode mistral \
+  --config-format mistral \
+  --load-format mistral \
+  --max-model-len 8192 \
+  --enforce-eager \
+  --dtype half \
+  --gpu-memory-utilization 0.9
+```
+
+Erster Start dauert **5-10 Minuten** (Download ~8 GB).
+
+### Schritt 2: WebSocket-Endpoint testen
+
+```bash
+# Health-Check (HTTP)
+curl http://localhost:8000/health
+
+# WebSocket Endpoint prüfen (sollte 101 Upgrade zurückgeben)
+curl -i -N \
+  -H "Connection: Upgrade" \
+  -H "Upgrade: websocket" \
+  -H "Sec-WebSocket-Version: 13" \
+  -H "Sec-WebSocket-Key: dGVzdA==" \
+  http://localhost:8000/v1/realtime
+```
+
+### Schritt 3: In Schreibdienst nutzen
+
+Keine zusätzliche Konfiguration nötig — der WebSocket-Endpoint wird automatisch aus `VOXTRAL_LOCAL_URL` abgeleitet:
+
+```
+VOXTRAL_LOCAL_URL=http://localhost:8000
+→ WebSocket: ws://localhost:8000/v1/realtime
+```
+
+Wähle in der UI den Provider **"Voxtral Lokal (vLLM/GPU)"** und diktiere im Online-Modus.
+
+### Funktionsweise (Protokoll-Details)
+
+Der Browser öffnet eine WebSocket-Verbindung und sendet Audio in Echtzeit:
+
+```
+Client                              vLLM Server
+  │                                      │
+  │── session.update ──────────────────→ │  (PCM16 16kHz, context_bias)
+  │←──────────────── session.updated ──  │
+  │                                      │
+  │── input_audio_buffer.append ───────→ │  (base64-kodierte PCM16 Chunks)
+  │── input_audio_buffer.append ───────→ │  (alle ~250ms ein Chunk)
+  │←──────────────── transcription.delta │  (partieller Text)
+  │── input_audio_buffer.append ───────→ │
+  │←──────────────── transcription.done  │  (finaler Satz)
+  │── input_audio_buffer.append ───────→ │
+  │   ...                                │
+  │── input_audio_buffer.commit ───────→ │  (Aufnahme beendet)
+  │←──────────────── transcription.done  │  (letzter Satz)
+  │                                      │
+```
+
+**Audio-Format:** PCM16, 16 kHz, Mono, base64-kodiert  
+**Wörterbuch:** Fachwörter aus dem Schreibdienst-Wörterbuch werden als `context_bias` in der `session.update`-Nachricht übergeben  
+**Diktat-Logik:** Sprachbefehle wie "Punkt" werden client-seitig erkannt und in Satzzeichen umgewandelt
+
+### V100-Optimierung für Realtime
+
+Das 4B Realtime-Modell passt gut auf die V100 (32 GB):
+
+```bash
+vllm serve mistralai/Voxtral-Mini-4B-Realtime-2602 \
+  --host 0.0.0.0 --port 8000 \
+  --tokenizer-mode mistral --config-format mistral --load-format mistral \
+  --max-model-len 8192 --enforce-eager --dtype half \
+  --gpu-memory-utilization 0.9 --max-num-seqs 4
 ```
 
 ---
@@ -329,6 +507,19 @@ docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
 # ✅ Resources → WSL Integration → Ubuntu aktivieren
 ```
 
+### WebSocket verbindet nicht (Realtime-Modus)
+
+- **Falsches Modell?** Der `/v1/realtime` Endpoint existiert nur wenn das Realtime-Modell (`Voxtral-Mini-4B-Realtime-2602`) geladen ist, nicht beim Batch-Modell
+- **Port blockiert?** `lsof -i :8000` prüfen
+- **Firewall?** WSL2 leitet Ports normalerweise automatisch weiter. Falls nicht: `netsh interface portproxy add v4tov4 listenport=8000 listenaddress=0.0.0.0 connectport=8000 connectaddress=$(wsl hostname -I | awk '{print $1}')` in PowerShell
+- **Browser-Konsole prüfen:** `F12` → Console → nach `[Voxtral]` Meldungen suchen
+
+### Kein Text beim Live-Diktat
+
+- **Mikrofon-Berechtigung?** Browser muss Mikrofon-Zugriff erlauben (HTTPS oder localhost)
+- **vLLM Logs prüfen:** `journalctl -u voxtral-realtime -f` — kommen WebSocket-Verbindungen an?
+- **Audio-Format:** Schreibdienst sendet PCM16 16kHz Mono — das Realtime-Modell erwartet genau dieses Format
+
 ---
 
 ## Vergleich: Voxtral Lokal vs. Cloud
@@ -340,7 +531,8 @@ docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
 | **Qualität (DE)** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 | **Geschwindigkeit** | GPU-abhängig | Schnell | GPU-abhängig |
 | **Timestamps** | ✅ Segmente | ✅ Segmente | ✅ Wort-Level |
-| **context_bias** | ❌ Nicht lokal | ✅ | ❌ (initial_prompt) |
+| **context_bias** | ✅ (Realtime session) | ✅ | ❌ (initial_prompt) |
+| **Live-Diktat** | ✅ WebSocket Realtime | ❌ (nur Batch) | ✅ (Fast Whisper) |
 | **Min. GPU** | 12 GB VRAM | Keine | 6 GB VRAM |
 | **Setup** | Mittel | Einfach (API Key) | Einfach (Docker) |
 
@@ -350,5 +542,9 @@ docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
 
 | Variable | Default | Beschreibung |
 |----------|---------|-------------|
-| `VOXTRAL_LOCAL_URL` | `http://localhost:8000` | URL des vLLM-Servers |
-| `VOXTRAL_LOCAL_MODEL` | `mistralai/Voxtral-Mini-3B-2507` | HuggingFace Modell-ID |
+| `VOXTRAL_LOCAL_URL` | `http://localhost:8000` | URL des vLLM-Servers (HTTP + WS) |
+| `VOXTRAL_LOCAL_MODEL` | `mistralai/Voxtral-Mini-3B-2507` | HuggingFace Modell-ID (Batch) |
+
+> **WebSocket-URL:** Wird automatisch aus `VOXTRAL_LOCAL_URL` abgeleitet:  
+> `http://localhost:8000` → `ws://localhost:8000/v1/realtime`  
+> `https://voxtral.example.com` → `wss://voxtral.example.com/v1/realtime`

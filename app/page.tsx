@@ -39,6 +39,7 @@ interface Template {
 interface RuntimeConfig {
   transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper' | 'voxtral_local';
   fastWhisperWsUrl?: string;
+  voxtralLocalWsUrl?: string;
 }
 
 export default function HomePage() {
@@ -59,6 +60,12 @@ export default function HomePage() {
   const fastWhisperAudioContextRef = useRef<AudioContext | null>(null);
   const fastWhisperProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const fastWhisperStreamRef = useRef<MediaStream | null>(null);
+  
+  // Voxtral Local Realtime WebSocket State (shared audio refs with FastWhisper)
+  const voxtralWsRef = useRef<WebSocket | null>(null);
+  const voxtralAudioContextRef = useRef<AudioContext | null>(null);
+  const voxtralProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const voxtralStreamRef = useRef<MediaStream | null>(null);
   
   // Fast Whisper: Akkumulierte finale Texte (wird bei jedem finalen Satz erweitert)
   const fastWhisperFinalTextRef = useRef<string>("");
@@ -236,9 +243,18 @@ export default function HomePage() {
         const res = await fetchWithDbToken('/api/config');
         const data = await res.json();
         if (data.config) {
+          // Voxtral Local WS URL aus HTTP URL ableiten
+          let voxtralWsUrl: string | undefined;
+          if (data.envInfo?.voxtralLocalUrl) {
+            voxtralWsUrl = data.envInfo.voxtralLocalUrl
+              .replace(/^https:\/\//, 'wss://')
+              .replace(/^http:\/\//, 'ws://')
+              .replace(/\/$/, '') + '/v1/realtime';
+          }
           const config = {
             transcriptionProvider: data.config.transcriptionProvider,
             fastWhisperWsUrl: data.envInfo?.fastWhisperWsUrl,
+            voxtralLocalWsUrl: voxtralWsUrl,
           };
           setRuntimeConfig(config);
           console.log('[Config] Loaded - Provider:', data.config.transcriptionProvider);
@@ -1206,6 +1222,174 @@ export default function HomePage() {
       return;
     }
     
+    // Voxtral Local Realtime WebSocket Modus
+    if (runtimeConfig?.transcriptionProvider === 'voxtral_local' && runtimeConfig.voxtralLocalWsUrl) {
+      // Finale Text-Refs zurücksetzen für neue Session
+      fastWhisperFinalTextRef.current = "";
+      fastWhisperFinalMethodikRef.current = "";
+      fastWhisperFinalBeurteilungRef.current = "";
+      
+      // Stable-Words-Refs zurücksetzen
+      fastWhisperStableWordsRef.current = "";
+      fastWhisperStableMethodikRef.current = "";
+      fastWhisperStableBeurteilungRef.current = "";
+      fastWhisperLastPartialRef.current = "";
+      fastWhisperPartialCountRef.current = 0;
+      
+      // Diktat-Modus: Erster Buchstabe groß
+      fastWhisperEndsWithPeriodRef.current = true;
+      
+      const wsUrl = runtimeConfig.voxtralLocalWsUrl;
+      console.log('[Voxtral] Starting Realtime WebSocket recording to', wsUrl);
+      
+      try {
+        const ws = new WebSocket(wsUrl);
+        voxtralWsRef.current = ws;
+        
+        ws.onopen = async () => {
+          console.log('[Voxtral] WebSocket connected');
+          
+          // Session konfigurieren
+          const sessionConfig: any = {
+            type: 'session.update',
+            session: {
+              input_audio_format: 'pcm16',
+              input_audio_sample_rate: 16000,
+            },
+          };
+          
+          // Context Bias aus Wörterbuch (Einträge mit useInPrompt=true)
+          const promptWords = dictionaryEntries
+            .filter(e => e.useInPrompt && e.correct)
+            .map(e => e.correct);
+          
+          if (promptWords.length > 0) {
+            sessionConfig.session.context_bias = promptWords;
+            console.log('[Voxtral] Sending context_bias with', promptWords.length, 'words');
+          }
+          
+          ws.send(JSON.stringify(sessionConfig));
+          
+          try {
+            // Mikrofon-Stream holen
+            const stream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                sampleRate: 16000,
+                channelCount: 1,
+                echoCancellation: true,
+                noiseSuppression: true,
+              }
+            });
+            voxtralStreamRef.current = stream;
+            
+            // AudioContext für Resampling und Audio-Level
+            const audioContext = new AudioContext({ sampleRate: 16000 });
+            voxtralAudioContextRef.current = audioContext;
+            
+            const source = audioContext.createMediaStreamSource(stream);
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            analyserRef.current = analyser;
+            
+            // Audio Level Monitor
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            const updateLevel = () => {
+              if (!analyserRef.current || !voxtralWsRef.current) return;
+              analyserRef.current.getByteFrequencyData(dataArray);
+              const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+              setAudioLevel(Math.min(100, (average / 128) * 100));
+              animationFrameRef.current = requestAnimationFrame(updateLevel);
+            };
+            updateLevel();
+            
+            // ScriptProcessorNode für Audio-Chunks
+            const processor = audioContext.createScriptProcessor(4096, 1, 1);
+            voxtralProcessorRef.current = processor;
+            
+            processor.onaudioprocess = (e) => {
+              if (!voxtralWsRef.current || voxtralWsRef.current.readyState !== WebSocket.OPEN) return;
+              
+              const inputData = e.inputBuffer.getChannelData(0);
+              
+              // Konvertiere Float32Array zu Int16Array (PCM16)
+              const int16Data = new Int16Array(inputData.length);
+              for (let i = 0; i < inputData.length; i++) {
+                const s = Math.max(-1, Math.min(1, inputData[i]));
+                int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+              }
+              
+              // Base64-encode für Voxtral Realtime API
+              const uint8 = new Uint8Array(int16Data.buffer);
+              let binary = '';
+              for (let i = 0; i < uint8.length; i++) {
+                binary += String.fromCharCode(uint8[i]);
+              }
+              const base64Audio = btoa(binary);
+              
+              // Sende als JSON mit input_audio_buffer.append
+              voxtralWsRef.current.send(JSON.stringify({
+                type: 'input_audio_buffer.append',
+                audio: base64Audio,
+              }));
+            };
+            
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+            
+            setRecording(true);
+          } catch (micError: any) {
+            console.error('[Voxtral] Microphone error:', micError);
+            setError('Mikrofon-Zugriff fehlgeschlagen: ' + micError.message);
+            ws.close();
+          }
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            if (typeof event.data !== 'string') return;
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'transcription.delta') {
+              // Partielle Transkription
+              const text = data.delta?.text || data.text || '';
+              if (text.trim()) {
+                handleFastWhisperTranscript(text.trim(), false);
+              }
+            } else if (data.type === 'transcription.done') {
+              // Finale Transkription
+              const text = data.text || data.result?.text || '';
+              if (text.trim()) {
+                handleFastWhisperTranscript(text.trim(), true);
+              }
+            } else if (data.type === 'error') {
+              console.error('[Voxtral] Server error:', data.error || data.message);
+              setError('Voxtral Fehler: ' + (data.error?.message || data.message || 'Unbekannt'));
+            } else if (data.type === 'session.created' || data.type === 'session.updated') {
+              console.log('[Voxtral]', data.type);
+            }
+          } catch (e) {
+            console.warn('[Voxtral] Parse error:', e);
+          }
+        };
+        
+        ws.onerror = (event) => {
+          console.error('[Voxtral] WebSocket error:', event);
+          setError('Voxtral Local Verbindung fehlgeschlagen - Server erreichbar?');
+        };
+        
+        ws.onclose = () => {
+          console.log('[Voxtral] WebSocket closed');
+        };
+        
+      } catch (wsError: any) {
+        console.error('[Voxtral] Connection error:', wsError);
+        setError('Voxtral Local Verbindung fehlgeschlagen: ' + wsError.message);
+      }
+      
+      return;
+    }
+    
     // Standard MediaRecorder Modus (für andere Provider)
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     streamRef.current = stream;
@@ -1300,6 +1484,55 @@ export default function HomePage() {
       setRecording(false);
       
       // Bei Fast Whisper: Direkt Korrektur anbieten (kein finaler Transkriptions-Chunk nötig)
+      setPendingCorrection(true);
+      return;
+    }
+    
+    // Voxtral Local Realtime WebSocket stoppen
+    if (runtimeConfig?.transcriptionProvider === 'voxtral_local' && voxtralWsRef.current) {
+      console.log('[Voxtral] Stopping Realtime WebSocket recording');
+      
+      // Signal zum Beenden senden (commit mit final flag)
+      if (voxtralWsRef.current.readyState === WebSocket.OPEN) {
+        voxtralWsRef.current.send(JSON.stringify({
+          type: 'input_audio_buffer.commit',
+        }));
+      }
+      
+      // Stream stoppen
+      if (voxtralStreamRef.current) {
+        voxtralStreamRef.current.getTracks().forEach(track => track.stop());
+        voxtralStreamRef.current = null;
+      }
+      
+      // Processor trennen
+      if (voxtralProcessorRef.current) {
+        voxtralProcessorRef.current.disconnect();
+        voxtralProcessorRef.current = null;
+      }
+      
+      // AudioContext schließen
+      if (voxtralAudioContextRef.current) {
+        voxtralAudioContextRef.current.close();
+        voxtralAudioContextRef.current = null;
+      }
+      
+      // WebSocket schließen (kurz warten für letzte Antwort)
+      setTimeout(() => {
+        if (voxtralWsRef.current) {
+          voxtralWsRef.current.close();
+          voxtralWsRef.current = null;
+        }
+      }, 500);
+      
+      // Animation Frame stoppen
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      
+      setAudioLevel(0);
+      setRecording(false);
       setPendingCorrection(true);
       return;
     }

@@ -38,7 +38,7 @@ export interface TranscriptionServiceOption {
 /** All available transcription services (static list). Availability is checked at runtime via env vars. */
 export const TRANSCRIPTION_SERVICES: TranscriptionServiceOption[] = [
   { id: 'elevenlabs',                                       name: 'ElevenLabs (Cloud)',                    provider: 'elevenlabs',    isCloud: true },
-  { id: 'mistral',                                          name: 'Mistral AI Voxtral (Cloud)',            provider: 'mistral',       isCloud: true },
+  { id: 'mistral',                                          name: 'Mistral Voxtral Mini (Cloud)',          provider: 'mistral',       isCloud: true },
   { id: 'fast_whisper',                                     name: 'Fast Whisper (WebSocket)',               provider: 'fast_whisper',  isCloud: false },
   { id: 'whisperx:large-v3',                                name: 'WhisperX: Model 1 (large-v3)',          provider: 'whisperx',      isCloud: false, whisperModel: 'large-v3' },
   { id: 'whisperx:guillaumekln/faster-whisper-large-v2',    name: 'WhisperX: Model 2 (large-v2, empfohlen)', provider: 'whisperx',    isCloud: false, whisperModel: 'guillaumekln/faster-whisper-large-v2' },

@@ -534,9 +534,19 @@ async function transcribeWithElevenLabs(file: Blob, filename: string) {
 /**
  * Transkription mit Mistral AI Voxtral
  * Verwendet den dedizierten Audio-Transkriptions-Endpunkt von Mistral
- * API-Dokumentation: https://docs.mistral.ai/capabilities/audio_transcription
+ * API-Dokumentation: https://docs.mistral.ai/capabilities/audio/
+ * Blog: https://mistral.ai/news/voxtral-transcribe-2
+ *
+ * Verfügbare Modelle:
+ *   voxtral-mini-latest  – schnell, günstig, für reine Transkription optimiert
+ *   voxtral-mini-2602    – Pinned-Version mit Diarize-Support
+ *
+ * Neue v2-Features:
+ *   context_bias  – Wortliste zum Boosten von Fachbegriffen (Wörterbuch!)
+ *   diarize       – Sprechererkennung
+ *   stream        – SSE-Streaming
  */
-async function transcribeWithMistral(file: Blob, filename: string) {
+async function transcribeWithMistral(file: Blob, filename: string, contextBiasWords?: string[]) {
   const apiKey = process.env.MISTRAL_API_KEY;
   if (!apiKey) {
     throw new Error('MISTRAL_API_KEY not configured');
@@ -552,7 +562,6 @@ async function transcribeWithMistral(file: Blob, filename: string) {
   let mimeType = file.type || 'audio/webm';
   
   // ALWAYS convert to WAV for reliable Mistral API compatibility
-  // The /audio/transcriptions endpoint has issues with some formats like m4a
   console.log(`[Mistral] Converting ${mimeType} to WAV for reliable Mistral API...`);
   const { data: normalizedData, mimeType: normalizedMime, normalized } = 
     await normalizeAudioForWhisper(audioBuffer, mimeType);
@@ -564,18 +573,30 @@ async function transcribeWithMistral(file: Blob, filename: string) {
     console.log(`[Mistral] Warning: Could not convert audio to WAV`);
   }
   
-  // Use the dedicated audio/transcriptions endpoint
+  // Build multipart/form-data request
   const formData = new FormData();
   
   console.log(`[Mistral] Sending file as audio.wav with mime ${mimeType}`);
   
-  // Use File object instead of Blob for proper multipart/form-data handling in Node.js
   const audioFile = new File([audioBuffer], 'audio.wav', { type: mimeType });
   formData.append('file', audioFile);
-  formData.append('model', 'voxtral-small-latest');
-  formData.append('language', 'de'); // Force German to prevent hallucinations
-  // Request word-level timestamps for "Mitlesen" feature
+  // voxtral-mini-latest ist für reine Transkription optimiert (nicht voxtral-small-latest!)
+  formData.append('model', 'voxtral-mini-latest');
+  formData.append('language', 'de');
+  // Segment-Timestamps für Mitlesen-Feature
+  formData.append('timestamp_granularities[]', 'segment');
   formData.append('timestamp_granularities[]', 'word');
+
+  // context_bias: Medizinische Fachbegriffe aus dem Wörterbuch zum Boosten
+  // Verbessert die Erkennung von Fachvokabular signifikant
+  if (contextBiasWords && contextBiasWords.length > 0) {
+    // Limitiere auf max 50 Begriffe um Request-Größe zu begrenzen
+    const limitedBias = contextBiasWords.slice(0, 50);
+    for (const word of limitedBias) {
+      formData.append('context_bias[]', word);
+    }
+    console.log(`[Mistral] Using context_bias with ${limitedBias.length} medical terms`);
+  }
 
   const res = await fetch('https://api.mistral.ai/v1/audio/transcriptions', {
     method: 'POST',
@@ -593,14 +614,26 @@ async function transcribeWithMistral(file: Blob, filename: string) {
   const data = await res.json();
   const transcriptionText = data.text || '';
   
+  // Parse Segmente aus der API-Antwort (mit Timestamps)
+  // Format: { type: "transcription_segment", text, start, end, score, speaker_id }
+  const segments = Array.isArray(data.segments)
+    ? data.segments.map((seg: any) => ({
+        text: seg.text || '',
+        start: seg.start ?? 0,
+        end: seg.end ?? 0,
+        score: seg.score ?? null,
+      }))
+    : [];
+
   const duration = ((Date.now() - startTime) / 1000).toFixed(2);
   const textLength = transcriptionText.length;
-  console.log(`[Mistral] ✓ Transcription complete - Duration: ${duration}s, Text length: ${textLength} chars`);
+  const audioSeconds = data.usage?.prompt_audio_seconds || 'unknown';
+  console.log(`[Mistral] ✓ Transcription complete - Duration: ${duration}s, Text length: ${textLength} chars, Audio: ${audioSeconds}s, Segments: ${segments.length}`);
   
   return {
     text: transcriptionText,
-    segments: [],
-    language: 'de',
+    segments,
+    language: data.language || 'de',
     provider: 'mistral' as const
   };
 }
@@ -677,7 +710,11 @@ export async function POST(request: NextRequest) {
       result = await transcribeWithElevenLabs(file, filename);
     } else if (provider === 'mistral') {
       console.log('Using Mistral AI Voxtral as primary provider');
-      result = await transcribeWithMistral(file, filename);
+      // Wörterbuch-Begriffe als context_bias an Mistral übergeben
+      const contextBiasWords = initialPrompt
+        ? initialPrompt.split(',').map(w => w.trim()).filter(Boolean)
+        : [];
+      result = await transcribeWithMistral(file, filename, contextBiasWords);
     } else if (provider === 'fast_whisper') {
       // Fast Whisper ist ein reiner WebSocket-Server (RealtimeSTT)
       // Für Server-seitige Transkription müssen wir auf WhisperX zurückfallen

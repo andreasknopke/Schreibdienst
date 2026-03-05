@@ -75,7 +75,7 @@ function getAvailableTranscriptionProviders(envInfo: any): { id: string; name: s
     },
     {
       id: 'mistral',
-      name: 'Mistral AI Voxtral (Cloud)',
+      name: 'Mistral Voxtral Mini (Cloud)',
       available: envInfo.hasMistralKey,
       reason: envInfo.hasMistralKey ? undefined : 'MISTRAL_API_KEY nicht konfiguriert',
     },

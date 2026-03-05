@@ -292,6 +292,120 @@ async function testMistralTranscribe(audioFilePath) {
       if (data.words) {
         console.log(`🕐 Timestamps: ${data.words.length} Wörter`);
       }
+      if (data.segments) {
+        console.log(`📊 Segments: ${data.segments.length} Segmente`);
+        data.segments.slice(0, 3).forEach((seg, i) => {
+          console.log(`  [${i}] ${seg.start?.toFixed(2)}s-${seg.end?.toFixed(2)}s: "${seg.text?.substring(0, 80)}"`);
+        });
+      }
+    }
+  } catch (error) {
+    console.error('❌ Fehler:', error.message);
+    console.error(error);
+  }
+  
+  console.log('');
+  
+  // Test 3: Mit context_bias für medizinische Fachbegriffe
+  console.log('═══════════════════════════════════════════════════════');
+  console.log('TEST 3: Mit context_bias (Medizinische Fachbegriffe)');
+  console.log('═══════════════════════════════════════════════════════');
+  
+  try {
+    const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+    
+    const medTerms = ["Liquorräume", "Mittellinie", "Mittellinienverschiebung", "parenchymatös", "Hirnparenchym", "periventrikulär"];
+    
+    const parts = [];
+    // model
+    parts.push(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="model"\r\n\r\n` +
+      `voxtral-mini-latest\r\n`
+    );
+    // language
+    parts.push(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="language"\r\n\r\n` +
+      `de\r\n`
+    );
+    // timestamp_granularities (segment)
+    parts.push(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="timestamp_granularities[]"\r\n\r\n` +
+      `segment\r\n`
+    );
+    // timestamp_granularities (word)
+    parts.push(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="timestamp_granularities[]"\r\n\r\n` +
+      `word\r\n`
+    );
+    // context_bias
+    parts.push(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="context_bias"\r\n\r\n` +
+      `${JSON.stringify(medTerms)}\r\n`
+    );
+    // file
+    const fileHeader = 
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="file"; filename="${basename}"\r\n` +
+      `Content-Type: ${mimeType}\r\n\r\n`;
+    const fileFooter = `\r\n--${boundary}--\r\n`;
+    
+    const partsBuffer = Buffer.from(parts.join(''), 'utf-8');
+    const headerBuffer = Buffer.from(fileHeader, 'utf-8');
+    const footerBuffer = Buffer.from(fileFooter, 'utf-8');
+    const body = Buffer.concat([partsBuffer, headerBuffer, audioBuffer, footerBuffer]);
+    
+    console.log('🚀 Sende Request...');
+    console.log('Model: voxtral-mini-latest');
+    console.log('Language: de');
+    console.log('Timestamp granularities: segment + word');
+    console.log(`Context bias: ${medTerms.join(', ')}`);
+    console.log('');
+    
+    const startTime = Date.now();
+    
+    const response = await httpsRequest({
+      hostname: 'api.mistral.ai',
+      path: '/v1/audio/transcriptions',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': body.length
+      }
+    }, body);
+    
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`⏱️  Dauer: ${duration}s`);
+    console.log(`📡 Status: ${response.status} ${response.statusText}`);
+    console.log('');
+    
+    if (response.status !== 200) {
+      console.error('❌ API-Fehler:');
+      console.error(response.data);
+      try {
+        const errorJson = JSON.parse(response.data);
+        console.log('Fehler-Details:');
+        console.log(JSON.stringify(errorJson, null, 2));
+      } catch (e) {}
+    } else {
+      const data = JSON.parse(response.data);
+      console.log('✅ Erfolgreiche Transkription mit context_bias!');
+      console.log('');
+      console.log('📄 Text:');
+      console.log(data.text || '(leer)');
+      console.log('');
+      console.log(`📊 Text-Länge: ${(data.text || '').length} Zeichen`);
+      if (data.segments) {
+        console.log(`📊 Segments: ${data.segments.length} Segmente`);
+      }
+      if (data.usage) {
+        console.log(`📊 Usage: ${JSON.stringify(data.usage)}`);
+      }
     }
   } catch (error) {
     console.error('❌ Fehler:', error.message);

@@ -362,7 +362,11 @@ async function transcribeWithProvider(
       result = await transcribeWithElevenLabs(audioBlob);
       break;
     case 'mistral':
-      result = await transcribeWithMistral(audioBlob);
+      // Wörterbuch-Begriffe als context_bias an Mistral übergeben
+      const contextBiasWords = initialPrompt
+        ? initialPrompt.split(',').map(w => w.trim()).filter(Boolean)
+        : [];
+      result = await transcribeWithMistral(audioBlob, contextBiasWords);
       break;
     case 'whisperx':
     default:
@@ -691,7 +695,10 @@ async function transcribeAudio(
   }
   
   if (provider === 'mistral') {
-    return transcribeWithMistral(audioBlob);
+    const biasWords = initialPrompt
+      ? initialPrompt.split(',').map(w => w.trim()).filter(Boolean)
+      : [];
+    return transcribeWithMistral(audioBlob, biasWords);
   }
   
   try {
@@ -723,7 +730,10 @@ async function transcribeAudio(
     // Fallback auf Mistral wenn WhisperX fehlschlägt (Mistral unterstützt Timestamps)
     if (process.env.MISTRAL_API_KEY) {
       console.log('[Worker] Falling back to Mistral...');
-      return transcribeWithMistral(audioBlob);
+      const biasWords = initialPrompt
+        ? initialPrompt.split(',').map(w => w.trim()).filter(Boolean)
+        : [];
+      return transcribeWithMistral(audioBlob, biasWords);
     }
     throw error;
   }
@@ -1107,9 +1117,10 @@ async function transcribeWithElevenLabs(file: Blob): Promise<{ text: string; seg
 /**
  * Transkription mit Mistral AI Voxtral Mini
  * Verwendet den Audio-Transkriptions-Endpunkt mit Timestamps für die Mitlesefunktion
- * API-Dokumentation: https://docs.mistral.ai/capabilities/audio_transcription
+ * API-Dokumentation: https://docs.mistral.ai/capabilities/audio/
+ * Blog: https://mistral.ai/news/voxtral-transcribe-2
  */
-async function transcribeWithMistral(file: Blob): Promise<{ text: string; segments?: any[] }> {
+async function transcribeWithMistral(file: Blob, contextBiasWords?: string[]): Promise<{ text: string; segments?: any[] }> {
   const apiKey = process.env.MISTRAL_API_KEY;
   if (!apiKey) throw new Error('MISTRAL_API_KEY not configured');
   
@@ -1123,7 +1134,6 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
   let mimeType = file.type || 'audio/webm';
   
   // ALWAYS convert to WAV for reliable Mistral API compatibility
-  // The /audio/transcriptions endpoint has issues with some formats like m4a
   console.log(`[Worker Mistral] Converting ${mimeType} to WAV for reliable Mistral API...`);
   const { data: normalizedData, mimeType: normalizedMime, normalized } = 
     await normalizeAudioForWhisper(audioBuffer, mimeType);
@@ -1135,19 +1145,25 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
     console.log(`[Worker Mistral] Warning: Could not convert audio to WAV`);
   }
   
-  // Use the dedicated audio/transcriptions endpoint with real timestamps
   const formData = new FormData();
   
   console.log(`[Worker Mistral] Sending file as audio.wav with mime ${mimeType}`);
   
-  // Use File object instead of Blob for proper multipart/form-data handling in Node.js
   const audioFile = new File([audioBuffer], 'audio.wav', { type: mimeType });
   formData.append('file', audioFile);
   formData.append('model', 'voxtral-mini-latest');
-  // NOTE: language parameter is NOT compatible with timestamp_granularities
-  // API automatically detects language when timestamps are requested
-  // Request word-level timestamps for "Mitlesen" feature
+  formData.append('language', 'de');
+  formData.append('timestamp_granularities[]', 'segment');
   formData.append('timestamp_granularities[]', 'word');
+
+  // context_bias: Medizinische Fachbegriffe aus dem Wörterbuch zum Boosten
+  if (contextBiasWords && contextBiasWords.length > 0) {
+    const limitedBias = contextBiasWords.slice(0, 50);
+    for (const word of limitedBias) {
+      formData.append('context_bias[]', word);
+    }
+    console.log(`[Worker Mistral] Using context_bias with ${limitedBias.length} medical terms`);
+  }
   
   const res = await fetch('https://api.mistral.ai/v1/audio/transcriptions', {
     method: 'POST',

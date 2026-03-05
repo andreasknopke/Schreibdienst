@@ -20,7 +20,7 @@ export const WHISPER_OFFLINE_MODELS: { id: WhisperOfflineModel; name: string; mo
 // Ein Service-Eintrag kombiniert Provider + ggf. WhisperX-Modell
 // ============================================================
 
-export type TranscriptionProvider = 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper';
+export type TranscriptionProvider = 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper' | 'voxtral_local';
 
 export interface TranscriptionServiceOption {
   /** Unique service ID, e.g. "elevenlabs" or "whisperx:large-v3" */
@@ -39,6 +39,7 @@ export interface TranscriptionServiceOption {
 export const TRANSCRIPTION_SERVICES: TranscriptionServiceOption[] = [
   { id: 'elevenlabs',                                       name: 'ElevenLabs (Cloud)',                    provider: 'elevenlabs',    isCloud: true },
   { id: 'mistral',                                          name: 'Mistral Voxtral Mini (Cloud)',          provider: 'mistral',       isCloud: true },
+  { id: 'voxtral_local',                                     name: 'Voxtral Lokal (vLLM/GPU)',              provider: 'voxtral_local', isCloud: false },
   { id: 'fast_whisper',                                     name: 'Fast Whisper (WebSocket)',               provider: 'fast_whisper',  isCloud: false },
   { id: 'whisperx:large-v3',                                name: 'WhisperX: Model 1 (large-v3)',          provider: 'whisperx',      isCloud: false, whisperModel: 'large-v3' },
   { id: 'whisperx:guillaumekln/faster-whisper-large-v2',    name: 'WhisperX: Model 2 (large-v2, empfohlen)', provider: 'whisperx',    isCloud: false, whisperModel: 'guillaumekln/faster-whisper-large-v2' },
@@ -53,7 +54,7 @@ export function parseServiceId(serviceId: string): { provider: TranscriptionProv
     return { provider: svc.provider, whisperModel: svc.whisperModel };
   }
   // Legacy fallback: bare provider names
-  if (['whisperx', 'elevenlabs', 'mistral', 'fast_whisper'].includes(serviceId)) {
+  if (['whisperx', 'elevenlabs', 'mistral', 'fast_whisper', 'voxtral_local'].includes(serviceId)) {
     return { provider: serviceId as TranscriptionProvider };
   }
   // Default
@@ -168,7 +169,7 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
     for (const row of rows) {
       switch (row.config_key) {
         case 'transcriptionProvider':
-          if (['whisperx', 'elevenlabs', 'mistral', 'fast_whisper'].includes(row.config_value)) {
+          if (['whisperx', 'elevenlabs', 'mistral', 'fast_whisper', 'voxtral_local'].includes(row.config_value)) {
             config.transcriptionProvider = row.config_value as any;
           }
           break;
@@ -281,7 +282,7 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
     for (const row of rows as { config_key: string; config_value: string }[]) {
       switch (row.config_key) {
         case 'transcriptionProvider':
-          if (['whisperx', 'elevenlabs', 'mistral', 'fast_whisper'].includes(row.config_value)) {
+          if (['whisperx', 'elevenlabs', 'mistral', 'fast_whisper', 'voxtral_local'].includes(row.config_value)) {
             config.transcriptionProvider = row.config_value as any;
           }
           break;

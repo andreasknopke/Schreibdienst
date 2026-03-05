@@ -347,7 +347,7 @@ export async function processDictation(request: NextRequest, dictationId: number
 async function transcribeWithProvider(
   request: NextRequest, 
   audioBlob: Blob, 
-  provider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper',
+  provider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper' | 'voxtral_local',
   initialPrompt?: string,
   whisperModel?: string
 ): Promise<TranscriptionResult> {
@@ -367,6 +367,9 @@ async function transcribeWithProvider(
         ? initialPrompt.split(',').map(w => w.trim()).filter(Boolean)
         : [];
       result = await transcribeWithMistral(audioBlob, contextBiasWords);
+      break;
+    case 'voxtral_local':
+      result = await transcribeWithVoxtralLocal(audioBlob);
       break;
     case 'whisperx':
     default:
@@ -699,6 +702,11 @@ async function transcribeAudio(
       ? initialPrompt.split(',').map(w => w.trim()).filter(Boolean)
       : [];
     return transcribeWithMistral(audioBlob, biasWords);
+  }
+  
+  if (provider === 'voxtral_local') {
+    console.log('[Worker] Using Voxtral Local (vLLM) for transcription');
+    return transcribeWithVoxtralLocal(audioBlob);
   }
   
   try {
@@ -1224,6 +1232,74 @@ async function transcribeWithMistral(file: Blob, contextBiasWords?: string[]): P
   }
   
   console.log(`[Worker Mistral] ✓ Transcription complete - Text length: ${transcriptionText.length} chars, Segments: ${segments.length}`);
+  
+  return { text: transcriptionText, segments };
+}
+
+/**
+ * Transkription mit lokalem Voxtral via vLLM
+ * vLLM bietet OpenAI-kompatible /v1/audio/transcriptions API
+ */
+async function transcribeWithVoxtralLocal(file: Blob): Promise<{ text: string; segments?: any[] }> {
+  const baseUrl = (process.env.VOXTRAL_LOCAL_URL || 'http://localhost:8000').replace(/\/+$/, '');
+  
+  const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+  console.log(`[Worker Voxtral-Local] Starting transcription - Size: ${fileSizeMB}MB, Type: ${file.type}`);
+  const startTime = Date.now();
+  
+  const arrayBuffer = await file.arrayBuffer();
+  let audioBuffer = Buffer.from(arrayBuffer);
+  let mimeType = file.type || 'audio/webm';
+  
+  console.log(`[Worker Voxtral-Local] Converting ${mimeType} to WAV...`);
+  const { data: normalizedData, mimeType: normalizedMime, normalized } = 
+    await normalizeAudioForWhisper(audioBuffer, mimeType);
+  if (normalized) {
+    audioBuffer = Buffer.from(normalizedData);
+    mimeType = normalizedMime;
+  }
+  
+  const formData = new FormData();
+  const audioFile = new File([audioBuffer], 'audio.wav', { type: mimeType });
+  formData.append('file', audioFile);
+  formData.append('model', process.env.VOXTRAL_LOCAL_MODEL || 'mistralai/Voxtral-Mini-3B-2507');
+  formData.append('language', 'de');
+  formData.append('response_format', 'verbose_json');
+  formData.append('temperature', '0.0');
+
+  const res = await fetch(`${baseUrl}/v1/audio/transcriptions`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Voxtral-Local API error (${res.status}): ${text}`);
+  }
+
+  const data = await res.json();
+  const transcriptionText = data.text || '';
+  
+  let segments: any[] = [];
+  if (data.segments && Array.isArray(data.segments)) {
+    segments = data.segments.map((seg: any) => {
+      let words = seg.words;
+      if (!words || words.length === 0) {
+        const segWords = seg.text.trim().split(/\s+/);
+        const segDuration = seg.end - seg.start;
+        const wordDuration = segDuration / segWords.length;
+        words = segWords.map((w: string, i: number) => ({
+          word: w,
+          start: seg.start + i * wordDuration,
+          end: seg.start + (i + 1) * wordDuration
+        }));
+      }
+      return { text: seg.text, start: seg.start, end: seg.end, words };
+    });
+  }
+
+  const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+  console.log(`[Worker Voxtral-Local] ✓ Transcription complete - Duration: ${duration}s, Text length: ${transcriptionText.length} chars, Segments: ${segments.length}`);
   
   return { text: transcriptionText, segments };
 }

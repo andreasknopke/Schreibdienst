@@ -37,7 +37,7 @@ interface Template {
 
 // Runtime Config Interface
 interface RuntimeConfig {
-  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper';
+  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper' | 'voxtral_local';
   fastWhisperWsUrl?: string;
 }
 

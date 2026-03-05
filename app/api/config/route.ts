@@ -39,9 +39,11 @@ export async function GET(request: NextRequest) {
     hasLMStudioUrl: !!process.env.LLM_STUDIO_URL,
     hasMistralKey: !!process.env.MISTRAL_API_KEY,
     hasFastWhisperUrl: !!process.env.FAST_WHISPER_WS_URL,
+    hasVoxtralLocalUrl: !!process.env.VOXTRAL_LOCAL_URL,
     whisperServiceUrl: process.env.WHISPER_SERVICE_URL || 'http://localhost:5000',
     lmStudioUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
     fastWhisperWsUrl: process.env.FAST_WHISPER_WS_URL || 'ws://localhost:5001',
+    voxtralLocalUrl: process.env.VOXTRAL_LOCAL_URL || 'http://localhost:8000',
   };
   
   return NextResponse.json({ 
@@ -79,6 +81,12 @@ function getAvailableTranscriptionProviders(envInfo: any): { id: string; name: s
       available: envInfo.hasMistralKey,
       reason: envInfo.hasMistralKey ? undefined : 'MISTRAL_API_KEY nicht konfiguriert',
     },
+    {
+      id: 'voxtral_local',
+      name: 'Voxtral Lokal (vLLM/GPU)',
+      available: envInfo.hasVoxtralLocalUrl,
+      reason: envInfo.hasVoxtralLocalUrl ? undefined : 'VOXTRAL_LOCAL_URL nicht konfiguriert',
+    },
   ];
 }
 
@@ -103,6 +111,10 @@ function getAvailableTranscriptionServices(envInfo: any): { id: string; name: st
       case 'mistral':
         available = envInfo.hasMistralKey;
         reason = available ? undefined : 'MISTRAL_API_KEY nicht konfiguriert';
+        break;
+      case 'voxtral_local':
+        available = envInfo.hasVoxtralLocalUrl;
+        reason = available ? undefined : 'VOXTRAL_LOCAL_URL nicht konfiguriert';
         break;
     }
 
@@ -150,7 +162,7 @@ export async function POST(request: NextRequest) {
       ...currentConfig,
     };
     
-    if (body.transcriptionProvider && ['whisperx', 'elevenlabs', 'mistral', 'fast_whisper'].includes(body.transcriptionProvider)) {
+    if (body.transcriptionProvider && ['whisperx', 'elevenlabs', 'mistral', 'fast_whisper', 'voxtral_local'].includes(body.transcriptionProvider)) {
       newConfig.transcriptionProvider = body.transcriptionProvider;
     }
     

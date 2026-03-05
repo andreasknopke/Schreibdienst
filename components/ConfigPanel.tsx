@@ -14,7 +14,7 @@ interface TranscriptionServiceOption {
 
 interface RuntimeConfig {
   // Legacy
-  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper';
+  transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper' | 'voxtral_local';
   whisperModel?: string;
   whisperOfflineModel?: string;
   doublePrecisionSecondProvider?: 'whisperx' | 'elevenlabs' | 'mistral';

@@ -184,7 +184,7 @@ function getUniqueCorrectWords(dictionary: { entries: DictionaryEntry[] }): stri
 }
 
 // Transkriptions-Provider auswählen
-type TranscriptionProvider = 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper';
+type TranscriptionProvider = 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper' | 'voxtral_local';
 
 // Session-Cache für Gradio (vermeidet wiederholtes Login)
 let gradioSessionCache: {
@@ -637,6 +637,77 @@ async function transcribeWithMistral(file: Blob, filename: string, contextBiasWo
   };
 }
 
+/**
+ * Transkription mit lokalem Voxtral via vLLM
+ * Benötigt vLLM-Server mit Voxtral-Modell (z.B. mistralai/Voxtral-Mini-3B-2507)
+ * Server starten: vllm serve mistralai/Voxtral-Mini-3B-2507 --tokenizer-mode mistral --config-format mistral --load-format mistral --dtype half --enforce-eager
+ * API ist OpenAI-kompatibel: POST /v1/audio/transcriptions
+ */
+async function transcribeWithVoxtralLocal(file: Blob, filename: string) {
+  const baseUrl = (process.env.VOXTRAL_LOCAL_URL || 'http://localhost:8000').replace(/\/+$/, '');
+
+  const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+  console.log(`[Voxtral-Local] Starting transcription - File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type}`);
+  const startTime = Date.now();
+
+  // Convert audio to Buffer
+  const arrayBuffer = await file.arrayBuffer();
+  let audioBuffer = Buffer.from(arrayBuffer);
+  let mimeType = file.type || 'audio/webm';
+  
+  // Convert to WAV for reliable compatibility
+  console.log(`[Voxtral-Local] Converting ${mimeType} to WAV...`);
+  const { data: normalizedData, mimeType: normalizedMime, normalized } = 
+    await normalizeAudioForWhisper(audioBuffer, mimeType);
+  if (normalized) {
+    audioBuffer = normalizedData;
+    mimeType = normalizedMime;
+    console.log(`[Voxtral-Local] Converted to WAV: ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB`);
+  }
+  
+  // vLLM OpenAI-kompatible API: POST /v1/audio/transcriptions
+  const formData = new FormData();
+  const audioFile = new File([audioBuffer], 'audio.wav', { type: mimeType });
+  formData.append('file', audioFile);
+  // Modell muss exakt dem vLLM-Modellnamen entsprechen
+  formData.append('model', process.env.VOXTRAL_LOCAL_MODEL || 'mistralai/Voxtral-Mini-3B-2507');
+  formData.append('language', 'de');
+  formData.append('response_format', 'verbose_json');
+  formData.append('temperature', '0.0');
+
+  const res = await fetch(`${baseUrl}/v1/audio/transcriptions`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Voxtral-Local API error (${res.status}): ${text}`);
+  }
+
+  const data = await res.json();
+  const transcriptionText = data.text || '';
+  
+  // vLLM verbose_json liefert segments mit start/end
+  const segments = Array.isArray(data.segments)
+    ? data.segments.map((seg: any) => ({
+        text: seg.text || '',
+        start: seg.start ?? 0,
+        end: seg.end ?? 0,
+      }))
+    : [];
+
+  const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+  console.log(`[Voxtral-Local] ✓ Transcription complete - Duration: ${duration}s, Text length: ${transcriptionText.length} chars, Segments: ${segments.length}`);
+  
+  return {
+    text: transcriptionText,
+    segments,
+    language: data.language || 'de',
+    provider: 'voxtral_local' as const
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
     console.log('\n=== Transcription Request Started ===')
@@ -714,6 +785,9 @@ export async function POST(request: NextRequest) {
         ? initialPrompt.split(',').map(w => w.trim()).filter(Boolean)
         : [];
       result = await transcribeWithMistral(file, filename, contextBiasWords);
+    } else if (provider === 'voxtral_local') {
+      console.log('Using Voxtral Local (vLLM) as primary provider');
+      result = await transcribeWithVoxtralLocal(file, filename);
     } else if (provider === 'fast_whisper') {
       // Fast Whisper ist ein reiner WebSocket-Server (RealtimeSTT)
       // Für Server-seitige Transkription müssen wir auf WhisperX zurückfallen

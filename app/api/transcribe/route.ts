@@ -585,7 +585,6 @@ async function transcribeWithMistral(file: Blob, filename: string, contextBiasWo
   formData.append('language', 'de');
   // Segment-Timestamps für Mitlesen-Feature
   formData.append('timestamp_granularities[]', 'segment');
-  formData.append('timestamp_granularities[]', 'word');
 
   // context_bias: Medizinische Fachbegriffe aus dem Wörterbuch zum Boosten
   // Verbessert die Erkennung von Fachvokabular signifikant

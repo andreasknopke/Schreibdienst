@@ -1154,7 +1154,6 @@ async function transcribeWithMistral(file: Blob, contextBiasWords?: string[]): P
   formData.append('model', 'voxtral-mini-latest');
   formData.append('language', 'de');
   formData.append('timestamp_granularities[]', 'segment');
-  formData.append('timestamp_granularities[]', 'word');
 
   // context_bias: Medizinische Fachbegriffe aus dem Wörterbuch zum Boosten
   if (contextBiasWords && contextBiasWords.length > 0) {

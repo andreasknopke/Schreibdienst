@@ -20,6 +20,15 @@ export async function register() {
       } catch (err: any) {
         console.error('[Instrumentation] ✗ MySQL initialization failed:', err.message);
       }
+
+      // Start the background worker that auto-processes pending dictations
+      try {
+        const { startBackgroundWorker } = await import('./lib/backgroundWorker');
+        startBackgroundWorker();
+        console.log('[Instrumentation] ✓ Background worker started');
+      } catch (err: any) {
+        console.error('[Instrumentation] ✗ Background worker failed to start:', err.message);
+      }
     } else {
       console.log('[Instrumentation] No DATABASE_URL or MYSQL_URL configured, skipping MySQL init');
     }

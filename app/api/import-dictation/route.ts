@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createOfflineDictationWithRequest } from '@/lib/offlineDictationDb';
 import { compressAudioForSpeech, getAudioDuration } from '@/lib/audioCompression';
 import { XMLParser } from 'fast-xml-parser';
-import { processDictation } from '@/app/api/offline-dictations/worker/route';
+import { processDictation } from '@/lib/dictationProcessor';
 
 export const runtime = 'nodejs';
 

@@ -672,7 +672,8 @@ async function transcribeWithVoxtralLocal(file: Blob, filename: string) {
   // Modell muss exakt dem vLLM-Modellnamen entsprechen
   formData.append('model', process.env.VOXTRAL_LOCAL_MODEL || 'mistralai/Voxtral-Mini-3B-2507');
   formData.append('language', 'de');
-  formData.append('response_format', 'verbose_json');
+  // Online-Chunk-Modus: Nur Text benötigt, keine Segmente/Timestamps
+  formData.append('response_format', 'json');
   formData.append('temperature', '0.0');
 
   const res = await fetch(`${baseUrl}/v1/audio/transcriptions`, {
@@ -688,14 +689,8 @@ async function transcribeWithVoxtralLocal(file: Blob, filename: string) {
   const data = await res.json();
   const transcriptionText = data.text || '';
   
-  // vLLM verbose_json liefert segments mit start/end
-  const segments = Array.isArray(data.segments)
-    ? data.segments.map((seg: any) => ({
-        text: seg.text || '',
-        start: seg.start ?? 0,
-        end: seg.end ?? 0,
-      }))
-    : [];
+  // Im Chunk-Modus senden wir response_format=json, daher keine Segmente erwartet
+  const segments: any[] = [];
 
   const duration = ((Date.now() - startTime) / 1000).toFixed(2);
   console.log(`[Voxtral-Local] ✓ Transcription complete - Duration: ${duration}s, Text length: ${transcriptionText.length} chars, Segments: ${segments.length}`);

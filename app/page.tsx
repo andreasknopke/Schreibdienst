@@ -40,6 +40,7 @@ interface RuntimeConfig {
   transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper' | 'voxtral_local';
   fastWhisperWsUrl?: string;
   voxtralLocalWsUrl?: string;
+  voxtralLocalOnlineMode?: 'websocket' | 'chunk';
 }
 
 export default function HomePage() {
@@ -243,6 +244,8 @@ export default function HomePage() {
         const res = await fetchWithDbToken('/api/config');
         const data = await res.json();
         if (data.config) {
+          const configuredOnlineService = data.config.onlineService || data.config.transcriptionProvider || 'whisperx';
+          const providerFromService = String(configuredOnlineService).split(':')[0] as RuntimeConfig['transcriptionProvider'];
           // Voxtral Local WS URL aus HTTP URL ableiten
           let voxtralWsUrl: string | undefined;
           if (data.envInfo?.voxtralLocalUrl) {
@@ -252,12 +255,13 @@ export default function HomePage() {
               .replace(/\/$/, '') + '/v1/realtime';
           }
           const config = {
-            transcriptionProvider: data.config.transcriptionProvider,
+            transcriptionProvider: providerFromService,
             fastWhisperWsUrl: data.envInfo?.fastWhisperWsUrl,
             voxtralLocalWsUrl: voxtralWsUrl,
+            voxtralLocalOnlineMode: data.config.voxtralLocalOnlineMode || 'websocket',
           };
           setRuntimeConfig(config);
-          console.log('[Config] Loaded - Provider:', data.config.transcriptionProvider);
+          console.log('[Config] Loaded - Provider:', providerFromService, 'Voxtral mode:', config.voxtralLocalOnlineMode);
           
           // Bei Fast Whisper mit WSS: SSL-Zertifikat prüfen
           if (config.transcriptionProvider === 'fast_whisper' && config.fastWhisperWsUrl) {
@@ -1223,7 +1227,11 @@ export default function HomePage() {
     }
     
     // Voxtral Local Realtime WebSocket Modus
-    if (runtimeConfig?.transcriptionProvider === 'voxtral_local' && runtimeConfig.voxtralLocalWsUrl) {
+    if (
+      runtimeConfig?.transcriptionProvider === 'voxtral_local' &&
+      runtimeConfig.voxtralLocalOnlineMode !== 'chunk' &&
+      runtimeConfig.voxtralLocalWsUrl
+    ) {
       // Finale Text-Refs zurücksetzen für neue Session
       fastWhisperFinalTextRef.current = "";
       fastWhisperFinalMethodikRef.current = "";
@@ -1489,7 +1497,11 @@ export default function HomePage() {
     }
     
     // Voxtral Local Realtime WebSocket stoppen
-    if (runtimeConfig?.transcriptionProvider === 'voxtral_local' && voxtralWsRef.current) {
+    if (
+      runtimeConfig?.transcriptionProvider === 'voxtral_local' &&
+      runtimeConfig.voxtralLocalOnlineMode !== 'chunk' &&
+      voxtralWsRef.current
+    ) {
       console.log('[Voxtral] Stopping Realtime WebSocket recording');
       
       // Signal zum Beenden senden (commit mit final flag)

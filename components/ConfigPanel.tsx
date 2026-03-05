@@ -34,6 +34,7 @@ interface RuntimeConfig {
   // Double Precision Pipeline
   doublePrecisionEnabled?: boolean;
   doublePrecisionMode?: 'parallel' | 'sequential';
+  voxtralLocalOnlineMode?: 'websocket' | 'chunk';
 }
 
 interface EnvInfo {
@@ -237,6 +238,39 @@ export default function ConfigPanel() {
               </option>
             ))}
           </select>
+
+          {((config.onlineService || config.transcriptionProvider).split(':')[0] === 'voxtral_local') && (
+            <div className="mt-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800/50">
+              <label className="text-xs text-gray-500 block mb-1">Voxtral Local Live-Modus</label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="voxtralLocalOnlineMode"
+                    value="websocket"
+                    checked={(config.voxtralLocalOnlineMode || 'websocket') === 'websocket'}
+                    onChange={() => updateConfig({ voxtralLocalOnlineMode: 'websocket' })}
+                    disabled={!isRoot || saving}
+                  />
+                  <span className="text-sm">WebSocket Realtime</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="voxtralLocalOnlineMode"
+                    value="chunk"
+                    checked={config.voxtralLocalOnlineMode === 'chunk'}
+                    onChange={() => updateConfig({ voxtralLocalOnlineMode: 'chunk' })}
+                    disabled={!isRoot || saving}
+                  />
+                  <span className="text-sm">Chunk-Audio (HTTP)</span>
+                </label>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                `websocket`: echtes Realtime-Streaming. `chunk`: periodische `/api/transcribe`-Chunks wie bei WhisperX.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Offline-Transkription */}

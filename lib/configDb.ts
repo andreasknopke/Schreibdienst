@@ -103,6 +103,8 @@ export interface RuntimeConfig {
   // Double Precision Pipeline
   doublePrecisionEnabled?: boolean;
   doublePrecisionMode?: 'parallel' | 'sequential';
+  // Voxtral Local Online-Modus
+  voxtralLocalOnlineMode?: 'websocket' | 'chunk';
 }
 
 /** Resolve the effective online service (new field → legacy fallback) */
@@ -155,6 +157,7 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   doublePrecisionSecondProvider: 'elevenlabs',
   doublePrecisionService: 'elevenlabs',
   doublePrecisionMode: 'parallel',
+  voxtralLocalOnlineMode: process.env.VOXTRAL_LOCAL_ONLINE_MODE === 'chunk' ? 'chunk' : 'websocket',
 };
 
 // Get runtime config from database
@@ -225,6 +228,11 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
           break;
         case 'doublePrecisionService':
           config.doublePrecisionService = row.config_value;
+          break;
+        case 'voxtralLocalOnlineMode':
+          if (['websocket', 'chunk'].includes(row.config_value)) {
+            config.voxtralLocalOnlineMode = row.config_value as 'websocket' | 'chunk';
+          }
           break;
       }
     }
@@ -338,6 +346,11 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
           break;
         case 'doublePrecisionService':
           config.doublePrecisionService = row.config_value;
+          break;
+        case 'voxtralLocalOnlineMode':
+          if (['websocket', 'chunk'].includes(row.config_value)) {
+            config.voxtralLocalOnlineMode = row.config_value as 'websocket' | 'chunk';
+          }
           break;
       }
     }

@@ -226,6 +226,10 @@ export async function POST(request: NextRequest) {
     if (typeof body.lmStudioUseApiMode === 'boolean') {
       newConfig.lmStudioUseApiMode = body.lmStudioUseApiMode;
     }
+
+    if (body.voxtralLocalOnlineMode && ['websocket', 'chunk'].includes(body.voxtralLocalOnlineMode)) {
+      newConfig.voxtralLocalOnlineMode = body.voxtralLocalOnlineMode;
+    }
     
     // ---- Unified Service Selections ----
     const validServiceIds = TRANSCRIPTION_SERVICES.map(s => s.id);

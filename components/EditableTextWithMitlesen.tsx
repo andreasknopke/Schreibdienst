@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { diffWordsWithSpace } from 'diff';
+import { buildAnchorTimestampTable, type AnchorOriginalWord, type AnchorCorrectedWord } from '../lib/anchorMatching';
 
 // Word with timestamp for highlighting
 interface TimestampedWord {
@@ -200,13 +201,12 @@ function extractOriginalWords(segments: TranscriptSegment[]): OriginalWord[] {
 /**
  * Build a timestamp lookup table for the formatted text.
  * 
- * New approach: Compare normalized word sequences, ignoring formatting.
- * 1. Extract words from original (with timestamps)
- * 2. Extract words from formatted text (with char positions)
- * 3. Diff the normalized word sequences
- * 4. Map timestamps based on word-level diff
- * 
- * This ignores formatting differences (newlines, brackets) and focuses only on words.
+ * Uses multi-pass anchor-point matching algorithm:
+ * 1. N-gram anchors: unique multi-word sequences in both texts
+ * 2. Unique word anchors: single words appearing exactly once
+ * 3. Order consistency via Longest Increasing Subsequence
+ * 4. Gap filling with greedy + fuzzy matching
+ * 5. Timestamp interpolation for remaining unmatched words
  */
 function buildTimestampTable(
   originalSegments: TranscriptSegment[],
@@ -223,117 +223,32 @@ function buildTimestampTable(
   const formattedWords = parseWords(formattedText);
   if (formattedWords.length === 0) return result;
   
-  // Build normalized word strings for comparison
-  // This strips all formatting - just space-separated normalized words
-  const origWordString = originalWords.map(w => w.normalized).join(' ');
-  const formattedWordString = formattedWords.map(w => w.normalized).join(' ');
+  // Convert to anchor matching types
+  const anchorOriginal: AnchorOriginalWord[] = originalWords.map(w => ({
+    normalized: w.normalized,
+    start: w.start,
+    end: w.end,
+  }));
   
-  // Diff the normalized word sequences
-  const diffs = diffWordsWithSpace(origWordString, formattedWordString);
+  const anchorCorrected: AnchorCorrectedWord[] = formattedWords.map(w => ({
+    word: w.word,
+    normalized: w.normalized,
+    charPos: w.charPos,
+  }));
   
-  // Track position in both word arrays
-  let origIdx = 0;
-  let formattedIdx = 0;
-  
-  // Process each diff part
-  for (const diff of diffs) {
-    const words = diff.value?.split(/\s+/).filter(w => w.length > 0) || [];
-    const wordCount = words.length;
-    
-    if (diff.removed) {
-      // Words in original that were removed - skip them in original
-      origIdx += wordCount;
-      continue;
-    }
-    
-    if (diff.added) {
-      // Words added to formatted text - they need interpolated timestamps
-      // For now, mark them as needing interpolation and advance formattedIdx
-      for (let i = 0; i < wordCount && formattedIdx < formattedWords.length; i++) {
-        const fw = formattedWords[formattedIdx];
-        // Mark for interpolation (will be filled in second pass)
-        formattedIdx++;
-      }
-      continue;
-    }
-    
-    // Unchanged words - direct timestamp mapping
-    for (let i = 0; i < wordCount && origIdx < originalWords.length && formattedIdx < formattedWords.length; i++) {
-      const origWord = originalWords[origIdx];
-      const fw = formattedWords[formattedIdx];
-      
-      result.set(fw.charPos, {
-        word: fw.word,
-        start: origWord.start,
-        end: origWord.end,
-        isInterpolated: false,
-        charPos: fw.charPos
-      });
-      
-      origIdx++;
-      formattedIdx++;
-    }
-  }
-  
-  // Second pass: Interpolate timestamps for words that weren't matched
   const audioDuration = originalWords[originalWords.length - 1].end;
   
-  for (let i = 0; i < formattedWords.length; i++) {
-    const fw = formattedWords[i];
-    if (result.has(fw.charPos)) continue; // Already has timestamp
-    
-    // Find nearest anchors (words with real timestamps)
-    let prevAnchor: { idx: number; end: number } | null = null;
-    let nextAnchor: { idx: number; start: number } | null = null;
-    
-    for (let j = i - 1; j >= 0; j--) {
-      const ts = result.get(formattedWords[j].charPos);
-      if (ts && !ts.isInterpolated) {
-        prevAnchor = { idx: j, end: ts.end };
-        break;
-      }
-    }
-    
-    for (let j = i + 1; j < formattedWords.length; j++) {
-      const ts = result.get(formattedWords[j].charPos);
-      if (ts && !ts.isInterpolated) {
-        nextAnchor = { idx: j, start: ts.start };
-        break;
-      }
-    }
-    
-    // Interpolate
-    let estimatedStart: number;
-    let estimatedEnd: number;
-    
-    if (prevAnchor && nextAnchor) {
-      const totalWords = nextAnchor.idx - prevAnchor.idx;
-      const wordOffset = i - prevAnchor.idx;
-      const fraction = wordOffset / totalWords;
-      const timeSpan = nextAnchor.start - prevAnchor.end;
-      estimatedStart = prevAnchor.end + (timeSpan * fraction);
-      estimatedEnd = estimatedStart + Math.min(0.3, timeSpan / totalWords);
-    } else if (prevAnchor) {
-      const wordsAfter = i - prevAnchor.idx;
-      estimatedStart = prevAnchor.end + (wordsAfter * 0.15);
-      estimatedEnd = estimatedStart + 0.2;
-    } else if (nextAnchor) {
-      const wordsBefore = nextAnchor.idx - i;
-      estimatedStart = Math.max(0, nextAnchor.start - (wordsBefore * 0.2));
-      estimatedEnd = estimatedStart + 0.2;
-    } else {
-      // No anchors at all
-      const fraction = i / formattedWords.length;
-      estimatedStart = fraction * audioDuration;
-      estimatedEnd = estimatedStart + 0.2;
-    }
-    
-    result.set(fw.charPos, {
-      word: fw.word,
-      start: estimatedStart,
-      end: Math.min(estimatedEnd, audioDuration),
-      isInterpolated: true,
-      charPos: fw.charPos
+  // Run anchor-point matching
+  const mappings = buildAnchorTimestampTable(anchorOriginal, anchorCorrected, audioDuration);
+  
+  // Convert to Map<charPos, TimestampedWord>
+  for (const m of mappings) {
+    result.set(m.charPos, {
+      word: m.word,
+      start: m.start,
+      end: m.end,
+      isInterpolated: m.isInterpolated,
+      charPos: m.charPos,
     });
   }
   

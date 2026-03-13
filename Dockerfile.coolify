@@ -36,6 +36,7 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/cache ./cache
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/start-standalone.js ./scripts/start-standalone.js
 
 RUN mkdir -p /app/cache/dictionaries \
   && chown -R nextjs:nodejs /app/cache \
@@ -45,4 +46,4 @@ USER nextjs
 
 EXPOSE 3000
 
-CMD ["node", "scripts/start-prod.js"]
+CMD ["node", "scripts/start-standalone.js"]

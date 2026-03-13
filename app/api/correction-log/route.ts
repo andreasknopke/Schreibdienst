@@ -6,6 +6,7 @@ import {
 } from '@/lib/correctionLogDb';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 // GET: Get correction logs for a dictation
 export async function GET(req: NextRequest) {

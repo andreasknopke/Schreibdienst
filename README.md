@@ -427,3 +427,9 @@ curl http://localhost:5000/health
 - Kleineres Modell wählen
 - GPU mit mehr VRAM nutzen
 - Swap erhöhen (nur für CPU)
+- 
+## Lizenz
+
+Dieses Projekt ist unter der MIT-Lizenz lizenziert – siehe [`LICENSE`](LICENSE).
+
+Hinweis zu optionalen Abhängigkeiten/Integrationen: Dieses Repository kann mit externen (lokalen oder Cloud-)Services wie WhisperX, Fast-Whisper/Whisper-Live, vLLM/Mistral oder ElevenLabs zusammenarbeiten. Diese Komponenten sind **optional** und werden getrennt installiert/betrieben; ihre jeweiligen Lizenzen gelten unabhängig von der MIT-Lizenz dieses Projekts.

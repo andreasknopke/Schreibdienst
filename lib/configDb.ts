@@ -157,7 +157,7 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   doublePrecisionSecondProvider: 'elevenlabs',
   doublePrecisionService: 'elevenlabs',
   doublePrecisionMode: 'parallel',
-  voxtralLocalOnlineMode: process.env.VOXTRAL_LOCAL_ONLINE_MODE === 'chunk' ? 'chunk' : 'websocket',
+  voxtralLocalOnlineMode: 'chunk',
 };
 
 // Get runtime config from database

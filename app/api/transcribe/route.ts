@@ -643,7 +643,7 @@ async function transcribeWithMistral(file: Blob, filename: string, contextBiasWo
  * Server starten: vllm serve mistralai/Voxtral-Mini-3B-2507 --tokenizer-mode mistral --config-format mistral --load-format mistral --dtype half --enforce-eager
  * API ist OpenAI-kompatibel: POST /v1/audio/transcriptions
  */
-async function transcribeWithVoxtralLocal(file: Blob, filename: string) {
+async function transcribeWithVoxtralLocal(file: Blob, filename: string, promptContext?: string) {
   const baseUrl = (process.env.VOXTRAL_LOCAL_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
   const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
@@ -675,6 +675,13 @@ async function transcribeWithVoxtralLocal(file: Blob, filename: string) {
   // Online-Chunk-Modus: Nur Text benötigt, keine Segmente/Timestamps
   formData.append('response_format', 'json');
   formData.append('temperature', '0.0');
+  
+  // Prompt-Kontext: Letzte Sätze für konsistente Groß-/Kleinschreibung und Vokabular
+  // Voxtral (vLLM OpenAI-kompatibel) nutzt 'prompt' analog zu Whisper's initial_prompt
+  if (promptContext) {
+    formData.append('prompt', promptContext);
+    console.log(`[Voxtral-Local] Using prompt context: "${promptContext.substring(0, 80)}..."`);
+  }
 
   const res = await fetch(`${baseUrl}/v1/audio/transcriptions`, {
     method: 'POST',
@@ -718,6 +725,7 @@ export async function POST(request: NextRequest) {
     const file = form.get('file');
     const username = form.get('username') as string | null;
     const speedModeParam = form.get('speed_mode') as string | null;
+    const promptContext = form.get('prompt_context') as string | null;
     
     if (!file || !(file instanceof Blob)) {
       console.error('[Error] Invalid file:', file);
@@ -755,6 +763,12 @@ export async function POST(request: NextRequest) {
       console.log(`[Dictionary] Using default medical terms (${initialPrompt.split(', ').length} words)`);
     }
 
+    // Prompt-Kontext aus VAD-Client anhängen (letzte Sätze für Konsistenz)
+    if (promptContext) {
+      initialPrompt = initialPrompt + '. ' + promptContext;
+      console.log(`[PromptContext] Appended VAD context: "${promptContext.substring(0, 80)}..."`);
+    }
+
     // Get whisper model from unified online service (or legacy config)
     // For online mode, use whisperModel directly (full HuggingFace path)
     const whisperModel = onlineService.whisperModel || runtimeConfig.whisperModel || 'guillaumekln/faster-whisper-large-v2';
@@ -782,7 +796,8 @@ export async function POST(request: NextRequest) {
       result = await transcribeWithMistral(file, filename, contextBiasWords);
     } else if (provider === 'voxtral_local') {
       console.log('Using Voxtral Local (vLLM) as primary provider');
-      result = await transcribeWithVoxtralLocal(file, filename);
+      // Prompt-Kontext von VAD-Client für konsistente Transkription
+      result = await transcribeWithVoxtralLocal(file, filename, promptContext || undefined);
     } else if (provider === 'fast_whisper') {
       // Fast Whisper ist ein reiner WebSocket-Server (RealtimeSTT)
       // Für Server-seitige Transkription müssen wir auf WhisperX zurückfallen

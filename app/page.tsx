@@ -11,6 +11,7 @@ import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
+import { useVadChunking } from '@/lib/useVadChunking';
 
 // Identifier für PowerShell Clipboard-Listener (RadCentre Integration)
 const CLIPBOARD_IDENTIFIER = '##RAD##';
@@ -93,6 +94,13 @@ export default function HomePage() {
   const existingTextRef = useRef<string>("");
   // Letzter transkribierter Text dieser Session
   const lastTranscriptRef = useRef<string>("");
+  
+  // VAD-basiertes Utterance-Commit: Gelockte Sätze + tentativer (aktuell gesprochener) Text
+  const [committedUtterances, setCommittedUtterances] = useState<string[]>([]);
+  const [tentativeText, setTentativeText] = useState<string>("");
+  const committedUtterancesRef = useRef<string[]>([]);
+  // Prompt-Kontext: Letzte 1-2 gelockte Sätze für konsistente Transkription
+  const vadPromptContextRef = useRef<string>("");
   
   const [transcript, setTranscript] = useState("");
   const [mode, setMode] = useState<'arztbrief' | 'befund'>('befund');
@@ -410,6 +418,71 @@ export default function HomePage() {
     return existing + separator + newText;
   }, []);
 
+  // VAD Utterance Handler: Transkribiert eine abgeschlossene Utterance und committet sie
+  const handleVadUtterance = useCallback(async (wavBlob: Blob) => {
+    setTranscribing(true);
+    try {
+      // Sende prompt_context der letzten gelockten Sätze für konsistente Transkription
+      const fd = new FormData();
+      fd.append('file', wavBlob, 'utterance.wav');
+      if (username) fd.append('username', username);
+      fd.append('speed_mode', 'turbo');
+      // Prompt-Kontext: letzte 1-2 Sätze für konsistente Groß-/Kleinschreibung
+      if (vadPromptContextRef.current) {
+        fd.append('prompt_context', vadPromptContextRef.current);
+      }
+      const res = await fetchWithDbToken('/api/transcribe', { method: 'POST', body: fd });
+      if (!res.ok) throw new Error(`Transkription fehlgeschlagen (${res.status})`);
+      const data = await res.json();
+      let text = data.text || '';
+      if (!text.trim()) return;
+
+      // Formatierungs-Kontrollwörter anwenden (neuer Absatz, Punkt, etc.)
+      text = applyFormattingControlWords(text);
+
+      // Wörterbuch-Korrektur pro Utterance
+      text = applyDictionaryToText(text);
+
+      console.log('[VAD] Utterance committed:', text.substring(0, 80));
+
+      // Utterance committen (locken)
+      const newCommitted = [...committedUtterancesRef.current, text];
+      committedUtterancesRef.current = newCommitted;
+      setCommittedUtterances(newCommitted);
+      setTentativeText('');
+
+      // Prompt-Kontext aktualisieren: letzte 2 Sätze
+      const lastTwo = newCommitted.slice(-2).join(' ');
+      vadPromptContextRef.current = lastTwo.length > 200 ? lastTwo.slice(-200) : lastTwo;
+
+      // Transcript State synchronisieren (für Export, Korrektur etc.)
+      const allText = [existingTextRef.current, ...newCommitted].filter(t => t.trim()).join(' ');
+      setTranscript(allText);
+    } catch (err: any) {
+      console.error('[VAD] Utterance transcription error:', err.message);
+      setError(err.message || 'Utterance-Transkription fehlgeschlagen');
+    } finally {
+      setTranscribing(false);
+    }
+  }, [username, applyDictionaryToText]);
+
+  // VAD Speech Start: Tentative-Anzeige aktivieren
+  const handleVadSpeechStart = useCallback(() => {
+    setTentativeText('...');
+  }, []);
+
+  // VAD Audio Level
+  const handleVadAudioLevel = useCallback((level: number) => {
+    setAudioLevel(level);
+  }, []);
+
+  // VAD Hook instanziieren
+  const vad = useVadChunking({
+    onUtterance: handleVadUtterance,
+    onSpeechStart: handleVadSpeechStart,
+    onAudioLevel: handleVadAudioLevel,
+  });
+
   // Erkennt Steuerbefehle und teilt Text auf alle Felder auf
   const parseFieldCommands = useCallback((text: string): { 
     methodik: string | null; 
@@ -627,6 +700,11 @@ export default function HomePage() {
     setBefundChangeScores({ methodik: 0, befund: 0, beurteilung: 0 });
     setApplyFormatting(true); // Reset auf Standard
     setShowDiffView(false); // Reset diff view
+    // VAD-State zurücksetzen
+    setCommittedUtterances([]);
+    committedUtterancesRef.current = [];
+    setTentativeText('');
+    vadPromptContextRef.current = '';
   }, []);
 
   // Revert-Funktion: Stellt den Text vor der letzten Korrektur wieder her
@@ -1399,6 +1477,30 @@ export default function HomePage() {
     }
     
     // Standard MediaRecorder Modus (für andere Provider)
+    // VAD-Modus: Nutze Silero VAD für Utterance-basiertes Chunking 
+    // (statt alle 2s den wachsenden Buffer komplett neu zu transkribieren)
+    const useVadMode = runtimeConfig?.transcriptionProvider === 'voxtral_local' 
+      || runtimeConfig?.transcriptionProvider === 'whisperx'
+      || runtimeConfig?.transcriptionProvider === 'mistral';
+    
+    if (useVadMode) {
+      // VAD-Modus: Kein MediaRecorder, VAD übernimmt Mikrofon und liefert Utterances
+      committedUtterancesRef.current = [];
+      setCommittedUtterances([]);
+      setTentativeText('');
+      vadPromptContextRef.current = '';
+
+      try {
+        await vad.start();
+        setRecording(true);
+      } catch (err: any) {
+        console.error('[VAD] Start error:', err);
+        setError('VAD Mikrofon-Zugriff fehlgeschlagen: ' + err.message);
+      }
+      return;
+    }
+
+    // Fallback: Klassischer MediaRecorder + setInterval (z.B. für ElevenLabs)
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     streamRef.current = stream;
     
@@ -1550,6 +1652,17 @@ export default function HomePage() {
     }
     
     // Standard Modus: Stoppe die Intervalle
+    // VAD-Modus stoppen (wenn aktiv)
+    if (vad.isListening) {
+      console.log('[VAD] Stopping VAD recording');
+      vad.stop();
+      setAudioLevel(0);
+      setRecording(false);
+      setTentativeText('');
+      setPendingCorrection(true);
+      return;
+    }
+
     if (transcriptionIntervalRef.current) {
       clearInterval(transcriptionIntervalRef.current);
       transcriptionIntervalRef.current = null;
@@ -2861,6 +2974,12 @@ export default function HomePage() {
                   placeholder="Befund..."
                   readOnly={isProcessing}
                 />
+                {/* VAD Tentative Text: Zeigt an, dass gerade gesprochen wird */}
+                {recording && vad.isListening && tentativeText && (
+                  <div className="px-2 py-1 text-sm italic text-gray-400 dark:text-gray-500 border-l-2 border-green-400 bg-green-50/50 dark:bg-green-900/20 rounded-r">
+                    {vad.isSpeaking ? '🎙️ Sprache erkannt...' : '⏳ Transkribiere...'}
+                  </div>
+                )}
               </div>
             </div>
             {/* Action Buttons für Befund */}
@@ -3009,6 +3128,12 @@ export default function HomePage() {
                   placeholder="Text erscheint hier..."
                   readOnly={isProcessing}
                 />
+                {/* VAD Tentative Text: Zeigt an, dass gerade gesprochen wird */}
+                {recording && vad.isListening && tentativeText && (
+                  <div className="px-2 py-1 text-sm italic text-gray-400 dark:text-gray-500 border-l-2 border-green-400 bg-green-50/50 dark:bg-green-900/20 rounded-r mt-1">
+                    {vad.isSpeaking ? '🎙️ Sprache erkannt...' : '⏳ Transkribiere...'}
+                  </div>
+                )}
                 <div className="flex gap-2 mt-2">
                   <button className="btn btn-primary flex-1 text-sm py-2" onClick={handleFormat} disabled={busy || !transcript}>
                     {busy && <Spinner className="mr-2" size={14} />} Formatieren

@@ -61,6 +61,8 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
   const speechStartTimeRef = useRef<number>(0);
   const autoChunkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const utilsRef = useRef<any>(null);
+  // Trackt wieviele Samples bereits per Auto-Chunk gesendet wurden
+  const samplesAlreadySentRef = useRef<number>(0);
 
   const start = useCallback(async () => {
     const { MicVAD, utils } = await loadVad();
@@ -81,7 +83,10 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       }
       speechFramesRef.current = [];
       
-      console.log(`[VAD] Auto-chunk: ${(totalLength / 16000).toFixed(1)}s Audio`);
+      // Merken wieviel wir schon gesendet haben (für onSpeechEnd Deduplizierung)
+      samplesAlreadySentRef.current += totalLength;
+      
+      console.log(`[VAD] Auto-chunk: ${(totalLength / 16000).toFixed(1)}s Audio (total sent: ${(samplesAlreadySentRef.current / 16000).toFixed(1)}s)`);
       const wavBuffer = utils.encodeWAV(combined);
       const blob = new Blob([wavBuffer], { type: 'audio/wav' });
       onUtterance(blob);
@@ -104,6 +109,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
         setIsSpeaking(true);
         speechFramesRef.current = [];
         speechStartTimeRef.current = Date.now();
+        samplesAlreadySentRef.current = 0;
         onSpeechStart?.();
         
         // Auto-Chunk Timer starten: Nach MAX_UTTERANCE_SECONDS erzwingen
@@ -130,15 +136,38 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
           clearTimeout(autoChunkTimerRef.current);
           autoChunkTimerRef.current = null;
         }
-        // audio ist Float32 16kHz mono → WAV encodieren
-        const wavBuffer = utils.encodeWAV(audio);
-        const blob = new Blob([wavBuffer], { type: 'audio/wav' });
-        onUtterance(blob);
+        
+        // VAD liefert das KOMPLETTE Audio seit onSpeechStart.
+        // Wenn Auto-Chunk bereits Teile gesendet hat, nur den Rest senden.
+        const alreadySent = samplesAlreadySentRef.current;
+        samplesAlreadySentRef.current = 0;
+        
+        if (alreadySent > 0 && alreadySent < audio.length) {
+          // Nur den Rest nach den bereits gesendeten Samples
+          const remaining = audio.subarray(alreadySent);
+          if (remaining.length > 1600) { // mind. 100ms
+            console.log(`[VAD] SpeechEnd: sending remaining ${(remaining.length / 16000).toFixed(1)}s (skipped ${(alreadySent / 16000).toFixed(1)}s already sent)`);
+            const wavBuffer = utils.encodeWAV(remaining);
+            const blob = new Blob([wavBuffer], { type: 'audio/wav' });
+            onUtterance(blob);
+          } else {
+            console.log(`[VAD] SpeechEnd: remaining audio too short (${remaining.length} samples), skipping`);
+          }
+        } else if (alreadySent >= audio.length) {
+          // Alles wurde bereits per Auto-Chunk gesendet
+          console.log('[VAD] SpeechEnd: all audio already sent via auto-chunk, skipping');
+        } else {
+          // Kein Auto-Chunk war nötig — normaler Fall
+          const wavBuffer = utils.encodeWAV(audio);
+          const blob = new Blob([wavBuffer], { type: 'audio/wav' });
+          onUtterance(blob);
+        }
       },
 
       onVADMisfire: () => {
         setIsSpeaking(false);
         speechFramesRef.current = [];
+        samplesAlreadySentRef.current = 0;
         if (autoChunkTimerRef.current) {
           clearTimeout(autoChunkTimerRef.current);
           autoChunkTimerRef.current = null;

@@ -183,6 +183,7 @@ export default function HomePage() {
     useInPrompt?: boolean;
   }
   const [dictionaryEntries, setDictionaryEntries] = useState<DictionaryEntry[]>([]);
+  const [standardDictEntries, setStandardDictEntries] = useState<{ wrong: string; correct: string }[]>([]);
 
   // Wörterbuch laden
   const fetchDictionary = useCallback(async () => {
@@ -204,6 +205,26 @@ export default function HomePage() {
     }
   }, [username, getAuthHeader, getDbTokenHeader]);
 
+  // Standard-Wörterbuch aus DB laden
+  const fetchStandardDictionary = useCallback(async () => {
+    if (!username) return;
+    try {
+      const response = await fetch('/api/standard-dictionary', {
+        headers: { 
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        }
+      });
+      const data = await response.json();
+      if (data.entries) {
+        setStandardDictEntries(data.entries);
+        console.log('[StandardDict] Loaded', data.entries.length, 'standard entries from DB');
+      }
+    } catch (error) {
+      console.error('[StandardDict] Load error:', error);
+    }
+  }, [username, getAuthHeader, getDbTokenHeader]);
+
   // Wörterbuch-Ersetzungen auf Text anwenden (clientseitig)
   // Pass 1: Exaktes Matching, Pass 2: Phonetisches Matching (Kölner Phonetik)
   const phoneticIndexRef = useRef<ReturnType<typeof buildPhoneticIndex> | null>(null);
@@ -213,11 +234,11 @@ export default function HomePage() {
   
   // Phonetischen Index neu aufbauen wenn sich Wörterbuch ändert
   useEffect(() => {
-    const merged = mergeWithStandardDictionary(dictionaryEntries);
+    const merged = mergeWithStandardDictionary(dictionaryEntries, standardDictEntries.length > 0 ? standardDictEntries : undefined);
     mergedEntriesRef.current = merged;
     phoneticIndexRef.current = buildPhoneticIndex(merged);
     console.log('[Phonetic] Index built with', merged.length, 'entries (', dictionaryEntries.length, 'user +', merged.length - dictionaryEntries.length, 'standard)');
-  }, [dictionaryEntries]);
+  }, [dictionaryEntries, standardDictEntries]);
 
   const applyDictionaryToText = useCallback((text: string): string => {
     if (!text || mergedEntriesRef.current.length === 0) return text;
@@ -377,8 +398,9 @@ export default function HomePage() {
   useEffect(() => {
     if (username) {
       fetchDictionary();
+      fetchStandardDictionary();
     }
-  }, [username, fetchDictionary]);
+  }, [username, fetchDictionary, fetchStandardDictionary]);
 
   // Event-Listener für Template-Aktualisierungen (wenn Templates im Modal geändert werden)
   useEffect(() => {

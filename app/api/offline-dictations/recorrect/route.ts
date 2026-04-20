@@ -15,6 +15,7 @@ import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFormatting';
+import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
 import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 
 export const runtime = 'nodejs';
@@ -584,6 +585,10 @@ export async function POST(req: NextRequest) {
     const dictionaryEntries = dictionary.entries;
     console.log(`[ReCorrect] Dictionary loaded: ${dictionaryEntries.length} entries for user "${dictation.username || '(none)'}"`);
     
+    // Load standard dictionary from DB
+    const standardEntries = await getStandardDictEntries(req);
+    console.log(`[ReCorrect] Standard dictionary loaded: ${standardEntries.length} entries`);
+    
     // Extract doctor name
     const doctorName = dictation.username ? extractDoctorName(dictation.username) : undefined;
     
@@ -631,7 +636,7 @@ export async function POST(req: NextRequest) {
     
     // Step 1: Preprocess (formatting + dictionary)
     const textBeforeFormatting = textForCorrection;
-    const preprocessedText = preprocessTranscription(textForCorrection, dictionaryEntries);
+    const preprocessedText = preprocessTranscription(textForCorrection, dictionaryEntries, standardEntries);
     
     // Log text formatting if changed
     if (preprocessedText !== textBeforeFormatting) {

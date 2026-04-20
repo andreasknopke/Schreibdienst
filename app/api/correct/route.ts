@@ -3,6 +3,7 @@ import { loadDictionaryWithRequest } from '@/lib/dictionaryDb';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFormatting';
+import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
 
 export const runtime = 'nodejs';
 
@@ -764,17 +765,21 @@ export async function POST(req: NextRequest) {
     const dictionaryEntries = dictionary.entries;
     console.log(`[Correct] Dictionary loaded: ${dictionaryEntries.length} entries`);
     
+    // Load standard dictionary from DB
+    const standardEntries = await getStandardDictEntries(req);
+    console.log(`[Correct] Standard dictionary loaded: ${standardEntries.length} entries`);
+    
     // Preprocess text: apply formatting control words AND dictionary corrections BEFORE LLM
     // This handles "neuer Absatz", "neue Zeile", "Klammer auf/zu", etc. programmatically
     // AND applies user dictionary corrections deterministically (saves tokens & more reliable)
-    const preprocessedText = text ? preprocessTranscription(text, dictionaryEntries) : undefined;
+    const preprocessedText = text ? preprocessTranscription(text, dictionaryEntries, standardEntries) : undefined;
     const preprocessedBefundFields = befundFields ? {
-      methodik: befundFields.methodik ? preprocessTranscription(befundFields.methodik, dictionaryEntries) : befundFields.methodik,
-      befund: befundFields.befund ? preprocessTranscription(befundFields.befund, dictionaryEntries) : befundFields.befund,
-      beurteilung: befundFields.beurteilung ? preprocessTranscription(befundFields.beurteilung, dictionaryEntries) : befundFields.beurteilung,
+      methodik: befundFields.methodik ? preprocessTranscription(befundFields.methodik, dictionaryEntries, standardEntries) : befundFields.methodik,
+      befund: befundFields.befund ? preprocessTranscription(befundFields.befund, dictionaryEntries, standardEntries) : befundFields.befund,
+      beurteilung: befundFields.beurteilung ? preprocessTranscription(befundFields.beurteilung, dictionaryEntries, standardEntries) : befundFields.beurteilung,
     } : undefined;
-    const preprocessedBefund = befund ? preprocessTranscription(befund, dictionaryEntries) : undefined;
-    const preprocessedMethodik = methodik ? preprocessTranscription(methodik, dictionaryEntries) : undefined;
+    const preprocessedBefund = befund ? preprocessTranscription(befund, dictionaryEntries, standardEntries) : undefined;
+    const preprocessedMethodik = methodik ? preprocessTranscription(methodik, dictionaryEntries, standardEntries) : undefined;
     
     // Load runtime config to get custom prompt addition (using request context for dynamic DB)
     const runtimeConfig = await getRuntimeConfigWithRequest(req);

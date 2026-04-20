@@ -238,17 +238,24 @@ export const STANDARD_DICTIONARY: StandardDictionaryEntry[] = [
 /**
  * Merged Standard-Wörterbuch mit Benutzer-Einträgen.
  * Benutzer-Einträge haben Vorrang (überschreiben Standard bei gleichem "wrong").
+ * 
+ * @param userEntries - Benutzer-spezifische Wörterbuch-Einträge
+ * @param dbStandardEntries - Optional: Standard-Einträge aus der Datenbank.
+ *   Wenn angegeben, werden diese statt der hardcodierten Liste verwendet.
  */
 export function mergeWithStandardDictionary<T extends { wrong: string; correct: string }>(
-  userEntries: T[]
+  userEntries: T[],
+  dbStandardEntries?: { wrong: string; correct: string }[]
 ): (T | StandardDictionaryEntry)[] {
+  const standardSource = dbStandardEntries ?? STANDARD_DICTIONARY;
+
   // User-"wrong"-Wörter sammeln (case-insensitive)
   const userWrongWords = new Set(
     userEntries.map(e => e.wrong.toLowerCase())
   );
 
   // Standard-Einträge die nicht vom User überschrieben werden
-  const standardOnly = STANDARD_DICTIONARY.filter(
+  const standardOnly = standardSource.filter(
     e => !userWrongWords.has(e.wrong.toLowerCase())
   );
 

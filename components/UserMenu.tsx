@@ -7,6 +7,7 @@ import DictionaryManager from './DictionaryManager';
 import TemplatesManager from './TemplatesManager';
 import ConfigPanel from './ConfigPanel';
 import HelpPanel from './HelpPanel';
+import StandardDictionaryManager from './StandardDictionaryManager';
 
 export default function UserMenu() {
   const { isLoggedIn, username, isAdmin, autoCorrect, setAutoCorrect, logout } = useAuth();
@@ -15,6 +16,7 @@ export default function UserMenu() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showStandardDict, setShowStandardDict] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [savingAutoCorrect, setSavingAutoCorrect] = useState(false);
   const [dictionaryInitialWord, setDictionaryInitialWord] = useState('');
@@ -156,6 +158,37 @@ export default function UserMenu() {
     document.body
   ) : null;
 
+  const standardDictModal = showStandardDict && isAdmin && mounted ? createPortal(
+    <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-lg w-full my-8 flex flex-col max-h-[calc(100vh-4rem)]">
+        <div className="flex items-center justify-between p-4 border-b dark:border-gray-700 flex-shrink-0">
+          <h2 className="font-semibold flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
+              <path d="M12 13V7"/>
+              <path d="M15 10l-3-3-3 3"/>
+            </svg>
+            Standard-Wörterbuch
+          </h2>
+          <button
+            onClick={() => setShowStandardDict(false)}
+            className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            title="Schließen"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6L6 18"/>
+              <path d="M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div className="p-4 overflow-y-auto flex-1">
+          <StandardDictionaryManager />
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null;
+
   const helpModal = showHelp && mounted ? createPortal(
     <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
       <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-lg w-full my-8 flex flex-col max-h-[calc(100vh-4rem)]">
@@ -238,6 +271,16 @@ export default function UserMenu() {
         >
           ❓
         </button>
+        {/* Standard-Wörterbuch nur für Admins */}
+        {isAdmin && (
+          <button
+            onClick={() => setShowStandardDict(!showStandardDict)}
+            className="text-xs text-teal-600 hover:text-teal-700 px-1.5 sm:px-2 py-1 rounded hover:bg-teal-50 dark:hover:bg-teal-900/20"
+            title="Standard-Wörterbuch verwalten (für alle Benutzer)"
+          >
+            📚<span className="hidden sm:inline"> Standard</span>
+          </button>
+        )}
         {/* Config only visible for root user */}
         {username?.toLowerCase() === 'root' && (
           <button
@@ -270,6 +313,7 @@ export default function UserMenu() {
       {templatesModal}
       {configModal}
       {userManagementModal}
+      {standardDictModal}
       {helpModal}
     </>
   );

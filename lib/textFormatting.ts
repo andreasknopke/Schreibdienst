@@ -24,13 +24,13 @@ export interface DictionaryEntry {
  * when it appears as a prefix in compound words (e.g., "Schole" -> "Chole"
  * will also correct "Scholezystitis" -> "Cholezystitis").
  */
-export function applyDictionaryCorrections(text: string, entries: DictionaryEntry[]): string {
+export function applyDictionaryCorrections(text: string, entries: DictionaryEntry[], standardEntries?: { wrong: string; correct: string }[]): string {
   if (!text || !entries || entries.length === 0) {
     return text;
   }
 
-  // Merge mit Standard-Wörterbuch
-  const mergedEntries = mergeWithStandardDictionary(entries);
+  // Merge mit Standard-Wörterbuch (aus DB wenn vorhanden, sonst hardcodiert)
+  const mergedEntries = mergeWithStandardDictionary(entries, standardEntries);
 
   let result = text;
   let replacementCount = 0;
@@ -544,7 +544,7 @@ export function removeFillerWords(text: string): string {
  * @param text - Raw transcription text
  * @param dictionaryEntries - Optional dictionary entries for user-specific corrections
  */
-export function preprocessTranscription(text: string, dictionaryEntries?: DictionaryEntry[]): string {
+export function preprocessTranscription(text: string, dictionaryEntries?: DictionaryEntry[], standardEntries?: { wrong: string; correct: string }[]): string {
   if (!text) return text;
   
   let result = text;
@@ -557,7 +557,7 @@ export function preprocessTranscription(text: string, dictionaryEntries?: Dictio
   
   // Step 3: Apply dictionary corrections (if entries provided, logs automatically if any applied)
   if (dictionaryEntries && dictionaryEntries.length > 0) {
-    result = applyDictionaryCorrections(result, dictionaryEntries);
+    result = applyDictionaryCorrections(result, dictionaryEntries, standardEntries);
   }
   
   return result;

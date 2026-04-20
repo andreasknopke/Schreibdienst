@@ -3,6 +3,8 @@
  * Applied BEFORE LLM correction for consistent, deterministic results.
  */
 
+import { buildPhoneticIndex, applyPhoneticCorrections, type PhoneticDictEntry } from './phoneticMatch';
+
 // Dictionary entry interface (compatible with dictionaryDb.ts)
 export interface DictionaryEntry {
   wrong: string;
@@ -74,6 +76,12 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
 
   if (replacementCount > 0 || stemReplacementCount > 0) {
     console.log(`[Dictionary] Applied ${replacementCount} direct + ${stemReplacementCount} stem corrections`);
+  }
+
+  // Pass 2: Phonetisches Matching für Wörter die das exakte Matching verpasst hat
+  const phoneticIndex = buildPhoneticIndex(entries);
+  if (phoneticIndex.allEntries.length > 0) {
+    result = applyPhoneticCorrections(result, phoneticIndex);
   }
 
   return result;

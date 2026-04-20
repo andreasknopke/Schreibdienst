@@ -7,6 +7,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
 import { applyFormattingControlWords, preprocessTranscription } from '@/lib/textFormatting';
+import { buildPhoneticIndex, applyPhoneticCorrections } from '@/lib/phoneticMatch';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
@@ -203,9 +204,23 @@ export default function HomePage() {
   }, [username, getAuthHeader, getDbTokenHeader]);
 
   // Wörterbuch-Ersetzungen auf Text anwenden (clientseitig)
+  // Pass 1: Exaktes Matching, Pass 2: Phonetisches Matching (Kölner Phonetik)
+  const phoneticIndexRef = useRef<ReturnType<typeof buildPhoneticIndex> | null>(null);
+  
+  // Phonetischen Index neu aufbauen wenn sich Wörterbuch ändert
+  useEffect(() => {
+    if (dictionaryEntries.length > 0) {
+      phoneticIndexRef.current = buildPhoneticIndex(dictionaryEntries);
+      console.log('[Phonetic] Index built with', dictionaryEntries.length, 'entries');
+    } else {
+      phoneticIndexRef.current = null;
+    }
+  }, [dictionaryEntries]);
+
   const applyDictionaryToText = useCallback((text: string): string => {
     if (dictionaryEntries.length === 0 || !text) return text;
     
+    // Pass 1: Exaktes Wort-Matching
     let result = text;
     for (const entry of dictionaryEntries) {
       // Case-insensitive Ersetzung mit Wortgrenzen
@@ -213,6 +228,12 @@ export default function HomePage() {
       const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
       result = result.replace(regex, entry.correct);
     }
+    
+    // Pass 2: Phonetisches Matching für verbleibende unerkannte Wörter
+    if (phoneticIndexRef.current) {
+      result = applyPhoneticCorrections(result, phoneticIndexRef.current);
+    }
+    
     return result;
   }, [dictionaryEntries]);
 

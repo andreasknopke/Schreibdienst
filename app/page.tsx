@@ -1116,12 +1116,12 @@ export default function HomePage() {
     // LLM-Korrektur im Hintergrund abwarten und dann ersetzen
     const llmCorrected = await llmCorrectedPromise;
     if (llmCorrected !== correctedText) {
-      // Ersetze den letzten Satz im finalRef mit der LLM-korrigierten Version
-      const parts = finalRef.current.split(' ' + correctedText);
-      if (parts.length > 1) {
-        finalRef.current = parts[0] + ' ' + llmCorrected + parts.slice(1).join(' ' + correctedText);
-      } else if (finalRef.current === correctedText) {
-        finalRef.current = llmCorrected;
+      // Ersetze NUR das letzte Vorkommen von correctedText im finalRef
+      // (split/join war fehlerhaft wenn correctedText mehrfach vorkommt → Duplikation)
+      const current = finalRef.current;
+      const lastIdx = current.lastIndexOf(correctedText);
+      if (lastIdx !== -1) {
+        finalRef.current = current.slice(0, lastIdx) + llmCorrected + current.slice(lastIdx + correctedText.length);
       }
       updateDisplay();
     }

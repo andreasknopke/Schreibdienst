@@ -27,6 +27,7 @@ export default function UserManagement() {
 
   const fetchUsers = async () => {
     try {
+      setError('');
       const response = await fetch('/api/users', {
         headers: { 
           'Authorization': getAuthHeader(),
@@ -34,8 +35,15 @@ export default function UserManagement() {
         }
       });
       const data = await response.json();
+      if (!response.ok) {
+        setError(data.error || 'Fehler beim Laden der Benutzer');
+        setUsers([]);
+        return;
+      }
       if (data.users) {
         setUsers(data.users);
+      } else {
+        setUsers([]);
       }
     } catch {
       setError('Fehler beim Laden der Benutzer');

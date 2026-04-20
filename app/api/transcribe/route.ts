@@ -643,7 +643,7 @@ async function transcribeWithMistral(file: Blob, filename: string, contextBiasWo
  * Server starten: vllm serve mistralai/Voxtral-Mini-3B-2507 --tokenizer-mode mistral --config-format mistral --load-format mistral --dtype half --enforce-eager
  * API ist OpenAI-kompatibel: POST /v1/audio/transcriptions
  */
-async function transcribeWithVoxtralLocal(file: Blob, filename: string, promptContext?: string) {
+async function transcribeWithVoxtralLocal(file: Blob, filename: string, promptContext?: string, dictionaryTerms?: string) {
   const baseUrl = (process.env.VOXTRAL_LOCAL_URL || 'http://localhost:8000').replace(/\/+$/, '');
 
   const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
@@ -676,11 +676,13 @@ async function transcribeWithVoxtralLocal(file: Blob, filename: string, promptCo
   formData.append('response_format', 'json');
   formData.append('temperature', '0.0');
   
-  // Prompt-Kontext: Letzte Sätze für konsistente Groß-/Kleinschreibung und Vokabular
-  // Voxtral (vLLM OpenAI-kompatibel) nutzt 'prompt' analog zu Whisper's initial_prompt
-  if (promptContext) {
-    formData.append('prompt', promptContext);
-    console.log(`[Voxtral-Local] Using prompt context: "${promptContext.substring(0, 80)}..."`);
+  // Wörterbuch-Begriffe als prompt übergeben (NUR Komma-getrennte Fachbegriffe).
+  // WICHTIG: Keine ganzen Sätze/Kontext senden — Voxtral ist ein Chat-Modell und
+  // würde auf Sätze "antworten" statt zu transkribieren.
+  // Eine reine Wortliste primed das Vokabular ohne Halluzinationen.
+  if (dictionaryTerms) {
+    formData.append('prompt', dictionaryTerms);
+    console.log(`[Voxtral-Local] Using dictionary terms as prompt: "${dictionaryTerms.substring(0, 100)}${dictionaryTerms.length > 100 ? '...' : ''}"`);
   }
 
   const res = await fetch(`${baseUrl}/v1/audio/transcriptions`, {
@@ -796,8 +798,8 @@ export async function POST(request: NextRequest) {
       result = await transcribeWithMistral(file, filename, contextBiasWords);
     } else if (provider === 'voxtral_local') {
       console.log('Using Voxtral Local (vLLM) as primary provider');
-      // Prompt-Kontext von VAD-Client für konsistente Transkription
-      result = await transcribeWithVoxtralLocal(file, filename, promptContext || undefined);
+      // Wörterbuch als Vokabular-Priming, Prompt-Kontext separat
+      result = await transcribeWithVoxtralLocal(file, filename, promptContext || undefined, initialPrompt);
     } else if (provider === 'fast_whisper') {
       // Fast Whisper ist ein reiner WebSocket-Server (RealtimeSTT)
       // Für Server-seitige Transkription müssen wir auf WhisperX zurückfallen

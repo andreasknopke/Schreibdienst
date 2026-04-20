@@ -215,6 +215,25 @@ export function buildPhoneticIndex(entries: { wrong: string; correct: string }[]
 }
 
 /**
+ * Prüft ob zwei phonetische Codes ähnlich genug sind.
+ * Erlaubt 1 Ziffer Abweichung bei Codes ≥4 Ziffern.
+ */
+function phoneticCodesMatch(code1: string, code2: string): boolean {
+  if (code1 === code2) return true;
+  if (!code1 || !code2) return false;
+  
+  // Bei langen Codes: Levenshtein ≤ 1 auf dem Code selbst erlauben
+  // Das fängt Ch/Sch-Verwechslungen ab (4 vs 8)
+  if (code1.length >= 4 && code2.length >= 4) {
+    const codeDist = levenshtein(code1, code2);
+    const maxCodeLen = Math.max(code1.length, code2.length);
+    return codeDist <= Math.max(1, Math.floor(maxCodeLen * 0.2));
+  }
+  
+  return false;
+}
+
+/**
  * Findet den besten phonetischen Match für ein Wort.
  * Gibt null zurück wenn kein ausreichend guter Match gefunden wird.
  *
@@ -242,17 +261,33 @@ export function findPhoneticMatch(
   const candidates = index.byPhoneticCode.get(wordPhonetic);
   if (candidates) {
     for (const cand of candidates) {
-      // Levenshtein auf normalisiertem Text als Qualitätsprüfung
       const dist = levenshtein(wordNorm, cand.wrongNorm);
       const maxLen = Math.max(wordNorm.length, cand.wrongNorm.length);
       const similarity = 1 - (dist / maxLen);
 
-      // Phonetischer Match + mindestens 50% Zeichenähnlichkeit
       if (similarity >= 0.5) {
-        const confidence = 0.5 + (similarity * 0.5); // 0.75 - 1.0
-
+        const confidence = 0.5 + (similarity * 0.5);
         if (!bestMatch || confidence > bestMatch.confidence) {
           bestMatch = { correct: cand.correct, confidence };
+        }
+      }
+    }
+  }
+
+  // Pass 1b: Unscharfer phonetischer Code-Match (z.B. Ch/Sch-Verwechslungen)
+  if (!bestMatch) {
+    for (const entry of index.allEntries) {
+      if (phoneticCodesMatch(wordPhonetic, entry.wrongPhonetic) || 
+          phoneticCodesMatch(wordPhonetic, entry.correctPhonetic)) {
+        const dist = levenshtein(wordNorm, entry.wrongNorm);
+        const maxLen = Math.max(wordNorm.length, entry.wrongNorm.length);
+        const similarity = 1 - (dist / maxLen);
+
+        if (similarity >= 0.45) {
+          const confidence = 0.4 + (similarity * 0.5); // Etwas weniger als exakter Match
+          if (!bestMatch || confidence > bestMatch.confidence) {
+            bestMatch = { correct: entry.correct, confidence };
+          }
         }
       }
     }
@@ -290,6 +325,10 @@ export function findPhoneticMatch(
  *
  * Wird NACH dem exakten Wörterbuch-Matching aufgerufen, fängt also
  * nur Wörter auf, die das exakte Matching verpasst hat.
+ *
+ * Multi-Wort-Fenster: Prüft auch ob 2-4 aufeinanderfolgende Wörter
+ * zusammengefügt einem Wörterbuch-Eintrag entsprechen.
+ * Z.B. "Schule Zystole Thiasis" → "Cholezystolithiasis"
  */
 export function applyPhoneticCorrections(
   text: string,
@@ -298,18 +337,88 @@ export function applyPhoneticCorrections(
 ): string {
   if (!text || index.allEntries.length === 0) return text;
 
-  // Text in Tokens aufteilen (Wörter + Nicht-Wörter)
-  const tokens = text.split(/(\s+|[.,;:!?()"\-–—…]+)/);
+  // Text in Wörter und Trennzeichen aufteilen
+  // Wir brauchen die Struktur: [word, sep, word, sep, word, ...]
+  const parts = text.split(/(\s+|[.,;:!?()"\-–—…]+)/);
+  
+  // Extrahiere Wort-Positionen (Indizes in parts[])
+  const wordIndices: number[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i] && !/^[\s.,;:!?()"\-–—…]+$/.test(parts[i])) {
+      wordIndices.push(i);
+    }
+  }
+
+  // Set um bereits ersetzte Positionen zu tracken
+  const replaced = new Set<number>();
   let changed = false;
 
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    // Nur Wort-Tokens prüfen (keine Leerzeichen/Satzzeichen)
-    if (!token || /^[\s.,;:!?()"\-–—…]+$/.test(token)) continue;
+  // Pass 1: Multi-Wort-Fenster (längste zuerst: 4, 3, 2 Wörter)
+  // Deutsche Stoppwörter die nicht Teil von Komposita sein können
+  const stopWords = new Set([
+    'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einer', 'eines', 'einem', 'einen',
+    'und', 'oder', 'aber', 'wenn', 'als', 'wie', 'dass', 'mit', 'von', 'zu', 'für', 'auf',
+    'an', 'in', 'im', 'am', 'um', 'bei', 'nach', 'vor', 'aus', 'bis', 'über', 'unter',
+    'ist', 'sind', 'war', 'hat', 'wird', 'kann', 'soll', 'muss', 'darf',
+    'ich', 'er', 'sie', 'es', 'wir', 'ihr', 'du', 'nicht', 'kein', 'keine', 'keiner',
+    'auch', 'noch', 'schon', 'nur', 'sehr', 'hier', 'dort', 'dann', 'da',
+  ]);
 
+  for (let windowSize = 4; windowSize >= 2; windowSize--) {
+    for (let wi = 0; wi <= wordIndices.length - windowSize; wi++) {
+      // Prüfe ob eine der Positionen schon ersetzt wurde
+      const positions = wordIndices.slice(wi, wi + windowSize);
+      if (positions.some(p => replaced.has(p))) continue;
+
+      // Wörter zusammenfügen (ohne Leerzeichen)
+      const words = positions.map(p => parts[p]);
+      
+      // Stoppwörter dürfen nicht am Rand des Fensters stehen
+      // (sie könnten versehentlich mitgezogen werden)
+      if (stopWords.has(words[0].toLowerCase()) || stopWords.has(words[words.length - 1].toLowerCase())) continue;
+      
+      const combined = words.join('');
+      
+      // Mindestlänge für zusammengefügte Wörter
+      if (combined.length < 6) continue;
+
+      const match = findPhoneticMatch(combined, index, 4);
+      if (match && match.confidence >= minConfidence) {
+        // Groß/Kleinschreibung vom ersten Wort übernehmen
+        let replacement = match.correct;
+        const firstWord = parts[positions[0]];
+        if (firstWord[0] === firstWord[0].toUpperCase() && replacement[0] !== replacement[0].toUpperCase()) {
+          replacement = replacement[0].toUpperCase() + replacement.slice(1);
+        }
+
+        if (replacement !== combined) {
+          const originalPhrase = positions.map(p => parts[p]).join(' ');
+          console.log(`[Phonetic] "${originalPhrase}" → "${replacement}" (${windowSize} words combined, confidence: ${match.confidence.toFixed(2)})`);
+          
+          // Erstes Wort ersetzen, restliche Wörter + Trennzeichen dazwischen leeren
+          parts[positions[0]] = replacement;
+          for (let k = 1; k < positions.length; k++) {
+            // Trennzeichen zwischen den Wörtern leeren
+            for (let t = positions[k - 1] + 1; t < positions[k]; t++) {
+              parts[t] = '';
+            }
+            parts[positions[k]] = '';
+          }
+          
+          positions.forEach(p => replaced.add(p));
+          changed = true;
+        }
+      }
+    }
+  }
+
+  // Pass 2: Einzelwort-Matching (für noch nicht ersetzte Wörter)
+  for (const wi of wordIndices) {
+    if (replaced.has(wi)) continue;
+    
+    const token = parts[wi];
     const match = findPhoneticMatch(token, index);
     if (match && match.confidence >= minConfidence) {
-      // Groß/Kleinschreibung vom Original übernehmen
       let replacement = match.correct;
       if (token[0] === token[0].toUpperCase() && replacement[0] !== replacement[0].toUpperCase()) {
         replacement = replacement[0].toUpperCase() + replacement.slice(1);
@@ -319,11 +428,12 @@ export function applyPhoneticCorrections(
 
       if (replacement !== token) {
         console.log(`[Phonetic] "${token}" → "${replacement}" (confidence: ${match.confidence.toFixed(2)})`);
-        tokens[i] = replacement;
+        parts[wi] = replacement;
+        replaced.add(wi);
         changed = true;
       }
     }
   }
 
-  return changed ? tokens.join('') : text;
+  return changed ? parts.join('') : text;
 }

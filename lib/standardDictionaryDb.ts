@@ -7,6 +7,8 @@ import { NextRequest } from 'next/server';
 import { query, execute, queryWithRequest, executeWithRequest, tableExistsCache } from './db';
 import { STANDARD_DICTIONARY } from './standardDictionary';
 
+const AUTO_SELF_MAPPING_CATEGORY = 'auto-self-mapping';
+
 export interface StandardDictDbEntry {
   id: number;
   wrong_word: string;
@@ -131,7 +133,7 @@ export async function addStandardDictEntry(
   wrong: string,
   correct: string,
   category: string = ''
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; createdSelfMapping?: boolean; error?: string }> {
   try {
     await ensureTable(request);
     await executeWithRequest(
@@ -139,7 +141,18 @@ export async function addStandardDictEntry(
       'INSERT INTO standard_dictionary (wrong_word, correct_word, category) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE correct_word = VALUES(correct_word), category = VALUES(category)',
       [wrong, correct, category]
     );
-    return { success: true };
+
+    let createdSelfMapping = false;
+    if (wrong.toLowerCase() !== correct.toLowerCase()) {
+      const selfMappingResult = await executeWithRequest(
+        request,
+        'INSERT IGNORE INTO standard_dictionary (wrong_word, correct_word, category) VALUES (?, ?, ?)',
+        [correct, correct, AUTO_SELF_MAPPING_CATEGORY]
+      );
+      createdSelfMapping = selfMappingResult.affectedRows > 0;
+    }
+
+    return { success: true, createdSelfMapping };
   } catch (error: any) {
     console.error('[StandardDict] Add error:', error);
     return { success: false, error: error.message };
@@ -152,15 +165,41 @@ export async function addStandardDictEntry(
 export async function removeStandardDictEntry(
   request: NextRequest,
   wrong: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; removedAutoSelfMapping?: boolean; error?: string }> {
   try {
     await ensureTable(request);
+
+    const [existingEntry] = await queryWithRequest<StandardDictDbEntry>(
+      request,
+      'SELECT wrong_word, correct_word, category FROM standard_dictionary WHERE wrong_word = ? LIMIT 1',
+      [wrong]
+    );
+
     await executeWithRequest(
       request,
       'DELETE FROM standard_dictionary WHERE wrong_word = ?',
       [wrong]
     );
-    return { success: true };
+
+    let removedAutoSelfMapping = false;
+    if (existingEntry && existingEntry.wrong_word.toLowerCase() !== existingEntry.correct_word.toLowerCase()) {
+      const remainingRows = await queryWithRequest<{ cnt: number }>(
+        request,
+        'SELECT COUNT(*) as cnt FROM standard_dictionary WHERE correct_word = ? AND LOWER(wrong_word) <> LOWER(correct_word)',
+        [existingEntry.correct_word]
+      );
+
+      if ((remainingRows[0]?.cnt ?? 0) === 0) {
+        const deleteSelfMappingResult = await executeWithRequest(
+          request,
+          'DELETE FROM standard_dictionary WHERE wrong_word = ? AND correct_word = ? AND category = ?',
+          [existingEntry.correct_word, existingEntry.correct_word, AUTO_SELF_MAPPING_CATEGORY]
+        );
+        removedAutoSelfMapping = deleteSelfMappingResult.affectedRows > 0;
+      }
+    }
+
+    return { success: true, removedAutoSelfMapping };
   } catch (error: any) {
     console.error('[StandardDict] Remove error:', error);
     return { success: false, error: error.message };

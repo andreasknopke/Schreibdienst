@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
 
     const result = await addStandardDictEntry(request, wrong.trim(), correct.trim(), category?.trim() || '');
     if (result.success) {
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true, createdSelfMapping: result.createdSelfMapping ?? false });
     }
     return NextResponse.json({ error: result.error }, { status: 500 });
   } catch (error) {
@@ -86,7 +86,7 @@ export async function DELETE(request: NextRequest) {
 
     const result = await removeStandardDictEntry(request, wrong);
     if (result.success) {
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true, removedAutoSelfMapping: result.removedAutoSelfMapping ?? false });
     }
     return NextResponse.json({ error: result.error }, { status: 500 });
   } catch (error) {

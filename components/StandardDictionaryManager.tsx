@@ -59,7 +59,8 @@ export default function StandardDictionaryManager() {
       });
       const data = await response.json();
       if (response.ok && data.success) {
-        setSuccess(`"${wrong}" → "${correct}" hinzugefügt`);
+        const autoMappingHint = data.createdSelfMapping ? ' + phonetischer Self-Mapping-Eintrag' : '';
+        setSuccess(`"${wrong}" → "${correct}" hinzugefügt${autoMappingHint}`);
         setWrong('');
         setCorrect('');
         fetchEntries();
@@ -203,6 +204,9 @@ export default function StandardDictionaryManager() {
             />
           </div>
         </div>
+        <p className="text-xs text-gray-500">
+          Für neue Korrekturen wird der korrekte Begriff automatisch auch als blauer phonetischer Eintrag angelegt.
+        </p>
         <div className="flex justify-between items-center">
           <div className="flex gap-2">
             <button

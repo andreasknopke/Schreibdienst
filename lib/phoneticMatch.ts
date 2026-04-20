@@ -215,22 +215,38 @@ export function buildPhoneticIndex(entries: { wrong: string; correct: string }[]
 }
 
 /**
- * Prüft ob zwei phonetische Codes ähnlich genug sind.
- * Erlaubt 1 Ziffer Abweichung bei Codes ≥4 Ziffern.
+ * Generiert alle phonetischen Code-Variationen mit Levenshtein-Distanz 1.
+ * Erlaubt: Ersetzung einer Ziffer, Löschung einer Ziffer, Einfügung einer Ziffer.
+ * Nur für Codes ≥ 4 Zeichen (kürzere haben zu viele false positives).
  */
-function phoneticCodesMatch(code1: string, code2: string): boolean {
-  if (code1 === code2) return true;
-  if (!code1 || !code2) return false;
+function generateCodeVariations(code: string): string[] {
+  if (code.length < 4) return [];
+  const digits = '012345678';
+  const variations: Set<string> = new Set();
   
-  // Bei langen Codes: Levenshtein ≤ 1 auf dem Code selbst erlauben
-  // Das fängt Ch/Sch-Verwechslungen ab (4 vs 8)
-  if (code1.length >= 4 && code2.length >= 4) {
-    const codeDist = levenshtein(code1, code2);
-    const maxCodeLen = Math.max(code1.length, code2.length);
-    return codeDist <= Math.max(1, Math.floor(maxCodeLen * 0.2));
+  // Ersetzungen: jede Position durch jede andere Ziffer
+  for (let i = 0; i < code.length; i++) {
+    for (const d of digits) {
+      if (d !== code[i]) {
+        variations.add(code.slice(0, i) + d + code.slice(i + 1));
+      }
+    }
   }
   
-  return false;
+  // Löschungen: jede Position entfernen
+  for (let i = 0; i < code.length; i++) {
+    const v = code.slice(0, i) + code.slice(i + 1);
+    if (v.length >= 3) variations.add(v);
+  }
+  
+  // Einfügungen: an jeder Position eine Ziffer einfügen
+  for (let i = 0; i <= code.length; i++) {
+    for (const d of digits) {
+      variations.add(code.slice(0, i) + d + code.slice(i));
+    }
+  }
+  
+  return [...variations];
 }
 
 /**
@@ -274,43 +290,24 @@ export function findPhoneticMatch(
     }
   }
 
-  // Pass 1b: Unscharfer phonetischer Code-Match (z.B. Ch/Sch-Verwechslungen)
+  // Pass 1b: Unscharfer phonetischer Code-Match via Code-Variationen (O(1) pro Variation)
+  // Fängt Ch/Sch-Verwechslungen und ähnliche Abweichungen ab
   if (!bestMatch) {
-    for (const entry of index.allEntries) {
-      if (phoneticCodesMatch(wordPhonetic, entry.wrongPhonetic) || 
-          phoneticCodesMatch(wordPhonetic, entry.correctPhonetic)) {
-        const dist = levenshtein(wordNorm, entry.wrongNorm);
-        const maxLen = Math.max(wordNorm.length, entry.wrongNorm.length);
+    const variations = generateCodeVariations(wordPhonetic);
+    for (const varCode of variations) {
+      const varCandidates = index.byPhoneticCode.get(varCode);
+      if (!varCandidates) continue;
+      
+      for (const cand of varCandidates) {
+        const dist = levenshtein(wordNorm, cand.wrongNorm);
+        const maxLen = Math.max(wordNorm.length, cand.wrongNorm.length);
         const similarity = 1 - (dist / maxLen);
 
         if (similarity >= 0.45) {
-          const confidence = 0.4 + (similarity * 0.5); // Etwas weniger als exakter Match
+          const confidence = 0.4 + (similarity * 0.5);
           if (!bestMatch || confidence > bestMatch.confidence) {
-            bestMatch = { correct: entry.correct, confidence };
+            bestMatch = { correct: cand.correct, confidence };
           }
-        }
-      }
-    }
-  }
-
-  // Pass 2: Kein phonetischer Match → Levenshtein-Fallback (strenger)
-  if (!bestMatch && wordNorm.length >= minWordLength) {
-    for (const entry of index.allEntries) {
-      // Längenfilter: Wörter müssen ähnlich lang sein (±40%)
-      const lenRatio = Math.min(wordNorm.length, entry.wrongNorm.length) /
-                       Math.max(wordNorm.length, entry.wrongNorm.length);
-      if (lenRatio < 0.6) continue;
-
-      const dist = levenshtein(wordNorm, entry.wrongNorm);
-      const maxLen = Math.max(wordNorm.length, entry.wrongNorm.length);
-      const similarity = 1 - (dist / maxLen);
-
-      // Ohne phonetischen Match: mindestens 70% Zeichenähnlichkeit
-      if (similarity >= 0.7) {
-        const confidence = similarity * 0.8; // Etwas weniger Vertrauen ohne Phonetik
-
-        if (!bestMatch || confidence > bestMatch.confidence) {
-          bestMatch = { correct: entry.correct, confidence };
         }
       }
     }
@@ -362,6 +359,15 @@ export function applyPhoneticCorrections(
     'ist', 'sind', 'war', 'hat', 'wird', 'kann', 'soll', 'muss', 'darf',
     'ich', 'er', 'sie', 'es', 'wir', 'ihr', 'du', 'nicht', 'kein', 'keine', 'keiner',
     'auch', 'noch', 'schon', 'nur', 'sehr', 'hier', 'dort', 'dann', 'da',
+    'neue', 'neuer', 'neues', 'neuem', 'neuen', 'neu',
+    'alte', 'alter', 'altes', 'altem', 'alten', 'alt',
+    'kleine', 'kleiner', 'kleines', 'kleinem', 'kleinen', 'klein',
+    'große', 'großer', 'großes', 'großem', 'großen', 'groß',
+    'gute', 'guter', 'gutes', 'gutem', 'guten', 'gut',
+    'ohne', 'seit', 'zum', 'zur', 'vom', 'beim', 'ins', 'aufs',
+    'links', 'rechts', 'oben', 'unten', 'vorne', 'hinten',
+    'leichte', 'leichter', 'schwere', 'schwerer',
+    'erste', 'erster', 'zweite', 'zweiter', 'dritte', 'dritter',
   ]);
 
   for (let windowSize = 4; windowSize >= 2; windowSize--) {

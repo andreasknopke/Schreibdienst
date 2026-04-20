@@ -4,6 +4,7 @@
  */
 
 import { buildPhoneticIndex, applyPhoneticCorrections, type PhoneticDictEntry } from './phoneticMatch';
+import { mergeWithStandardDictionary } from './standardDictionary';
 
 // Dictionary entry interface (compatible with dictionaryDb.ts)
 export interface DictionaryEntry {
@@ -28,12 +29,15 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
     return text;
   }
 
+  // Merge mit Standard-Wörterbuch
+  const mergedEntries = mergeWithStandardDictionary(entries);
+
   let result = text;
   let replacementCount = 0;
   let stemReplacementCount = 0;
 
   // Sort entries by length of wrong word (longest first) to avoid partial replacements
-  const sortedEntries = [...entries].sort((a, b) => b.wrong.length - a.wrong.length);
+  const sortedEntries = [...mergedEntries].sort((a, b) => b.wrong.length - a.wrong.length);
 
   for (const entry of sortedEntries) {
     if (!entry.wrong || !entry.correct) continue;
@@ -42,7 +46,7 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
     const escapedWrong = entry.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const escapedCorrect = entry.correct;
     
-    if (entry.matchStem) {
+    if ('matchStem' in entry && entry.matchStem) {
       // STEM MATCHING: Also match when wrong word appears as prefix in compound words
       // Match: "Schole" in "Scholezystitis", "Scholedochus", "Scholestase"
       // Pattern: word boundary at start, then the wrong word, followed by more letters
@@ -79,7 +83,7 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
   }
 
   // Pass 2: Phonetisches Matching für Wörter die das exakte Matching verpasst hat
-  const phoneticIndex = buildPhoneticIndex(entries);
+  const phoneticIndex = buildPhoneticIndex(mergedEntries);
   if (phoneticIndex.allEntries.length > 0) {
     result = applyPhoneticCorrections(result, phoneticIndex);
   }

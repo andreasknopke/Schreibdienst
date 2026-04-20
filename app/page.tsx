@@ -8,6 +8,7 @@ import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
 import { applyFormattingControlWords, preprocessTranscription } from '@/lib/textFormatting';
 import { buildPhoneticIndex, applyPhoneticCorrections } from '@/lib/phoneticMatch';
+import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
@@ -207,22 +208,23 @@ export default function HomePage() {
   // Pass 1: Exaktes Matching, Pass 2: Phonetisches Matching (Kölner Phonetik)
   const phoneticIndexRef = useRef<ReturnType<typeof buildPhoneticIndex> | null>(null);
   
+  // Gemergte Einträge (User + Standard-Wörterbuch)
+  const mergedEntriesRef = useRef<{ wrong: string; correct: string }[]>([]);
+  
   // Phonetischen Index neu aufbauen wenn sich Wörterbuch ändert
   useEffect(() => {
-    if (dictionaryEntries.length > 0) {
-      phoneticIndexRef.current = buildPhoneticIndex(dictionaryEntries);
-      console.log('[Phonetic] Index built with', dictionaryEntries.length, 'entries');
-    } else {
-      phoneticIndexRef.current = null;
-    }
+    const merged = mergeWithStandardDictionary(dictionaryEntries);
+    mergedEntriesRef.current = merged;
+    phoneticIndexRef.current = buildPhoneticIndex(merged);
+    console.log('[Phonetic] Index built with', merged.length, 'entries (', dictionaryEntries.length, 'user +', merged.length - dictionaryEntries.length, 'standard)');
   }, [dictionaryEntries]);
 
   const applyDictionaryToText = useCallback((text: string): string => {
-    if (dictionaryEntries.length === 0 || !text) return text;
+    if (!text || mergedEntriesRef.current.length === 0) return text;
     
-    // Pass 1: Exaktes Wort-Matching
+    // Pass 1: Exaktes Wort-Matching (User + Standard)
     let result = text;
-    for (const entry of dictionaryEntries) {
+    for (const entry of mergedEntriesRef.current) {
       // Case-insensitive Ersetzung mit Wortgrenzen
       const escaped = entry.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = new RegExp(`\\b${escaped}\\b`, 'gi');

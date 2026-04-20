@@ -676,13 +676,12 @@ async function transcribeWithVoxtralLocal(file: Blob, filename: string, promptCo
   formData.append('response_format', 'json');
   formData.append('temperature', '0.0');
   
-  // Wörterbuch-Begriffe als prompt übergeben (NUR Komma-getrennte Fachbegriffe).
-  // WICHTIG: Keine ganzen Sätze/Kontext senden — Voxtral ist ein Chat-Modell und
-  // würde auf Sätze "antworten" statt zu transkribieren.
-  // Eine reine Wortliste primed das Vokabular ohne Halluzinationen.
+  // Wörterbuch-Begriffe: Bei Voxtral Mini 3B verursacht das prompt-Feld
+  // Halluzinationen und Kommentare. Das 3B-Modell interpretiert die Wortliste
+  // als Gesprächskontext statt als Vokabular-Priming.
+  // Für größere Voxtral-Modelle (>7B) könnte man das wieder aktivieren.
   if (dictionaryTerms) {
-    formData.append('prompt', dictionaryTerms);
-    console.log(`[Voxtral-Local] Using dictionary terms as prompt: "${dictionaryTerms.substring(0, 100)}${dictionaryTerms.length > 100 ? '...' : ''}"`);
+    console.log(`[Voxtral-Local] Dictionary terms available but NOT sent (3B model too small for reliable prompt priming): "${dictionaryTerms.substring(0, 80)}..."`);
   }
 
   const res = await fetch(`${baseUrl}/v1/audio/transcriptions`, {

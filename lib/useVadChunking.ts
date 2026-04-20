@@ -103,7 +103,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       negativeSpeechThreshold: 0.35,
       redemptionFrames: 5,        // ~300ms Pause reicht zum Committen
       minSpeechFrames: 3,         // Mind. ~180ms Sprache (weniger Fehlzündungs-Schutz)
-      preSpeechPadFrames: 2,      // Etwas Audio vor dem Sprechbeginn mitnehmen
+      preSpeechPadFrames: 5,      // ~300ms Audio VOR Sprechbeginn (verhindert abgeschnittene Wortanfänge)
 
       onSpeechStart: () => {
         setIsSpeaking(true);
@@ -158,7 +158,13 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
           console.log('[VAD] SpeechEnd: all audio already sent via auto-chunk, skipping');
         } else {
           // Kein Auto-Chunk war nötig — normaler Fall
-          const wavBuffer = utils.encodeWAV(audio);
+          // Padding anhängen: 0.3s Stille NACH dem Audio, damit WhisperX
+          // das letzte Wort nicht verschluckt (besonders bei Einzelwörtern)
+          const padSamples = Math.round(0.3 * 16000); // 300ms bei 16kHz
+          const padded = new Float32Array(audio.length + padSamples);
+          padded.set(audio, 0);
+          // padSamples bleiben 0 (Stille)
+          const wavBuffer = utils.encodeWAV(padded);
           const blob = new Blob([wavBuffer], { type: 'audio/wav' });
           onUtterance(blob);
         }

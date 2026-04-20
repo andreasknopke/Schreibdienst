@@ -431,7 +431,11 @@ export default function HomePage() {
       if (vadPromptContextRef.current) {
         fd.append('prompt_context', vadPromptContextRef.current);
       }
-      const res = await fetchWithDbToken('/api/transcribe', { method: 'POST', body: fd });
+      // Timeout: WhisperX kann bei sehr kurzen Clips hängen bleiben
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000); // 15s Timeout
+      const res = await fetchWithDbToken('/api/transcribe', { method: 'POST', body: fd, signal: controller.signal });
+      clearTimeout(timeout);
       if (!res.ok) throw new Error(`Transkription fehlgeschlagen (${res.status})`);
       const data = await res.json();
       let text = data.text || '';

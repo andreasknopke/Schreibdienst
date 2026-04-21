@@ -187,11 +187,11 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
 const DELETE_PATTERNS = [
   { pattern: /\bwort\s*streichen\b/gi, type: 'word' as const },  // "Wort streichen" or "Wortstreichen"
   { pattern: /\bstreiche\s+wort\b/gi, type: 'word' as const },   // "streiche Wort"
-  { pattern: /lösche\s+das\s+letzte\s+wort\b/gi, type: 'word' as const },
+  { pattern: /lösche\s+(?:das\s+)?letzte(?:s)?\s+wort\b/gi, type: 'word' as const },
   { pattern: /letztes\s+wort\s+löschen\b/gi, type: 'word' as const },
-  { pattern: /lösche\s+den\s+letzten\s+satz\b/gi, type: 'sentence' as const },
+  { pattern: /lösche\s+(?:den\s+)?letzten\s+satz\b/gi, type: 'sentence' as const },
   { pattern: /letzten\s+satz\s+löschen\b/gi, type: 'sentence' as const },
-  { pattern: /lösche\s+den\s+letzten\s+absatz\b/gi, type: 'paragraph' as const },
+  { pattern: /lösche\s+(?:den\s+)?letzten\s+absatz\b/gi, type: 'paragraph' as const },
   { pattern: /letzten\s+absatz\s+löschen\b/gi, type: 'paragraph' as const },
 ];
 
@@ -289,43 +289,110 @@ function isStandaloneDeleteCommand(text: string): boolean {
     .trim();
 
   const standaloneDeletePatterns = [
-    /^lösche das letzte wort$/,
+    /^lösche (?:das )?letzte(?:s)? wort$/,
     /^letztes wort löschen$/,
     /^wort streichen$/,
     /^streiche wort$/,
-    /^lösche den letzten satz$/,
+    /^lösche (?:den )?letzten satz$/,
     /^letzten satz löschen$/,
-    /^lösche den letzten absatz$/,
+    /^lösche (?:den )?letzten absatz$/,
     /^letzten absatz löschen$/,
   ];
 
   return standaloneDeletePatterns.some((pattern) => pattern.test(normalized));
 }
 
-function detectStandaloneOnlineCommand(text: string):
-  | { type: 'delete' }
-  | { type: 'lineBreak' }
-  | { type: 'paragraphBreak' }
-  | { type: 'comma' }
-  | { type: 'period' }
-  | { type: 'dash' }
-  | null {
-  if (!text) return null;
+type OnlineCommandType =
+  | 'deleteWord'
+  | 'deleteSentence'
+  | 'deleteParagraph'
+  | 'lineBreak'
+  | 'paragraphBreak'
+  | 'comma'
+  | 'period'
+  | 'dash';
 
-  const normalized = text
-    .toLowerCase()
-    .replace(/[.,;:!?]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+interface OnlineCommandMatch {
+  type: OnlineCommandType;
+  index: number;
+  length: number;
+}
 
-  if (isStandaloneDeleteCommand(normalized)) return { type: 'delete' };
-  if (/^(neue|nächste) zeile$|^zeilenumbruch$/.test(normalized)) return { type: 'lineBreak' };
-  if (/^(neuer|nächster) absatz$|^absatz$/.test(normalized)) return { type: 'paragraphBreak' };
-  if (/^(komma|beistrich)$/.test(normalized)) return { type: 'comma' };
-  if (/^punkt$/.test(normalized)) return { type: 'period' };
-  if (/^(bindestrich|anstrich)$/.test(normalized)) return { type: 'dash' };
+const ONLINE_COMMAND_PATTERNS: Array<{ type: OnlineCommandType; pattern: RegExp }> = [
+  { type: 'deleteWord', pattern: /\blösche\s+(?:das\s+)?letzte(?:s)?\s+wort\b[.,;:!?]*/i },
+  { type: 'deleteWord', pattern: /\bletztes\s+wort\s+löschen\b[.,;:!?]*/i },
+  { type: 'deleteWord', pattern: /\bwort\s*streichen\b[.,;:!?]*/i },
+  { type: 'deleteWord', pattern: /\bstreiche\s+wort\b[.,;:!?]*/i },
+  { type: 'deleteSentence', pattern: /\blösche\s+(?:den\s+)?letzten\s+satz\b[.,;:!?]*/i },
+  { type: 'deleteSentence', pattern: /\bletzen\s+satz\s+löschen\b[.,;:!?]*/i },
+  { type: 'deleteSentence', pattern: /\bletzten\s+satz\s+löschen\b[.,;:!?]*/i },
+  { type: 'deleteParagraph', pattern: /\blösche\s+(?:den\s+)?letzten\s+absatz\b[.,;:!?]*/i },
+  { type: 'deleteParagraph', pattern: /\bletzten\s+absatz\s+löschen\b[.,;:!?]*/i },
+  { type: 'paragraphBreak', pattern: /\b(?:neuer|nächster)\s+absatz\b[.,;:!?]*/i },
+  { type: 'lineBreak', pattern: /\b(?:neue|nächste)\s+zeile\b[.,;:!?]*/i },
+  { type: 'lineBreak', pattern: /\bzeilenumbruch\b[.,;:!?]*/i },
+  { type: 'comma', pattern: /\b(?:komma|beistrich)\b[.,;:!?]*/i },
+  { type: 'period', pattern: /\bpunkt\b[.,;:!?]*/i },
+  { type: 'dash', pattern: /\b(?:bindestrich|anstrich)\b[.,;:!?]*/i },
+];
 
-  return null;
+function findNextOnlineCommand(text: string, startIndex: number): OnlineCommandMatch | null {
+  let bestMatch: OnlineCommandMatch | null = null;
+
+  for (const { type, pattern } of ONLINE_COMMAND_PATTERNS) {
+    const slice = text.slice(startIndex);
+    const match = slice.match(pattern);
+    if (!match || match.index === undefined) continue;
+
+    const absoluteIndex = startIndex + match.index;
+    const candidate: OnlineCommandMatch = {
+      type,
+      index: absoluteIndex,
+      length: match[0].length,
+    };
+
+    if (!bestMatch || absoluteIndex < bestMatch.index) {
+      bestMatch = candidate;
+      continue;
+    }
+
+    if (bestMatch && absoluteIndex === bestMatch.index && candidate.length > bestMatch.length) {
+      bestMatch = candidate;
+    }
+  }
+
+  return bestMatch;
+}
+
+function appendOnlineText(currentText: string, textSegment: string): string {
+  if (!textSegment.trim()) return currentText;
+  const normalizedSegment = /\n$/.test(currentText) ? textSegment.replace(/^\s+/, '') : textSegment;
+  const formattedSegment = applyOnlineDictationControlWords(normalizedSegment);
+  if (!formattedSegment.trim()) return currentText;
+  return combineFormattedText(currentText, formattedSegment);
+}
+
+function applyOnlineCommand(currentText: string, type: OnlineCommandType): string {
+  switch (type) {
+    case 'deleteWord':
+      return deleteLastWordFromText(currentText);
+    case 'deleteSentence':
+      return deleteLastSentenceFromText(currentText);
+    case 'deleteParagraph':
+      return deleteLastParagraphFromText(currentText);
+    case 'lineBreak':
+      return `${currentText.replace(/[^\S\n]*$/, '')}\n`;
+    case 'paragraphBreak':
+      return `${currentText.replace(/[^\S\n]*$/, '')}\n\n`;
+    case 'comma':
+      return cleanupFormatting(`${currentText.replace(/[^\S\n]*$/, '')},`);
+    case 'period':
+      return cleanupFormatting(`${currentText.replace(/[^\S\n]*$/, '')}.`);
+    case 'dash':
+      return cleanupFormattingPreserveTrailingBreaks(`${currentText}${currentText ? ' ' : ''}-`);
+    default:
+      return currentText;
+  }
 }
 
 function cleanupFormattingPreserveTrailingBreaks(text: string): string {
@@ -364,13 +431,13 @@ function applyStandaloneDeleteCommand(currentText: string, commandText: string):
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (/wort streichen|streiche wort|lösche das letzte wort|letztes wort löschen/.test(normalized)) {
+  if (/wort streichen|streiche wort|lösche (?:das )?letzte(?:s)? wort|letztes wort löschen/.test(normalized)) {
     return deleteLastWordFromText(currentText);
   }
-  if (/lösche den letzten satz|letzten satz löschen/.test(normalized)) {
+  if (/lösche (?:den )?letzten satz|letzten satz löschen/.test(normalized)) {
     return deleteLastSentenceFromText(currentText);
   }
-  if (/lösche den letzten absatz|letzten absatz löschen/.test(normalized)) {
+  if (/lösche (?:den )?letzten absatz|letzten absatz löschen/.test(normalized)) {
     return deleteLastParagraphFromText(currentText);
   }
 
@@ -386,30 +453,25 @@ function applyStandaloneDeleteCommand(currentText: string, commandText: string):
 export function applyOnlineUtteranceToText(currentText: string, utteranceText: string): string {
   if (!utteranceText.trim()) return cleanupFormatting(currentText);
 
-  const standaloneCommand = detectStandaloneOnlineCommand(utteranceText);
-  if (standaloneCommand?.type === 'delete') {
-    return applyStandaloneDeleteCommand(currentText, utteranceText);
-  }
-  if (standaloneCommand?.type === 'lineBreak') {
-    return `${currentText.replace(/[^\S]*$/, '')}\n`;
-  }
-  if (standaloneCommand?.type === 'paragraphBreak') {
-    return `${currentText.replace(/[^\S]*$/, '')}\n\n`;
-  }
-  if (standaloneCommand?.type === 'comma') {
-    return cleanupFormatting(`${currentText.replace(/[^\S]*$/, '')},`);
-  }
-  if (standaloneCommand?.type === 'period') {
-    return cleanupFormatting(`${currentText.replace(/[^\S]*$/, '')}.`);
-  }
-  if (standaloneCommand?.type === 'dash') {
-    return cleanupFormattingPreserveTrailingBreaks(`${currentText}${currentText ? ' ' : ''}-`);
+  let result = currentText;
+  let cursor = 0;
+
+  while (cursor < utteranceText.length) {
+    const nextCommand = findNextOnlineCommand(utteranceText, cursor);
+    if (!nextCommand) {
+      result = appendOnlineText(result, utteranceText.slice(cursor));
+      break;
+    }
+
+    if (nextCommand.index > cursor) {
+      result = appendOnlineText(result, utteranceText.slice(cursor, nextCommand.index));
+    }
+
+    result = applyOnlineCommand(result, nextCommand.type);
+    cursor = nextCommand.index + nextCommand.length;
   }
 
-  const formattedUtterance = applyOnlineDictationControlWords(utteranceText);
-
-  const combinedText = combineFormattedText(currentText, formattedUtterance);
-  return applyDeleteCommands(combinedText);
+  return cleanupFormattingPreserveTrailingBreaks(result);
 }
 
 /**
@@ -419,7 +481,8 @@ export function applyOnlineUtteranceToText(currentText: string, utteranceText: s
 export function combineFormattedText(existingText: string, incomingText: string): string {
   if (!existingText) return cleanupFormattingPreserveTrailingBreaks(incomingText);
   if (!incomingText) return cleanupFormattingPreserveTrailingBreaks(existingText);
-  return cleanupFormattingPreserveTrailingBreaks(`${existingText} ${incomingText}`);
+  const separator = existingText.endsWith(' ') || existingText.endsWith('\n') ? '' : ' ';
+  return cleanupFormattingPreserveTrailingBreaks(`${existingText}${separator}${incomingText}`);
 }
 
 /**

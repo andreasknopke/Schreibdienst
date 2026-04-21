@@ -266,7 +266,7 @@ export function applyOnlineDictationControlWords(text: string): string {
     result = result.replace(pattern, replacement);
   }
 
-  return cleanupFormatting(result);
+  return cleanupFormattingPreserveTrailingBreaks(result);
 }
 
 /**
@@ -279,14 +279,147 @@ export function applyDeleteCommands(text: string): string {
   return cleanupFormatting(handleDeleteCommands(text));
 }
 
+function isStandaloneDeleteCommand(text: string): boolean {
+  if (!text) return false;
+
+  const normalized = text
+    .toLowerCase()
+    .replace(/[.,;:!?-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const standaloneDeletePatterns = [
+    /^lösche das letzte wort$/,
+    /^letztes wort löschen$/,
+    /^wort streichen$/,
+    /^streiche wort$/,
+    /^lösche den letzten satz$/,
+    /^letzten satz löschen$/,
+    /^lösche den letzten absatz$/,
+    /^letzten absatz löschen$/,
+  ];
+
+  return standaloneDeletePatterns.some((pattern) => pattern.test(normalized));
+}
+
+function detectStandaloneOnlineCommand(text: string):
+  | { type: 'delete' }
+  | { type: 'lineBreak' }
+  | { type: 'paragraphBreak' }
+  | { type: 'comma' }
+  | { type: 'period' }
+  | { type: 'dash' }
+  | null {
+  if (!text) return null;
+
+  const normalized = text
+    .toLowerCase()
+    .replace(/[.,;:!?]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (isStandaloneDeleteCommand(normalized)) return { type: 'delete' };
+  if (/^(neue|nächste) zeile$|^zeilenumbruch$/.test(normalized)) return { type: 'lineBreak' };
+  if (/^(neuer|nächster) absatz$|^absatz$/.test(normalized)) return { type: 'paragraphBreak' };
+  if (/^(komma|beistrich)$/.test(normalized)) return { type: 'comma' };
+  if (/^punkt$/.test(normalized)) return { type: 'period' };
+  if (/^(bindestrich|anstrich)$/.test(normalized)) return { type: 'dash' };
+
+  return null;
+}
+
+function cleanupFormattingPreserveTrailingBreaks(text: string): string {
+  if (!text) return text;
+
+  const trailingBreaks = text.match(/\n+$/)?.[0] ?? '';
+  const cleaned = cleanupFormatting(text);
+  if (!trailingBreaks) return cleaned;
+  return `${cleaned}${trailingBreaks}`;
+}
+
+function deleteLastWordFromText(text: string): string {
+  return cleanupFormatting(text.replace(/\s*\S+\s*$/, ''));
+}
+
+function deleteLastSentenceFromText(text: string): string {
+  const withoutLastSentence = text.replace(/\s*[^.!?]*[.!?]\s*$/, '');
+  if (withoutLastSentence !== text) {
+    return cleanupFormatting(withoutLastSentence);
+  }
+  return cleanupFormatting(text.replace(/[^\n]*$/, ''));
+}
+
+function deleteLastParagraphFromText(text: string): string {
+  const lastParagraphBreak = text.lastIndexOf('\n\n');
+  if (lastParagraphBreak > 0) {
+    return cleanupFormatting(text.substring(0, lastParagraphBreak));
+  }
+  return '';
+}
+
+function applyStandaloneDeleteCommand(currentText: string, commandText: string): string {
+  const normalized = commandText
+    .toLowerCase()
+    .replace(/[.,;:!?]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (/wort streichen|streiche wort|lösche das letzte wort|letztes wort löschen/.test(normalized)) {
+    return deleteLastWordFromText(currentText);
+  }
+  if (/lösche den letzten satz|letzten satz löschen/.test(normalized)) {
+    return deleteLastSentenceFromText(currentText);
+  }
+  if (/lösche den letzten absatz|letzten absatz löschen/.test(normalized)) {
+    return deleteLastParagraphFromText(currentText);
+  }
+
+  return cleanupFormatting(currentText);
+}
+
+/**
+ * Wendet eine einzelne Online-Utterance auf den bereits aufgebauten Text an.
+ * Reine Löschbefehle werden NICHT angehängt, sondern direkt auf den vorhandenen
+ * Text angewendet. Dadurch löscht "lösche den letzten Satz" zuverlässig den
+ * vorherigen Satz statt den aktuellen Befehls-Chunk.
+ */
+export function applyOnlineUtteranceToText(currentText: string, utteranceText: string): string {
+  if (!utteranceText.trim()) return cleanupFormatting(currentText);
+
+  const standaloneCommand = detectStandaloneOnlineCommand(utteranceText);
+  if (standaloneCommand?.type === 'delete') {
+    return applyStandaloneDeleteCommand(currentText, utteranceText);
+  }
+  if (standaloneCommand?.type === 'lineBreak') {
+    return `${currentText.replace(/[^\S]*$/, '')}\n`;
+  }
+  if (standaloneCommand?.type === 'paragraphBreak') {
+    return `${currentText.replace(/[^\S]*$/, '')}\n\n`;
+  }
+  if (standaloneCommand?.type === 'comma') {
+    return cleanupFormatting(`${currentText.replace(/[^\S]*$/, '')},`);
+  }
+  if (standaloneCommand?.type === 'period') {
+    return cleanupFormatting(`${currentText.replace(/[^\S]*$/, '')}.`);
+  }
+  if (standaloneCommand?.type === 'dash') {
+    return cleanupFormattingPreserveTrailingBreaks(`${currentText}${currentText ? ' ' : ''}-`);
+  }
+
+  const formattedUtterance = applyOnlineDictationControlWords(utteranceText);
+
+  const combinedText = combineFormattedText(currentText, formattedUtterance);
+  return applyDeleteCommands(combinedText);
+}
+
 /**
  * Kombiniert zwei bereits formatierte Textstücke und bereinigt Leerzeichen/
  * Satzzeichen an der Fuge. Das verhindert Artefakte wie "Text ," oder "Text \n\n".
  */
 export function combineFormattedText(existingText: string, incomingText: string): string {
-  if (!existingText) return cleanupFormatting(incomingText);
-  if (!incomingText) return cleanupFormatting(existingText);
-  return cleanupFormatting(`${existingText} ${incomingText}`);
+  if (!existingText) return cleanupFormattingPreserveTrailingBreaks(incomingText);
+  if (!incomingText) return cleanupFormattingPreserveTrailingBreaks(existingText);
+  return cleanupFormattingPreserveTrailingBreaks(`${existingText} ${incomingText}`);
 }
 
 /**

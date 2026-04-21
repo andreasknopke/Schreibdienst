@@ -6,7 +6,7 @@ import Spinner from '@/components/Spinner';
 import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
-import { applyDeleteCommands, applyFormattingControlWords, applyOnlineDictationControlWords, combineFormattedText, preprocessTranscription } from '@/lib/textFormatting';
+import { applyDeleteCommands, applyFormattingControlWords, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, preprocessTranscription } from '@/lib/textFormatting';
 import { buildPhoneticIndex, applyPhoneticCorrections } from '@/lib/phoneticMatch';
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
@@ -472,14 +472,6 @@ export default function HomePage() {
     return existing + separator + newText;
   }, []);
 
-  const applyOnlineUtteranceToCurrentText = useCallback((currentText: string, utteranceText: string): string => {
-    if (!utteranceText.trim()) return currentText;
-
-    const formattedUtterance = applyOnlineDictationControlWords(utteranceText);
-    const combinedText = combineFormattedText(currentText, formattedUtterance);
-    return applyDeleteCommands(combinedText);
-  }, []);
-
   // Transkribiert eine Utterance mit Retry-Logik. Wirft Fehler erst nach allen Versuchen.
   const transcribeUtteranceWithRetry = useCallback(async (
     wavBlob: Blob,
@@ -545,7 +537,7 @@ export default function HomePage() {
         continue;
       }
 
-      const nextCombinedText = applyOnlineUtteranceToCurrentText(combinedCommittedText, entry.text);
+      const nextCombinedText = applyOnlineUtteranceToText(combinedCommittedText, entry.text);
       if (nextCombinedText !== combinedCommittedText) {
         combinedCommittedText = nextCombinedText;
         didCommit = true;
@@ -1251,7 +1243,7 @@ export default function HomePage() {
     const existingRef = getExistingRef();
     
     // Text akkumulieren und danach Löschbefehle auf den Gesamtkontext anwenden.
-    finalRef.current = applyDeleteCommands(combineFormattedText(finalRef.current, correctedText));
+    finalRef.current = applyOnlineUtteranceToText(finalRef.current, correctedText);
     
     // Anzeige aktualisieren
     const updateDisplay = () => {

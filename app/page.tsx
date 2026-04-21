@@ -6,7 +6,7 @@ import Spinner from '@/components/Spinner';
 import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
-import { applyFormattingControlWords, preprocessTranscription } from '@/lib/textFormatting';
+import { applyDeleteCommands, applyFormattingControlWords, applyOnlineDictationControlWords, combineFormattedText, preprocessTranscription } from '@/lib/textFormatting';
 import { buildPhoneticIndex, applyPhoneticCorrections } from '@/lib/phoneticMatch';
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
@@ -472,6 +472,14 @@ export default function HomePage() {
     return existing + separator + newText;
   }, []);
 
+  const applyOnlineUtteranceToCurrentText = useCallback((currentText: string, utteranceText: string): string => {
+    if (!utteranceText.trim()) return currentText;
+
+    const formattedUtterance = applyOnlineDictationControlWords(utteranceText);
+    const combinedText = combineFormattedText(currentText, formattedUtterance);
+    return applyDeleteCommands(combinedText);
+  }, []);
+
   // Transkribiert eine Utterance mit Retry-Logik. Wirft Fehler erst nach allen Versuchen.
   const transcribeUtteranceWithRetry = useCallback(async (
     wavBlob: Blob,
@@ -517,32 +525,36 @@ export default function HomePage() {
   // Garantiert dass Utterances NIE in falscher Reihenfolge erscheinen oder verloren gehen.
   const drainVadCommitQueue = useCallback(() => {
     let didCommit = false;
+    let combinedCommittedText = committedUtterancesRef.current.join(' ');
     while (vadPendingResultsRef.current.has(vadNextCommitSeqRef.current)) {
       const seq = vadNextCommitSeqRef.current;
       const entry = vadPendingResultsRef.current.get(seq)!;
       vadPendingResultsRef.current.delete(seq);
       vadNextCommitSeqRef.current = seq + 1;
 
-      let text = entry.text;
       if (entry.failed) {
         // Permanenter Fehler: sichtbarer Platzhalter + Audio-Blob für manuelle Wiederholung aufbewahren
-        text = '[⚠ Audio-Abschnitt nicht transkribiert – bitte wiederholen]';
+        const text = '[⚠ Audio-Abschnitt nicht transkribiert – bitte wiederholen]';
         setVadFailedUtterances(prev => [...prev, {
           seq,
           blob: entry.blob,
           error: 'Transkription nach mehreren Versuchen fehlgeschlagen',
         }]);
+        combinedCommittedText = combineFormattedText(combinedCommittedText, text);
+        didCommit = true;
+        continue;
       }
 
-      if (!text.trim()) continue;
-
-      const newCommitted = [...committedUtterancesRef.current, text];
-      committedUtterancesRef.current = newCommitted;
-      didCommit = true;
+      const nextCombinedText = applyOnlineUtteranceToCurrentText(combinedCommittedText, entry.text);
+      if (nextCombinedText !== combinedCommittedText) {
+        combinedCommittedText = nextCombinedText;
+        didCommit = true;
+      }
     }
 
     if (didCommit) {
-      const committed = committedUtterancesRef.current;
+      const committed = combinedCommittedText.trim() ? [combinedCommittedText] : [];
+      committedUtterancesRef.current = committed;
       setCommittedUtterances(committed);
       // Prompt-Kontext: letzte 2 gelockte Sätze (max. 200 Zeichen)
       const lastTwo = committed.slice(-2).join(' ');
@@ -575,8 +587,8 @@ export default function HomePage() {
     try {
       text = await transcribeUtteranceWithRetry(wavBlob, promptContext);
       if (text.trim()) {
-        // Formatierungs-Kontrollwörter und Wörterbuch anwenden
-        text = applyFormattingControlWords(text);
+        // Wörterbuch-Korrektur auf Rohtranskript anwenden; Steuerbefehle werden
+        // erst beim Commit gegen den Gesamtkontext verarbeitet.
         text = applyDictionaryToText(text);
         console.log(`[VAD] Utterance #${seq} OK:`, text.substring(0, 80));
       } else {
@@ -1186,6 +1198,9 @@ export default function HomePage() {
     
     // Update des Refs für den nächsten Satz
     fastWhisperEndsWithPeriodRef.current = endsWithPeriod;
+
+    // Online-Steuerbefehle auch im WebSocket-Pfad kontextbezogen anwenden.
+    processedText = applyOnlineDictationControlWords(processedText);
     
     // Wörterbuch-Ersetzungen anwenden
     let correctedText = applyDictionaryToText(processedText);
@@ -1235,10 +1250,8 @@ export default function HomePage() {
     const finalRef = getFinalRef();
     const existingRef = getExistingRef();
     
-    // Text akkumulieren (erst mit Wörterbuch-Korrektur)
-    finalRef.current = finalRef.current 
-      ? finalRef.current + ' ' + correctedText 
-      : correctedText;
+    // Text akkumulieren und danach Löschbefehle auf den Gesamtkontext anwenden.
+    finalRef.current = applyDeleteCommands(combineFormattedText(finalRef.current, correctedText));
     
     // Anzeige aktualisieren
     const updateDisplay = () => {
@@ -2665,28 +2678,6 @@ export default function HomePage() {
   // Ref für den Mikrofon-Button
   const recordButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Globaler Click-Handler: Klick auf nicht-interaktive Bereiche → Mikrofon-Button
-  const handleGlobalClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLElement;
-    
-    // Prüfe ob das Ziel oder ein Elternelement ein interaktives Element ist
-    const interactiveSelectors = 'button, a, input, textarea, select, [role="button"], [tabindex]:not([tabindex="-1"])';
-    const isInteractive = target.closest(interactiveSelectors);
-    
-    // Prüfe ob ein Textfeld fokussiert ist (blinkender Cursor)
-    const activeElement = document.activeElement;
-    const isEditing = activeElement?.tagName === 'TEXTAREA' || activeElement?.tagName === 'INPUT';
-    
-    // Wenn nicht interaktiv und nicht am Editieren, toggle Aufnahme
-    if (!isInteractive && !isEditing) {
-      if (recording) {
-        stopRecording();
-      } else {
-        startRecording();
-      }
-    }
-  }, [recording, startRecording, stopRecording]);
-
   // Rechtsklick-Handler: Löst "Neu" aus (alle Felder löschen) - nur auf nicht-interaktiven Elementen
   const handleContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
@@ -2767,7 +2758,7 @@ export default function HomePage() {
   );
 
   return (
-    <div className="space-y-3 min-h-[calc(100vh-120px)] cursor-pointer" onClick={handleGlobalClick} onContextMenu={handleContextMenu}>
+    <div className="space-y-3 min-h-[calc(100vh-120px)]" onContextMenu={handleContextMenu}>
       {/* Kompakte Steuerleiste */}
       <div className="card">
         <div className="card-body py-3 flex items-center justify-between gap-3">

@@ -247,6 +247,49 @@ export function applyFormattingControlWords(text: string): string {
 }
 
 /**
+ * Online-Modus: aggressivere Steuerwort-Ersetzung für bereits segmentierte Utterances.
+ * In VAD-/Realtime-Pfaden sind einzelne Utterances deutlich eher echte Befehle als Fließtext,
+ * deshalb werden hier auch Punkt/Komma/Bindestrich programmgesteuert umgesetzt.
+ */
+export function applyOnlineDictationControlWords(text: string): string {
+  if (!text) return text;
+
+  let result = applyFormattingControlWords(text);
+
+  const liveOnlyReplacements: Array<{ pattern: RegExp; replacement: string }> = [
+    { pattern: /\b(komma|beistrich)\b/gi, replacement: ',' },
+    { pattern: /\b(bindestrich|anstrich)\b/gi, replacement: '-' },
+    { pattern: /\bpunkt\b/gi, replacement: '.' },
+  ];
+
+  for (const { pattern, replacement } of liveOnlyReplacements) {
+    result = result.replace(pattern, replacement);
+  }
+
+  return cleanupFormatting(result);
+}
+
+/**
+ * Wendet Löschbefehle auf einen bereits kombinierten Text an.
+ * Dadurch funktionieren Befehle wie "lösche den letzten Satz" auch dann,
+ * wenn der zu löschende Inhalt in einer vorherigen Utterance liegt.
+ */
+export function applyDeleteCommands(text: string): string {
+  if (!text) return text;
+  return cleanupFormatting(handleDeleteCommands(text));
+}
+
+/**
+ * Kombiniert zwei bereits formatierte Textstücke und bereinigt Leerzeichen/
+ * Satzzeichen an der Fuge. Das verhindert Artefakte wie "Text ," oder "Text \n\n".
+ */
+export function combineFormattedText(existingText: string, incomingText: string): string {
+  if (!existingText) return cleanupFormatting(incomingText);
+  if (!incomingText) return cleanupFormatting(existingText);
+  return cleanupFormatting(`${existingText} ${incomingText}`);
+}
+
+/**
  * Apply formatting control words and return statistics about what was applied.
  * Use this version when you need to log/display the results.
  */

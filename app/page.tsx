@@ -103,6 +103,15 @@ export default function HomePage() {
   const committedUtterancesRef = useRef<string[]>([]);
   // Prompt-Kontext: Letzte 1-2 gelockte Sätze für konsistente Transkription
   const vadPromptContextRef = useRef<string>("");
+  // VAD-Sequenzierung: Garantiert reihenfolgetreue Commits und verhindert Verlust
+  // bei parallel laufenden Transkriptions-Requests (Race Condition).
+  const vadSeqCounterRef = useRef<number>(0);          // Nächste zu vergebende Seq
+  const vadNextCommitSeqRef = useRef<number>(0);       // Nächste zu committende Seq
+  const vadInFlightCountRef = useRef<number>(0);       // Anzahl laufender Requests
+  // Ergebnisse, die auf vorherige Seq warten müssen, bevor sie committet werden können
+  const vadPendingResultsRef = useRef<Map<number, { text: string; failed: boolean; blob: Blob }>>(new Map());
+  // Audio-Blobs deren Transkription dauerhaft fehlgeschlagen ist (für manuelle Wiederholung)
+  const [vadFailedUtterances, setVadFailedUtterances] = useState<Array<{ seq: number; blob: Blob; error: string }>>([]);
   
   const [transcript, setTranscript] = useState("");
   const [mode, setMode] = useState<'arztbrief' | 'befund'>('befund');
@@ -463,57 +472,129 @@ export default function HomePage() {
     return existing + separator + newText;
   }, []);
 
-  // VAD Utterance Handler: Transkribiert eine abgeschlossene Utterance und committet sie
-  const handleVadUtterance = useCallback(async (wavBlob: Blob) => {
-    setTranscribing(true);
-    try {
-      // Sende prompt_context der letzten gelockten Sätze für konsistente Transkription
-      const fd = new FormData();
-      fd.append('file', wavBlob, 'utterance.wav');
-      if (username) fd.append('username', username);
-      fd.append('speed_mode', 'turbo');
-      // Prompt-Kontext: letzte 1-2 Sätze für konsistente Groß-/Kleinschreibung
-      if (vadPromptContextRef.current) {
-        fd.append('prompt_context', vadPromptContextRef.current);
-      }
-      // Timeout: WhisperX kann bei sehr kurzen Clips hängen bleiben
+  // Transkribiert eine Utterance mit Retry-Logik. Wirft Fehler erst nach allen Versuchen.
+  const transcribeUtteranceWithRetry = useCallback(async (
+    wavBlob: Blob,
+    promptContext: string
+  ): Promise<string> => {
+    const MAX_ATTEMPTS = 3;
+    const TIMEOUT_MS = 45000; // 45s pro Versuch (Utterances können lang sein)
+    let lastError: any = null;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000); // 15s Timeout
-      const res = await fetchWithDbToken('/api/transcribe', { method: 'POST', body: fd, signal: controller.signal });
-      clearTimeout(timeout);
-      if (!res.ok) throw new Error(`Transkription fehlgeschlagen (${res.status})`);
-      const data = await res.json();
-      let text = data.text || '';
-      if (!text.trim()) return;
+      const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      try {
+        const fd = new FormData();
+        fd.append('file', wavBlob, 'utterance.wav');
+        if (username) fd.append('username', username);
+        fd.append('speed_mode', 'turbo');
+        if (promptContext) fd.append('prompt_context', promptContext);
+        const res = await fetchWithDbToken('/api/transcribe', {
+          method: 'POST',
+          body: fd,
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        return data.text || '';
+      } catch (err: any) {
+        clearTimeout(timeout);
+        lastError = err;
+        const isAbort = err?.name === 'AbortError';
+        console.warn(`[VAD] Transkriptions-Versuch ${attempt}/${MAX_ATTEMPTS} fehlgeschlagen${isAbort ? ' (Timeout)' : ''}: ${err?.message || err}`);
+        if (attempt < MAX_ATTEMPTS) {
+          // Exponentielles Backoff: 500ms, 1500ms
+          await new Promise(r => setTimeout(r, 500 * attempt * attempt));
+        }
+      }
+    }
+    throw lastError || new Error('Transkription nach mehreren Versuchen fehlgeschlagen');
+  }, [username]);
 
-      // Formatierungs-Kontrollwörter anwenden (neuer Absatz, Punkt, etc.)
-      text = applyFormattingControlWords(text);
+  // Drainiert fertige Ergebnisse in der korrekten Reihenfolge in den committed-State.
+  // Garantiert dass Utterances NIE in falscher Reihenfolge erscheinen oder verloren gehen.
+  const drainVadCommitQueue = useCallback(() => {
+    let didCommit = false;
+    while (vadPendingResultsRef.current.has(vadNextCommitSeqRef.current)) {
+      const seq = vadNextCommitSeqRef.current;
+      const entry = vadPendingResultsRef.current.get(seq)!;
+      vadPendingResultsRef.current.delete(seq);
+      vadNextCommitSeqRef.current = seq + 1;
 
-      // Wörterbuch-Korrektur pro Utterance
-      text = applyDictionaryToText(text);
+      let text = entry.text;
+      if (entry.failed) {
+        // Permanenter Fehler: sichtbarer Platzhalter + Audio-Blob für manuelle Wiederholung aufbewahren
+        text = '[⚠ Audio-Abschnitt nicht transkribiert – bitte wiederholen]';
+        setVadFailedUtterances(prev => [...prev, {
+          seq,
+          blob: entry.blob,
+          error: 'Transkription nach mehreren Versuchen fehlgeschlagen',
+        }]);
+      }
 
-      console.log('[VAD] Utterance committed:', text.substring(0, 80));
+      if (!text.trim()) continue;
 
-      // Utterance committen (locken)
       const newCommitted = [...committedUtterancesRef.current, text];
       committedUtterancesRef.current = newCommitted;
-      setCommittedUtterances(newCommitted);
-      setTentativeText('');
-
-      // Prompt-Kontext aktualisieren: letzte 2 Sätze
-      const lastTwo = newCommitted.slice(-2).join(' ');
-      vadPromptContextRef.current = lastTwo.length > 200 ? lastTwo.slice(-200) : lastTwo;
-
-      // Transcript State synchronisieren (für Export, Korrektur etc.)
-      const allText = [existingTextRef.current, ...newCommitted].filter(t => t.trim()).join(' ');
-      setTranscript(allText);
-    } catch (err: any) {
-      console.error('[VAD] Utterance transcription error:', err.message);
-      setError(err.message || 'Utterance-Transkription fehlgeschlagen');
-    } finally {
-      setTranscribing(false);
+      didCommit = true;
     }
-  }, [username, applyDictionaryToText]);
+
+    if (didCommit) {
+      const committed = committedUtterancesRef.current;
+      setCommittedUtterances(committed);
+      // Prompt-Kontext: letzte 2 gelockte Sätze (max. 200 Zeichen)
+      const lastTwo = committed.slice(-2).join(' ');
+      vadPromptContextRef.current = lastTwo.length > 200 ? lastTwo.slice(-200) : lastTwo;
+      // Transcript-State synchronisieren (für Export, Korrektur etc.)
+      const allText = [existingTextRef.current, ...committed].filter(t => t.trim()).join(' ');
+      setTranscript(allText);
+    }
+
+    // Tentative nur löschen, wenn keine Requests mehr in flight sind
+    if (vadInFlightCountRef.current === 0 && vadPendingResultsRef.current.size === 0) {
+      setTentativeText('');
+    }
+  }, []);
+
+  // VAD Utterance Handler: Reiht Utterance reihenfolgetreu ein, retried bei Fehlern.
+  // GARANTIE: Eine Utterance geht NIE verloren – bei permanentem Fehler wird ein
+  // sichtbarer Platzhalter eingefügt und der Audio-Blob für manuelle Wiederholung gespeichert.
+  const handleVadUtterance = useCallback(async (wavBlob: Blob) => {
+    // Sequenznummer SOFORT vergeben, damit die Reihenfolge der eingehenden
+    // Utterances erhalten bleibt, auch wenn Transkriptionen unterschiedlich lange dauern.
+    const seq = vadSeqCounterRef.current++;
+    const promptContext = vadPromptContextRef.current;
+
+    vadInFlightCountRef.current += 1;
+    setTranscribing(true);
+
+    let text = '';
+    let failed = false;
+    try {
+      text = await transcribeUtteranceWithRetry(wavBlob, promptContext);
+      if (text.trim()) {
+        // Formatierungs-Kontrollwörter und Wörterbuch anwenden
+        text = applyFormattingControlWords(text);
+        text = applyDictionaryToText(text);
+        console.log(`[VAD] Utterance #${seq} OK:`, text.substring(0, 80));
+      } else {
+        console.log(`[VAD] Utterance #${seq}: leeres Transkript (Stille / nicht erkannt)`);
+      }
+    } catch (err: any) {
+      failed = true;
+      console.error(`[VAD] Utterance #${seq} ENDGÜLTIG fehlgeschlagen:`, err?.message || err);
+      setError(`⚠ Audio-Abschnitt #${seq + 1} konnte nicht transkribiert werden (${err?.message || 'Fehler'}). Audio bleibt erhalten – bitte wiederholen.`);
+    } finally {
+      vadPendingResultsRef.current.set(seq, { text, failed, blob: wavBlob });
+      vadInFlightCountRef.current = Math.max(0, vadInFlightCountRef.current - 1);
+      drainVadCommitQueue();
+      if (vadInFlightCountRef.current === 0 && vadPendingResultsRef.current.size === 0) {
+        setTranscribing(false);
+      }
+    }
+  }, [transcribeUtteranceWithRetry, applyDictionaryToText, drainVadCommitQueue]);
 
   // VAD Speech Start: Tentative-Anzeige aktivieren
   const handleVadSpeechStart = useCallback(() => {
@@ -754,6 +835,11 @@ export default function HomePage() {
     committedUtterancesRef.current = [];
     setTentativeText('');
     vadPromptContextRef.current = '';
+    vadSeqCounterRef.current = 0;
+    vadNextCommitSeqRef.current = 0;
+    vadInFlightCountRef.current = 0;
+    vadPendingResultsRef.current.clear();
+    setVadFailedUtterances([]);
   }, []);
 
   // Revert-Funktion: Stellt den Text vor der letzten Korrektur wieder her
@@ -1538,6 +1624,12 @@ export default function HomePage() {
       setCommittedUtterances([]);
       setTentativeText('');
       vadPromptContextRef.current = '';
+      // Sequenz-State für neue Session zurücksetzen (verhindert Verschlucken / falsche Reihenfolge)
+      vadSeqCounterRef.current = 0;
+      vadNextCommitSeqRef.current = 0;
+      vadInFlightCountRef.current = 0;
+      vadPendingResultsRef.current.clear();
+      setVadFailedUtterances([]);
 
       try {
         await vad.start();

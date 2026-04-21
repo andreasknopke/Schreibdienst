@@ -25,12 +25,15 @@ export interface DictionaryEntry {
  * will also correct "Scholezystitis" -> "Cholezystitis").
  */
 export function applyDictionaryCorrections(text: string, entries: DictionaryEntry[], standardEntries?: { wrong: string; correct: string }[]): string {
-  if (!text || !entries || entries.length === 0) {
+  if (!text) {
     return text;
   }
 
   // Merge mit Standard-Wörterbuch (aus DB wenn vorhanden, sonst hardcodiert)
-  const mergedEntries = mergeWithStandardDictionary(entries, standardEntries);
+  const mergedEntries = mergeWithStandardDictionary(entries ?? [], standardEntries);
+  if (mergedEntries.length === 0) {
+    return text;
+  }
 
   let result = text;
   let replacementCount = 0;
@@ -795,8 +798,10 @@ export function preprocessTranscription(text: string, dictionaryEntries?: Dictio
   result = applyFormattingControlWords(result);
   
   // Step 3: Apply dictionary corrections (if entries provided, logs automatically if any applied)
-  if (dictionaryEntries && dictionaryEntries.length > 0) {
-    result = applyDictionaryCorrections(result, dictionaryEntries, standardEntries);
+  const hasDictionaryEntries = (dictionaryEntries?.length ?? 0) > 0;
+  const hasStandardEntries = (standardEntries?.length ?? 0) > 0;
+  if (hasDictionaryEntries || hasStandardEntries) {
+    result = applyDictionaryCorrections(result, dictionaryEntries ?? [], standardEntries);
   }
   
   return result;

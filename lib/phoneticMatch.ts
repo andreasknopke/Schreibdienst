@@ -166,6 +166,20 @@ export interface PhoneticDictEntry {
   wrongPhonetic: string;  // Kölner Phonetik Code von "wrong"
   wrongNorm: string;      // Normalisiertes "wrong"
   correctPhonetic: string;// Kölner Phonetik Code von "correct"
+  isSelfMapping: boolean; // Reiner Fachbegriff ohne explizite Fehlvariante
+}
+
+const EXPLICIT_MATCH_SIMILARITY = 0.5;
+const EXPLICIT_VARIATION_SIMILARITY = 0.45;
+const SELF_MAPPING_MATCH_SIMILARITY = 0.82;
+const SELF_MAPPING_VARIATION_SIMILARITY = 0.88;
+
+function getSimilarityThreshold(candidate: PhoneticDictEntry, viaVariation: boolean): number {
+  if (candidate.isSelfMapping) {
+    return viaVariation ? SELF_MAPPING_VARIATION_SIMILARITY : SELF_MAPPING_MATCH_SIMILARITY;
+  }
+
+  return viaVariation ? EXPLICIT_VARIATION_SIMILARITY : EXPLICIT_MATCH_SIMILARITY;
 }
 
 /**
@@ -188,6 +202,7 @@ export function buildPhoneticIndex(entries: { wrong: string; correct: string }[]
       wrongPhonetic: colognePhonetic(entry.wrong),
       wrongNorm: normalizeForComparison(entry.wrong),
       correctPhonetic: colognePhonetic(entry.correct),
+      isSelfMapping: normalizeForComparison(entry.wrong) === normalizeForComparison(entry.correct),
     };
     allEntries.push(pe);
 
@@ -280,8 +295,9 @@ export function findPhoneticMatch(
       const dist = levenshtein(wordNorm, cand.wrongNorm);
       const maxLen = Math.max(wordNorm.length, cand.wrongNorm.length);
       const similarity = 1 - (dist / maxLen);
+      const minSimilarity = getSimilarityThreshold(cand, false);
 
-      if (similarity >= 0.5) {
+      if (similarity >= minSimilarity) {
         const confidence = 0.5 + (similarity * 0.5);
         if (!bestMatch || confidence > bestMatch.confidence) {
           bestMatch = { correct: cand.correct, confidence };
@@ -302,8 +318,9 @@ export function findPhoneticMatch(
         const dist = levenshtein(wordNorm, cand.wrongNorm);
         const maxLen = Math.max(wordNorm.length, cand.wrongNorm.length);
         const similarity = 1 - (dist / maxLen);
+        const minSimilarity = getSimilarityThreshold(cand, true);
 
-        if (similarity >= 0.45) {
+        if (similarity >= minSimilarity) {
           const confidence = 0.4 + (similarity * 0.5);
           if (!bestMatch || confidence > bestMatch.confidence) {
             bestMatch = { correct: cand.correct, confidence };

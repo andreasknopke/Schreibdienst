@@ -25,6 +25,7 @@ export default function StandardDictionaryManager() {
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [bulkText, setBulkText] = useState('');
   const [importing, setImporting] = useState(false);
+  const [importingMedicalTerms, setImportingMedicalTerms] = useState(false);
 
   const fetchEntries = async () => {
     try {
@@ -152,6 +153,37 @@ export default function StandardDictionaryManager() {
     fetchEntries();
   };
 
+  const handleImportMedicalTerms = async () => {
+    const confirmed = confirm(
+      'Die externe Liste wird live von GitHub geladen und als Self-Mappings in das Standard-Wörterbuch importiert. Die Quelle steht laut Upstream unter GPL v3. Fortfahren?'
+    );
+    if (!confirmed) return;
+
+    setImportingMedicalTerms(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await fetch('/api/standard-dictionary', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': getAuthHeader(), ...getDbTokenHeader() },
+        body: JSON.stringify({ action: 'import-glutanimate-medicalterms' })
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setSuccess(`${data.imported} MedicalTerms importiert${data.skipped > 0 ? `, ${data.skipped} bereits vorhanden` : ''}`);
+        fetchEntries();
+      } else {
+        setError(data.error || 'Fehler beim Import');
+      }
+    } catch {
+      setError('Verbindungsfehler');
+    } finally {
+      setImportingMedicalTerms(false);
+    }
+  };
+
   // Gefilterte Einträge
   const filtered = filter
     ? entries.filter(e => 
@@ -222,6 +254,14 @@ export default function StandardDictionaryManager() {
               className="text-xs text-orange-600 hover:text-orange-800 dark:text-orange-400"
             >
               Werkseinstellungen
+            </button>
+            <button
+              type="button"
+              onClick={handleImportMedicalTerms}
+              className="text-xs text-teal-600 hover:text-teal-800 dark:text-teal-400"
+              disabled={importingMedicalTerms}
+            >
+              {importingMedicalTerms ? 'Importiere MedicalTerms...' : 'MedicalTerms importieren'}
             </button>
           </div>
           <button type="submit" className="btn btn-primary text-sm" disabled={adding}>

@@ -8,6 +8,8 @@ import { query, execute, queryWithRequest, executeWithRequest, tableExistsCache 
 import { STANDARD_DICTIONARY } from './standardDictionary';
 
 const AUTO_SELF_MAPPING_CATEGORY = 'auto-self-mapping';
+const EXTERNAL_MEDICALTERMS_CATEGORY = 'external-medicalterms-de';
+const GLUTANIMATE_MEDICALTERMS_URL = 'https://raw.githubusercontent.com/glutanimate/wordlist-medicalterms-de/master/wordlist.txt';
 
 export interface StandardDictDbEntry {
   id: number;
@@ -25,6 +27,12 @@ export interface StandardDictEntry {
 
 // Tracking ob Tabelle+Seed schon geprüft wurde (pro Pool)
 const tableCheckedPools = new Set<string>();
+
+type StandardDictSeedEntry = {
+  wrong: string;
+  correct: string;
+  category: string;
+};
 
 /**
  * Stellt sicher, dass die Tabelle existiert und mit Seed-Daten befüllt ist.
@@ -73,29 +81,55 @@ async function ensureTable(request?: NextRequest): Promise<void> {
  * Befüllt die DB-Tabelle mit den hardcodierten Seed-Daten.
  */
 async function seedFromHardcoded(request?: NextRequest): Promise<void> {
-  // Kategorie aus dem Array-Index ableiten
-  let currentCategory = '';
   const categorized: { wrong: string; correct: string; category: string }[] = [];
 
   for (const entry of STANDARD_DICTIONARY) {
     categorized.push({ ...entry, category: '' });
   }
 
+  await insertStandardEntries(request, categorized);
+
+  console.log('[StandardDict] Seed-Daten eingefügt:', categorized.length, 'Einträge');
+}
+
+async function insertStandardEntries(request: NextRequest | undefined, entries: StandardDictSeedEntry[]): Promise<number> {
+  let inserted = 0;
+
   // Batch-Insert in Gruppen von 50
-  for (let i = 0; i < categorized.length; i += 50) {
-    const batch = categorized.slice(i, i + 50);
+  for (let i = 0; i < entries.length; i += 50) {
+    const batch = entries.slice(i, i + 50);
     const placeholders = batch.map(() => '(?, ?, ?)').join(', ');
     const params = batch.flatMap(e => [e.wrong, e.correct, e.category]);
 
     const sql = `INSERT IGNORE INTO standard_dictionary (wrong_word, correct_word, category) VALUES ${placeholders}`;
     if (request) {
-      await executeWithRequest(request, sql, params);
+      const result = await executeWithRequest(request, sql, params);
+      inserted += result.affectedRows ?? 0;
     } else {
-      await execute(sql, params);
+      const result = await execute(sql, params);
+      inserted += result.affectedRows ?? 0;
     }
   }
 
-  console.log('[StandardDict] Seed-Daten eingefügt:', categorized.length, 'Einträge');
+  return inserted;
+}
+
+function parseExternalMedicalTermsWordlist(wordlistText: string): string[] {
+  const seen = new Set<string>();
+  const terms: string[] = [];
+
+  for (const rawLine of wordlistText.split(/\r?\n/)) {
+    const term = rawLine.replace(/^\uFEFF/, '').trim();
+    if (!term || term === '---' || term.startsWith('#')) continue;
+
+    const key = term.toLowerCase();
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    terms.push(term);
+  }
+
+  return terms;
 }
 
 /**
@@ -218,5 +252,49 @@ export async function resetStandardDict(request: NextRequest): Promise<{ success
   } catch (error: any) {
     console.error('[StandardDict] Reset error:', error);
     return { success: false, count: 0, error: error.message };
+  }
+}
+
+export async function importGlutanimateMedicalTerms(request: NextRequest): Promise<{ success: boolean; imported: number; skipped: number; total: number; error?: string }> {
+  try {
+    await ensureTable(request);
+
+    const response = await fetch(GLUTANIMATE_MEDICALTERMS_URL, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} beim Laden der externen Wortliste`);
+    }
+
+    const wordlistText = await response.text();
+    const terms = parseExternalMedicalTermsWordlist(wordlistText);
+    const entries = terms.map((term) => ({
+      wrong: term,
+      correct: term,
+      category: EXTERNAL_MEDICALTERMS_CATEGORY,
+    }));
+
+    const imported = await insertStandardEntries(request, entries);
+    const skipped = entries.length - imported;
+
+    console.log('[StandardDict] Externe MedicalTerms-Liste importiert:', { imported, skipped, total: entries.length });
+
+    return {
+      success: true,
+      imported,
+      skipped,
+      total: entries.length,
+    };
+  } catch (error: any) {
+    console.error('[StandardDict] External import error:', error);
+    return {
+      success: false,
+      imported: 0,
+      skipped: 0,
+      total: 0,
+      error: error.message,
+    };
   }
 }

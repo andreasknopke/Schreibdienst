@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
-import { getStandardDictEntries, addStandardDictEntry, removeStandardDictEntry, resetStandardDict } from '@/lib/standardDictionaryDb';
+import { getStandardDictEntries, addStandardDictEntry, removeStandardDictEntry, resetStandardDict, importGlutanimateMedicalTerms } from '@/lib/standardDictionaryDb';
 
 // Auth-Prüfung: nur Admins dürfen das Standard-Wörterbuch bearbeiten
 async function getAuthenticatedAdmin(request: NextRequest): Promise<{ username: string; isAdmin: boolean } | null> {
@@ -112,6 +112,20 @@ export async function PATCH(request: NextRequest) {
       const result = await resetStandardDict(request);
       if (result.success) {
         return NextResponse.json({ success: true, count: result.count, message: 'Standard-Wörterbuch zurückgesetzt' });
+      }
+      return NextResponse.json({ error: result.error }, { status: 500 });
+    }
+
+    if (body.action === 'import-glutanimate-medicalterms') {
+      const result = await importGlutanimateMedicalTerms(request);
+      if (result.success) {
+        return NextResponse.json({
+          success: true,
+          imported: result.imported,
+          skipped: result.skipped,
+          total: result.total,
+          message: 'Externe MedicalTerms-Wortliste importiert',
+        });
       }
       return NextResponse.json({ error: result.error }, { status: 500 });
     }

@@ -153,11 +153,14 @@ export function levenshtein(a: string, b: string): number {
 }
 
 /**
- * Normalisiert ein Wort für den Vergleich: Lowercase, Umlaute auflösen.
+ * Normalisiert ein Wort für den Vergleich: Lowercase, Umlaute auflösen,
+ * Trenner entfernen. Bindestriche und Leerzeichen sollen beim
+ * Ähnlichkeitsvergleich nicht als echter Buchstabenfehler zählen.
  */
 function normalizeForComparison(word: string): string {
   return word.toLowerCase()
-    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+    .replace(/[^a-z]/g, '');
 }
 
 export interface PhoneticDictEntry {
@@ -172,7 +175,7 @@ export interface PhoneticDictEntry {
 const EXPLICIT_MATCH_SIMILARITY = 0.5;
 const EXPLICIT_VARIATION_SIMILARITY = 0.45;
 const SELF_MAPPING_MATCH_SIMILARITY = 0.82;
-const SELF_MAPPING_VARIATION_SIMILARITY = 0.88;
+const SELF_MAPPING_VARIATION_SIMILARITY = 0.85;
 
 function getSimilarityThreshold(candidate: PhoneticDictEntry, viaVariation: boolean): number {
   if (candidate.isSelfMapping) {

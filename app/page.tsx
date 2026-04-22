@@ -110,6 +110,7 @@ export default function HomePage() {
   const vadSeqCounterRef = useRef<number>(0);          // Nächste zu vergebende Seq
   const vadNextCommitSeqRef = useRef<number>(0);       // Nächste zu committende Seq
   const vadInFlightCountRef = useRef<number>(0);       // Anzahl laufender Requests
+  const vadSessionIdRef = useRef<number>(0);           // Trennt alte von neuen Aufnahme-Sessions
   // Ergebnisse, die auf vorherige Seq warten müssen, bevor sie committet werden können
   const vadPendingResultsRef = useRef<Map<number, { text: string; failed: boolean; blob: Blob }>>(new Map());
   // Audio-Blobs deren Transkription dauerhaft fehlgeschlagen ist (für manuelle Wiederholung)
@@ -590,6 +591,7 @@ export default function HomePage() {
   // GARANTIE: Eine Utterance geht NIE verloren – bei permanentem Fehler wird ein
   // sichtbarer Platzhalter eingefügt und der Audio-Blob für manuelle Wiederholung gespeichert.
   const handleVadUtterance = useCallback(async (wavBlob: Blob) => {
+    const sessionId = vadSessionIdRef.current;
     // Sequenznummer SOFORT vergeben, damit die Reihenfolge der eingehenden
     // Utterances erhalten bleibt, auch wenn Transkriptionen unterschiedlich lange dauern.
     const seq = vadSeqCounterRef.current++;
@@ -619,6 +621,11 @@ export default function HomePage() {
       console.error(`[VAD] Utterance #${seq} ENDGÜLTIG fehlgeschlagen:`, err?.message || err);
       setError(`⚠ Audio-Abschnitt #${seq + 1} konnte nicht transkribiert werden (${err?.message || 'Fehler'}). Audio bleibt erhalten – bitte wiederholen.`);
     } finally {
+      if (sessionId !== vadSessionIdRef.current) {
+        console.log(`[VAD] Drop stale utterance #${seq} from session ${sessionId}`);
+        return;
+      }
+
       vadPendingResultsRef.current.set(seq, { text, failed, blob: wavBlob });
       vadInFlightCountRef.current = Math.max(0, vadInFlightCountRef.current - 1);
       drainVadCommitQueue();
@@ -849,6 +856,7 @@ export default function HomePage() {
 
   // Funktion zum Zurücksetzen aller Felder (New-Button) - hier oben für Hotkey-Unterstützung
   const handleReset = useCallback(() => {
+    vadSessionIdRef.current += 1;
     setTranscript('');
     setMethodik('');
     setBeurteilung('');
@@ -1653,6 +1661,7 @@ export default function HomePage() {
     
     if (useVadMode) {
       // VAD-Modus: Kein MediaRecorder, VAD übernimmt Mikrofon und liefert Utterances
+      vadSessionIdRef.current += 1;
       committedUtterancesRef.current = [];
       setCommittedUtterances([]);
       setTentativeText('');

@@ -18,6 +18,12 @@ import { useCallback, useRef, useState } from 'react';
 
 // Max. Dauer einer Utterance bevor Auto-Chunk greift (Sekunden)
 const MAX_UTTERANCE_SECONDS = 8;
+const WAV_HEADER_BYTES = 44;
+const WAV_BYTES_PER_SECOND = 16000 * 2;
+
+function estimateWavDurationSeconds(blobSize: number): number {
+  return Math.max(0, (blobSize - WAV_HEADER_BYTES) / WAV_BYTES_PER_SECOND);
+}
 
 // Dynamischer Import damit SSR nicht crasht
 let MicVADImport: any = null;
@@ -59,6 +65,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
   // Auto-Chunk: Sammelt Frames seit Sprechbeginn für forced flush
   const speechFramesRef = useRef<Float32Array[]>([]);
   const speechStartTimeRef = useRef<number>(0);
+  const isSpeechActiveRef = useRef(false);
   const autoChunkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const utilsRef = useRef<any>(null);
   // Trackt wieviele Samples bereits per Auto-Chunk gesendet wurden
@@ -100,17 +107,21 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
 
       // Tuning: etwas konservativer, damit kurze Denk-/Atempausen
       // nicht mitten im Satz ein Utterance beenden.
-      positiveSpeechThreshold: 0.5,
+      // Etwas empfindlicherer Start, damit der Beginn leiser/komplizierter
+      // Wortfolgen nicht erst mitten in der Äußerung erkannt wird.
+      positiveSpeechThreshold: 0.42,
       negativeSpeechThreshold: 0.35,
       redemptionFrames: 10,       // ~600ms Pause bis zum Commit
-      minSpeechFrames: 5,         // Mind. ~300ms Sprache gegen Fehlzündungen
-      preSpeechPadFrames: 8,      // ~480ms Audio vor Sprechbeginn
+      minSpeechFrames: 4,         // Mind. ~240ms Sprache gegen Fehlzündungen
+      preSpeechPadFrames: 15,     // ~900ms Audio vor Sprechbeginn
 
       onSpeechStart: () => {
         setIsSpeaking(true);
+        isSpeechActiveRef.current = true;
         speechFramesRef.current = [];
         speechStartTimeRef.current = Date.now();
         samplesAlreadySentRef.current = 0;
+        console.log('[VAD] Speech start detected');
         onSpeechStart?.();
         
         // Auto-Chunk deaktiviert: Schneidet bei schnellem Sprechen mitten im Satz
@@ -119,7 +130,9 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
 
       onSpeechEnd: (audio: Float32Array) => {
         setIsSpeaking(false);
+        isSpeechActiveRef.current = false;
         speechFramesRef.current = [];
+        speechStartTimeRef.current = 0;
         if (autoChunkTimerRef.current) {
           clearTimeout(autoChunkTimerRef.current);
           autoChunkTimerRef.current = null;
@@ -132,22 +145,26 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
         padded.set(audio, 0);
         const wavBuffer = utils.encodeWAV(padded);
         const blob = new Blob([wavBuffer], { type: 'audio/wav' });
+        console.log(`[VAD] Speech end -> utterance ${estimateWavDurationSeconds(blob.size).toFixed(2)}s, ${blob.size} bytes`);
         onUtterance(blob);
       },
 
       onVADMisfire: () => {
         setIsSpeaking(false);
+        isSpeechActiveRef.current = false;
         speechFramesRef.current = [];
+        speechStartTimeRef.current = 0;
         samplesAlreadySentRef.current = 0;
         if (autoChunkTimerRef.current) {
           clearTimeout(autoChunkTimerRef.current);
           autoChunkTimerRef.current = null;
         }
+        console.log('[VAD] Misfire - speech start discarded');
       },
 
       onFrameProcessed: (_probs: any, frame: Float32Array) => {
         // Frames sammeln für Auto-Chunk (nur während Sprechen)
-        if (speechStartTimeRef.current > 0) {
+        if (isSpeechActiveRef.current && speechStartTimeRef.current > 0) {
           speechFramesRef.current.push(new Float32Array(frame));
         }
         
@@ -188,7 +205,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       autoChunkTimerRef.current = null;
     }
     // Letzte gesammelte Frames noch als Utterance senden
-    if (speechFramesRef.current.length > 0 && utilsRef.current) {
+    if (isSpeechActiveRef.current && speechFramesRef.current.length > 0 && utilsRef.current) {
       const frames = speechFramesRef.current;
       const totalLength = frames.reduce((sum, f) => sum + f.length, 0);
       if (totalLength > 1600) { // mind. 100ms Audio
@@ -204,11 +221,13 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
         padded.set(combined, 0);
         const wavBuffer = utilsRef.current.encodeWAV(padded);
         const blob = new Blob([wavBuffer], { type: 'audio/wav' });
+        console.log(`[VAD] Stop flush -> utterance ${estimateWavDurationSeconds(blob.size).toFixed(2)}s, ${blob.size} bytes`);
         onUtterance(blob);
       }
     }
     speechFramesRef.current = [];
     speechStartTimeRef.current = 0;
+    isSpeechActiveRef.current = false;
     
     if (vadRef.current) {
       vadRef.current.destroy();

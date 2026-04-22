@@ -530,6 +530,12 @@ export default function HomePage() {
     throw lastError || new Error('Transkription nach mehreren Versuchen fehlgeschlagen');
   }, [username]);
 
+  const estimateWavDurationSeconds = useCallback((blob: Blob): number => {
+    const wavHeaderBytes = 44;
+    const wavBytesPerSecond = 16000 * 2;
+    return Math.max(0, (blob.size - wavHeaderBytes) / wavBytesPerSecond);
+  }, []);
+
   // Drainiert fertige Ergebnisse in der korrekten Reihenfolge in den committed-State.
   // Garantiert dass Utterances NIE in falscher Reihenfolge erscheinen oder verloren gehen.
   const drainVadCommitQueue = useCallback(() => {
@@ -587,6 +593,9 @@ export default function HomePage() {
     // Utterances erhalten bleibt, auch wenn Transkriptionen unterschiedlich lange dauern.
     const seq = vadSeqCounterRef.current++;
     const promptContext = vadPromptContextRef.current;
+    const approxDurationSeconds = estimateWavDurationSeconds(wavBlob);
+
+    console.log(`[VAD] Queue utterance #${seq}: ${approxDurationSeconds.toFixed(2)}s, ${wavBlob.size} bytes, promptContext=${promptContext.length} chars`);
 
     vadInFlightCountRef.current += 1;
     setTranscribing(true);
@@ -601,7 +610,7 @@ export default function HomePage() {
         text = applyDictionaryToText(text);
         console.log(`[VAD] Utterance #${seq} OK:`, text.substring(0, 80));
       } else {
-        console.log(`[VAD] Utterance #${seq}: leeres Transkript (Stille / nicht erkannt)`);
+        console.warn(`[VAD] Utterance #${seq}: leeres Transkript (${approxDurationSeconds.toFixed(2)}s, ${wavBlob.size} bytes)`);
       }
     } catch (err: any) {
       failed = true;
@@ -615,7 +624,7 @@ export default function HomePage() {
         setTranscribing(false);
       }
     }
-  }, [transcribeUtteranceWithRetry, applyDictionaryToText, drainVadCommitQueue]);
+  }, [transcribeUtteranceWithRetry, applyDictionaryToText, drainVadCommitQueue, estimateWavDurationSeconds]);
 
   // VAD Speech Start: Tentative-Anzeige aktivieren
   const handleVadSpeechStart = useCallback(() => {

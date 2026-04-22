@@ -8,6 +8,14 @@ interface StandardDictEntry {
   category?: string;
 }
 
+const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
+
+function notifyStandardDictionaryChanged() {
+  window.dispatchEvent(new CustomEvent(DICTIONARY_CHANGED_EVENT, {
+    detail: { scope: 'standard' }
+  }));
+}
+
 export default function StandardDictionaryManager() {
   const { getAuthHeader, getDbTokenHeader } = useAuth();
   const [entries, setEntries] = useState<StandardDictEntry[]>([]);
@@ -64,7 +72,8 @@ export default function StandardDictionaryManager() {
         setSuccess(`"${wrong}" → "${correct}" hinzugefügt${autoMappingHint}`);
         setWrong('');
         setCorrect('');
-        fetchEntries();
+        await fetchEntries();
+        notifyStandardDictionaryChanged();
       } else {
         setError(data.error || 'Fehler');
       }
@@ -88,6 +97,7 @@ export default function StandardDictionaryManager() {
       if (data.success) {
         setEntries(prev => prev.filter(e => e.wrong !== wrongWord));
         setSuccess(`"${wrongWord}" gelöscht`);
+        notifyStandardDictionaryChanged();
       } else {
         setError(data.error || 'Fehler');
       }
@@ -109,7 +119,8 @@ export default function StandardDictionaryManager() {
       const data = await response.json();
       if (data.success) {
         setSuccess(`Zurückgesetzt auf ${data.count} Standard-Einträge`);
-        fetchEntries();
+        await fetchEntries();
+        notifyStandardDictionaryChanged();
       } else {
         setError(data.error || 'Fehler');
       }
@@ -150,7 +161,8 @@ export default function StandardDictionaryManager() {
     setBulkText('');
     setShowBulkImport(false);
     setImporting(false);
-    fetchEntries();
+    await fetchEntries();
+    notifyStandardDictionaryChanged();
   };
 
   const handleImportMedicalTerms = async () => {
@@ -173,7 +185,8 @@ export default function StandardDictionaryManager() {
 
       if (response.ok && data.success) {
         setSuccess(`${data.imported} MedicalTerms importiert${data.skipped > 0 ? `, ${data.skipped} bereits vorhanden` : ''}`);
-        fetchEntries();
+        await fetchEntries();
+        notifyStandardDictionaryChanged();
       } else {
         setError(data.error || 'Fehler beim Import');
       }

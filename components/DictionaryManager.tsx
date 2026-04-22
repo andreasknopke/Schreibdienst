@@ -14,6 +14,14 @@ interface DictionaryManagerProps {
   initialWrong?: string;
 }
 
+const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
+
+function notifyDictionaryChanged() {
+  window.dispatchEvent(new CustomEvent(DICTIONARY_CHANGED_EVENT, {
+    detail: { scope: 'private' }
+  }));
+}
+
 export default function DictionaryManager({ initialWrong = '' }: DictionaryManagerProps) {
   const { getAuthHeader, getDbTokenHeader } = useAuth();
   const [entries, setEntries] = useState<DictionaryEntry[]>([]);
@@ -91,7 +99,8 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
         setCorrect('');
         setUseInPrompt(false);
         setMatchStem(false);
-        fetchEntries();
+        await fetchEntries();
+        notifyDictionaryChanged();
       } else {
         setError(data.error || 'Fehler beim Hinzufügen');
       }
@@ -133,6 +142,7 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
             ? { ...e, useInPrompt: newUseInPrompt, matchStem: newMatchStem }
             : e
         ));
+        notifyDictionaryChanged();
       } else {
         setError(data.error || 'Fehler beim Aktualisieren');
       }
@@ -165,7 +175,8 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
 
       if (data.success) {
         setSuccess(`"${wrongWord}" gelöscht`);
-        fetchEntries();
+        await fetchEntries();
+        notifyDictionaryChanged();
       } else {
         setError(data.error || 'Fehler beim Löschen');
       }

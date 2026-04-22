@@ -17,6 +17,7 @@ import { useVadChunking } from '@/lib/useVadChunking';
 
 // Identifier für PowerShell Clipboard-Listener (RadCentre Integration)
 const CLIPBOARD_IDENTIFIER = '##RAD##';
+const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 
 // Hilfsfunktion zum Kopieren in Zwischenablage mit Identifier
 async function copyToClipboard(text: string): Promise<void> {
@@ -410,6 +411,22 @@ export default function HomePage() {
       fetchStandardDictionary();
     }
   }, [username, fetchDictionary, fetchStandardDictionary]);
+
+  useEffect(() => {
+    const handleDictionaryChanged = (event: Event) => {
+      const customEvent = event as CustomEvent<{ scope?: string }>;
+      if (customEvent.detail?.scope === 'private') {
+        fetchDictionary();
+      }
+
+      if (customEvent.detail?.scope === 'standard') {
+        fetchStandardDictionary();
+      }
+    };
+
+    window.addEventListener(DICTIONARY_CHANGED_EVENT, handleDictionaryChanged);
+    return () => window.removeEventListener(DICTIONARY_CHANGED_EVENT, handleDictionaryChanged);
+  }, [fetchDictionary, fetchStandardDictionary]);
 
   // Event-Listener für Template-Aktualisierungen (wenn Templates im Modal geändert werden)
   useEffect(() => {

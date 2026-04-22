@@ -399,10 +399,12 @@ export function applyPhoneticCorrections(
 
       // Wörter zusammenfügen (ohne Leerzeichen)
       const words = positions.map(p => parts[p]);
+      const normalizedWords = words.map(word => normalizeForComparison(word));
       
       // Stoppwörter dürfen nicht am Rand des Fensters stehen
       // (sie könnten versehentlich mitgezogen werden)
       if (stopWords.has(words[0].toLowerCase()) || stopWords.has(words[words.length - 1].toLowerCase())) continue;
+      if (normalizedWords.some(word => word.length === 0)) continue;
       
       const combined = words.join('');
       

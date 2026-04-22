@@ -282,9 +282,10 @@ export function findPhoneticMatch(
   index: { byPhoneticCode: Map<string, PhoneticDictEntry[]>; allEntries: PhoneticDictEntry[] },
   minWordLength: number = 5
 ): { correct: string; confidence: number } | null {
-  if (!word || word.length < minWordLength) return null;
-
+  if (!word) return null;
   const wordNorm = normalizeForComparison(word);
+  if (wordNorm.length < minWordLength) return null;
+
   const wordPhonetic = colognePhonetic(word);
 
   if (!wordPhonetic) return null;

@@ -18,6 +18,7 @@ import { useVadChunking } from '@/lib/useVadChunking';
 // Identifier für PowerShell Clipboard-Listener (RadCentre Integration)
 const CLIPBOARD_IDENTIFIER = '##RAD##';
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
+const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
 
 // Hilfsfunktion zum Kopieren in Zwischenablage mit Identifier
 async function copyToClipboard(text: string): Promise<void> {
@@ -610,6 +611,7 @@ export default function HomePage() {
         text = applyDictionaryToText(text);
         console.log(`[VAD] Utterance #${seq} OK:`, text.substring(0, 80));
       } else {
+        text = UNRECOGNIZED_UTTERANCE_PLACEHOLDER;
         console.warn(`[VAD] Utterance #${seq}: leeres Transkript (${approxDurationSeconds.toFixed(2)}s, ${wavBlob.size} bytes)`);
       }
     } catch (err: any) {

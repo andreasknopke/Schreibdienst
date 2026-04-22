@@ -98,12 +98,13 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       onnxWASMBasePath: '/',
       model: 'v5',
 
-      // Tuning: ~300ms Pause = Utterance-Ende (schnellere Reaktion)
+      // Tuning: etwas konservativer, damit kurze Denk-/Atempausen
+      // nicht mitten im Satz ein Utterance beenden.
       positiveSpeechThreshold: 0.5,
       negativeSpeechThreshold: 0.35,
-      redemptionFrames: 5,        // ~300ms Pause reicht zum Committen
-      minSpeechFrames: 3,         // Mind. ~180ms Sprache (weniger Fehlzündungs-Schutz)
-      preSpeechPadFrames: 5,      // ~300ms Audio VOR Sprechbeginn (verhindert abgeschnittene Wortanfänge)
+      redemptionFrames: 10,       // ~600ms Pause bis zum Commit
+      minSpeechFrames: 5,         // Mind. ~300ms Sprache gegen Fehlzündungen
+      preSpeechPadFrames: 8,      // ~480ms Audio vor Sprechbeginn
 
       onSpeechStart: () => {
         setIsSpeaking(true);
@@ -124,9 +125,9 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
           autoChunkTimerRef.current = null;
         }
         
-        // Padding anhängen: 0.3s Stille NACH dem Audio, damit WhisperX
-        // das letzte Wort nicht verschluckt (besonders bei Einzelwörtern)
-        const padSamples = Math.round(0.3 * 16000); // 300ms bei 16kHz
+        // Etwas mehr Nachlauf-Stille hilft, dass Endsilben und das letzte
+        // Wort am Chunk-Ende nicht abgeschnitten werden.
+        const padSamples = Math.round(0.45 * 16000); // 450ms bei 16kHz
         const padded = new Float32Array(audio.length + padSamples);
         padded.set(audio, 0);
         const wavBuffer = utils.encodeWAV(padded);
@@ -197,7 +198,11 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
           combined.set(frame, offset);
           offset += frame.length;
         }
-        const wavBuffer = utilsRef.current.encodeWAV(combined);
+
+        const padSamples = Math.round(0.45 * 16000);
+        const padded = new Float32Array(combined.length + padSamples);
+        padded.set(combined, 0);
+        const wavBuffer = utilsRef.current.encodeWAV(padded);
         const blob = new Blob([wavBuffer], { type: 'audio/wav' });
         onUtterance(blob);
       }

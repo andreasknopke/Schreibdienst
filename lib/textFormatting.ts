@@ -453,7 +453,18 @@ function applyStandaloneDeleteCommand(currentText: string, commandText: string):
  * Text angewendet. Dadurch löscht "lösche den letzten Satz" zuverlässig den
  * vorherigen Satz statt den aktuellen Befehls-Chunk.
  */
-export function applyOnlineUtteranceToText(currentText: string, utteranceText: string): string {
+export interface OnlineUtteranceApplicationDebugStep {
+  kind: 'append' | 'command';
+  input: string;
+  changed: boolean;
+  commandType?: OnlineCommandType;
+}
+
+export function applyOnlineUtteranceToText(
+  currentText: string,
+  utteranceText: string,
+  onDebugStep?: (step: OnlineUtteranceApplicationDebugStep) => void
+): string {
   if (!utteranceText.trim()) return cleanupFormatting(currentText);
 
   let result = currentText;
@@ -462,15 +473,37 @@ export function applyOnlineUtteranceToText(currentText: string, utteranceText: s
   while (cursor < utteranceText.length) {
     const nextCommand = findNextOnlineCommand(utteranceText, cursor);
     if (!nextCommand) {
-      result = appendOnlineText(result, utteranceText.slice(cursor));
+      const input = utteranceText.slice(cursor);
+      const before = result;
+      result = appendOnlineText(result, input);
+      onDebugStep?.({
+        kind: 'append',
+        input,
+        changed: result !== before,
+      });
       break;
     }
 
     if (nextCommand.index > cursor) {
-      result = appendOnlineText(result, utteranceText.slice(cursor, nextCommand.index));
+      const input = utteranceText.slice(cursor, nextCommand.index);
+      const before = result;
+      result = appendOnlineText(result, input);
+      onDebugStep?.({
+        kind: 'append',
+        input,
+        changed: result !== before,
+      });
     }
 
+    const commandText = utteranceText.slice(nextCommand.index, nextCommand.index + nextCommand.length);
+    const before = result;
     result = applyOnlineCommand(result, nextCommand.type);
+    onDebugStep?.({
+      kind: 'command',
+      input: commandText,
+      commandType: nextCommand.type,
+      changed: result !== before,
+    });
     cursor = nextCommand.index + nextCommand.length;
   }
 

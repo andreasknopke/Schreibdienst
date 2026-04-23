@@ -6,7 +6,7 @@ import Spinner from '@/components/Spinner';
 import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
-import { applyDeleteCommands, applyFormattingControlWords, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, preprocessTranscription } from '@/lib/textFormatting';
+import { applyDeleteCommands, applyFormattingControlWords, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, preprocessTranscription, type OnlineUtteranceApplicationDebugStep } from '@/lib/textFormatting';
 import { buildPhoneticIndex, applyPhoneticCorrections } from '@/lib/phoneticMatch';
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
@@ -538,6 +538,10 @@ export default function HomePage() {
     return Math.max(0, (blob.size - wavHeaderBytes) / wavBytesPerSecond);
   }, []);
 
+  const getVadLogPreview = useCallback((text: string): string => {
+    return text.replace(/\s+/g, ' ').trim().slice(0, 120);
+  }, []);
+
   // Drainiert fertige Ergebnisse in der korrekten Reihenfolge in den committed-State.
   // Garantiert dass Utterances NIE in falscher Reihenfolge erscheinen oder verloren gehen.
   const drainVadCommitQueue = useCallback(() => {
@@ -552,6 +556,7 @@ export default function HomePage() {
       if (entry.failed) {
         // Permanenter Fehler: sichtbarer Platzhalter + Audio-Blob für manuelle Wiederholung aufbewahren
         const text = '[⚠ Audio-Abschnitt nicht transkribiert – bitte wiederholen]';
+        console.warn(`[VAD] Commit utterance #${seq}: permanent failure placeholder inserted`);
         setVadFailedUtterances(prev => [...prev, {
           seq,
           blob: entry.blob,
@@ -562,10 +567,24 @@ export default function HomePage() {
         continue;
       }
 
-      const nextCombinedText = applyOnlineUtteranceToText(combinedCommittedText, entry.text);
+      const debugSteps: OnlineUtteranceApplicationDebugStep[] = [];
+      const nextCombinedText = applyOnlineUtteranceToText(combinedCommittedText, entry.text, step => {
+        debugSteps.push(step);
+      });
       if (nextCombinedText !== combinedCommittedText) {
+        console.log(
+          `[VAD] Commit utterance #${seq}: text applied (input="${getVadLogPreview(entry.text)}", steps=${debugSteps
+            .map(step => `${step.kind}:${step.commandType ?? getVadLogPreview(step.input)}:${step.changed ? 'changed' : 'noop'}`)
+            .join(', ')})`
+        );
         combinedCommittedText = nextCombinedText;
         didCommit = true;
+      } else {
+        console.warn(
+          `[VAD] Commit utterance #${seq}: no visible text change (input="${getVadLogPreview(entry.text)}", steps=${debugSteps
+            .map(step => `${step.kind}:${step.commandType ?? getVadLogPreview(step.input)}:${step.changed ? 'changed' : 'noop'}`)
+            .join(', ')})`
+        );
       }
     }
 
@@ -622,7 +641,9 @@ export default function HomePage() {
       setError(`⚠ Audio-Abschnitt #${seq + 1} konnte nicht transkribiert werden (${err?.message || 'Fehler'}). Audio bleibt erhalten – bitte wiederholen.`);
     } finally {
       if (sessionId !== vadSessionIdRef.current) {
-        console.log(`[VAD] Drop stale utterance #${seq} from session ${sessionId}`);
+        console.warn(
+          `[VAD] Drop stale utterance #${seq} from session ${sessionId} (current=${vadSessionIdRef.current}, failed=${failed}, text="${getVadLogPreview(text)}")`
+        );
         return;
       }
 
@@ -633,7 +654,7 @@ export default function HomePage() {
         setTranscribing(false);
       }
     }
-  }, [transcribeUtteranceWithRetry, applyDictionaryToText, drainVadCommitQueue, estimateWavDurationSeconds]);
+  }, [transcribeUtteranceWithRetry, applyDictionaryToText, drainVadCommitQueue, estimateWavDurationSeconds, getVadLogPreview]);
 
   // VAD Speech Start: Tentative-Anzeige aktivieren
   const handleVadSpeechStart = useCallback(() => {

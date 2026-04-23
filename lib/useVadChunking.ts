@@ -150,6 +150,10 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       },
 
       onVADMisfire: () => {
+        const bufferedSamples = speechFramesRef.current.reduce((sum, frame) => sum + frame.length, 0);
+        const bufferedSeconds = bufferedSamples / 16000;
+        const activeMs = speechStartTimeRef.current > 0 ? Date.now() - speechStartTimeRef.current : 0;
+        const frameCount = speechFramesRef.current.length;
         setIsSpeaking(false);
         isSpeechActiveRef.current = false;
         speechFramesRef.current = [];
@@ -159,7 +163,9 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
           clearTimeout(autoChunkTimerRef.current);
           autoChunkTimerRef.current = null;
         }
-        console.log('[VAD] Misfire - speech start discarded');
+        console.warn(
+          `[VAD] Misfire - speech start discarded after ${activeMs}ms with ${bufferedSeconds.toFixed(2)}s buffered audio across ${frameCount} frames. No utterance will be transcribed.`
+        );
       },
 
       onFrameProcessed: (_probs: any, frame: Float32Array) => {

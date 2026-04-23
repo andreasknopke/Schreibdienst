@@ -7,8 +7,17 @@ import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
 
 export const runtime = 'nodejs';
 
-// LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
-const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);
+const DEFAULT_LM_STUDIO_MAX_TOKENS = 4096;
+const MAX_SAFE_LM_STUDIO_MAX_TOKENS = 8192;
+const parsedLMStudioMaxTokens = Number.parseInt(process.env.LLM_STUDIO_TOKEN || `${DEFAULT_LM_STUDIO_MAX_TOKENS}`, 10);
+const LM_STUDIO_MAX_TOKENS = Number.isFinite(parsedLMStudioMaxTokens) && parsedLMStudioMaxTokens > 0
+  ? Math.min(parsedLMStudioMaxTokens, MAX_SAFE_LM_STUDIO_MAX_TOKENS)
+  : DEFAULT_LM_STUDIO_MAX_TOKENS;
+const DEFAULT_LLM_TIMEOUT_MS = 180000;
+const parsedDefaultLlmTimeoutMs = Number.parseInt(process.env.LLM_REQUEST_TIMEOUT_MS || `${DEFAULT_LLM_TIMEOUT_MS}`, 10);
+const LLM_REQUEST_TIMEOUT_MS = Number.isFinite(parsedDefaultLlmTimeoutMs) && parsedDefaultLlmTimeoutMs > 0
+  ? parsedDefaultLlmTimeoutMs
+  : DEFAULT_LLM_TIMEOUT_MS;
 
 // LLM Provider configuration
 type LLMProvider = 'openai' | 'lmstudio' | 'mistral';
@@ -472,8 +481,8 @@ async function callLLM(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
-      console.error(`[LLM] Request TIMEOUT after 60 seconds`);
-    }, 60000); // 60 second timeout
+      console.error(`[LLM] Request TIMEOUT after ${LLM_REQUEST_TIMEOUT_MS / 1000} seconds`);
+    }, LLM_REQUEST_TIMEOUT_MS);
     
     const res = await fetch(fullUrl, {
       method: 'POST',

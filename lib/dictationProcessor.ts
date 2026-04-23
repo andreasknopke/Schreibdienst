@@ -21,8 +21,22 @@ import { preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFor
 import { compressAudioForSpeech, normalizeAudioForWhisper } from '@/lib/audioCompression';
 import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 
-// LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
-const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);
+const DEFAULT_LM_STUDIO_MAX_TOKENS = 4096;
+const MAX_SAFE_LM_STUDIO_MAX_TOKENS = 8192;
+const parsedLMStudioMaxTokens = Number.parseInt(process.env.LLM_STUDIO_TOKEN || `${DEFAULT_LM_STUDIO_MAX_TOKENS}`, 10);
+const LM_STUDIO_MAX_TOKENS = Number.isFinite(parsedLMStudioMaxTokens) && parsedLMStudioMaxTokens > 0
+  ? Math.min(parsedLMStudioMaxTokens, MAX_SAFE_LM_STUDIO_MAX_TOKENS)
+  : DEFAULT_LM_STUDIO_MAX_TOKENS;
+const DEFAULT_LLM_TIMEOUT_MS = 300000;
+const DEFAULT_LONG_LLM_TIMEOUT_MS = 600000;
+const parsedDefaultLlmTimeoutMs = Number.parseInt(process.env.LLM_REQUEST_TIMEOUT_MS || `${DEFAULT_LLM_TIMEOUT_MS}`, 10);
+const parsedLongLlmTimeoutMs = Number.parseInt(process.env.LONG_LLM_REQUEST_TIMEOUT_MS || `${DEFAULT_LONG_LLM_TIMEOUT_MS}`, 10);
+const LLM_REQUEST_TIMEOUT_MS = Number.isFinite(parsedDefaultLlmTimeoutMs) && parsedDefaultLlmTimeoutMs > 0
+  ? parsedDefaultLlmTimeoutMs
+  : DEFAULT_LLM_TIMEOUT_MS;
+const LONG_LLM_REQUEST_TIMEOUT_MS = Number.isFinite(parsedLongLlmTimeoutMs) && parsedLongLlmTimeoutMs > 0
+  ? parsedLongLlmTimeoutMs
+  : DEFAULT_LONG_LLM_TIMEOUT_MS;
 
 /**
  * GPU Memory Warmup - Loads a tiny model in LM Studio to free GPU memory before Whisper
@@ -1839,8 +1853,7 @@ async function callLLM(
   const totalInputChars = messages.reduce((sum, m) => sum + m.content.length, 0);
   console.log(`[Worker LLM] Calling ${config.provider} at ${fullUrl}, model: ${config.model}, input: ${totalInputChars} chars`);
   
-  // Add timeout - 5 minutes for very long texts, 2 minutes for normal
-  const timeoutMs = totalInputChars > 20000 ? 300000 : 120000;
+  const timeoutMs = totalInputChars > 20000 ? LONG_LLM_REQUEST_TIMEOUT_MS : LLM_REQUEST_TIMEOUT_MS;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();

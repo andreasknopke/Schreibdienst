@@ -7,18 +7,18 @@ import { processDictation } from '@/lib/dictationProcessor';
 export const runtime = 'nodejs';
 
 interface SpeaKINGDictation {
-  uid: string;
-  creator: string;
+  uid: string | number;
+  creator: string | number;
   priority: number;
-  deadline?: string;
-  typist?: string;
+  deadline?: string | number;
+  typist?: string | number;
   data?: {
     key: Array<{
       '@_element': string;
-      '#text'?: string;
+      '#text'?: string | number | boolean;
     }> | {
       '@_element': string;
-      '#text'?: string;
+      '#text'?: string | number | boolean;
     };
   };
   audio?: {
@@ -28,7 +28,7 @@ interface SpeaKINGDictation {
       filename: string;
     }>;
   };
-  comment?: string;
+  comment?: string | number;
 }
 
 /**
@@ -61,10 +61,18 @@ function parseSpeaKINGXml(xmlContent: string): {
   // Extract data keys
   const dataKeys = dictation.data?.key;
   const keyArray = Array.isArray(dataKeys) ? dataKeys : dataKeys ? [dataKeys] : [];
+  const normalizeXmlValue = (value: string | number | boolean | undefined): string | undefined => {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+
+    const normalized = String(value).trim();
+    return normalized || undefined;
+  };
   
   const getDataValue = (element: string): string | undefined => {
     const key = keyArray.find(k => k['@_element'] === element);
-    return key?.['#text'];
+    return normalizeXmlValue(key?.['#text']);
   };
   
   // Map priority: 0=normal, 1=urgent, 2=stat
@@ -87,33 +95,35 @@ function parseSpeaKINGXml(xmlContent: string): {
   let termin: string | undefined;
   if (dictation.deadline) {
     try {
-      const date = new Date(dictation.deadline);
+      const deadline = String(dictation.deadline);
+      const date = new Date(deadline);
       termin = date.toISOString().split('T')[0]; // YYYY-MM-DD format
     } catch {
-      termin = dictation.deadline;
+      termin = normalizeXmlValue(dictation.deadline);
     }
   }
   
   // Parse berechtigte (typist)
   let berechtigte: string[] | undefined;
   if (dictation.typist) {
-    berechtigte = [dictation.typist];
+    const normalizedTypist = normalizeXmlValue(dictation.typist);
+    berechtigte = normalizedTypist ? [normalizedTypist] : undefined;
   }
 
-  const subjectId = getDataValue('subjectid')?.trim();
-  const uid = dictation.uid?.trim() || '';
+  const subjectId = getDataValue('subjectid');
+  const uid = normalizeXmlValue(dictation.uid) || '';
   const orderNumber = subjectId ? `${subjectId}/${uid}` : uid;
   
   return {
     orderNumber,
-    username: dictation.creator || '',
+    username: normalizeXmlValue(dictation.creator) || '',
     priority: priorityMap[dictation.priority] || 'normal',
     termin,
-    berechtigte,
+    berechtigte: berechtigte?.map(value => String(value).trim()).filter(Boolean),
     patientName: getDataValue('subjectname'),
     patientDob: getDataValue('subjectdate'),
     fachabteilung: getDataValue('section'),
-    bemerkung: dictation.comment,
+    bemerkung: normalizeXmlValue(dictation.comment),
     audioFilename,
   };
 }

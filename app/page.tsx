@@ -542,6 +542,12 @@ export default function HomePage() {
     return text.replace(/\s+/g, ' ').trim().slice(0, 120);
   }, []);
 
+  const getVadPromptContext = useCallback((text: string): string => {
+    const trimmed = text.trim();
+    if (!trimmed) return '';
+    return trimmed.length > 200 ? trimmed.slice(-200) : trimmed;
+  }, []);
+
   // Drainiert fertige Ergebnisse in der korrekten Reihenfolge in den committed-State.
   // Garantiert dass Utterances NIE in falscher Reihenfolge erscheinen oder verloren gehen.
   const drainVadCommitQueue = useCallback(() => {
@@ -595,9 +601,10 @@ export default function HomePage() {
       // Prompt-Kontext: letzte 2 gelockte Sätze (max. 200 Zeichen)
       const lastTwo = committed.slice(-2).join(' ');
       vadPromptContextRef.current = lastTwo.length > 200 ? lastTwo.slice(-200) : lastTwo;
-      // Transcript-State synchronisieren (für Export, Korrektur etc.)
-      const allText = [existingTextRef.current, ...committed].filter(t => t.trim()).join(' ');
-      setTranscript(allText);
+      // Transcript-State synchronisieren (für Export, Korrektur etc.).
+      // committed enthält im VAD-Pfad bereits den vollständigen aktuellen Textzustand,
+      // inklusive bestehendem Text vor Session-Start.
+      setTranscript(committed[0] || '');
     }
 
     // Tentative nur löschen, wenn keine Requests mehr in flight sind
@@ -1683,10 +1690,11 @@ export default function HomePage() {
     if (useVadMode) {
       // VAD-Modus: Kein MediaRecorder, VAD übernimmt Mikrofon und liefert Utterances
       vadSessionIdRef.current += 1;
-      committedUtterancesRef.current = [];
-      setCommittedUtterances([]);
+      const existingVADText = existingTextRef.current.trim();
+      committedUtterancesRef.current = existingVADText ? [existingVADText] : [];
+      setCommittedUtterances(existingVADText ? [existingVADText] : []);
       setTentativeText('');
-      vadPromptContextRef.current = '';
+      vadPromptContextRef.current = getVadPromptContext(existingVADText);
       // Sequenz-State für neue Session zurücksetzen (verhindert Verschlucken / falsche Reihenfolge)
       vadSeqCounterRef.current = 0;
       vadNextCommitSeqRef.current = 0;

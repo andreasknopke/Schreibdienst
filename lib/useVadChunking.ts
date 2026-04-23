@@ -18,6 +18,7 @@ import { useCallback, useRef, useState } from 'react';
 
 // Max. Dauer einer Utterance bevor Auto-Chunk greift (Sekunden)
 const MAX_UTTERANCE_SECONDS = 8;
+const PRE_SPEECH_PAD_FRAMES = 15;
 const WAV_HEADER_BYTES = 44;
 const WAV_BYTES_PER_SECOND = 16000 * 2;
 
@@ -64,6 +65,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
   
   // Auto-Chunk: Sammelt Frames seit Sprechbeginn für forced flush
   const speechFramesRef = useRef<Float32Array[]>([]);
+  const preSpeechFramesRef = useRef<Float32Array[]>([]);
   const speechStartTimeRef = useRef<number>(0);
   const isSpeechActiveRef = useRef(false);
   const autoChunkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -118,7 +120,10 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       onSpeechStart: () => {
         setIsSpeaking(true);
         isSpeechActiveRef.current = true;
-        speechFramesRef.current = [];
+        // Der manuelle Stop-Flush baut Audio aus den lokal gesammelten Frames.
+        // Deshalb müssen wir den Vorlauf vor der Speech-Erkennung selbst mitnehmen,
+        // sonst können Anfangswörter im Stop-Pfad abgeschnitten werden.
+        speechFramesRef.current = preSpeechFramesRef.current.map(frame => new Float32Array(frame));
         speechStartTimeRef.current = Date.now();
         samplesAlreadySentRef.current = 0;
         console.log('[VAD] Speech start detected');
@@ -132,6 +137,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
         setIsSpeaking(false);
         isSpeechActiveRef.current = false;
         speechFramesRef.current = [];
+        preSpeechFramesRef.current = [];
         speechStartTimeRef.current = 0;
         if (autoChunkTimerRef.current) {
           clearTimeout(autoChunkTimerRef.current);
@@ -157,6 +163,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
         setIsSpeaking(false);
         isSpeechActiveRef.current = false;
         speechFramesRef.current = [];
+        preSpeechFramesRef.current = [];
         speechStartTimeRef.current = 0;
         samplesAlreadySentRef.current = 0;
         if (autoChunkTimerRef.current) {
@@ -169,9 +176,16 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       },
 
       onFrameProcessed: (_probs: any, frame: Float32Array) => {
+        const frameCopy = new Float32Array(frame);
+
+        preSpeechFramesRef.current.push(frameCopy);
+        if (preSpeechFramesRef.current.length > PRE_SPEECH_PAD_FRAMES) {
+          preSpeechFramesRef.current.shift();
+        }
+
         // Frames sammeln für Auto-Chunk (nur während Sprechen)
         if (isSpeechActiveRef.current && speechStartTimeRef.current > 0) {
-          speechFramesRef.current.push(new Float32Array(frame));
+          speechFramesRef.current.push(frameCopy);
         }
         
         // Audio-Level aus Analyser lesen (wenn vorhanden)
@@ -232,6 +246,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       }
     }
     speechFramesRef.current = [];
+    preSpeechFramesRef.current = [];
     speechStartTimeRef.current = 0;
     isSpeechActiveRef.current = false;
     

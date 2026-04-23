@@ -99,9 +99,13 @@ function parseSpeaKINGXml(xmlContent: string): {
   if (dictation.typist) {
     berechtigte = [dictation.typist];
   }
+
+  const subjectId = getDataValue('subjectid')?.trim();
+  const uid = dictation.uid?.trim() || '';
+  const orderNumber = subjectId ? `${subjectId}/${uid}` : uid;
   
   return {
-    orderNumber: dictation.uid || '',
+    orderNumber,
     username: dictation.creator || '',
     priority: priorityMap[dictation.priority] || 'normal',
     termin,

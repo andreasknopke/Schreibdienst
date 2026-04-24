@@ -4,7 +4,6 @@
  */
 
 import { buildPhoneticIndex, applyPhoneticCorrectionsDetailed } from './phoneticMatch';
-import { mergeWithStandardDictionary } from './standardDictionary';
 
 // Dictionary entry interface (compatible with dictionaryDb.ts)
 export interface DictionaryEntry {
@@ -75,7 +74,12 @@ export function applyDictionaryCorrectionsDetailed(
   }));
 
   // Merge mit Standard-Wörterbuch (aus DB wenn vorhanden, sonst hardcodiert)
-  const mergedEntries = mergeWithStandardDictionary(annotatedUserEntries, annotatedStandardEntries);
+  // Typisiert lokal, damit source/targetUsername der annotierten Einträge erhalten bleiben.
+  const userWrongWords = new Set(annotatedUserEntries.map((entry) => entry.wrong.toLowerCase()));
+  const mergedEntries: AnnotatedDictionaryEntry[] = [
+    ...annotatedUserEntries,
+    ...annotatedStandardEntries.filter((entry) => !userWrongWords.has(entry.wrong.toLowerCase())),
+  ];
   if (mergedEntries.length === 0) {
     return { text, operations: [] };
   }
@@ -910,7 +914,7 @@ export function preprocessTranscriptionDetailed(
   standardEntries?: { wrong: string; correct: string; phoneticMinSimilarity?: number }[],
   options?: { targetUsername?: string }
 ): PreprocessTranscriptionResult {
-  if (!text) return text;
+  if (!text) return { text, operations: [] };
   
   let result = text;
   const operations: DictionaryCorrectionOperation[] = [];

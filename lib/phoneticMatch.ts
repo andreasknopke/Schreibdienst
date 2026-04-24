@@ -163,6 +163,98 @@ function normalizeForComparison(word: string): string {
     .replace(/[^a-z]/g, '');
 }
 
+// Deutsche Beuge-/Pluralendungen, längste zuerst (wichtig für korrektes Strippen).
+const INFLECTION_SUFFIXES = ['innen', 'nen', 'en', 'em', 'er', 'es', 'ne', 'in', 'e', 'n', 's'];
+
+/**
+ * Liefert die längste passende Endung aus INFLECTION_SUFFIXES, sofern der
+ * verbleibende Stamm noch lang genug ist.
+ */
+function detectInflectionSuffix(normWord: string, minStemLen = 3): string {
+  for (const suf of INFLECTION_SUFFIXES) {
+    if (normWord.endsWith(suf) && normWord.length - suf.length >= minStemLen) {
+      return suf;
+    }
+  }
+  return '';
+}
+
+/**
+ * Hängt eine Endung an den Original-Replacement an und respektiert dabei
+ * Original-Schreibweise (Umlaute, Bindestriche). Da die Endungen rein aus
+ * ASCII-Buchstaben bestehen, ist das ein einfaches Konkatenieren.
+ */
+function applySuffix(replacement: string, suffix: string): string {
+  if (!suffix) return replacement;
+  return replacement + suffix;
+}
+
+/**
+ * Tauscht eine vorhandene Endung am Replacement durch eine neue Endung aus.
+ * Behält Groß-/Kleinschreibung des Wortanfangs bei (wird vom Aufrufer separat
+ * gehandhabt).
+ */
+function swapSuffix(replacement: string, oldSuf: string, newSuf: string): string {
+  if (!oldSuf) return applySuffix(replacement, newSuf);
+  // Replacement kann Umlaute enthalten; Endungen sind aber ASCII.
+  // Wir entfernen oldSuf nur, wenn das Replacement (case-insensitive) darauf endet.
+  const lower = replacement.toLowerCase();
+  if (lower.endsWith(oldSuf)) {
+    return replacement.slice(0, -oldSuf.length) + newSuf;
+  }
+  return replacement + newSuf;
+}
+
+/**
+ * Bewahrt deutsche Beuge- und Pluralendungen beim Wörterbuch-Ersatz.
+ *
+ * Beispiele:
+ *   "arterielle"        → matched "arteriell"        → "arterielle"        (Endung 'e' bewahrt)
+ *   "Arterien"          → matched "Arterie"          → "Arterien"          (Endung 'n' bewahrt)
+ *   "arterialle"        → matched "arteriell"        → "arterielle"        (Tippfehler korrigiert + 'e' bewahrt)
+ *   "rheumatologischen" → matched "rheumatologische" → "rheumatologischen" (Endung 'e' → 'en' getauscht)
+ *   "rheumtologische"   → matched "rheumatologische" → "rheumatologische"  (Tippfehler korrigiert, Endung gleich)
+ *   "Diabetes"          → matched "Diabetes"        → "Diabetes"          (keine Änderung)
+ *
+ * Strategie:
+ *   1. Erkenne Endung am Original und am Replacement.
+ *   2. Wenn die Stämme (Levenshtein auf normalisierter Form) deutlich näher
+ *      beieinander liegen als die ursprünglichen Wörter, ersetze die Endung
+ *      des Replacements durch die Endung des Originals.
+ *   3. Sonst: Replacement unverändert lassen.
+ */
+function preserveInflection(original: string, replacement: string): string {
+  const origNorm = normalizeForComparison(original);
+  const replNorm = normalizeForComparison(replacement);
+  if (!origNorm || !replNorm) return replacement;
+  if (origNorm === replNorm) return replacement;
+
+  const baseDist = levenshtein(origNorm, replNorm);
+  const origSuf = detectInflectionSuffix(origNorm);
+  const replSuf = detectInflectionSuffix(replNorm);
+
+  // Wenn schon identische Endung: nichts zu tun.
+  if (origSuf && origSuf === replSuf) return replacement;
+
+  const origStem = origSuf ? origNorm.slice(0, -origSuf.length) : origNorm;
+  const replStem = replSuf ? replNorm.slice(0, -replSuf.length) : replNorm;
+
+  // Mindestlänge der Stämme, damit kein "is/im/es" als Stamm zählt.
+  if (origStem.length < 3 || replStem.length < 3) return replacement;
+
+  const stemDist = levenshtein(origStem, replStem);
+
+  // Stämme müssen näher liegen als die vollen Wörter (sonst war es kein Endungs-Effekt).
+  if (stemDist >= baseDist) return replacement;
+
+  // Zusätzliche Sicherung gegen False-Positives: Stämme sollen recht ähnlich sein.
+  const stemMaxLen = Math.max(origStem.length, replStem.length);
+  const stemSimilarity = 1 - stemDist / stemMaxLen;
+  if (stemSimilarity < 0.7) return replacement;
+
+  return swapSuffix(replacement, replSuf, origSuf);
+}
+
 export interface PhoneticDictEntry {
   wrong: string;          // Original "wrong"-Feld
   correct: string;        // Korrekte Schreibweise
@@ -413,8 +505,9 @@ export function applyPhoneticCorrections(
 
       const match = findPhoneticMatch(combined, index, 4);
       if (match && match.confidence >= minConfidence) {
+        // Beuge-/Pluralendung des Gesamtphrasenendes bewahren
+        let replacement = preserveInflection(combined, match.correct);
         // Groß/Kleinschreibung vom ersten Wort übernehmen
-        let replacement = match.correct;
         const firstWord = parts[positions[0]];
         if (firstWord[0] === firstWord[0].toUpperCase() && replacement[0] !== replacement[0].toUpperCase()) {
           replacement = replacement[0].toUpperCase() + replacement.slice(1);
@@ -448,7 +541,8 @@ export function applyPhoneticCorrections(
     const token = parts[wi];
     const match = findPhoneticMatch(token, index);
     if (match && match.confidence >= minConfidence) {
-      let replacement = match.correct;
+      // Beuge-/Pluralendung bewahren (z.B. "arterielle" bleibt "arterielle", nicht "arteriell")
+      let replacement = preserveInflection(token, match.correct);
       if (token[0] === token[0].toUpperCase() && replacement[0] !== replacement[0].toUpperCase()) {
         replacement = replacement[0].toUpperCase() + replacement.slice(1);
       } else if (token[0] === token[0].toLowerCase() && replacement[0] !== replacement[0].toLowerCase()) {

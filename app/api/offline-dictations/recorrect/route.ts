@@ -5,6 +5,7 @@ import {
   updateCorrectedTextWithRequest,
 } from '@/lib/offlineDictationDb';
 import {
+  deleteCorrectionLogByDictationIdWithRequest,
   getCorrectionLogByDictationIdWithRequest,
   logDoublePrecisionCorrectionWithRequest,
   logLLMCorrectionWithRequest,
@@ -538,7 +539,7 @@ export async function POST(req: NextRequest) {
     await initOfflineDictationTableWithRequest(req);
     await initCorrectionLogTableWithRequest(req);
     
-    const { dictationId } = await req.json();
+    const { dictationId, discardOldProtocols = false } = await req.json();
     
     if (!dictationId) {
       return NextResponse.json({ error: 'dictationId required' }, { status: 400 });
@@ -555,6 +556,11 @@ export async function POST(req: NextRequest) {
     }
     
     console.log(`[ReCorrect] Starting re-correction for dictation #${dictationId}`);
+
+    if (discardOldProtocols) {
+      await deleteCorrectionLogByDictationIdWithRequest(req, dictationId);
+      console.log(`[ReCorrect] Old correction logs discarded for dictation #${dictationId}`);
+    }
     
     // Convert patient_name and patient_dob to strings (they may come as Date objects or null from DB)
     // Use 'any' cast because the DB may return Date objects even though TypeScript expects strings
@@ -704,6 +710,7 @@ export async function POST(req: NextRequest) {
       doublePrecisionReRan: !!(doublePrecisionLog && parseDoublePrecisionLog(doublePrecisionLog.text_before)),
       llmProvider: (await getLLMConfig(req)).provider,
       llmModel: (await getLLMConfig(req)).model,
+      discardedOldProtocols: !!discardOldProtocols,
     });
     
   } catch (error: any) {

@@ -97,6 +97,13 @@ async function _getLogsByDictation(db: mysql.Pool, dictationId: number): Promise
   return rows as CorrectionLogEntry[];
 }
 
+async function _deleteLogsByDictation(db: mysql.Pool, dictationId: number): Promise<void> {
+  await db.execute(
+    `DELETE FROM correction_log WHERE dictation_id = ?`,
+    [dictationId]
+  );
+}
+
 async function _getLogStats(db: mysql.Pool, dictationId: number) {
   const [rows] = await db.execute<any[]>(
     `SELECT correction_type, COUNT(*) as count FROM correction_log WHERE dictation_id = ? GROUP BY correction_type`,
@@ -146,6 +153,10 @@ export function getCorrectionLogByDictationId(dictationId: number) {
   return getPool().then(db => _getLogsByDictation(db, dictationId));
 }
 
+export function deleteCorrectionLogByDictationId(dictationId: number) {
+  return getPool().then(db => _deleteLogsByDictation(db, dictationId));
+}
+
 export function getCorrectionLogStats(dictationId: number) {
   return getPool().then(db => _getLogStats(db, dictationId));
 }
@@ -184,6 +195,10 @@ export function logManualCorrectionWithRequest(req: NextRequest, dictationId: nu
 
 export function getCorrectionLogByDictationIdWithRequest(req: NextRequest, dictationId: number) {
   return getPoolForRequest(req).then(db => _getLogsByDictation(db, dictationId));
+}
+
+export function deleteCorrectionLogByDictationIdWithRequest(req: NextRequest, dictationId: number) {
+  return getPoolForRequest(req).then(db => _deleteLogsByDictation(db, dictationId));
 }
 
 export function getCorrectionLogStatsWithRequest(req: NextRequest, dictationId: number) {

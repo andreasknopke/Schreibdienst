@@ -298,6 +298,7 @@ function CorrectedTextMitlesen({
 
 export default function DictationQueue({ username, canViewAll = false, isSecretariat = false, onRefreshNeeded }: DictationQueueProps) {
   const { getAuthHeader } = useAuth();
+  const isRootUser = username.toLowerCase() === 'root';
   const [dictations, setDictations] = useState<Dictation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -850,6 +851,13 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const handleReCorrect = useCallback(async () => {
     const selected = dictations.find(d => d.id === selectedId);
     if (!selected) return;
+
+    let discardOldProtocols = false;
+    if (isRootUser) {
+      discardOldProtocols = window.confirm(
+        'Sollen alle alten Korrekturprotokolle fuer dieses Diktat verworfen werden?\n\nOK = Alte Protokolle verwerfen\nAbbrechen = Alte Protokolle behalten'
+      );
+    }
     
     setIsReCorrecting(true);
     setError(null);
@@ -862,7 +870,8 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          dictationId: selected.id
+          dictationId: selected.id,
+          discardOldProtocols,
         }),
       });
       
@@ -887,9 +896,12 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
         console.log(`  - ${dpInfo}`);
         console.log(`  - LLM: ${data.llmProvider}/${data.llmModel}`);
         console.log(`  - Change Score: ${data.changeScore}%`);
+        if (data.discardedOldProtocols) {
+          console.log('  - Alte Protokolle wurden verworfen');
+        }
         
         // Show success message with details
-        alert(`Korrektur abgeschlossen!\n\n${dpInfo}\nLLM: ${data.llmProvider}/${data.llmModel}\nÄnderungsscore: ${data.changeScore}%`);
+        alert(`Korrektur abgeschlossen!\n\n${dpInfo}\nLLM: ${data.llmProvider}/${data.llmModel}\nÄnderungsscore: ${data.changeScore}%${data.discardedOldProtocols ? '\nAlte Protokolle: verworfen' : ''}`);
       } else {
         const errorData = await res.json();
         throw new Error(errorData.error || 'Korrektur fehlgeschlagen');
@@ -899,7 +911,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     } finally {
       setIsReCorrecting(false);
     }
-  }, [selectedId, dictations, loadDictationDetails]);
+  }, [selectedId, dictations, loadDictationDetails, isRootUser, selectedDictationDetails?.raw_transcript]);
 
   // Save corrected text to database
   const handleSave = useCallback(async () => {

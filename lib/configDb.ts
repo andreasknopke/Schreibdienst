@@ -2,17 +2,39 @@ import { NextRequest } from 'next/server';
 import { query, execute, getPoolForRequest } from './db';
 
 // Verfügbare Offline-Modelle für WhisperX (aus Model_Manager.py)
+const TURBO_GERMAN_MODEL = 'primeline/whisper-large-v3-turbo-german';
+const LEGACY_TURBO_GERMAN_MODELS = [
+  'primeline-turbo-de-int8_bf16',
+  'cstr/whisper-large-v3-turbo-german-int8_float32',
+] as const;
+
 export type WhisperOfflineModel = 
   | 'large-v3'                                        // Standard large-v3
   | 'guillaumekln/faster-whisper-large-v2'            // Large-v2 (empfohlen)
   | 'large-v2'                                        // Standard large-v2
-  | 'cstr/whisper-large-v3-turbo-german-int8_float32'; // Turbo German
+  | 'primeline/whisper-large-v3-turbo-german';        // Turbo German
+
+function normalizeTurboGermanModel(modelId: string | undefined): string | undefined {
+  if (!modelId) return modelId;
+  if (modelId === TURBO_GERMAN_MODEL) return modelId;
+  if (LEGACY_TURBO_GERMAN_MODELS.includes(modelId as typeof LEGACY_TURBO_GERMAN_MODELS[number])) {
+    return TURBO_GERMAN_MODEL;
+  }
+  return modelId;
+}
+
+function normalizeServiceId(serviceId: string | undefined): string | undefined {
+  if (!serviceId) return serviceId;
+  if (!serviceId.startsWith('whisperx:')) return serviceId;
+  const whisperModel = normalizeTurboGermanModel(serviceId.slice('whisperx:'.length));
+  return whisperModel ? `whisperx:${whisperModel}` : serviceId;
+}
 
 export const WHISPER_OFFLINE_MODELS: { id: WhisperOfflineModel; name: string; modelPath: string }[] = [
   { id: 'large-v3', name: 'Large-v3', modelPath: 'large-v3' },
   { id: 'guillaumekln/faster-whisper-large-v2', name: 'Large-v2 (empfohlen)', modelPath: 'guillaumekln/faster-whisper-large-v2' },
   { id: 'large-v2', name: 'Large-v2', modelPath: 'large-v2' },
-  { id: 'cstr/whisper-large-v3-turbo-german-int8_float32', name: 'Large-v3 Turbo German (schnell)', modelPath: 'cstr/whisper-large-v3-turbo-german-int8_float32' },
+  { id: TURBO_GERMAN_MODEL, name: 'Large-v3 Turbo German (schnell)', modelPath: TURBO_GERMAN_MODEL },
 ];
 
 // ============================================================
@@ -44,18 +66,19 @@ export const TRANSCRIPTION_SERVICES: TranscriptionServiceOption[] = [
   { id: 'whisperx:large-v3',                                name: 'WhisperX: Model 1 (large-v3)',          provider: 'whisperx',      isCloud: false, whisperModel: 'large-v3' },
   { id: 'whisperx:guillaumekln/faster-whisper-large-v2',    name: 'WhisperX: Model 2 (large-v2, empfohlen)', provider: 'whisperx',    isCloud: false, whisperModel: 'guillaumekln/faster-whisper-large-v2' },
   { id: 'whisperx:large-v2',                                name: 'WhisperX: Model 3 (large-v2)',          provider: 'whisperx',      isCloud: false, whisperModel: 'large-v2' },
-  { id: 'whisperx:cstr/whisper-large-v3-turbo-german-int8_float32', name: 'WhisperX: Model 4 (Turbo German)', provider: 'whisperx', isCloud: false, whisperModel: 'cstr/whisper-large-v3-turbo-german-int8_float32' },
+  { id: `whisperx:${TURBO_GERMAN_MODEL}`,                   name: 'WhisperX: Model 4 (Turbo German)',      provider: 'whisperx',      isCloud: false, whisperModel: TURBO_GERMAN_MODEL },
 ];
 
 /** Parse a unified service ID into provider + optional whisper model */
 export function parseServiceId(serviceId: string): { provider: TranscriptionProvider; whisperModel?: string } {
-  const svc = TRANSCRIPTION_SERVICES.find(s => s.id === serviceId);
+  const normalizedServiceId = normalizeServiceId(serviceId) || serviceId;
+  const svc = TRANSCRIPTION_SERVICES.find(s => s.id === normalizedServiceId);
   if (svc) {
     return { provider: svc.provider, whisperModel: svc.whisperModel };
   }
   // Legacy fallback: bare provider names
-  if (['whisperx', 'elevenlabs', 'mistral', 'fast_whisper', 'voxtral_local'].includes(serviceId)) {
-    return { provider: serviceId as TranscriptionProvider };
+  if (['whisperx', 'elevenlabs', 'mistral', 'fast_whisper', 'voxtral_local'].includes(normalizedServiceId)) {
+    return { provider: normalizedServiceId as TranscriptionProvider };
   }
   // Default
   return { provider: 'whisperx', whisperModel: 'guillaumekln/faster-whisper-large-v2' };
@@ -64,7 +87,7 @@ export function parseServiceId(serviceId: string): { provider: TranscriptionProv
 /** Build a unified service ID from provider + optional whisper model */
 export function buildServiceId(provider: TranscriptionProvider, whisperModel?: string): string {
   if (provider === 'whisperx' && whisperModel) {
-    return `whisperx:${whisperModel}`;
+    return `whisperx:${normalizeTurboGermanModel(whisperModel)}`;
   }
   return provider;
 }
@@ -75,7 +98,8 @@ export function getWhisperOfflineModelPath(modelId: WhisperOfflineModel | string
     // Default to the first model
     return WHISPER_OFFLINE_MODELS[0].modelPath;
   }
-  const model = WHISPER_OFFLINE_MODELS.find(m => m.id === modelId);
+  const normalizedModelId = normalizeTurboGermanModel(modelId);
+  const model = WHISPER_OFFLINE_MODELS.find(m => m.id === normalizedModelId);
   return model?.modelPath || WHISPER_OFFLINE_MODELS[0].modelPath;
 }
 
@@ -182,7 +206,7 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
           }
           break;
         case 'whisperModel':
-          config.whisperModel = row.config_value;
+          config.whisperModel = normalizeTurboGermanModel(row.config_value);
           break;
         case 'openaiModel':
           config.openaiModel = row.config_value;
@@ -191,8 +215,9 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
           config.mistralModel = row.config_value;
           break;
         case 'whisperOfflineModel':
-          if (WHISPER_OFFLINE_MODELS.some(m => m.id === row.config_value)) {
-            config.whisperOfflineModel = row.config_value as WhisperOfflineModel;
+          const normalizedOfflineModel = normalizeTurboGermanModel(row.config_value);
+          if (normalizedOfflineModel && WHISPER_OFFLINE_MODELS.some(m => m.id === normalizedOfflineModel)) {
+            config.whisperOfflineModel = normalizedOfflineModel as WhisperOfflineModel;
           }
           break;
         case 'llmPromptAddition':
@@ -207,7 +232,7 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
           }
           break;
         case 'doublePrecisionWhisperModel':
-          config.doublePrecisionWhisperModel = row.config_value;
+          config.doublePrecisionWhisperModel = normalizeTurboGermanModel(row.config_value);
           break;
         case 'doublePrecisionMode':
           if (['parallel', 'sequential'].includes(row.config_value)) {
@@ -221,13 +246,13 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
           config.lmStudioUseApiMode = row.config_value === 'true';
           break;
         case 'onlineService':
-          config.onlineService = row.config_value;
+          config.onlineService = normalizeServiceId(row.config_value);
           break;
         case 'offlineService':
-          config.offlineService = row.config_value;
+          config.offlineService = normalizeServiceId(row.config_value);
           break;
         case 'doublePrecisionService':
-          config.doublePrecisionService = row.config_value;
+          config.doublePrecisionService = normalizeServiceId(row.config_value);
           break;
         case 'voxtralLocalOnlineMode':
           if (['websocket', 'chunk'].includes(row.config_value)) {
@@ -300,7 +325,7 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
           }
           break;
         case 'whisperModel':
-          config.whisperModel = row.config_value;
+          config.whisperModel = normalizeTurboGermanModel(row.config_value);
           break;
         case 'openaiModel':
           config.openaiModel = row.config_value;
@@ -309,8 +334,9 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
           config.mistralModel = row.config_value;
           break;
         case 'whisperOfflineModel':
-          if (WHISPER_OFFLINE_MODELS.some(m => m.id === row.config_value)) {
-            config.whisperOfflineModel = row.config_value as WhisperOfflineModel;
+          const normalizedOfflineModel = normalizeTurboGermanModel(row.config_value);
+          if (normalizedOfflineModel && WHISPER_OFFLINE_MODELS.some(m => m.id === normalizedOfflineModel)) {
+            config.whisperOfflineModel = normalizedOfflineModel as WhisperOfflineModel;
           }
           break;
         case 'llmPromptAddition':
@@ -325,7 +351,7 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
           }
           break;
         case 'doublePrecisionWhisperModel':
-          config.doublePrecisionWhisperModel = row.config_value;
+          config.doublePrecisionWhisperModel = normalizeTurboGermanModel(row.config_value);
           break;
         case 'doublePrecisionMode':
           if (['parallel', 'sequential'].includes(row.config_value)) {
@@ -339,13 +365,13 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
           config.lmStudioUseApiMode = row.config_value === 'true';
           break;
         case 'onlineService':
-          config.onlineService = row.config_value;
+          config.onlineService = normalizeServiceId(row.config_value);
           break;
         case 'offlineService':
-          config.offlineService = row.config_value;
+          config.offlineService = normalizeServiceId(row.config_value);
           break;
         case 'doublePrecisionService':
-          config.doublePrecisionService = row.config_value;
+          config.doublePrecisionService = normalizeServiceId(row.config_value);
           break;
         case 'voxtralLocalOnlineMode':
           if (['websocket', 'chunk'].includes(row.config_value)) {

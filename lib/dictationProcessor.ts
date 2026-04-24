@@ -11,8 +11,6 @@ import {
 } from '@/lib/offlineDictationDb';
 import {
   logTextFormattingCorrectionWithRequest,
-  logStandardDictionaryCorrectionWithRequest,
-  logPrivateDictionaryCorrectionWithRequest,
   logLLMCorrectionWithRequest,
   logDoublePrecisionCorrectionWithRequest,
 } from '@/lib/correctionLogDb';
@@ -243,51 +241,15 @@ export async function processDictation(request: NextRequest, dictationId: number
     const standardDictionaryEntries = await getStandardDictEntries(request);
     
     // Step 2a: formatting/filler cleanup before any dictionary replacements.
-    const textBeforeFormatting = rawTranscript;
     const formattedText = preprocessTranscription(rawTranscript, [], []);
-    
-    if (formattedText !== textBeforeFormatting) {
-      try {
-        const formattingChangeScore = calculateChangeScore(textBeforeFormatting, formattedText);
-        await logTextFormattingCorrectionWithRequest(
-          request,
-          dictationId,
-          textBeforeFormatting,
-          formattedText,
-          formattingChangeScore
-        );
-        console.log(`[Worker] ✓ Text formatting correction logged (score: ${formattingChangeScore}%)`);
-      } catch (logError: any) {
-        console.warn(`[Worker] Failed to log text formatting correction: ${logError.message}`);
-      }
-    }
 
-    // Step 2b: apply standard and private dictionary separately so both appear in the log.
+    // Step 2b: apply standard and private dictionary before the LLM.
     const effectiveStandardEntries = getStandardOnlyEntries(dictionaryEntries, standardDictionaryEntries);
-    const textBeforeStandardDictionary = formattedText;
     const standardDictionaryText = applyDictionaryCorrections(
       formattedText,
       [],
       effectiveStandardEntries
     );
-
-    if (standardDictionaryText !== textBeforeStandardDictionary) {
-      try {
-        const standardDictionaryChangeScore = calculateChangeScore(textBeforeStandardDictionary, standardDictionaryText);
-        await logStandardDictionaryCorrectionWithRequest(
-          request,
-          dictationId,
-          textBeforeStandardDictionary,
-          standardDictionaryText,
-          standardDictionaryChangeScore
-        );
-        console.log(`[Worker] ✓ Standard dictionary correction logged (score: ${standardDictionaryChangeScore}%)`);
-      } catch (logError: any) {
-        console.warn(`[Worker] Failed to log standard dictionary correction: ${logError.message}`);
-      }
-    }
-
-    const textBeforePrivateDictionary = standardDictionaryText;
     const preprocessedText = applyDictionaryCorrections(
       standardDictionaryText,
       dictionaryEntries,
@@ -298,19 +260,19 @@ export async function processDictation(request: NextRequest, dictationId: number
       `(user dictionary: ${dictionaryEntries.length}, standard dictionary: ${effectiveStandardEntries.length})`
     );
 
-    if (preprocessedText !== textBeforePrivateDictionary) {
+    if (preprocessedText !== rawTranscript) {
       try {
-        const privateDictionaryChangeScore = calculateChangeScore(textBeforePrivateDictionary, preprocessedText);
-        await logPrivateDictionaryCorrectionWithRequest(
+        const formattingChangeScore = calculateChangeScore(rawTranscript, preprocessedText);
+        await logTextFormattingCorrectionWithRequest(
           request,
           dictationId,
-          textBeforePrivateDictionary,
+          rawTranscript,
           preprocessedText,
-          privateDictionaryChangeScore
+          formattingChangeScore
         );
-        console.log(`[Worker] ✓ Private dictionary correction logged (score: ${privateDictionaryChangeScore}%)`);
+        console.log(`[Worker] ✓ Text formatting correction logged (score: ${formattingChangeScore}%)`);
       } catch (logError: any) {
-        console.warn(`[Worker] Failed to log private dictionary correction: ${logError.message}`);
+        console.warn(`[Worker] Failed to log text formatting correction: ${logError.message}`);
       }
     }
     

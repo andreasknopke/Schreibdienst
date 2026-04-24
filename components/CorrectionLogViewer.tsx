@@ -17,6 +17,15 @@ interface CorrectionLogEntry {
   created_at: string;
 }
 
+type DisplayCorrectionLogEntry = CorrectionLogEntry;
+
+const PREPROCESSING_TYPES = new Set<CorrectionLogEntry['correction_type']>([
+  'textFormatting',
+  'dictionary',
+  'standardDictionary',
+  'privateDictionary',
+]);
+
 interface CorrectionLogViewerProps {
   dictationId: number;
   onClose: () => void;
@@ -129,6 +138,44 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
     return 'text-red-600 dark:text-red-400';
   };
 
+  const displayLogs: DisplayCorrectionLogEntry[] = [];
+  for (let index = 0; index < logs.length; index++) {
+    const currentLog = logs[index];
+
+    if (!PREPROCESSING_TYPES.has(currentLog.correction_type)) {
+      displayLogs.push(currentLog);
+      continue;
+    }
+
+    const mergedLogs = [currentLog];
+    while (index + 1 < logs.length && PREPROCESSING_TYPES.has(logs[index + 1].correction_type)) {
+      mergedLogs.push(logs[index + 1]);
+      index++;
+    }
+
+    if (mergedLogs.length === 1 && currentLog.correction_type === 'textFormatting') {
+      displayLogs.push(currentLog);
+      continue;
+    }
+
+    const firstLog = mergedLogs[0];
+    const lastLog = mergedLogs[mergedLogs.length - 1];
+    const maxChangeScore = mergedLogs.reduce<number | undefined>((maxScore, log) => {
+      if (log.change_score === undefined || log.change_score === null) return maxScore;
+      if (maxScore === undefined) return log.change_score;
+      return Math.max(maxScore, log.change_score);
+    }, undefined);
+
+    displayLogs.push({
+      ...firstLog,
+      correction_type: 'textFormatting',
+      text_before: firstLog.text_before,
+      text_after: lastLog.text_after,
+      change_score: maxChangeScore,
+      created_at: firstLog.created_at,
+    });
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
@@ -165,9 +212,9 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
             </div>
           )}
 
-          {!loading && !error && logs.length > 0 && (
+          {!loading && !error && displayLogs.length > 0 && (
             <div className="space-y-3">
-              {logs.map((log, index) => (
+              {displayLogs.map((log, index) => (
                 (() => {
                   const typeStyle = correctionTypeStyles[log.correction_type] || correctionTypeStyles.textFormatting;
                   return (
@@ -283,7 +330,7 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
         <div className="border-t border-gray-200 dark:border-gray-700 p-4">
           <div className="flex items-center justify-between">
             <div className="text-sm text-gray-500 dark:text-gray-400">
-              {logs.length > 0 && `${logs.length} Korrektur${logs.length !== 1 ? 'en' : ''}`}
+              {displayLogs.length > 0 && `${displayLogs.length} Korrektur${displayLogs.length !== 1 ? 'en' : ''}`}
             </div>
             <button
               onClick={onClose}

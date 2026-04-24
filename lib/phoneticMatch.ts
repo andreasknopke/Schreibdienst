@@ -262,6 +262,30 @@ export interface PhoneticDictEntry {
   wrongNorm: string;      // Normalisiertes "wrong"
   correctPhonetic: string;// Kölner Phonetik Code von "correct"
   isSelfMapping: boolean; // Reiner Fachbegriff ohne explizite Fehlvariante
+  source?: 'standard' | 'private';
+  phoneticMinSimilarity?: number;
+  targetUsername?: string;
+}
+
+export interface PhoneticMatchResult {
+  correct: string;
+  confidence: number;
+  similarity: number;
+  minSimilarity: number;
+  matchedEntry: PhoneticDictEntry;
+}
+
+export interface PhoneticReplacementOperation {
+  originalText: string;
+  replacementText: string;
+  dictionaryWrong: string;
+  dictionaryCorrect: string;
+  source: 'standard' | 'private';
+  matchType: 'phonetic';
+  confidence: number;
+  similarity: number;
+  minSimilarity: number;
+  targetUsername?: string;
 }
 
 const EXPLICIT_MATCH_SIMILARITY = 0.5;
@@ -270,18 +294,24 @@ const SELF_MAPPING_MATCH_SIMILARITY = 0.82;
 const SELF_MAPPING_VARIATION_SIMILARITY = 0.85;
 
 function getSimilarityThreshold(candidate: PhoneticDictEntry, viaVariation: boolean): number {
+  const override = typeof candidate.phoneticMinSimilarity === 'number'
+    ? Math.min(0.99, Math.max(0, candidate.phoneticMinSimilarity))
+    : undefined;
+
   if (candidate.isSelfMapping) {
-    return viaVariation ? SELF_MAPPING_VARIATION_SIMILARITY : SELF_MAPPING_MATCH_SIMILARITY;
+    const base = viaVariation ? SELF_MAPPING_VARIATION_SIMILARITY : SELF_MAPPING_MATCH_SIMILARITY;
+    return override !== undefined ? Math.max(base, override) : base;
   }
 
-  return viaVariation ? EXPLICIT_VARIATION_SIMILARITY : EXPLICIT_MATCH_SIMILARITY;
+  const base = viaVariation ? EXPLICIT_VARIATION_SIMILARITY : EXPLICIT_MATCH_SIMILARITY;
+  return override !== undefined ? Math.max(base, override) : base;
 }
 
 /**
  * Baut einen phonetischen Index aus Wörterbuch-Einträgen.
  * Einmal beim Laden aufbauen, dann O(1)-Lookup pro phonetischem Code.
  */
-export function buildPhoneticIndex(entries: { wrong: string; correct: string }[]): {
+export function buildPhoneticIndex(entries: { wrong: string; correct: string; source?: 'standard' | 'private'; phoneticMinSimilarity?: number; targetUsername?: string }[]): {
   byPhoneticCode: Map<string, PhoneticDictEntry[]>;
   allEntries: PhoneticDictEntry[];
 } {
@@ -298,6 +328,9 @@ export function buildPhoneticIndex(entries: { wrong: string; correct: string }[]
       wrongNorm: normalizeForComparison(entry.wrong),
       correctPhonetic: colognePhonetic(entry.correct),
       isSelfMapping: normalizeForComparison(entry.wrong) === normalizeForComparison(entry.correct),
+      source: entry.source,
+      phoneticMinSimilarity: entry.phoneticMinSimilarity,
+      targetUsername: entry.targetUsername,
     };
     allEntries.push(pe);
 
@@ -373,7 +406,7 @@ export function findPhoneticMatch(
   word: string,
   index: { byPhoneticCode: Map<string, PhoneticDictEntry[]>; allEntries: PhoneticDictEntry[] },
   minWordLength: number = 5
-): { correct: string; confidence: number } | null {
+): PhoneticMatchResult | null {
   if (!word) return null;
   const wordNorm = normalizeForComparison(word);
   if (wordNorm.length < minWordLength) return null;
@@ -382,7 +415,7 @@ export function findPhoneticMatch(
 
   if (!wordPhonetic) return null;
 
-  let bestMatch: { correct: string; confidence: number } | null = null;
+  let bestMatch: PhoneticMatchResult | null = null;
 
   // Pass 1: Exakter phonetischer Code-Match
   const candidates = index.byPhoneticCode.get(wordPhonetic);
@@ -396,7 +429,7 @@ export function findPhoneticMatch(
       if (similarity >= minSimilarity) {
         const confidence = 0.5 + (similarity * 0.5);
         if (!bestMatch || confidence > bestMatch.confidence) {
-          bestMatch = { correct: cand.correct, confidence };
+            bestMatch = { correct: cand.correct, confidence, similarity, minSimilarity, matchedEntry: cand };
         }
       }
     }
@@ -419,7 +452,7 @@ export function findPhoneticMatch(
         if (similarity >= minSimilarity) {
           const confidence = 0.4 + (similarity * 0.5);
           if (!bestMatch || confidence > bestMatch.confidence) {
-            bestMatch = { correct: cand.correct, confidence };
+            bestMatch = { correct: cand.correct, confidence, similarity, minSimilarity, matchedEntry: cand };
           }
         }
       }
@@ -445,7 +478,17 @@ export function applyPhoneticCorrections(
   index: { byPhoneticCode: Map<string, PhoneticDictEntry[]>; allEntries: PhoneticDictEntry[] },
   minConfidence: number = 0.75
 ): string {
-  if (!text || index.allEntries.length === 0) return text;
+  return applyPhoneticCorrectionsDetailed(text, index, minConfidence).text;
+}
+
+export function applyPhoneticCorrectionsDetailed(
+  text: string,
+  index: { byPhoneticCode: Map<string, PhoneticDictEntry[]>; allEntries: PhoneticDictEntry[] },
+  minConfidence: number = 0.75
+): { text: string; operations: PhoneticReplacementOperation[] } {
+  if (!text || index.allEntries.length === 0) {
+    return { text, operations: [] };
+  }
 
   // Text in Wörter und Trennzeichen aufteilen
   // Wir brauchen die Struktur: [word, sep, word, sep, word, ...]
@@ -462,6 +505,7 @@ export function applyPhoneticCorrections(
   // Set um bereits ersetzte Positionen zu tracken
   const replaced = new Set<number>();
   let changed = false;
+  const operations: PhoneticReplacementOperation[] = [];
 
   // Pass 1: Multi-Wort-Fenster (längste zuerst: 4, 3, 2 Wörter)
   // Deutsche Stoppwörter die nicht Teil von Komposita sein können
@@ -516,6 +560,18 @@ export function applyPhoneticCorrections(
         if (replacement !== combined) {
           const originalPhrase = positions.map(p => parts[p]).join(' ');
           console.log(`[Phonetic] "${originalPhrase}" → "${replacement}" (${windowSize} words combined, confidence: ${match.confidence.toFixed(2)})`);
+          operations.push({
+            originalText: originalPhrase,
+            replacementText: replacement,
+            dictionaryWrong: match.matchedEntry.wrong,
+            dictionaryCorrect: match.matchedEntry.correct,
+            source: match.matchedEntry.source ?? 'standard',
+            matchType: 'phonetic',
+            confidence: match.confidence,
+            similarity: match.similarity,
+            minSimilarity: match.minSimilarity,
+            targetUsername: match.matchedEntry.targetUsername,
+          });
           
           // Erstes Wort ersetzen, restliche Wörter + Trennzeichen dazwischen leeren
           parts[positions[0]] = replacement;
@@ -554,9 +610,21 @@ export function applyPhoneticCorrections(
         parts[wi] = replacement;
         replaced.add(wi);
         changed = true;
+        operations.push({
+          originalText: token,
+          replacementText: replacement,
+          dictionaryWrong: match.matchedEntry.wrong,
+          dictionaryCorrect: match.matchedEntry.correct,
+          source: match.matchedEntry.source ?? 'standard',
+          matchType: 'phonetic',
+          confidence: match.confidence,
+          similarity: match.similarity,
+          minSimilarity: match.minSimilarity,
+          targetUsername: match.matchedEntry.targetUsername,
+        });
       }
     }
   }
 
-  return changed ? parts.join('') : text;
+  return { text: changed ? parts.join('') : text, operations };
 }

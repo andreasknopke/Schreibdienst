@@ -20,6 +20,7 @@ export interface CorrectionLogEntry {
   text_before: string;
   text_after: string;
   change_score?: number;
+  metadata?: unknown;
   created_at: Date;
 }
 
@@ -48,6 +49,15 @@ async function ensureCorrectionLogSchema(db: mysql.Pool): Promise<void> {
     )
   `);
 
+  try {
+    await db.execute(`
+      ALTER TABLE correction_log
+      ADD COLUMN metadata_json LONGTEXT DEFAULT NULL
+    `);
+  } catch {
+    // Column already exists.
+  }
+
   await db.execute(`
     ALTER TABLE correction_log
     MODIFY COLUMN correction_type ${CORRECTION_TYPE_ENUM} NOT NULL
@@ -74,27 +84,43 @@ async function _logCorrection(
   type: CorrectionType,
   textBefore: string,
   textAfter: string,
-  opts?: { modelName?: string; modelProvider?: string; username?: string; changeScore?: number }
+  opts?: { modelName?: string; modelProvider?: string; username?: string; changeScore?: number; metadata?: unknown }
 ): Promise<number> {
   const [result] = await db.execute(
     `INSERT INTO correction_log 
-      (dictation_id, correction_type, model_name, model_provider, username, text_before, text_after, change_score)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      (dictation_id, correction_type, model_name, model_provider, username, text_before, text_after, change_score, metadata_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       dictationId, type,
       opts?.modelName ?? null, opts?.modelProvider ?? null, opts?.username ?? null,
       textBefore, textAfter, opts?.changeScore ?? null,
+      opts?.metadata !== undefined ? JSON.stringify(opts.metadata) : null,
     ]
   ) as any;
   return result.insertId;
 }
 
 async function _getLogsByDictation(db: mysql.Pool, dictationId: number): Promise<CorrectionLogEntry[]> {
-  const [rows] = await db.execute(
+  const [rows] = await db.execute<any[]>(
     `SELECT * FROM correction_log WHERE dictation_id = ? ORDER BY created_at ASC`,
     [dictationId]
   );
-  return rows as CorrectionLogEntry[];
+
+  return (rows as any[]).map((row) => {
+    let metadata: unknown;
+    if (typeof row.metadata_json === 'string' && row.metadata_json.trim()) {
+      try {
+        metadata = JSON.parse(row.metadata_json);
+      } catch {
+        metadata = undefined;
+      }
+    }
+
+    return {
+      ...row,
+      metadata,
+    } as CorrectionLogEntry;
+  });
 }
 
 async function _deleteLogsByDictation(db: mysql.Pool, dictationId: number): Promise<void> {
@@ -121,8 +147,8 @@ async function _getLogStats(db: mysql.Pool, dictationId: number) {
 // Public API – Default pool
 // ============================================================
 
-export function logTextFormattingCorrection(dictationId: number, textBefore: string, textAfter: string, changeScore?: number) {
-  return getPool().then(db => _logCorrection(db, dictationId, 'textFormatting', textBefore, textAfter, { changeScore }));
+export function logTextFormattingCorrection(dictationId: number, textBefore: string, textAfter: string, changeScore?: number, metadata?: unknown) {
+  return getPool().then(db => _logCorrection(db, dictationId, 'textFormatting', textBefore, textAfter, { changeScore, metadata }));
 }
 
 export function logDictionaryCorrection(dictationId: number, textBefore: string, textAfter: string, changeScore?: number) {
@@ -165,8 +191,8 @@ export function getCorrectionLogStats(dictationId: number) {
 // Public API – Request-based (dynamic pool via DB-Token)
 // ============================================================
 
-export function logTextFormattingCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, changeScore?: number) {
-  return getPoolForRequest(req).then(db => _logCorrection(db, dictationId, 'textFormatting', textBefore, textAfter, { changeScore }));
+export function logTextFormattingCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, changeScore?: number, metadata?: unknown) {
+  return getPoolForRequest(req).then(db => _logCorrection(db, dictationId, 'textFormatting', textBefore, textAfter, { changeScore, metadata }));
 }
 
 export function logDictionaryCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, changeScore?: number) {

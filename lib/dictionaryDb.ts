@@ -7,6 +7,7 @@ export interface DictionaryEntry {
   addedAt: string;
   useInPrompt?: boolean;  // Wort wird im Whisper initial_prompt verwendet
   matchStem?: boolean;    // Wortstamm-Matching aktivieren (z.B. "Schole" -> "Chole" korrigiert auch "Scholezystitis" -> "Cholezystitis")
+  phoneticMinSimilarity?: number;
 }
 
 interface DbDictionaryEntry {
@@ -17,6 +18,7 @@ interface DbDictionaryEntry {
   added_at: Date;
   use_in_prompt: boolean;
   match_stem: boolean;
+  phonetic_min_similarity?: number | null;
 }
 
 // Get all entries for a user
@@ -32,7 +34,8 @@ export async function getEntries(username: string): Promise<DictionaryEntry[]> {
       correct: e.correct_word,
       addedAt: e.added_at?.toISOString() || new Date().toISOString(),
       useInPrompt: Boolean(e.use_in_prompt),
-      matchStem: Boolean(e.match_stem)
+      matchStem: Boolean(e.match_stem),
+      phoneticMinSimilarity: e.phonetic_min_similarity ?? undefined
     }));
   } catch (error: any) {
     // If columns don't exist yet, fall back to basic query
@@ -302,6 +305,15 @@ async function ensureColumnsExist(db: any, poolKey: string): Promise<void> {
   } catch (e: any) {
     // Column already exists - that's fine
   }
+
+  try {
+    await db.execute(`
+      ALTER TABLE dictionary_entries ADD COLUMN phonetic_min_similarity DOUBLE DEFAULT NULL
+    `);
+    console.log(`[Dictionary] Added phonetic_min_similarity column on-demand (${poolKey})`);
+  } catch (e: any) {
+    // Column already exists - that's fine
+  }
 }
 
 // Track if we've already checked columns PER DATABASE (not global!)
@@ -338,7 +350,7 @@ export async function getEntriesWithRequest(request: NextRequest, username: stri
     }
     
     const [rows] = await db.execute<any[]>(
-      'SELECT wrong_word, correct_word, added_at, COALESCE(use_in_prompt, 0) as use_in_prompt, COALESCE(match_stem, 0) as match_stem FROM dictionary_entries WHERE username = ? ORDER BY added_at DESC',
+      'SELECT wrong_word, correct_word, added_at, COALESCE(use_in_prompt, 0) as use_in_prompt, COALESCE(match_stem, 0) as match_stem, phonetic_min_similarity FROM dictionary_entries WHERE username = ? ORDER BY added_at DESC',
       [username]
     );
     
@@ -347,7 +359,8 @@ export async function getEntriesWithRequest(request: NextRequest, username: stri
       correct: e.correct_word,
       addedAt: e.added_at?.toISOString() || new Date().toISOString(),
       useInPrompt: Boolean(e.use_in_prompt),
-      matchStem: Boolean(e.match_stem)
+      matchStem: Boolean(e.match_stem),
+      phoneticMinSimilarity: e.phonetic_min_similarity ?? undefined
     }));
   } catch (error: any) {
     // If columns don't exist yet (migration failed or didn't run), fall back to basic query
@@ -472,4 +485,46 @@ export async function removeEntryWithRequest(
 export async function loadDictionaryWithRequest(request: NextRequest, username: string): Promise<{ entries: DictionaryEntry[] }> {
   const entries = await getEntriesWithRequest(request, username);
   return { entries };
+}
+
+function getDefaultPhoneticMinSimilarity(wrong: string, correct: string): number {
+  return wrong.trim().toLowerCase() === correct.trim().toLowerCase() ? 0.82 : 0.5;
+}
+
+export async function increaseEntryPhoneticMinSimilarityWithRequest(
+  request: NextRequest,
+  username: string,
+  wrong: string,
+  step: number = 0.05
+): Promise<{ success: boolean; oldValue?: number; newValue?: number; error?: string }> {
+  try {
+    const db = await getPoolForRequest(request);
+    const poolKey = getPoolKeyFromRequest(request);
+    await ensureColumnsExist(db, poolKey);
+
+    const [rows] = await db.execute<any[]>(
+      'SELECT wrong_word, correct_word, phonetic_min_similarity FROM dictionary_entries WHERE username = ? AND wrong_word = ? LIMIT 1',
+      [username, wrong]
+    );
+
+    const entry = rows?.[0];
+    if (!entry) {
+      return { success: false, error: 'Eintrag nicht gefunden' };
+    }
+
+    const defaultValue = getDefaultPhoneticMinSimilarity(entry.wrong_word, entry.correct_word);
+    const oldValue = typeof entry.phonetic_min_similarity === 'number' ? entry.phonetic_min_similarity : defaultValue;
+    const newValue = Math.min(0.99, Math.max(defaultValue, oldValue) + step);
+
+    await db.execute(
+      'UPDATE dictionary_entries SET phonetic_min_similarity = ? WHERE username = ? AND wrong_word = ?',
+      [newValue, username, wrong]
+    );
+
+    console.log('[Dictionary] Increased phonetic_min_similarity for', username, wrong, `${oldValue} -> ${newValue}`);
+    return { success: true, oldValue, newValue };
+  } catch (error) {
+    console.error('[Dictionary] Increase phonetic similarity error (with request):', error);
+    return { success: false, error: 'Datenbankfehler' };
+  }
 }

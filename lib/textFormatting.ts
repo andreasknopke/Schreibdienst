@@ -3,7 +3,7 @@
  * Applied BEFORE LLM correction for consistent, deterministic results.
  */
 
-import { buildPhoneticIndex, applyPhoneticCorrections, type PhoneticDictEntry } from './phoneticMatch';
+import { buildPhoneticIndex, applyPhoneticCorrectionsDetailed } from './phoneticMatch';
 import { mergeWithStandardDictionary } from './standardDictionary';
 
 // Dictionary entry interface (compatible with dictionaryDb.ts)
@@ -13,7 +13,33 @@ export interface DictionaryEntry {
   addedAt?: string;
   useInPrompt?: boolean;  // Wort wird im Whisper initial_prompt verwendet
   matchStem?: boolean;    // Wortstamm-Matching aktivieren
+  phoneticMinSimilarity?: number;
 }
+
+export interface DictionaryCorrectionOperation {
+  originalText: string;
+  replacementText: string;
+  dictionaryWrong: string;
+  dictionaryCorrect: string;
+  source: 'standard' | 'private';
+  matchType: 'exact' | 'stem' | 'phonetic';
+  confidence?: number;
+  similarity?: number;
+  minSimilarity?: number;
+  targetUsername?: string;
+}
+
+export interface PreprocessTranscriptionResult {
+  text: string;
+  operations: DictionaryCorrectionOperation[];
+}
+
+type DictionarySource = 'standard' | 'private';
+
+type AnnotatedDictionaryEntry = DictionaryEntry & {
+  source: DictionarySource;
+  targetUsername?: string;
+};
 
 /**
  * Apply dictionary corrections to text.
@@ -24,20 +50,40 @@ export interface DictionaryEntry {
  * when it appears as a prefix in compound words (e.g., "Schole" -> "Chole"
  * will also correct "Scholezystitis" -> "Cholezystitis").
  */
-export function applyDictionaryCorrections(text: string, entries: DictionaryEntry[], standardEntries?: { wrong: string; correct: string }[]): string {
+export function applyDictionaryCorrections(text: string, entries: DictionaryEntry[], standardEntries?: { wrong: string; correct: string; phoneticMinSimilarity?: number }[]): string {
+  return applyDictionaryCorrectionsDetailed(text, entries, standardEntries).text;
+}
+
+export function applyDictionaryCorrectionsDetailed(
+  text: string,
+  entries: DictionaryEntry[],
+  standardEntries?: { wrong: string; correct: string; phoneticMinSimilarity?: number }[],
+  options?: { targetUsername?: string }
+): PreprocessTranscriptionResult {
   if (!text) {
-    return text;
+    return { text, operations: [] };
   }
 
+  const annotatedUserEntries: AnnotatedDictionaryEntry[] = (entries ?? []).map((entry) => ({
+    ...entry,
+    source: 'private',
+    targetUsername: options?.targetUsername,
+  }));
+  const annotatedStandardEntries: AnnotatedDictionaryEntry[] = (standardEntries ?? []).map((entry) => ({
+    ...entry,
+    source: 'standard',
+  }));
+
   // Merge mit Standard-Wörterbuch (aus DB wenn vorhanden, sonst hardcodiert)
-  const mergedEntries = mergeWithStandardDictionary(entries ?? [], standardEntries);
+  const mergedEntries = mergeWithStandardDictionary(annotatedUserEntries, annotatedStandardEntries);
   if (mergedEntries.length === 0) {
-    return text;
+    return { text, operations: [] };
   }
 
   let result = text;
   let replacementCount = 0;
   let stemReplacementCount = 0;
+  const operations: DictionaryCorrectionOperation[] = [];
 
   // Sort entries by length of wrong word (longest first) to avoid partial replacements
   const sortedEntries = [...mergedEntries].sort((a, b) => b.wrong.length - a.wrong.length);
@@ -57,26 +103,59 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
       // First: Match standalone words (exact match)
       const standaloneRegex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapedWrong}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
       result = result.replace(standaloneRegex, (match) => {
+        const replacement = preserveCase(match, escapedCorrect);
+        if (replacement === match) return match;
         replacementCount++;
-        return preserveCase(match, escapedCorrect);
+        operations.push({
+          originalText: match,
+          replacementText: replacement,
+          dictionaryWrong: entry.wrong,
+          dictionaryCorrect: entry.correct,
+          source: entry.source,
+          matchType: 'exact',
+          targetUsername: entry.targetUsername,
+        });
+        return replacement;
       });
       
       // Second: Match as prefix in compound words (wrong word followed by more letters)
       // This matches "Scholezystitis" and replaces "Schole" with "Chole" -> "Cholezystitis"
       const stemRegex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapedWrong}([A-ZÄÖÜa-zäöüß]+)`, 'gi');
       result = result.replace(stemRegex, (match, suffix) => {
-        stemReplacementCount++;
         // Preserve case of the original stem
         const correctedStem = preserveCase(match.slice(0, entry.wrong.length), escapedCorrect);
-        return correctedStem + suffix;
+        const replacement = correctedStem + suffix;
+        if (replacement === match) return match;
+        stemReplacementCount++;
+        operations.push({
+          originalText: match,
+          replacementText: replacement,
+          dictionaryWrong: entry.wrong,
+          dictionaryCorrect: entry.correct,
+          source: entry.source,
+          matchType: 'stem',
+          targetUsername: entry.targetUsername,
+        });
+        return replacement;
       });
     } else {
       // Standard word boundary matching (no stem matching)
       const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapedWrong}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
       
       result = result.replace(regex, (match) => {
+        const replacement = preserveCase(match, escapedCorrect);
+        if (replacement === match) return match;
         replacementCount++;
-        return preserveCase(match, escapedCorrect);
+        operations.push({
+          originalText: match,
+          replacementText: replacement,
+          dictionaryWrong: entry.wrong,
+          dictionaryCorrect: entry.correct,
+          source: entry.source,
+          matchType: 'exact',
+          targetUsername: entry.targetUsername,
+        });
+        return replacement;
       });
     }
   }
@@ -88,10 +167,12 @@ export function applyDictionaryCorrections(text: string, entries: DictionaryEntr
   // Pass 2: Phonetisches Matching für Wörter die das exakte Matching verpasst hat
   const phoneticIndex = buildPhoneticIndex(mergedEntries);
   if (phoneticIndex.allEntries.length > 0) {
-    result = applyPhoneticCorrections(result, phoneticIndex);
+    const phoneticResult = applyPhoneticCorrectionsDetailed(result, phoneticIndex);
+    result = phoneticResult.text;
+    operations.push(...phoneticResult.operations);
   }
 
-  return result;
+  return { text: result, operations };
 }
 
 /**
@@ -819,10 +900,20 @@ export function removeFillerWords(text: string): string {
  * @param text - Raw transcription text
  * @param dictionaryEntries - Optional dictionary entries for user-specific corrections
  */
-export function preprocessTranscription(text: string, dictionaryEntries?: DictionaryEntry[], standardEntries?: { wrong: string; correct: string }[]): string {
+export function preprocessTranscription(text: string, dictionaryEntries?: DictionaryEntry[], standardEntries?: { wrong: string; correct: string; phoneticMinSimilarity?: number }[]): string {
+  return preprocessTranscriptionDetailed(text, dictionaryEntries, standardEntries).text;
+}
+
+export function preprocessTranscriptionDetailed(
+  text: string,
+  dictionaryEntries?: DictionaryEntry[],
+  standardEntries?: { wrong: string; correct: string; phoneticMinSimilarity?: number }[],
+  options?: { targetUsername?: string }
+): PreprocessTranscriptionResult {
   if (!text) return text;
   
   let result = text;
+  const operations: DictionaryCorrectionOperation[] = [];
   
   // Step 1: Remove filler words
   result = removeFillerWords(result);
@@ -834,10 +925,12 @@ export function preprocessTranscription(text: string, dictionaryEntries?: Dictio
   const hasDictionaryEntries = (dictionaryEntries?.length ?? 0) > 0;
   const hasStandardEntries = (standardEntries?.length ?? 0) > 0;
   if (hasDictionaryEntries || hasStandardEntries) {
-    result = applyDictionaryCorrections(result, dictionaryEntries ?? [], standardEntries);
+    const dictionaryResult = applyDictionaryCorrectionsDetailed(result, dictionaryEntries ?? [], standardEntries, options);
+    result = dictionaryResult.text;
+    operations.push(...dictionaryResult.operations);
   }
   
-  return result;
+  return { text: result, operations };
 }
 
 /**

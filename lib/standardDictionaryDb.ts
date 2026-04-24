@@ -16,6 +16,7 @@ export interface StandardDictDbEntry {
   wrong_word: string;
   correct_word: string;
   category: string;
+  phonetic_min_similarity?: number | null;
   added_at: Date;
 }
 
@@ -23,6 +24,7 @@ export interface StandardDictEntry {
   wrong: string;
   correct: string;
   category?: string;
+  phoneticMinSimilarity?: number;
 }
 
 // Tracking ob Tabelle+Seed schon geprüft wurde (pro Pool)
@@ -47,6 +49,7 @@ async function ensureTable(request?: NextRequest): Promise<void> {
       wrong_word VARCHAR(500) NOT NULL,
       correct_word VARCHAR(500) NOT NULL,
       category VARCHAR(100) DEFAULT '',
+      phonetic_min_similarity DOUBLE DEFAULT NULL,
       added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY unique_wrong (wrong_word(191))
     )
@@ -56,6 +59,16 @@ async function ensureTable(request?: NextRequest): Promise<void> {
     await executeWithRequest(request, createSQL);
   } else {
     await execute(createSQL);
+  }
+
+  try {
+    if (request) {
+      await executeWithRequest(request, 'ALTER TABLE standard_dictionary ADD COLUMN phonetic_min_similarity DOUBLE DEFAULT NULL');
+    } else {
+      await execute('ALTER TABLE standard_dictionary ADD COLUMN phonetic_min_similarity DOUBLE DEFAULT NULL');
+    }
+  } catch {
+    // Column already exists.
   }
 
   // Prüfen ob Tabelle leer ist → Seed-Daten einfügen
@@ -139,7 +152,7 @@ export async function getStandardDictEntries(request?: NextRequest): Promise<Sta
   try {
     await ensureTable(request);
 
-    const sql = 'SELECT wrong_word, correct_word, category FROM standard_dictionary ORDER BY correct_word ASC';
+    const sql = 'SELECT wrong_word, correct_word, category, phonetic_min_similarity FROM standard_dictionary ORDER BY correct_word ASC';
     let rows: StandardDictDbEntry[];
     if (request) {
       rows = await queryWithRequest<StandardDictDbEntry>(request, sql);
@@ -151,6 +164,7 @@ export async function getStandardDictEntries(request?: NextRequest): Promise<Sta
       wrong: r.wrong_word,
       correct: r.correct_word,
       category: r.category || '',
+      phoneticMinSimilarity: r.phonetic_min_similarity ?? undefined,
     }));
   } catch (error) {
     console.error('[StandardDict] Fehler beim Laden, nutze Fallback:', error);
@@ -296,5 +310,45 @@ export async function importGlutanimateMedicalTerms(request: NextRequest): Promi
       total: 0,
       error: error.message,
     };
+  }
+}
+
+function getDefaultPhoneticMinSimilarity(wrong: string, correct: string): number {
+  return wrong.trim().toLowerCase() === correct.trim().toLowerCase() ? 0.82 : 0.5;
+}
+
+export async function increaseStandardDictPhoneticMinSimilarity(
+  request: NextRequest,
+  wrong: string,
+  step: number = 0.05
+): Promise<{ success: boolean; oldValue?: number; newValue?: number; error?: string }> {
+  try {
+    await ensureTable(request);
+
+    const [entry] = await queryWithRequest<StandardDictDbEntry>(
+      request,
+      'SELECT wrong_word, correct_word, phonetic_min_similarity FROM standard_dictionary WHERE wrong_word = ? LIMIT 1',
+      [wrong]
+    );
+
+    if (!entry) {
+      return { success: false, error: 'Eintrag nicht gefunden' };
+    }
+
+    const defaultValue = getDefaultPhoneticMinSimilarity(entry.wrong_word, entry.correct_word);
+    const oldValue = typeof entry.phonetic_min_similarity === 'number' ? entry.phonetic_min_similarity : defaultValue;
+    const newValue = Math.min(0.99, Math.max(defaultValue, oldValue) + step);
+
+    await executeWithRequest(
+      request,
+      'UPDATE standard_dictionary SET phonetic_min_similarity = ? WHERE wrong_word = ?',
+      [newValue, wrong]
+    );
+
+    console.log('[StandardDict] Increased phonetic_min_similarity for', wrong, `${oldValue} -> ${newValue}`);
+    return { success: true, oldValue, newValue };
+  } catch (error: any) {
+    console.error('[StandardDict] Increase phonetic similarity error:', error);
+    return { success: false, error: error.message };
   }
 }

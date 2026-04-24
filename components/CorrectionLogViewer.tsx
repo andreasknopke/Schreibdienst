@@ -3,6 +3,26 @@ import { useState, useEffect } from 'react';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import Spinner from './Spinner';
 import DiffHighlight from './DiffHighlight';
+import { useAuth } from './AuthProvider';
+
+interface DictionaryOperation {
+  originalText: string;
+  replacementText: string;
+  dictionaryWrong: string;
+  dictionaryCorrect: string;
+  source: 'standard' | 'private';
+  matchType: 'exact' | 'stem' | 'phonetic';
+  confidence?: number;
+  similarity?: number;
+  minSimilarity?: number;
+  targetUsername?: string;
+}
+
+interface CorrectionLogMetadata {
+  version?: number;
+  targetUsername?: string;
+  dictionaryOperations?: DictionaryOperation[];
+}
 
 interface CorrectionLogEntry {
   id: number;
@@ -14,10 +34,16 @@ interface CorrectionLogEntry {
   text_before: string;
   text_after: string;
   change_score?: number;
+  metadata?: CorrectionLogMetadata;
   created_at: string;
 }
 
 type DisplayCorrectionLogEntry = CorrectionLogEntry;
+
+type SelectedDictionaryAction = {
+  logId: number;
+  operation: DictionaryOperation;
+};
 
 const PREPROCESSING_TYPES = new Set<CorrectionLogEntry['correction_type']>([
   'textFormatting',
@@ -90,10 +116,15 @@ const correctionTypeStyles: Record<string, { container: string; header: string; 
 };
 
 export default function CorrectionLogViewer({ dictationId, onClose }: CorrectionLogViewerProps) {
+  const { username, getAuthHeader, getDbTokenHeader } = useAuth();
+  const isRootUser = username?.toLowerCase() === 'root';
   const [logs, setLogs] = useState<CorrectionLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [actionTarget, setActionTarget] = useState<SelectedDictionaryAction | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
     const fetchLogs = async () => {
@@ -173,8 +204,59 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
       text_after: lastLog.text_after,
       change_score: maxChangeScore,
       created_at: firstLog.created_at,
+      metadata: {
+        version: 1,
+        targetUsername: firstLog.metadata?.targetUsername || lastLog.metadata?.targetUsername,
+        dictionaryOperations: mergedLogs.flatMap((log) => log.metadata?.dictionaryOperations ?? []),
+      },
     });
   }
+
+  const getOperationLabel = (operation: DictionaryOperation) => {
+    const sourceLabel = operation.source === 'standard' ? 'Standard' : 'User';
+    const matchLabel = operation.matchType === 'phonetic'
+      ? 'phonetisch'
+      : operation.matchType === 'stem'
+        ? 'Wortstamm'
+        : 'direkt';
+
+    return `${operation.originalText} -> ${operation.replacementText} (${sourceLabel}, ${matchLabel})`;
+  };
+
+  const handleTermAction = async (action: 'remove' | 'weaken') => {
+    if (!actionTarget) return;
+
+    setActionLoading(true);
+    setActionFeedback(null);
+    try {
+      const response = await fetchWithDbToken('/api/correction-log/term-action', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader(),
+        },
+        body: JSON.stringify({
+          action,
+          scope: actionTarget.operation.source,
+          wrong: actionTarget.operation.dictionaryWrong,
+          targetUsername: actionTarget.operation.targetUsername || logs.find(log => log.id === actionTarget.logId)?.metadata?.targetUsername,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Aktion fehlgeschlagen');
+      }
+
+      setActionFeedback({ type: 'success', message: data.message || 'Aktion ausgefuehrt' });
+      setActionTarget(null);
+    } catch (err: any) {
+      setActionFeedback({ type: 'error', message: err.message || 'Aktion fehlgeschlagen' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
@@ -193,6 +275,15 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4">
+          {actionFeedback && (
+            <div className={`mb-3 rounded-lg border p-3 text-sm ${actionFeedback.type === 'success'
+              ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-300'
+              : 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300'
+            }`}>
+              {actionFeedback.message}
+            </div>
+          )}
+
           {loading && (
             <div className="flex items-center justify-center py-8">
               <Spinner size={32} />
@@ -295,6 +386,41 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
                             />
                           </div>
 
+                          {log.metadata?.dictionaryOperations && log.metadata.dictionaryOperations.length > 0 && (
+                            <div>
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <div className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                                  Wörterbuch-Ersetzungen:
+                                </div>
+                                {isRootUser && (
+                                  <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                                    Anklicken fuer Root-Aktionen
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {log.metadata.dictionaryOperations.map((operation, operationIndex) => (
+                                  <button
+                                    key={`${log.id}-${operationIndex}-${operation.dictionaryWrong}-${operation.replacementText}`}
+                                    type="button"
+                                    disabled={!isRootUser}
+                                    onClick={() => isRootUser && setActionTarget({ logId: log.id, operation })}
+                                    className={`rounded-full border px-3 py-1 text-left text-xs ${isRootUser
+                                      ? 'border-slate-300 bg-slate-50 text-slate-700 hover:border-slate-400 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200 dark:hover:bg-slate-800'
+                                      : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-900/20 dark:text-slate-300'
+                                    }`}
+                                    title={getOperationLabel(operation)}
+                                  >
+                                    <span className="font-medium">{operation.originalText}</span>
+                                    <span className="mx-1">→</span>
+                                    <span>{operation.replacementText}</span>
+                                    <span className="ml-2 opacity-70">[{operation.source === 'standard' ? 'Standard' : 'User'} / {operation.matchType}]</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
                           {/* Original Text */}
                           <div>
                             <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
@@ -341,6 +467,68 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
           </div>
         </div>
       </div>
+
+      {actionTarget && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded-xl bg-white p-4 shadow-xl dark:bg-gray-900">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Wörterbuch-Aktion</h3>
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{getOperationLabel(actionTarget.operation)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActionTarget(null)}
+                className="text-xl leading-none text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                title="Schließen"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+              <div>Quelle: {actionTarget.operation.source === 'standard' ? 'Standard-Wörterbuch' : 'Benutzer-Wörterbuch'}</div>
+              <div>Dictionary: {actionTarget.operation.dictionaryWrong} → {actionTarget.operation.dictionaryCorrect}</div>
+              <div>Match-Art: {actionTarget.operation.matchType}</div>
+              {typeof actionTarget.operation.confidence === 'number' && (
+                <div>Confidence: {(actionTarget.operation.confidence * 100).toFixed(1)}%</div>
+              )}
+              {typeof actionTarget.operation.minSimilarity === 'number' && (
+                <div>Aktuelle Mindestähnlichkeit: {(actionTarget.operation.minSimilarity * 100).toFixed(0)}%</div>
+              )}
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => handleTermAction('remove')}
+                disabled={actionLoading}
+                className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {actionLoading ? 'Arbeite...' : 'Aus Wörterbuch löschen'}
+              </button>
+              {actionTarget.operation.matchType === 'phonetic' && (
+                <button
+                  type="button"
+                  onClick={() => handleTermAction('weaken')}
+                  disabled={actionLoading}
+                  className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-50"
+                >
+                  {actionLoading ? 'Arbeite...' : 'Phonetisches Matching abschwächen'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setActionTarget(null)}
+                disabled={actionLoading}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

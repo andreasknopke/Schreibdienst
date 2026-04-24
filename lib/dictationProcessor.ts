@@ -17,11 +17,10 @@ import {
 import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath, getEffectiveOfflineService, getEffectiveDoublePrecisionService, RuntimeConfig } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
-import { applyDictionaryCorrections, preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFormatting';
+import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
 import { compressAudioForSpeech, normalizeAudioForWhisper } from '@/lib/audioCompression';
 import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
-import { getStandardOnlyEntries } from '@/lib/standardDictionary';
 
 // LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
 const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);
@@ -240,24 +239,16 @@ export async function processDictation(request: NextRequest, dictationId: number
     const dictionaryEntries = dictionary.entries;
     const standardDictionaryEntries = await getStandardDictEntries(request);
     
-    // Step 2a: formatting/filler cleanup before any dictionary replacements.
-    const formattedText = preprocessTranscription(rawTranscript, [], []);
-
-    // Step 2b: apply standard and private dictionary before the LLM.
-    const effectiveStandardEntries = getStandardOnlyEntries(dictionaryEntries, standardDictionaryEntries);
-    const standardDictionaryText = applyDictionaryCorrections(
-      formattedText,
-      [],
-      effectiveStandardEntries
-    );
-    const preprocessedText = applyDictionaryCorrections(
-      standardDictionaryText,
+    const preprocessingResult = preprocessTranscriptionDetailed(
+      rawTranscript,
       dictionaryEntries,
-      []
+      standardDictionaryEntries,
+      { targetUsername: dictation.username }
     );
+    const preprocessedText = preprocessingResult.text;
     console.log(
       `[Worker] Preprocessed text: ${rawTranscript.length} → ${preprocessedText.length} chars ` +
-      `(user dictionary: ${dictionaryEntries.length}, standard dictionary: ${effectiveStandardEntries.length})`
+      `(user dictionary: ${dictionaryEntries.length}, standard dictionary: ${standardDictionaryEntries.length})`
     );
 
     if (preprocessedText !== rawTranscript) {
@@ -268,7 +259,8 @@ export async function processDictation(request: NextRequest, dictationId: number
           dictationId,
           rawTranscript,
           preprocessedText,
-          formattingChangeScore
+          formattingChangeScore,
+          { version: 1, targetUsername: dictation.username, dictionaryOperations: preprocessingResult.operations }
         );
         console.log(`[Worker] ✓ Text formatting correction logged (score: ${formattingChangeScore}%)`);
       } catch (logError: any) {

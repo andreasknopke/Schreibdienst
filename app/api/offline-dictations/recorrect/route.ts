@@ -15,7 +15,7 @@ import {
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
-import { preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFormatting';
+import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
 import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 
@@ -642,7 +642,13 @@ export async function POST(req: NextRequest) {
     
     // Step 1: Preprocess (formatting + dictionary)
     const textBeforeFormatting = textForCorrection;
-    const preprocessedText = preprocessTranscription(textForCorrection, dictionaryEntries, standardEntries);
+    const preprocessingResult = preprocessTranscriptionDetailed(
+      textForCorrection,
+      dictionaryEntries,
+      standardEntries,
+      { targetUsername: dictation.username }
+    );
+    const preprocessedText = preprocessingResult.text;
     
     // Log text formatting if changed
     if (preprocessedText !== textBeforeFormatting) {
@@ -653,7 +659,8 @@ export async function POST(req: NextRequest) {
           dictationId,
           textBeforeFormatting,
           preprocessedText,
-          formattingChangeScore
+          formattingChangeScore,
+          { version: 1, targetUsername: dictation.username, dictionaryOperations: preprocessingResult.operations }
         );
         console.log(`[ReCorrect] ✓ Text formatting logged (score: ${formattingChangeScore}%)`);
       } catch (logError: any) {

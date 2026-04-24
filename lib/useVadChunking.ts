@@ -52,7 +52,7 @@ export interface UseVadChunkingReturn {
   isListening: boolean;
   isSpeaking: boolean;
   start: () => Promise<void>;
-  stop: () => void;
+  stop: () => Promise<void>;
 }
 
 export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingReturn {
@@ -62,6 +62,8 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
   const vadRef = useRef<any>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  const sessionIdRef = useRef(0);
+  const stopPromiseRef = useRef<Promise<void> | null>(null);
   
   // Auto-Chunk: Sammelt Frames seit Sprechbeginn für forced flush
   const speechFramesRef = useRef<Float32Array[]>([]);
@@ -74,6 +76,13 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
   const samplesAlreadySentRef = useRef<number>(0);
 
   const start = useCallback(async () => {
+    if (stopPromiseRef.current) {
+      await stopPromiseRef.current;
+    }
+
+    const sessionId = sessionIdRef.current + 1;
+    sessionIdRef.current = sessionId;
+
     const { MicVAD, utils } = await loadVad();
     utilsRef.current = utils;
 
@@ -118,6 +127,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       preSpeechPadFrames: 15,     // ~900ms Audio vor Sprechbeginn
 
       onSpeechStart: () => {
+        if (sessionId !== sessionIdRef.current) return;
         setIsSpeaking(true);
         isSpeechActiveRef.current = true;
         // Der manuelle Stop-Flush baut Audio aus den lokal gesammelten Frames.
@@ -134,6 +144,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       },
 
       onSpeechEnd: (audio: Float32Array) => {
+        if (sessionId !== sessionIdRef.current) return;
         setIsSpeaking(false);
         isSpeechActiveRef.current = false;
         speechFramesRef.current = [];
@@ -156,6 +167,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       },
 
       onVADMisfire: () => {
+        if (sessionId !== sessionIdRef.current) return;
         const bufferedSamples = speechFramesRef.current.reduce((sum, frame) => sum + frame.length, 0);
         const bufferedSeconds = bufferedSamples / 16000;
         const activeMs = speechStartTimeRef.current > 0 ? Date.now() - speechStartTimeRef.current : 0;
@@ -176,6 +188,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       },
 
       onFrameProcessed: (_probs: any, frame: Float32Array) => {
+        if (sessionId !== sessionIdRef.current) return;
         const frameCopy = new Float32Array(frame);
 
         preSpeechFramesRef.current.push(frameCopy);
@@ -200,6 +213,11 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
 
     vadRef.current = vad;
 
+    if (sessionId !== sessionIdRef.current) {
+      await vad.destroy();
+      return;
+    }
+
     // Audio-Level-Analyser an den AudioContext der VAD hängen
     try {
       const audioCtx = (vad as any)._audioContext as AudioContext | undefined;
@@ -215,10 +233,20 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
     }
 
     await vad.start();
+    if (sessionId !== sessionIdRef.current) {
+      await vad.destroy();
+      return;
+    }
     setIsListening(true);
   }, [onUtterance, onSpeechStart, onAudioLevel]);
 
   const stop = useCallback(() => {
+    if (stopPromiseRef.current) {
+      return stopPromiseRef.current;
+    }
+
+    sessionIdRef.current += 1;
+
     // Auto-Chunk Timer aufräumen
     if (autoChunkTimerRef.current) {
       clearTimeout(autoChunkTimerRef.current);
@@ -249,18 +277,30 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
     preSpeechFramesRef.current = [];
     speechStartTimeRef.current = 0;
     isSpeechActiveRef.current = false;
-    
-    if (vadRef.current) {
-      vadRef.current.destroy();
-      vadRef.current = null;
-    }
+    setIsListening(false);
+    setIsSpeaking(false);
+
+    const currentVad = vadRef.current;
+    vadRef.current = null;
+
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
-    analyserRef.current = null;
-    setIsListening(false);
-    setIsSpeaking(false);
+
+    const stopPromise = (async () => {
+      if (currentVad) {
+        await currentVad.destroy();
+      }
+      analyserRef.current = null;
+    })().finally(() => {
+      if (stopPromiseRef.current === stopPromise) {
+        stopPromiseRef.current = null;
+      }
+    });
+
+    stopPromiseRef.current = stopPromise;
+    return stopPromise;
   }, [onUtterance]);
 
   return { isListening, isSpeaking, start, stop };

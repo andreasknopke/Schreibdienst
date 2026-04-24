@@ -1867,7 +1867,7 @@ export default function HomePage() {
     // VAD-Modus stoppen (wenn aktiv)
     if (vad.isListening) {
       console.log('[VAD] Stopping VAD recording');
-      vad.stop();
+      await vad.stop();
       setAudioLevel(0);
       setRecording(false);
       setTentativeText('');

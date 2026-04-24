@@ -1540,11 +1540,7 @@ KRITISCH - AUSGABEFORMAT:
       }
       
       // Join chunks - preserve paragraph breaks, normalize other whitespace
-      result = correctedChunks
-        .join('\n\n')  // Join chunks with paragraph break
-        .replace(/\n{3,}/g, '\n\n')  // Max 2 newlines (1 empty line)
-        .replace(/[^\S\n]+/g, ' ')  // Normalize spaces but keep newlines
-        .trim();
+      result = joinCorrectedChunks(correctedChunks);
     } else {
       // Single chunk
       result = await callLLM(llmConfig, [
@@ -1584,11 +1580,7 @@ KRITISCH - AUSGABEFORMAT:
       }
       
       // Join chunks - preserve paragraph breaks, normalize other whitespace
-      result = correctedChunks
-        .join('\n\n')  // Join chunks with paragraph break
-        .replace(/\n{3,}/g, '\n\n')  // Max 2 newlines (1 empty line)
-        .replace(/[^\S\n]+/g, ' ')  // Normalize spaces but keep newlines
-        .trim();
+      result = joinCorrectedChunks(correctedChunks);
     } else {
       // Text fits in a single request
       result = await callLLM(llmConfig, [
@@ -1706,27 +1698,78 @@ const LM_STUDIO_MAX_SENTENCES = 10;
 // Max characters per chunk for cloud LLMs (Mistral, OpenAI) to avoid timeouts
 const CLOUD_LLM_MAX_CHARS = 40000;
 
-function splitTextIntoChunks(text: string, maxSentences: number = LM_STUDIO_MAX_SENTENCES): string[] {
-  if (!text || text.trim().length === 0) return [''];
-  
-  // Split by sentence-ending punctuation while keeping the punctuation
+function splitTextIntoSentenceUnits(text: string): string[] {
   const sentenceRegex = /([^.!?]*[.!?]+[\s"')\]]*)/g;
   const sentences: string[] = [];
   let match;
   let lastIndex = 0;
-  
+
   while ((match = sentenceRegex.exec(text)) !== null) {
     sentences.push(match[1]);
     lastIndex = sentenceRegex.lastIndex;
   }
-  
-  // Add any remaining text that doesn't end with punctuation
+
   if (lastIndex < text.length) {
     const remaining = text.slice(lastIndex).trim();
     if (remaining) {
       sentences.push(remaining);
     }
   }
+
+  return sentences;
+}
+
+function normalizeSentenceForDedup(sentence: string): string {
+  return sentence
+    .replace(/\s+/g, ' ')
+    .replace(/[.!?]+$/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function removeAdjacentDuplicateSentences(text: string): string {
+  const sentences = splitTextIntoSentenceUnits(text);
+  if (sentences.length < 2) {
+    return text;
+  }
+
+  const deduped: string[] = [];
+  let previousNormalized = '';
+
+  for (const sentence of sentences) {
+    const normalized = normalizeSentenceForDedup(sentence);
+    if (!normalized) {
+      deduped.push(sentence);
+      previousNormalized = '';
+      continue;
+    }
+
+    if (normalized === previousNormalized) {
+      console.log(`[Worker] Removed duplicate sentence at chunk boundary: ${normalized.slice(0, 80)}`);
+      continue;
+    }
+
+    deduped.push(sentence);
+    previousNormalized = normalized;
+  }
+
+  return deduped.join('').trim();
+}
+
+function joinCorrectedChunks(chunks: string[]): string {
+  const joined = chunks
+    .join('\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[^\S\n]+/g, ' ')
+    .trim();
+
+  return removeAdjacentDuplicateSentences(joined);
+}
+
+function splitTextIntoChunks(text: string, maxSentences: number = LM_STUDIO_MAX_SENTENCES): string[] {
+  if (!text || text.trim().length === 0) return [''];
+  
+  const sentences = splitTextIntoSentenceUnits(text);
   
   // If no sentences were found, return the original text as one chunk
   if (sentences.length === 0) {
@@ -1750,24 +1793,7 @@ function splitTextIntoChunksByCharLimit(text: string, maxChars: number = CLOUD_L
   if (!text || text.trim().length === 0) return [''];
   if (text.length <= maxChars) return [text];
 
-  // Split by sentence-ending punctuation while keeping the punctuation
-  const sentenceRegex = /([^.!?]*[.!?]+[\s"')\]]*)/g;
-  const sentences: string[] = [];
-  let match;
-  let lastIndex = 0;
-
-  while ((match = sentenceRegex.exec(text)) !== null) {
-    sentences.push(match[1]);
-    lastIndex = sentenceRegex.lastIndex;
-  }
-
-  // Add any remaining text that doesn't end with punctuation
-  if (lastIndex < text.length) {
-    const remaining = text.slice(lastIndex).trim();
-    if (remaining) {
-      sentences.push(remaining);
-    }
-  }
+  const sentences = splitTextIntoSentenceUnits(text);
 
   // If no sentences were found, do a hard split at maxChars on whitespace
   if (sentences.length === 0) {

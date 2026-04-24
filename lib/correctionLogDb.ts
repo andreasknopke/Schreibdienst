@@ -6,7 +6,9 @@ import mysql from 'mysql2/promise';
 // Types
 // ============================================================
 
-export type CorrectionType = 'textFormatting' | 'llm' | 'doublePrecision' | 'manual';
+export type CorrectionType = 'textFormatting' | 'dictionary' | 'standardDictionary' | 'privateDictionary' | 'llm' | 'doublePrecision' | 'manual';
+
+const CORRECTION_TYPE_ENUM = "ENUM('textFormatting', 'dictionary', 'standardDictionary', 'privateDictionary', 'llm', 'doublePrecision', 'manual')";
 
 export interface CorrectionLogEntry {
   id: number;
@@ -26,13 +28,12 @@ export interface CorrectionLogEntry {
 // These exist for backward-compat with routes that call initCorrectionLogTable*
 // ============================================================
 
-export async function initCorrectionLogTable(): Promise<void> {
-  const db = await getPool();
+async function ensureCorrectionLogSchema(db: mysql.Pool): Promise<void> {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS correction_log (
       id INT AUTO_INCREMENT PRIMARY KEY,
       dictation_id INT NOT NULL,
-      correction_type ENUM('textFormatting', 'llm', 'doublePrecision', 'manual') NOT NULL,
+      correction_type ${CORRECTION_TYPE_ENUM} NOT NULL,
       model_name VARCHAR(255) DEFAULT NULL,
       model_provider VARCHAR(100) DEFAULT NULL,
       username VARCHAR(255) DEFAULT NULL,
@@ -46,28 +47,21 @@ export async function initCorrectionLogTable(): Promise<void> {
       FOREIGN KEY (dictation_id) REFERENCES offline_dictations(id) ON DELETE CASCADE
     )
   `);
+
+  await db.execute(`
+    ALTER TABLE correction_log
+    MODIFY COLUMN correction_type ${CORRECTION_TYPE_ENUM} NOT NULL
+  `);
+}
+
+export async function initCorrectionLogTable(): Promise<void> {
+  const db = await getPool();
+  await ensureCorrectionLogSchema(db);
 }
 
 export async function initCorrectionLogTableWithRequest(req: NextRequest): Promise<void> {
   const db = await getPoolForRequest(req);
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS correction_log (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      dictation_id INT NOT NULL,
-      correction_type ENUM('textFormatting', 'llm', 'doublePrecision', 'manual') NOT NULL,
-      model_name VARCHAR(255) DEFAULT NULL,
-      model_provider VARCHAR(100) DEFAULT NULL,
-      username VARCHAR(255) DEFAULT NULL,
-      text_before LONGTEXT NOT NULL,
-      text_after LONGTEXT NOT NULL,
-      change_score INT DEFAULT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_dictation_id (dictation_id),
-      INDEX idx_correction_type (correction_type),
-      INDEX idx_created_at (created_at),
-      FOREIGN KEY (dictation_id) REFERENCES offline_dictations(id) ON DELETE CASCADE
-    )
-  `);
+  await ensureCorrectionLogSchema(db);
 }
 
 // ============================================================
@@ -124,6 +118,18 @@ export function logTextFormattingCorrection(dictationId: number, textBefore: str
   return getPool().then(db => _logCorrection(db, dictationId, 'textFormatting', textBefore, textAfter, { changeScore }));
 }
 
+export function logDictionaryCorrection(dictationId: number, textBefore: string, textAfter: string, changeScore?: number) {
+  return getPool().then(db => _logCorrection(db, dictationId, 'dictionary', textBefore, textAfter, { changeScore }));
+}
+
+export function logStandardDictionaryCorrection(dictationId: number, textBefore: string, textAfter: string, changeScore?: number) {
+  return getPool().then(db => _logCorrection(db, dictationId, 'standardDictionary', textBefore, textAfter, { changeScore }));
+}
+
+export function logPrivateDictionaryCorrection(dictationId: number, textBefore: string, textAfter: string, changeScore?: number) {
+  return getPool().then(db => _logCorrection(db, dictationId, 'privateDictionary', textBefore, textAfter, { changeScore }));
+}
+
 export function logLLMCorrection(dictationId: number, textBefore: string, textAfter: string, modelName: string, modelProvider: string, changeScore?: number) {
   return getPool().then(db => _logCorrection(db, dictationId, 'llm', textBefore, textAfter, { modelName, modelProvider, changeScore }));
 }
@@ -150,6 +156,18 @@ export function getCorrectionLogStats(dictationId: number) {
 
 export function logTextFormattingCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, changeScore?: number) {
   return getPoolForRequest(req).then(db => _logCorrection(db, dictationId, 'textFormatting', textBefore, textAfter, { changeScore }));
+}
+
+export function logDictionaryCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, changeScore?: number) {
+  return getPoolForRequest(req).then(db => _logCorrection(db, dictationId, 'dictionary', textBefore, textAfter, { changeScore }));
+}
+
+export function logStandardDictionaryCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, changeScore?: number) {
+  return getPoolForRequest(req).then(db => _logCorrection(db, dictationId, 'standardDictionary', textBefore, textAfter, { changeScore }));
+}
+
+export function logPrivateDictionaryCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, changeScore?: number) {
+  return getPoolForRequest(req).then(db => _logCorrection(db, dictationId, 'privateDictionary', textBefore, textAfter, { changeScore }));
 }
 
 export function logLLMCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, modelName: string, modelProvider: string, changeScore?: number) {

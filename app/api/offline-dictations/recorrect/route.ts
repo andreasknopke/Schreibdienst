@@ -21,34 +21,8 @@ import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult,
 export const runtime = 'nodejs';
 export const maxDuration = 120; // 2 minutes max
 
-const DEFAULT_LM_STUDIO_MAX_TOKENS = 4096;
-const MAX_SAFE_LM_STUDIO_MAX_TOKENS = 8192;
-const DEFAULT_LM_STUDIO_CONTEXT_WINDOW = 8192;
-const MIN_LM_STUDIO_INPUT_TOKENS = 512;
-const LM_STUDIO_PROMPT_TOKEN_BUFFER = 512;
-const APPROX_CHARS_PER_TOKEN = 4;
-const parsedLMStudioMaxTokens = Number.parseInt(process.env.LLM_STUDIO_TOKEN || `${DEFAULT_LM_STUDIO_MAX_TOKENS}`, 10);
-const parsedLMStudioContextWindow = Number.parseInt(process.env.LM_STUDIO_CONTEXT_WINDOW || `${DEFAULT_LM_STUDIO_CONTEXT_WINDOW}`, 10);
-const LM_STUDIO_MAX_TOKENS = Number.isFinite(parsedLMStudioMaxTokens) && parsedLMStudioMaxTokens > 0
-  ? Math.min(parsedLMStudioMaxTokens, MAX_SAFE_LM_STUDIO_MAX_TOKENS)
-  : DEFAULT_LM_STUDIO_MAX_TOKENS;
-const LM_STUDIO_CONTEXT_WINDOW = Number.isFinite(parsedLMStudioContextWindow) && parsedLMStudioContextWindow > 0
-  ? Math.max(parsedLMStudioContextWindow, LM_STUDIO_MAX_TOKENS + MIN_LM_STUDIO_INPUT_TOKENS)
-  : DEFAULT_LM_STUDIO_CONTEXT_WINDOW;
-const LM_STUDIO_MAX_INPUT_TOKENS = Math.max(
-  MIN_LM_STUDIO_INPUT_TOKENS,
-  LM_STUDIO_CONTEXT_WINDOW - LM_STUDIO_MAX_TOKENS - LM_STUDIO_PROMPT_TOKEN_BUFFER,
-);
-const DEFAULT_LLM_TIMEOUT_MS = 300000;
-const DEFAULT_LONG_LLM_TIMEOUT_MS = 600000;
-const parsedDefaultLlmTimeoutMs = Number.parseInt(process.env.LLM_REQUEST_TIMEOUT_MS || `${DEFAULT_LLM_TIMEOUT_MS}`, 10);
-const parsedLongLlmTimeoutMs = Number.parseInt(process.env.LONG_LLM_REQUEST_TIMEOUT_MS || `${DEFAULT_LONG_LLM_TIMEOUT_MS}`, 10);
-const LLM_REQUEST_TIMEOUT_MS = Number.isFinite(parsedDefaultLlmTimeoutMs) && parsedDefaultLlmTimeoutMs > 0
-  ? parsedDefaultLlmTimeoutMs
-  : DEFAULT_LLM_TIMEOUT_MS;
-const LONG_LLM_REQUEST_TIMEOUT_MS = Number.isFinite(parsedLongLlmTimeoutMs) && parsedLongLlmTimeoutMs > 0
-  ? parsedLongLlmTimeoutMs
-  : DEFAULT_LONG_LLM_TIMEOUT_MS;
+// LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
+const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);
 
 // Max characters per chunk for cloud LLMs (Mistral, OpenAI) to avoid timeouts
 const CLOUD_LLM_MAX_CHARS = 40000;
@@ -118,115 +92,6 @@ function splitTextIntoChunksByCharLimit(text: string, maxChars: number = CLOUD_L
   }
 
   return chunks.length > 0 ? chunks : [text];
-}
-
-function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / APPROX_CHARS_PER_TOKEN));
-}
-
-function splitTextIntoChunksByEstimatedTokens(
-  text: string,
-  maxInputTokens: number,
-  reservedPromptTokens: number = 0,
-): string[] {
-  if (!text || text.trim().length === 0) return [''];
-
-  const effectiveMaxTokens = Math.max(
-    MIN_LM_STUDIO_INPUT_TOKENS,
-    maxInputTokens - reservedPromptTokens,
-  );
-
-  if (estimateTokens(text) <= effectiveMaxTokens) {
-    return [text.trim()];
-  }
-
-  const sentences: string[] = [];
-  let currentSentence = '';
-  let i = 0;
-
-  while (i < text.length) {
-    const char = text[i];
-    currentSentence += char;
-
-    if (char === '.' || char === '!' || char === '?') {
-      const nextChar = text[i + 1] || '';
-      const prevChars = currentSentence.slice(-4, -1);
-      const isDate = /\d$/.test(prevChars) || /^\d/.test(nextChar);
-      const isAbbreviation = /\b(Dr|Mr|Fr|Hr|Prof|bzw|z\.B|u\.a|d\.h|etc|ca|vs|Nr|Tel|Str|inkl|ggf|evtl|usw)\.$/.test(currentSentence);
-
-      if (!isDate && !isAbbreviation) {
-        while (i + 1 < text.length && /[\s"')\]]/.test(text[i + 1])) {
-          i++;
-          currentSentence += text[i];
-        }
-        if (currentSentence.trim()) {
-          sentences.push(currentSentence);
-        }
-        currentSentence = '';
-      }
-    }
-    i++;
-  }
-
-  if (currentSentence.trim()) {
-    sentences.push(currentSentence);
-  }
-
-  if (sentences.length === 0) {
-    const chunks: string[] = [];
-    let start = 0;
-    const maxCharsPerChunk = effectiveMaxTokens * APPROX_CHARS_PER_TOKEN;
-
-    while (start < text.length) {
-      let end = Math.min(text.length, start + maxCharsPerChunk);
-      if (end < text.length) {
-        const splitAt = text.lastIndexOf(' ', end);
-        if (splitAt > start) {
-          end = splitAt;
-        }
-      }
-      chunks.push(text.slice(start, end).trim());
-      start = end;
-      while (start < text.length && text[start] === ' ') {
-        start++;
-      }
-    }
-
-    return chunks.filter(chunk => chunk.length > 0);
-  }
-
-  const chunks: string[] = [];
-  let currentChunk = '';
-
-  for (const sentence of sentences) {
-    const sentenceTokens = estimateTokens(sentence);
-
-    if (sentenceTokens > effectiveMaxTokens) {
-      if (currentChunk.trim()) {
-        chunks.push(currentChunk.trim());
-        currentChunk = '';
-      }
-
-      const oversizeSentenceChunks = splitTextIntoChunksByEstimatedTokens(sentence, effectiveMaxTokens, 0);
-      chunks.push(...oversizeSentenceChunks);
-      continue;
-    }
-
-    const candidateChunk = currentChunk + sentence;
-    if (currentChunk.trim() && estimateTokens(candidateChunk) > effectiveMaxTokens) {
-      chunks.push(currentChunk.trim());
-      currentChunk = sentence;
-      continue;
-    }
-
-    currentChunk = candidateChunk;
-  }
-
-  if (currentChunk.trim()) {
-    chunks.push(currentChunk.trim());
-  }
-
-  return chunks.length > 0 ? chunks : [text.trim()];
 }
 
 /**
@@ -563,8 +428,9 @@ REGELN:
       return chunkText;
     }
     
+    // Add timeout - 5 minutes for very long texts, 2 minutes for normal
     const totalChars = prompt.length + chunkText.length;
-    const timeoutMs = totalChars > 20000 ? LONG_LLM_REQUEST_TIMEOUT_MS : LLM_REQUEST_TIMEOUT_MS;
+    const timeoutMs = totalChars > 20000 ? 300000 : 120000;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
@@ -630,71 +496,30 @@ REGELN:
     }
   } else if (llmConfig.provider === 'lmstudio') {
     const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
-
-    const callLmStudioLLM = async (chunkText: string): Promise<string> => {
-      const userMessage = `<<<DIKTAT_START>>>\n${chunkText}\n<<<DIKTAT_ENDE>>>`;
-      const totalChars = systemPrompt.length + chunkText.length;
-      const timeoutMs = totalChars > 20000 ? LONG_LLM_REQUEST_TIMEOUT_MS : LLM_REQUEST_TIMEOUT_MS;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-        console.error(`[ReCorrect] Request TIMEOUT after ${timeoutMs / 1000}s for ${llmConfig.provider}`);
-      }, timeoutMs);
-
-      try {
-        const res = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: llmConfig.model,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userMessage }
-            ],
-            temperature: 0.1,
-            max_tokens: LM_STUDIO_MAX_TOKENS,
-          }),
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!res.ok) {
-          const errorText = await res.text();
-          throw new Error(`LM Studio API error (${res.status}): ${errorText.substring(0, 200)}`);
-        }
-
-        const data = await res.json();
-        const lmCorrContent = data.choices?.[0]?.message?.content;
-        return (typeof lmCorrContent === 'string' ? lmCorrContent.trim() : (lmCorrContent ? String(lmCorrContent) : '')) || chunkText;
-      } catch (error: any) {
-        clearTimeout(timeoutId);
-        if (error.name === 'AbortError') {
-          throw new Error(`LLM request timeout after ${timeoutMs / 1000}s (provider: ${llmConfig.provider}, input: ${totalChars} chars)`);
-        }
-        throw error;
-      }
-    };
-
-    const reservedPromptTokens = estimateTokens(systemPrompt) + estimateTokens('<<<DIKTAT_START>>>\n\n<<<DIKTAT_ENDE>>>');
-    const chunks = splitTextIntoChunksByEstimatedTokens(text, LM_STUDIO_MAX_INPUT_TOKENS, reservedPromptTokens);
-
-    if (chunks.length > 1) {
-      console.log(`[ReCorrect] LM Studio: Text split into ${chunks.length} chunks (budget: ${LM_STUDIO_MAX_INPUT_TOKENS} input tokens, output: ${LM_STUDIO_MAX_TOKENS})`);
+    
+    // LM Studio uses fixed max tokens
+    const temperature = 0.1;
+    const maxTokens = LM_STUDIO_MAX_TOKENS;
+    
+    const res = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: llmConfig.model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `<<<DIKTAT_START>>>\n${text}\n<<<DIKTAT_ENDE>>>` }
+        ],
+        temperature,
+        max_tokens: maxTokens,
+      }),
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      const lmCorrContent = data.choices?.[0]?.message?.content;
+      correctedText = (typeof lmCorrContent === 'string' ? lmCorrContent.trim() : (lmCorrContent ? String(lmCorrContent) : '')) || text;
     }
-
-    const correctedChunks: string[] = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      console.log(`[ReCorrect] LM Studio chunk ${i + 1}/${chunks.length}: ${chunk.length} chars, est. ${estimateTokens(chunk)} tokens`);
-      correctedChunks.push(await callLmStudioLLM(chunk));
-    }
-
-    correctedText = correctedChunks
-      .join('\n\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .replace(/[^\S\n]+/g, ' ')
-      .trim();
   }
   
   // Remove any Markdown formatting that the LLM may have added despite instructions

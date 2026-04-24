@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import { getPool, getPoolForRequest } from './db';
 import mysql from 'mysql2/promise';
 
+const CORRECTION_TYPE_ENUM = "ENUM('textFormatting', 'dictionary', 'standardDictionary', 'privateDictionary', 'llm', 'doublePrecision', 'manual')";
+
 // ============================================================
 // Types
 // ============================================================
@@ -183,7 +185,7 @@ async function _doInitTables(db: mysql.Pool, poolKey: string): Promise<void> {
     CREATE TABLE IF NOT EXISTS correction_log (
       id INT AUTO_INCREMENT PRIMARY KEY,
       dictation_id INT NOT NULL,
-      correction_type ENUM('textFormatting', 'llm', 'doublePrecision', 'manual') NOT NULL,
+      correction_type ${CORRECTION_TYPE_ENUM} NOT NULL,
       model_name VARCHAR(255) DEFAULT NULL,
       model_provider VARCHAR(100) DEFAULT NULL,
       username VARCHAR(255) DEFAULT NULL,
@@ -196,6 +198,11 @@ async function _doInitTables(db: mysql.Pool, poolKey: string): Promise<void> {
       INDEX idx_created_at (created_at),
       FOREIGN KEY (dictation_id) REFERENCES offline_dictations(id) ON DELETE CASCADE
     )
+  `);
+
+  await db.execute(`
+    ALTER TABLE correction_log
+    MODIFY COLUMN correction_type ${CORRECTION_TYPE_ENUM} NOT NULL
   `);
 
   // ── Migrate legacy: move audio_data from main table to dictation_audio ──

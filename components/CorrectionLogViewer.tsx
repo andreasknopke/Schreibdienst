@@ -7,7 +7,7 @@ import DiffHighlight from './DiffHighlight';
 interface CorrectionLogEntry {
   id: number;
   dictation_id: number;
-  correction_type: 'textFormatting' | 'llm' | 'doublePrecision' | 'manual';
+  correction_type: 'textFormatting' | 'dictionary' | 'standardDictionary' | 'privateDictionary' | 'llm' | 'doublePrecision' | 'manual';
   model_name?: string;
   model_provider?: string;
   username?: string;
@@ -24,16 +24,60 @@ interface CorrectionLogViewerProps {
 
 const correctionTypeLabels: Record<string, string> = {
   textFormatting: '📝 Text-Formatierung',
+  dictionary: '📚 Wörterbuch-Korrektur',
+  standardDictionary: '📘 Standardwörterbuch',
+  privateDictionary: '📗 Privates Wörterbuch',
   llm: '🤖 KI-Korrektur',
   doublePrecision: '🔍 Double Precision Merge',
   manual: '✏️ Manuelle Korrektur'
 };
 
 const correctionTypeDescriptions: Record<string, string> = {
-  textFormatting: 'Automatische Formatierung (Absätze, Wörterbuch, etc.)',
+  textFormatting: 'Automatische Formatierung und Bereinigung von Diktierbefehlen',
+  dictionary: 'Legacy-Eintrag: kombinierte Wörterbuch-Korrektur',
+  standardDictionary: 'Deterministische Korrektur durch das Standardwörterbuch',
+  privateDictionary: 'Deterministische Korrektur durch das private Wörterbuch',
   llm: 'KI-gestützte Grammatik- und Rechtschreibkorrektur',
   doublePrecision: 'Vergleich und Zusammenführung zweier Transkriptionen durch LLM',
   manual: 'Manuelle Korrektur durch Benutzer'
+};
+
+const correctionTypeStyles: Record<string, { container: string; header: string; label: string }> = {
+  textFormatting: {
+    container: 'border-gray-200 dark:border-gray-700',
+    header: 'bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800',
+    label: 'text-gray-700 dark:text-gray-200',
+  },
+  dictionary: {
+    container: 'border-amber-200 dark:border-amber-800',
+    header: 'bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/30',
+    label: 'text-amber-800 dark:text-amber-300',
+  },
+  standardDictionary: {
+    container: 'border-blue-200 dark:border-blue-800',
+    header: 'bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30',
+    label: 'text-blue-800 dark:text-blue-300',
+  },
+  privateDictionary: {
+    container: 'border-emerald-200 dark:border-emerald-800',
+    header: 'bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/30',
+    label: 'text-emerald-800 dark:text-emerald-300',
+  },
+  llm: {
+    container: 'border-violet-200 dark:border-violet-800',
+    header: 'bg-violet-50 dark:bg-violet-900/20 hover:bg-violet-100 dark:hover:bg-violet-900/30',
+    label: 'text-violet-800 dark:text-violet-300',
+  },
+  doublePrecision: {
+    container: 'border-cyan-200 dark:border-cyan-800',
+    header: 'bg-cyan-50 dark:bg-cyan-900/20 hover:bg-cyan-100 dark:hover:bg-cyan-900/30',
+    label: 'text-cyan-800 dark:text-cyan-300',
+  },
+  manual: {
+    container: 'border-rose-200 dark:border-rose-800',
+    header: 'bg-rose-50 dark:bg-rose-900/20 hover:bg-rose-100 dark:hover:bg-rose-900/30',
+    label: 'text-rose-800 dark:text-rose-300',
+  },
 };
 
 export default function CorrectionLogViewer({ dictationId, onClose }: CorrectionLogViewerProps) {
@@ -124,19 +168,22 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
           {!loading && !error && logs.length > 0 && (
             <div className="space-y-3">
               {logs.map((log, index) => (
+                (() => {
+                  const typeStyle = correctionTypeStyles[log.correction_type] || correctionTypeStyles.textFormatting;
+                  return (
                 <div
                   key={log.id}
-                  className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden"
+                  className={`border rounded-lg overflow-hidden ${typeStyle.container}`}
                 >
                   {/* Header */}
                   <div
-                    className="bg-gray-50 dark:bg-gray-900 p-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    className={`p-3 cursor-pointer transition-colors ${typeStyle.header}`}
                     onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="font-medium text-sm">
+                          <span className={`font-medium text-sm ${typeStyle.label}`}>
                             {index + 1}. {correctionTypeLabels[log.correction_type] || log.correction_type}
                           </span>
                           {log.change_score !== undefined && log.change_score !== null && (
@@ -225,6 +272,8 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
                     </div>
                   )}
                 </div>
+                  );
+                })()
               ))}
             </div>
           )}

@@ -247,17 +247,22 @@ export function mergeWithStandardDictionary<T extends { wrong: string; correct: 
   userEntries: T[],
   dbStandardEntries?: { wrong: string; correct: string }[]
 ): (T | StandardDictionaryEntry)[] {
+  const standardOnly = getStandardOnlyEntries(userEntries, dbStandardEntries);
+
+  return [...userEntries, ...standardOnly];
+}
+
+export function getStandardOnlyEntries<T extends { wrong: string }>(
+  userEntries: T[],
+  dbStandardEntries?: { wrong: string; correct: string }[]
+): StandardDictionaryEntry[] {
   const standardSource = dbStandardEntries ?? STANDARD_DICTIONARY;
 
-  // User-"wrong"-Wörter sammeln (case-insensitive)
   const userWrongWords = new Set(
     userEntries.map(e => e.wrong.toLowerCase())
   );
 
-  // Standard-Einträge die nicht vom User überschrieben werden
-  const standardOnly = standardSource.filter(
+  return standardSource.filter(
     e => !userWrongWords.has(e.wrong.toLowerCase())
   );
-
-  return [...userEntries, ...standardOnly];
 }

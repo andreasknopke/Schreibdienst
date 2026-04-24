@@ -11,44 +11,22 @@ import {
 } from '@/lib/offlineDictationDb';
 import {
   logTextFormattingCorrectionWithRequest,
+  logStandardDictionaryCorrectionWithRequest,
+  logPrivateDictionaryCorrectionWithRequest,
   logLLMCorrectionWithRequest,
   logDoublePrecisionCorrectionWithRequest,
 } from '@/lib/correctionLogDb';
 import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath, getEffectiveOfflineService, getEffectiveDoublePrecisionService, RuntimeConfig } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
-import { preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFormatting';
+import { applyDictionaryCorrections, preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFormatting';
 import { compressAudioForSpeech, normalizeAudioForWhisper } from '@/lib/audioCompression';
 import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
+import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
+import { getStandardOnlyEntries } from '@/lib/standardDictionary';
 
-const DEFAULT_LM_STUDIO_MAX_TOKENS = 4096;
-const MAX_SAFE_LM_STUDIO_MAX_TOKENS = 8192;
-const DEFAULT_LM_STUDIO_CONTEXT_WINDOW = 8192;
-const MIN_LM_STUDIO_INPUT_TOKENS = 512;
-const LM_STUDIO_PROMPT_TOKEN_BUFFER = 512;
-const APPROX_CHARS_PER_TOKEN = 4;
-const parsedLMStudioMaxTokens = Number.parseInt(process.env.LLM_STUDIO_TOKEN || `${DEFAULT_LM_STUDIO_MAX_TOKENS}`, 10);
-const parsedLMStudioContextWindow = Number.parseInt(process.env.LM_STUDIO_CONTEXT_WINDOW || `${DEFAULT_LM_STUDIO_CONTEXT_WINDOW}`, 10);
-const LM_STUDIO_MAX_TOKENS = Number.isFinite(parsedLMStudioMaxTokens) && parsedLMStudioMaxTokens > 0
-  ? Math.min(parsedLMStudioMaxTokens, MAX_SAFE_LM_STUDIO_MAX_TOKENS)
-  : DEFAULT_LM_STUDIO_MAX_TOKENS;
-const LM_STUDIO_CONTEXT_WINDOW = Number.isFinite(parsedLMStudioContextWindow) && parsedLMStudioContextWindow > 0
-  ? Math.max(parsedLMStudioContextWindow, LM_STUDIO_MAX_TOKENS + MIN_LM_STUDIO_INPUT_TOKENS)
-  : DEFAULT_LM_STUDIO_CONTEXT_WINDOW;
-const LM_STUDIO_MAX_INPUT_TOKENS = Math.max(
-  MIN_LM_STUDIO_INPUT_TOKENS,
-  LM_STUDIO_CONTEXT_WINDOW - LM_STUDIO_MAX_TOKENS - LM_STUDIO_PROMPT_TOKEN_BUFFER,
-);
-const DEFAULT_LLM_TIMEOUT_MS = 300000;
-const DEFAULT_LONG_LLM_TIMEOUT_MS = 600000;
-const parsedDefaultLlmTimeoutMs = Number.parseInt(process.env.LLM_REQUEST_TIMEOUT_MS || `${DEFAULT_LLM_TIMEOUT_MS}`, 10);
-const parsedLongLlmTimeoutMs = Number.parseInt(process.env.LONG_LLM_REQUEST_TIMEOUT_MS || `${DEFAULT_LONG_LLM_TIMEOUT_MS}`, 10);
-const LLM_REQUEST_TIMEOUT_MS = Number.isFinite(parsedDefaultLlmTimeoutMs) && parsedDefaultLlmTimeoutMs > 0
-  ? parsedDefaultLlmTimeoutMs
-  : DEFAULT_LLM_TIMEOUT_MS;
-const LONG_LLM_REQUEST_TIMEOUT_MS = Number.isFinite(parsedLongLlmTimeoutMs) && parsedLongLlmTimeoutMs > 0
-  ? parsedLongLlmTimeoutMs
-  : DEFAULT_LONG_LLM_TIMEOUT_MS;
+// LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
+const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);
 
 /**
  * GPU Memory Warmup - Loads a tiny model in LM Studio to free GPU memory before Whisper
@@ -259,31 +237,80 @@ export async function processDictation(request: NextRequest, dictationId: number
     // Store segments for word-level highlighting during audio playback
     const segments = transcriptionResult.segments;
     
-    // Load user dictionary for preprocessing
+    // Load dictionaries for deterministic preprocessing before the LLM step.
     const dictionary = dictation.username ? await loadDictionaryWithRequest(request, dictation.username) : { entries: [] };
     const dictionaryEntries = dictionary.entries;
+    const standardDictionaryEntries = await getStandardDictEntries(request);
     
-    // Preprocess: apply formatting control words AND dictionary corrections BEFORE LLM
-    // This handles "neuer Absatz", "neue Zeile", "Klammer auf/zu", etc. programmatically
-    // AND applies user dictionary corrections deterministically (saves tokens & more reliable)
+    // Step 2a: formatting/filler cleanup before any dictionary replacements.
     const textBeforeFormatting = rawTranscript;
-    const preprocessedText = preprocessTranscription(rawTranscript, dictionaryEntries);
-    console.log(`[Worker] Preprocessed text: ${rawTranscript.length} → ${preprocessedText.length} chars${dictionaryEntries.length > 0 ? ` (dictionary: ${dictionaryEntries.length} entries applied)` : ''}`);
+    const formattedText = preprocessTranscription(rawTranscript, [], []);
     
-    // Log text formatting correction
-    if (preprocessedText !== textBeforeFormatting) {
+    if (formattedText !== textBeforeFormatting) {
       try {
-        const formattingChangeScore = calculateChangeScore(textBeforeFormatting, preprocessedText);
+        const formattingChangeScore = calculateChangeScore(textBeforeFormatting, formattedText);
         await logTextFormattingCorrectionWithRequest(
           request,
           dictationId,
           textBeforeFormatting,
-          preprocessedText,
+          formattedText,
           formattingChangeScore
         );
         console.log(`[Worker] ✓ Text formatting correction logged (score: ${formattingChangeScore}%)`);
       } catch (logError: any) {
         console.warn(`[Worker] Failed to log text formatting correction: ${logError.message}`);
+      }
+    }
+
+    // Step 2b: apply standard and private dictionary separately so both appear in the log.
+    const effectiveStandardEntries = getStandardOnlyEntries(dictionaryEntries, standardDictionaryEntries);
+    const textBeforeStandardDictionary = formattedText;
+    const standardDictionaryText = applyDictionaryCorrections(
+      formattedText,
+      [],
+      effectiveStandardEntries
+    );
+
+    if (standardDictionaryText !== textBeforeStandardDictionary) {
+      try {
+        const standardDictionaryChangeScore = calculateChangeScore(textBeforeStandardDictionary, standardDictionaryText);
+        await logStandardDictionaryCorrectionWithRequest(
+          request,
+          dictationId,
+          textBeforeStandardDictionary,
+          standardDictionaryText,
+          standardDictionaryChangeScore
+        );
+        console.log(`[Worker] ✓ Standard dictionary correction logged (score: ${standardDictionaryChangeScore}%)`);
+      } catch (logError: any) {
+        console.warn(`[Worker] Failed to log standard dictionary correction: ${logError.message}`);
+      }
+    }
+
+    const textBeforePrivateDictionary = standardDictionaryText;
+    const preprocessedText = applyDictionaryCorrections(
+      standardDictionaryText,
+      dictionaryEntries,
+      []
+    );
+    console.log(
+      `[Worker] Preprocessed text: ${rawTranscript.length} → ${preprocessedText.length} chars ` +
+      `(user dictionary: ${dictionaryEntries.length}, standard dictionary: ${effectiveStandardEntries.length})`
+    );
+
+    if (preprocessedText !== textBeforePrivateDictionary) {
+      try {
+        const privateDictionaryChangeScore = calculateChangeScore(textBeforePrivateDictionary, preprocessedText);
+        await logPrivateDictionaryCorrectionWithRequest(
+          request,
+          dictationId,
+          textBeforePrivateDictionary,
+          preprocessedText,
+          privateDictionaryChangeScore
+        );
+        console.log(`[Worker] ✓ Private dictionary correction logged (score: ${privateDictionaryChangeScore}%)`);
+      } catch (logError: any) {
+        console.warn(`[Worker] Failed to log private dictionary correction: ${logError.message}`);
       }
     }
     
@@ -1522,20 +1549,16 @@ KRITISCH - AUSGABEFORMAT:
   const shouldUseChunking = llmConfig.provider === 'lmstudio' && !runtimeConfig.lmStudioUseApiMode;
   
   if (shouldUseChunking) {
-    const reservedPromptTokens = Math.max(
-      estimateTokens(systemPrompt),
-      estimateTokens(chunkSystemPrompt),
-    ) + estimateTokens('<<<DIKTAT_START>>><<<DIKTAT_ENDE>>>');
-    const chunks = splitTextIntoChunksByEstimatedTokens(text, LM_STUDIO_MAX_INPUT_TOKENS, reservedPromptTokens);
+    const chunks = splitTextIntoChunks(text, LM_STUDIO_MAX_SENTENCES);
     
     if (chunks.length > 1) {
-      console.log(`[Worker] LM Studio: Processing ${chunks.length} chunks (budget: ${LM_STUDIO_MAX_INPUT_TOKENS} input tokens, output: ${LM_STUDIO_MAX_TOKENS})`);
+      console.log(`[Worker] LM Studio: Processing ${chunks.length} chunks of max ${LM_STUDIO_MAX_SENTENCES} sentences`);
       
       const correctedChunks: string[] = [];
       
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
-        console.log(`[Worker] Chunk ${i + 1}/${chunks.length}: ${chunk.length} chars, est. ${estimateTokens(chunk)} tokens`);
+        console.log(`[Worker] Chunk ${i + 1}/${chunks.length}: ${chunk.length} chars`);
         
         const chunkResult = await callLLM(llmConfig, [
           { role: 'system', content: chunkSystemPrompt },
@@ -1721,10 +1744,6 @@ const LM_STUDIO_MAX_SENTENCES = 10;
 // Max characters per chunk for cloud LLMs (Mistral, OpenAI) to avoid timeouts
 const CLOUD_LLM_MAX_CHARS = 40000;
 
-function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / APPROX_CHARS_PER_TOKEN));
-}
-
 function splitTextIntoChunks(text: string, maxSentences: number = LM_STUDIO_MAX_SENTENCES): string[] {
   if (!text || text.trim().length === 0) return [''];
   
@@ -1763,80 +1782,6 @@ function splitTextIntoChunks(text: string, maxSentences: number = LM_STUDIO_MAX_
   
   return chunks.length > 0 ? chunks : [text];
 }
-
-  function splitTextIntoChunksByEstimatedTokens(
-    text: string,
-    maxInputTokens: number,
-    reservedPromptTokens: number = 0,
-  ): string[] {
-    if (!text || text.trim().length === 0) return [''];
-
-    const effectiveMaxTokens = Math.max(
-      MIN_LM_STUDIO_INPUT_TOKENS,
-      maxInputTokens - reservedPromptTokens,
-    );
-
-    if (estimateTokens(text) <= effectiveMaxTokens) {
-      return [text.trim()];
-    }
-
-    const sentenceChunks = splitTextIntoChunks(text, 1);
-    if (sentenceChunks.length === 0) {
-      return [text.trim()];
-    }
-
-    const chunks: string[] = [];
-    let currentChunk = '';
-
-    for (const sentence of sentenceChunks) {
-      const trimmedSentence = sentence.trim();
-      const sentenceTokens = estimateTokens(trimmedSentence);
-
-      if (sentenceTokens > effectiveMaxTokens) {
-        if (currentChunk.trim()) {
-          chunks.push(currentChunk.trim());
-          currentChunk = '';
-        }
-
-        const maxCharsPerChunk = effectiveMaxTokens * APPROX_CHARS_PER_TOKEN;
-        let start = 0;
-        while (start < trimmedSentence.length) {
-          let end = Math.min(trimmedSentence.length, start + maxCharsPerChunk);
-          if (end < trimmedSentence.length) {
-            const splitAt = trimmedSentence.lastIndexOf(' ', end);
-            if (splitAt > start) {
-              end = splitAt;
-            }
-          }
-          const hardChunk = trimmedSentence.slice(start, end).trim();
-          if (hardChunk) {
-            chunks.push(hardChunk);
-          }
-          start = end;
-          while (start < trimmedSentence.length && trimmedSentence[start] === ' ') {
-            start++;
-          }
-        }
-        continue;
-      }
-
-      const separator = currentChunk ? ' ' : '';
-      const candidateChunk = `${currentChunk}${separator}${trimmedSentence}`;
-      if (currentChunk.trim() && estimateTokens(candidateChunk) > effectiveMaxTokens) {
-        chunks.push(currentChunk.trim());
-        currentChunk = trimmedSentence;
-        continue;
-      }
-
-      currentChunk = candidateChunk;
-    }
-
-    if (currentChunk.trim()) {
-      chunks.push(currentChunk.trim());
-    }
-
-    return chunks.length > 0 ? chunks : [text.trim()];
-  }
 
 // Split text into chunks by character limit, breaking at sentence boundaries
 function splitTextIntoChunksByCharLimit(text: string, maxChars: number = CLOUD_LLM_MAX_CHARS): string[] {
@@ -1946,19 +1891,9 @@ async function callLLM(
   const fullUrl = `${config.baseUrl}/v1/chat/completions`;
   const totalInputChars = messages.reduce((sum, m) => sum + m.content.length, 0);
   console.log(`[Worker LLM] Calling ${config.provider} at ${fullUrl}, model: ${config.model}, input: ${totalInputChars} chars`);
-
-  if (isLMStudio) {
-    const estimatedInputTokens = estimateTokens(messages.map(message => message.content).join(' '));
-    const availableOutputTokens = LM_STUDIO_CONTEXT_WINDOW - estimatedInputTokens - LM_STUDIO_PROMPT_TOKEN_BUFFER;
-
-    if (availableOutputTokens <= 0) {
-      throw new Error(`LM Studio request exceeds context window (input est. ${estimatedInputTokens} tokens, context: ${LM_STUDIO_CONTEXT_WINDOW})`);
-    }
-
-    body.max_tokens = Math.min(LM_STUDIO_MAX_TOKENS, availableOutputTokens);
-  }
   
-  const timeoutMs = totalInputChars > 20000 ? LONG_LLM_REQUEST_TIMEOUT_MS : LLM_REQUEST_TIMEOUT_MS;
+  // Add timeout - 5 minutes for very long texts, 2 minutes for normal
+  const timeoutMs = totalInputChars > 20000 ? 300000 : 120000;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();

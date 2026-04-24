@@ -180,6 +180,31 @@ function detectInflectionSuffix(normWord: string, minStemLen = 3): string {
 }
 
 /**
+ * Wählt für das Replacement diejenige Endung, deren abgetrennter Stamm dem
+ * Zielstamm am nächsten kommt. So werden lexikalische Wortenden wie
+ * "Immunglobulin" oder "Ödem" nicht fälschlich als Flexionsendung behandelt.
+ */
+function detectBestReplacementSuffix(normWord: string, targetStem: string, minStemLen = 3): string {
+  let bestSuffix = '';
+  let bestDistance = levenshtein(normWord, targetStem);
+
+  for (const suf of INFLECTION_SUFFIXES) {
+    if (!normWord.endsWith(suf) || normWord.length - suf.length < minStemLen) {
+      continue;
+    }
+
+    const candidateStem = normWord.slice(0, -suf.length);
+    const candidateDistance = levenshtein(candidateStem, targetStem);
+    if (candidateDistance < bestDistance) {
+      bestDistance = candidateDistance;
+      bestSuffix = suf;
+    }
+  }
+
+  return bestSuffix;
+}
+
+/**
  * Hängt eine Endung an den Original-Replacement an und respektiert dabei
  * Original-Schreibweise (Umlaute, Bindestriche). Da die Endungen rein aus
  * ASCII-Buchstaben bestehen, ist das ein einfaches Konkatenieren.
@@ -231,12 +256,14 @@ function preserveInflection(original: string, replacement: string): string {
 
   const baseDist = levenshtein(origNorm, replNorm);
   const origSuf = detectInflectionSuffix(origNorm);
-  const replSuf = detectInflectionSuffix(replNorm);
+  if (!origSuf) return replacement;
+
+  const origStem = origNorm.slice(0, -origSuf.length);
+  const replSuf = detectBestReplacementSuffix(replNorm, origStem);
 
   // Wenn schon identische Endung: nichts zu tun.
   if (origSuf && origSuf === replSuf) return replacement;
 
-  const origStem = origSuf ? origNorm.slice(0, -origSuf.length) : origNorm;
   const replStem = replSuf ? replNorm.slice(0, -replSuf.length) : replNorm;
 
   // Mindestlänge der Stämme, damit kein "is/im/es" als Stamm zählt.

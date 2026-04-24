@@ -2,8 +2,9 @@ import { NextRequest } from 'next/server';
 import { query, execute, getPoolForRequest } from './db';
 
 // Verfügbare Offline-Modelle für WhisperX (aus Model_Manager.py)
-const TURBO_GERMAN_MODEL = 'primeline/whisper-large-v3-turbo-german';
+const TURBO_GERMAN_MODEL = 'primeline-whisper-large-v3-turbo-german';
 const LEGACY_TURBO_GERMAN_MODELS = [
+  'primeline/whisper-large-v3-turbo-german',
   'primeline-turbo-de-int8_bf16',
   'cstr/whisper-large-v3-turbo-german-int8_float32',
 ] as const;
@@ -12,7 +13,7 @@ export type WhisperOfflineModel =
   | 'large-v3'                                        // Standard large-v3
   | 'guillaumekln/faster-whisper-large-v2'            // Large-v2 (empfohlen)
   | 'large-v2'                                        // Standard large-v2
-  | 'primeline/whisper-large-v3-turbo-german';        // Turbo German
+  | 'primeline-whisper-large-v3-turbo-german';        // Turbo German
 
 function normalizeTurboGermanModel(modelId: string | undefined): string | undefined {
   if (!modelId) return modelId;

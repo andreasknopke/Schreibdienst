@@ -175,14 +175,16 @@ export async function POST(request: NextRequest) {
       'large-v3',
       'guillaumekln/faster-whisper-large-v2',
       'large-v2',
+      'primeline-whisper-large-v3-turbo-german',
       'primeline/whisper-large-v3-turbo-german',
       'primeline-turbo-de-int8_bf16',
       'cstr/whisper-large-v3-turbo-german-int8_float32',
     ];
     if (body.whisperModel && validWhisperModels.includes(body.whisperModel)) {
-      newConfig.whisperModel = body.whisperModel === 'primeline-turbo-de-int8_bf16'
+      newConfig.whisperModel = body.whisperModel === 'primeline/whisper-large-v3-turbo-german'
+        || body.whisperModel === 'primeline-turbo-de-int8_bf16'
         || body.whisperModel === 'cstr/whisper-large-v3-turbo-german-int8_float32'
-        ? 'primeline/whisper-large-v3-turbo-german'
+        ? 'primeline-whisper-large-v3-turbo-german'
         : body.whisperModel;
     }
     

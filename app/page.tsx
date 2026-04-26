@@ -48,6 +48,111 @@ interface RuntimeConfig {
   voxtralLocalOnlineMode?: 'websocket' | 'chunk';
 }
 
+type TextInsertionTarget = 'transcript' | BefundField;
+
+interface CaretSelection {
+  start: number;
+  end: number;
+  direction: HTMLTextAreaElement['selectionDirection'];
+}
+
+interface CaretOverlayPosition {
+  top: number;
+  left: number;
+  height: number;
+  visible: boolean;
+}
+
+function insertTextAtSelection(existing: string, incomingText: string, selection?: CaretSelection | null): string {
+  if (!existing) return incomingText;
+  if (!incomingText) return existing;
+
+  if (!selection) {
+    const separator = existing.endsWith('\n') || existing.endsWith(' ') ? '' : ' ';
+    return existing + separator + incomingText;
+  }
+
+  const start = Math.max(0, Math.min(selection.start, existing.length));
+  const end = Math.max(start, Math.min(selection.end, existing.length));
+  const before = existing.slice(0, start);
+  const after = existing.slice(end);
+  const needsPrefixSeparator = before.length > 0 && !before.endsWith('\n') && !before.endsWith(' ');
+  const inserted = `${before}${needsPrefixSeparator ? ' ' : ''}${incomingText}`;
+
+  if (!after) {
+    return inserted;
+  }
+
+  const needsSuffixSeparator = !inserted.endsWith('\n')
+    && !inserted.endsWith(' ')
+    && !after.startsWith('\n')
+    && !after.startsWith(' ')
+    && !/^[,.;:!?)]/.test(after);
+
+  return `${inserted}${needsSuffixSeparator ? ' ' : ''}${after}`;
+}
+
+function hiddenCaretOverlay(): CaretOverlayPosition {
+  return { top: 0, left: 0, height: 0, visible: false };
+}
+
+function getTextareaCaretOverlay(
+  textarea: HTMLTextAreaElement | null,
+  selection?: CaretSelection | null
+): CaretOverlayPosition {
+  if (!textarea || !selection || selection.start !== selection.end) {
+    return hiddenCaretOverlay();
+  }
+
+  const caretIndex = Math.max(0, Math.min(selection.end, textarea.value.length));
+  const style = window.getComputedStyle(textarea);
+  const mirror = document.createElement('div');
+
+  mirror.style.position = 'absolute';
+  mirror.style.visibility = 'hidden';
+  mirror.style.pointerEvents = 'none';
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.wordBreak = 'break-word';
+  mirror.style.overflowWrap = 'break-word';
+  mirror.style.boxSizing = style.boxSizing;
+  mirror.style.width = `${textarea.clientWidth}px`;
+  mirror.style.font = style.font;
+  mirror.style.fontFamily = style.fontFamily;
+  mirror.style.fontSize = style.fontSize;
+  mirror.style.fontWeight = style.fontWeight;
+  mirror.style.fontStyle = style.fontStyle;
+  mirror.style.letterSpacing = style.letterSpacing;
+  mirror.style.lineHeight = style.lineHeight;
+  mirror.style.padding = style.padding;
+  mirror.style.border = style.border;
+  mirror.style.textTransform = style.textTransform;
+  mirror.style.textIndent = style.textIndent;
+  mirror.style.textAlign = style.textAlign;
+  mirror.style.tabSize = style.tabSize;
+
+  const beforeCaret = textarea.value.slice(0, caretIndex);
+  const afterCaret = textarea.value.slice(caretIndex) || ' ';
+  mirror.textContent = beforeCaret;
+
+  const marker = document.createElement('span');
+  marker.textContent = afterCaret[0] === '\n' ? ' ' : afterCaret[0];
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+
+  const lineHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.2;
+  const top = marker.offsetTop - textarea.scrollTop;
+  const left = marker.offsetLeft - textarea.scrollLeft;
+
+  document.body.removeChild(mirror);
+
+  return {
+    top: Math.max(0, top),
+    left: Math.max(0, left),
+    height: lineHeight,
+    visible: true,
+  };
+}
+
 export default function HomePage() {
   const { username, autoCorrect, defaultMode, getAuthHeader, getDbTokenHeader } = useAuth();
   const [recording, setRecording] = useState(false);
@@ -117,6 +222,19 @@ export default function HomePage() {
   const [vadFailedUtterances, setVadFailedUtterances] = useState<Array<{ seq: number; blob: Blob; error: string }>>([]);
   
   const [transcript, setTranscript] = useState("");
+  const methodikTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const befundTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const beurteilungTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const transcriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [textSelections, setTextSelections] = useState<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
+  const textSelectionsRef = useRef<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
+  const [focusedTextField, setFocusedTextField] = useState<TextInsertionTarget | null>(null);
+  const [caretOverlays, setCaretOverlays] = useState<Record<TextInsertionTarget, CaretOverlayPosition>>({
+    transcript: hiddenCaretOverlay(),
+    methodik: hiddenCaretOverlay(),
+    befund: hiddenCaretOverlay(),
+    beurteilung: hiddenCaretOverlay(),
+  });
   const [mode, setMode] = useState<'arztbrief' | 'befund'>('befund');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -176,6 +294,65 @@ export default function HomePage() {
 
   // Custom Actions Manager
   const [showCustomActionsManager, setShowCustomActionsManager] = useState(false);
+
+  const syncTextSelection = useCallback((field: TextInsertionTarget, textarea: HTMLTextAreaElement) => {
+    const nextSelection: CaretSelection = {
+      start: textarea.selectionStart ?? 0,
+      end: textarea.selectionEnd ?? 0,
+      direction: textarea.selectionDirection ?? 'none',
+    };
+
+    textSelectionsRef.current = {
+      ...textSelectionsRef.current,
+      [field]: nextSelection,
+    };
+
+    setTextSelections((prev) => {
+      const current = prev[field];
+      if (
+        current
+        && current.start === nextSelection.start
+        && current.end === nextSelection.end
+        && current.direction === nextSelection.direction
+      ) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [field]: nextSelection,
+      };
+    });
+  }, []);
+
+  const getStoredSelection = useCallback((field: TextInsertionTarget) => {
+    return textSelectionsRef.current[field] ?? null;
+  }, []);
+
+  const combineTextForField = useCallback((field: TextInsertionTarget, existing: string, newText: string) => {
+    return insertTextAtSelection(existing, newText, getStoredSelection(field));
+  }, [getStoredSelection]);
+
+  const showPersistentCaret = recording || transcribing || busy || correcting;
+
+  useEffect(() => {
+    if (!showPersistentCaret) {
+      setCaretOverlays({
+        transcript: hiddenCaretOverlay(),
+        methodik: hiddenCaretOverlay(),
+        befund: hiddenCaretOverlay(),
+        beurteilung: hiddenCaretOverlay(),
+      });
+      return;
+    }
+
+    setCaretOverlays({
+      transcript: getTextareaCaretOverlay(transcriptTextareaRef.current, textSelections.transcript),
+      methodik: getTextareaCaretOverlay(methodikTextareaRef.current, textSelections.methodik),
+      befund: getTextareaCaretOverlay(befundTextareaRef.current, textSelections.befund),
+      beurteilung: getTextareaCaretOverlay(beurteilungTextareaRef.current, textSelections.beurteilung),
+    });
+  }, [transcript, methodik, beurteilung, textSelections, showPersistentCaret]);
 
   // SpeaKING Import State
   const [speakingMetadata, setSpeakingMetadata] = useState<SpeaKINGMetadata | null>(null);
@@ -604,7 +781,8 @@ export default function HomePage() {
       // Transcript-State synchronisieren (für Export, Korrektur etc.).
       // committed enthält im VAD-Pfad bereits den vollständigen aktuellen Textzustand,
       // inklusive bestehendem Text vor Session-Start.
-      setTranscript(committed[0] || '');
+      const targetField: TextInsertionTarget = mode === 'befund' ? 'befund' : 'transcript';
+      setTranscript(combineTextForField(targetField, existingTextRef.current, committed[0] || ''));
     }
 
     // Tentative nur löschen, wenn keine Requests mehr in flight sind
@@ -774,26 +952,26 @@ export default function HomePage() {
       
       // Setze jeden Feldinhalt wenn vorhanden
       if (parsed.methodik !== null) {
-        setMethodik(combineTexts(existingMethodikRef.current, parsed.methodik));
+        setMethodik(combineTextForField('methodik', existingMethodikRef.current, parsed.methodik));
       }
       if (parsed.befund !== null) {
-        setTranscript(combineTexts(existingTextRef.current, parsed.befund));
+        setTranscript(combineTextForField('befund', existingTextRef.current, parsed.befund));
       }
       if (parsed.beurteilung !== null) {
-        setBeurteilung(combineTexts(existingBeurteilungRef.current, parsed.beurteilung));
+        setBeurteilung(combineTextForField('beurteilung', existingBeurteilungRef.current, parsed.beurteilung));
       }
     } else {
       // Kein Steuerbefehl erkannt - Text geht ins aktive Feld
       switch (activeField) {
         case 'methodik':
-          setMethodik(combineTexts(existingMethodikRef.current, formattedText));
+          setMethodik(combineTextForField('methodik', existingMethodikRef.current, formattedText));
           break;
         case 'beurteilung':
-          setBeurteilung(combineTexts(existingBeurteilungRef.current, formattedText));
+          setBeurteilung(combineTextForField('beurteilung', existingBeurteilungRef.current, formattedText));
           break;
         case 'befund':
         default:
-          setTranscript(combineTexts(existingTextRef.current, formattedText));
+          setTranscript(combineTextForField('befund', existingTextRef.current, formattedText));
           break;
       }
     }
@@ -828,35 +1006,35 @@ export default function HomePage() {
             // Verteile Text auf die entsprechenden Felder
             if (parsed.methodik !== null) {
               lastMethodikRef.current = parsed.methodik;
-              setMethodik(combineTexts(existingMethodikRef.current, parsed.methodik));
+              setMethodik(combineTextForField('methodik', existingMethodikRef.current, parsed.methodik));
             }
             if (parsed.befund !== null) {
-              setTranscript(combineTexts(existingTextRef.current, parsed.befund));
+              setTranscript(combineTextForField('befund', existingTextRef.current, parsed.befund));
             }
             if (parsed.beurteilung !== null) {
               lastBeurteilungRef.current = parsed.beurteilung;
-              setBeurteilung(combineTexts(existingBeurteilungRef.current, parsed.beurteilung));
+              setBeurteilung(combineTextForField('beurteilung', existingBeurteilungRef.current, parsed.beurteilung));
             }
           } else {
             // Kein Steuerbefehl - Text geht ins aktive Feld
             switch (activeField) {
               case 'methodik':
                 lastMethodikRef.current = currentTranscript;
-                setMethodik(combineTexts(existingMethodikRef.current, currentTranscript));
+                setMethodik(combineTextForField('methodik', existingMethodikRef.current, currentTranscript));
                 break;
               case 'beurteilung':
                 lastBeurteilungRef.current = currentTranscript;
-                setBeurteilung(combineTexts(existingBeurteilungRef.current, currentTranscript));
+                setBeurteilung(combineTextForField('beurteilung', existingBeurteilungRef.current, currentTranscript));
                 break;
               case 'befund':
               default:
-                setTranscript(combineTexts(existingTextRef.current, currentTranscript));
+                setTranscript(combineTextForField('befund', existingTextRef.current, currentTranscript));
                 break;
             }
           }
         } else {
           // Im Arztbrief-Modus: Normales Verhalten
-          const fullText = combineTexts(existingTextRef.current, currentTranscript);
+          const fullText = combineTextForField('transcript', existingTextRef.current, currentTranscript);
           setTranscript(fullText);
         }
       }
@@ -1191,7 +1369,10 @@ export default function HomePage() {
       fastWhisperEndsWithPeriodRef.current = true;
       
       // Anzeige aktualisieren
-      const displayText = [existingRef.current, finalRef.current].filter(p => p.trim()).join(' ');
+      const targetField: TextInsertionTarget = mode === 'befund'
+        ? (activeField === 'methodik' ? 'methodik' : activeField === 'beurteilung' ? 'beurteilung' : 'befund')
+        : 'transcript';
+      const displayText = combineTextForField(targetField, existingRef.current, finalRef.current);
       setText(displayText);
       return; // Fertig, kein weiterer Text zu verarbeiten
     }
@@ -1311,7 +1492,10 @@ export default function HomePage() {
     
     // Anzeige aktualisieren
     const updateDisplay = () => {
-      const displayText = [existingRef.current, finalRef.current].filter(p => p.trim()).join(' ');
+      const targetField: TextInsertionTarget = mode === 'befund'
+        ? (activeField === 'methodik' ? 'methodik' : activeField === 'beurteilung' ? 'beurteilung' : 'befund')
+        : 'transcript';
+      const displayText = combineTextForField(targetField, existingRef.current, finalRef.current);
       setText(displayText);
     };
     
@@ -1334,14 +1518,14 @@ export default function HomePage() {
   async function startRecording() {
     setError(null);
     // Bestehenden Text behalten
-    existingTextRef.current = transcript.trim();
+    existingTextRef.current = transcript;
     lastTranscriptRef.current = "";
     allChunksRef.current = [];
     
     // Für Befund-Modus: Auch die anderen Felder speichern
     if (mode === 'befund') {
-      existingMethodikRef.current = methodik.trim();
-      existingBeurteilungRef.current = beurteilung.trim();
+      existingMethodikRef.current = methodik;
+      existingBeurteilungRef.current = beurteilung;
       lastMethodikRef.current = "";
       lastBeurteilungRef.current = "";
     }
@@ -1977,39 +2161,39 @@ export default function HomePage() {
               if (parsed.lastField) {
                 // Steuerbefehle erkannt - verteile auf entsprechende Felder
                 if (parsed.methodik !== null) {
-                  currentMethodik = combineTexts(existingMethodikRef.current, parsed.methodik);
+                  currentMethodik = combineTextForField('methodik', existingMethodikRef.current, parsed.methodik);
                 }
                 if (parsed.befund !== null) {
-                  currentBefund = combineTexts(existingTextRef.current, parsed.befund);
+                  currentBefund = combineTextForField('befund', existingTextRef.current, parsed.befund);
                 }
                 if (parsed.beurteilung !== null) {
-                  currentBeurteilung = combineTexts(existingBeurteilungRef.current, parsed.beurteilung);
+                  currentBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, parsed.beurteilung);
                 }
                 // Rohe Version
                 if (rawParsed.methodik !== null) {
-                  rawMethodik = combineTexts(existingMethodikRef.current, rawParsed.methodik);
+                  rawMethodik = combineTextForField('methodik', existingMethodikRef.current, rawParsed.methodik);
                 }
                 if (rawParsed.befund !== null) {
-                  rawBefund = combineTexts(existingTextRef.current, rawParsed.befund);
+                  rawBefund = combineTextForField('befund', existingTextRef.current, rawParsed.befund);
                 }
                 if (rawParsed.beurteilung !== null) {
-                  rawBeurteilung = combineTexts(existingBeurteilungRef.current, rawParsed.beurteilung);
+                  rawBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, rawParsed.beurteilung);
                 }
               } else {
               // Kein Steuerbefehl - Text geht ins aktive Feld
               switch (activeField) {
                 case 'methodik':
-                  currentMethodik = combineTexts(existingMethodikRef.current, formattedTranscript);
-                  rawMethodik = combineTexts(existingMethodikRef.current, sessionTranscript);
+                  currentMethodik = combineTextForField('methodik', existingMethodikRef.current, formattedTranscript);
+                  rawMethodik = combineTextForField('methodik', existingMethodikRef.current, sessionTranscript);
                   break;
                 case 'beurteilung':
-                  currentBeurteilung = combineTexts(existingBeurteilungRef.current, formattedTranscript);
-                  rawBeurteilung = combineTexts(existingBeurteilungRef.current, sessionTranscript);
+                  currentBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, formattedTranscript);
+                  rawBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, sessionTranscript);
                   break;
                 case 'befund':
                 default:
-                  currentBefund = combineTexts(existingTextRef.current, formattedTranscript);
-                  rawBefund = combineTexts(existingTextRef.current, sessionTranscript);
+                  currentBefund = combineTextForField('befund', existingTextRef.current, formattedTranscript);
+                  rawBefund = combineTextForField('befund', existingTextRef.current, sessionTranscript);
                   break;
               }
             }
@@ -2118,8 +2302,8 @@ export default function HomePage() {
             }
           } else {
             // Im Arztbrief-Modus: Normales Verhalten
-            const fullText = combineTexts(existingTextRef.current, formattedTranscript);
-            const rawFullText = combineTexts(existingTextRef.current, sessionTranscript);
+            const fullText = combineTextForField('transcript', existingTextRef.current, formattedTranscript);
+            const rawFullText = combineTextForField('transcript', existingTextRef.current, sessionTranscript);
             
             // Speichere Text VOR der Korrektur für Revert-Funktion (formatierte Version)
             setPreCorrectionState({
@@ -3094,15 +3278,33 @@ export default function HomePage() {
                     />
                   </div>
                 )}
-                <textarea
-                  className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                  value={methodik}
-                  onChange={(e) => { setMethodik(e.target.value); setPendingCorrection(true); }}
-                  onFocus={() => setActiveField('methodik')}
-                  placeholder="Methodik..."
-                  rows={2}
-                  readOnly={isProcessing}
-                />
+                <div className="relative">
+                  <textarea
+                    ref={methodikTextareaRef}
+                    className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    value={methodik}
+                    onChange={(e) => { setMethodik(e.target.value); setPendingCorrection(true); syncTextSelection('methodik', e.currentTarget); }}
+                    onFocus={(e) => { setActiveField('methodik'); setFocusedTextField('methodik'); syncTextSelection('methodik', e.currentTarget); }}
+                    onBlur={() => setFocusedTextField((current) => current === 'methodik' ? null : current)}
+                    onSelect={(e) => syncTextSelection('methodik', e.currentTarget)}
+                    onClick={(e) => syncTextSelection('methodik', e.currentTarget)}
+                    onKeyUp={(e) => syncTextSelection('methodik', e.currentTarget)}
+                    onMouseUp={(e) => syncTextSelection('methodik', e.currentTarget)}
+                    placeholder="Methodik..."
+                    rows={2}
+                    readOnly={isProcessing}
+                  />
+                  {showPersistentCaret && focusedTextField !== 'methodik' && caretOverlays.methodik.visible && (
+                    <div
+                      className="pointer-events-none absolute w-0.5 rounded-full bg-blue-500/80"
+                      style={{
+                        top: caretOverlays.methodik.top,
+                        left: caretOverlays.methodik.left,
+                        height: caretOverlays.methodik.height,
+                      }}
+                    />
+                  )}
+                </div>
               </div>
             </div>
             {/* Action Buttons für Methodik */}
@@ -3156,14 +3358,32 @@ export default function HomePage() {
                     />
                   </div>
                 )}
-                <textarea
-                  className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                  value={transcript}
-                  onChange={(e) => { setTranscript(e.target.value); setPendingCorrection(true); }}
-                  onFocus={() => setActiveField('befund')}
-                  placeholder="Befund..."
-                  readOnly={isProcessing}
-                />
+                <div className="relative">
+                  <textarea
+                    ref={befundTextareaRef}
+                    className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    value={transcript}
+                    onChange={(e) => { setTranscript(e.target.value); setPendingCorrection(true); syncTextSelection('befund', e.currentTarget); }}
+                    onFocus={(e) => { setActiveField('befund'); setFocusedTextField('befund'); syncTextSelection('befund', e.currentTarget); }}
+                    onBlur={() => setFocusedTextField((current) => current === 'befund' ? null : current)}
+                    onSelect={(e) => syncTextSelection('befund', e.currentTarget)}
+                    onClick={(e) => syncTextSelection('befund', e.currentTarget)}
+                    onKeyUp={(e) => syncTextSelection('befund', e.currentTarget)}
+                    onMouseUp={(e) => syncTextSelection('befund', e.currentTarget)}
+                    placeholder="Befund..."
+                    readOnly={isProcessing}
+                  />
+                  {showPersistentCaret && focusedTextField !== 'befund' && caretOverlays.befund.visible && (
+                    <div
+                      className="pointer-events-none absolute w-0.5 rounded-full bg-blue-500/80"
+                      style={{
+                        top: caretOverlays.befund.top,
+                        left: caretOverlays.befund.left,
+                        height: caretOverlays.befund.height,
+                      }}
+                    />
+                  )}
+                </div>
                 {/* VAD Tentative Text: Zeigt an, dass gerade gesprochen wird */}
                 {recording && vad.isListening && tentativeText && (
                   <div className="px-2 py-1 text-sm italic text-gray-400 dark:text-gray-500 border-l-2 border-green-400 bg-green-50/50 dark:bg-green-900/20 rounded-r">
@@ -3233,15 +3453,33 @@ export default function HomePage() {
                     />
                   </div>
                 )}
-                <textarea
-                  className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                  value={beurteilung}
-                  onChange={(e) => { setBeurteilung(e.target.value); setPendingCorrection(true); }}
-                  onFocus={() => setActiveField('beurteilung')}
-                  placeholder="Zusammenfassung..."
-                  rows={2}
-                  readOnly={isProcessing}
-                />
+                <div className="relative">
+                  <textarea
+                    ref={beurteilungTextareaRef}
+                    className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    value={beurteilung}
+                    onChange={(e) => { setBeurteilung(e.target.value); setPendingCorrection(true); syncTextSelection('beurteilung', e.currentTarget); }}
+                    onFocus={(e) => { setActiveField('beurteilung'); setFocusedTextField('beurteilung'); syncTextSelection('beurteilung', e.currentTarget); }}
+                    onBlur={() => setFocusedTextField((current) => current === 'beurteilung' ? null : current)}
+                    onSelect={(e) => syncTextSelection('beurteilung', e.currentTarget)}
+                    onClick={(e) => syncTextSelection('beurteilung', e.currentTarget)}
+                    onKeyUp={(e) => syncTextSelection('beurteilung', e.currentTarget)}
+                    onMouseUp={(e) => syncTextSelection('beurteilung', e.currentTarget)}
+                    placeholder="Zusammenfassung..."
+                    rows={2}
+                    readOnly={isProcessing}
+                  />
+                  {showPersistentCaret && focusedTextField !== 'beurteilung' && caretOverlays.beurteilung.visible && (
+                    <div
+                      className="pointer-events-none absolute w-0.5 rounded-full bg-blue-500/80"
+                      style={{
+                        top: caretOverlays.beurteilung.top,
+                        left: caretOverlays.beurteilung.left,
+                        height: caretOverlays.beurteilung.height,
+                      }}
+                    />
+                  )}
+                </div>
                 <button 
                   className="btn btn-primary w-full text-sm py-2" 
                   onClick={handleSuggestBeurteilung} 
@@ -3311,13 +3549,32 @@ export default function HomePage() {
             
             <div className="flex gap-2">
               <div className="flex-1">
-                <textarea
-                  className={`textarea font-mono text-sm min-h-40 w-full ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                  value={transcript}
-                  onChange={(e) => { setTranscript(e.target.value); setPendingCorrection(true); }}
-                  placeholder="Text erscheint hier..."
-                  readOnly={isProcessing}
-                />
+                <div className="relative">
+                  <textarea
+                    ref={transcriptTextareaRef}
+                    className={`textarea font-mono text-sm min-h-40 w-full ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    value={transcript}
+                    onChange={(e) => { setTranscript(e.target.value); setPendingCorrection(true); syncTextSelection('transcript', e.currentTarget); }}
+                    onFocus={(e) => { setFocusedTextField('transcript'); syncTextSelection('transcript', e.currentTarget); }}
+                    onBlur={() => setFocusedTextField((current) => current === 'transcript' ? null : current)}
+                    onSelect={(e) => syncTextSelection('transcript', e.currentTarget)}
+                    onClick={(e) => syncTextSelection('transcript', e.currentTarget)}
+                    onKeyUp={(e) => syncTextSelection('transcript', e.currentTarget)}
+                    onMouseUp={(e) => syncTextSelection('transcript', e.currentTarget)}
+                    placeholder="Text erscheint hier..."
+                    readOnly={isProcessing}
+                  />
+                  {showPersistentCaret && focusedTextField !== 'transcript' && caretOverlays.transcript.visible && (
+                    <div
+                      className="pointer-events-none absolute w-0.5 rounded-full bg-blue-500/80"
+                      style={{
+                        top: caretOverlays.transcript.top,
+                        left: caretOverlays.transcript.left,
+                        height: caretOverlays.transcript.height,
+                      }}
+                    />
+                  )}
+                </div>
                 {/* VAD Tentative Text: Zeigt an, dass gerade gesprochen wird */}
                 {recording && vad.isListening && tentativeText && (
                   <div className="px-2 py-1 text-sm italic text-gray-400 dark:text-gray-500 border-l-2 border-green-400 bg-green-50/50 dark:bg-green-900/20 rounded-r mt-1">

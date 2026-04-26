@@ -470,18 +470,32 @@ export default function HomePage() {
     incomingDelta: string
   ) => {
     const currentText = getCurrentFieldText(field);
-    if (isSelectionAtEnd(field, currentText)) {
-      setFieldText(field, fullText);
-      setStoredSelection(field, getDefaultSelection(fullText));
+
+    // WICHTIG: Neu transkribierter Text wird IMMER an der aktuellen Cursor-Position
+    // eingefügt – nie wird der ganze Feldinhalt durch `fullText` ersetzt. Eine
+    // Voll-Ersetzung wäre zwar bei Cursor-am-Ende theoretisch äquivalent, führt aber
+    // zu Race-Conditions (z. B. bei parallelen Voxtral-Online-Requests, deren
+    // Reihenfolge der State-Updates leicht von der internen `committedUtterancesRef`
+    // abweichen kann), wodurch zuvor gesprochene Sätze unbeabsichtigt überschrieben
+    // wurden. Insert-am-Cursor ist deterministisch und respektiert eine vom Benutzer
+    // umpositionierte Eingabemarke.
+    if (incomingDelta && incomingDelta.trim()) {
+      setFieldText(field, combineTextForField(field, currentText, incomingDelta));
       return;
     }
 
-    if (!incomingDelta.trim()) {
-      return;
+    // Kein textuelles Delta, aber `fullText` weicht vom aktuellen Feldinhalt ab
+    // (z. B. nach einem Lösch-Steuerbefehl in der Online-Verarbeitung) UND der
+    // Vorzustand ist ein striktes Präfix von `fullText`. In dem Fall können wir
+    // sicher die "Erweiterung" anhängen, ohne bereits geschriebenen Text zu
+    // verlieren.
+    if (fullText && fullText !== currentText && fullText.startsWith(currentText)) {
+      const extension = fullText.slice(currentText.length);
+      if (extension) {
+        setFieldText(field, combineTextForField(field, currentText, extension));
+      }
     }
-
-    setFieldText(field, combineTextForField(field, currentText, incomingDelta));
-  }, [getCurrentFieldText, isSelectionAtEnd, setFieldText, setStoredSelection, combineTextForField]);
+  }, [getCurrentFieldText, setFieldText, combineTextForField]);
 
   const showPersistentCaret = recording || transcribing || busy || correcting;
 

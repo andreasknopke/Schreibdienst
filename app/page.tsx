@@ -63,24 +63,46 @@ interface CaretOverlayPosition {
   visible: boolean;
 }
 
-function insertTextAtSelection(existing: string, incomingText: string, selection?: CaretSelection | null): string {
-  if (!existing) return incomingText;
-  if (!incomingText) return existing;
+interface TextInsertionResult {
+  text: string;
+  selection: CaretSelection;
+}
 
-  if (!selection) {
-    const separator = existing.endsWith('\n') || existing.endsWith(' ') ? '' : ' ';
-    return existing + separator + incomingText;
+function getDefaultSelection(text: string): CaretSelection {
+  return {
+    start: text.length,
+    end: text.length,
+    direction: 'none',
+  };
+}
+
+function insertTextAtSelection(existing: string, incomingText: string, selection?: CaretSelection | null): TextInsertionResult {
+  if (!incomingText) {
+    return {
+      text: existing,
+      selection: selection ?? getDefaultSelection(existing),
+    };
   }
 
-  const start = Math.max(0, Math.min(selection.start, existing.length));
-  const end = Math.max(start, Math.min(selection.end, existing.length));
+  const baseSelection = selection ?? getDefaultSelection(existing);
+  const start = Math.max(0, Math.min(baseSelection.start, existing.length));
+  const end = Math.max(start, Math.min(baseSelection.end, existing.length));
   const before = existing.slice(0, start);
   const after = existing.slice(end);
   const needsPrefixSeparator = before.length > 0 && !before.endsWith('\n') && !before.endsWith(' ');
-  const inserted = `${before}${needsPrefixSeparator ? ' ' : ''}${incomingText}`;
+  const prefix = needsPrefixSeparator ? ' ' : '';
+  const inserted = `${before}${prefix}${incomingText}`;
+  const caretIndex = inserted.length;
 
   if (!after) {
-    return inserted;
+    return {
+      text: inserted,
+      selection: {
+        start: caretIndex,
+        end: caretIndex,
+        direction: 'none',
+      },
+    };
   }
 
   const needsSuffixSeparator = !inserted.endsWith('\n')
@@ -89,7 +111,33 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
     && !after.startsWith(' ')
     && !/^[,.;:!?)]/.test(after);
 
-  return `${inserted}${needsSuffixSeparator ? ' ' : ''}${after}`;
+  return {
+    text: `${inserted}${needsSuffixSeparator ? ' ' : ''}${after}`,
+    selection: {
+      start: caretIndex,
+      end: caretIndex,
+      direction: 'none',
+    },
+  };
+}
+
+function getIncrementalTranscript(previousText: string, currentText: string): string {
+  if (!previousText) return currentText;
+  if (currentText.startsWith(previousText)) {
+    return currentText.slice(previousText.length);
+  }
+
+  let prefixLength = 0;
+  const maxPrefixLength = Math.min(previousText.length, currentText.length);
+  while (prefixLength < maxPrefixLength && previousText[prefixLength] === currentText[prefixLength]) {
+    prefixLength += 1;
+  }
+
+  if (prefixLength > 0) {
+    return currentText.slice(prefixLength);
+  }
+
+  return currentText;
 }
 
 function hiddenCaretOverlay(): CaretOverlayPosition {
@@ -325,13 +373,27 @@ export default function HomePage() {
     });
   }, []);
 
-  const getStoredSelection = useCallback((field: TextInsertionTarget) => {
-    return textSelectionsRef.current[field] ?? null;
+  const setStoredSelection = useCallback((field: TextInsertionTarget, selection: CaretSelection) => {
+    textSelectionsRef.current = {
+      ...textSelectionsRef.current,
+      [field]: selection,
+    };
+
+    setTextSelections((prev) => ({
+      ...prev,
+      [field]: selection,
+    }));
+  }, []);
+
+  const getStoredSelection = useCallback((field: TextInsertionTarget, currentText: string) => {
+    return textSelectionsRef.current[field] ?? getDefaultSelection(currentText);
   }, []);
 
   const combineTextForField = useCallback((field: TextInsertionTarget, existing: string, newText: string) => {
-    return insertTextAtSelection(existing, newText, getStoredSelection(field));
-  }, [getStoredSelection]);
+    const result = insertTextAtSelection(existing, newText, getStoredSelection(field, existing));
+    setStoredSelection(field, result.selection);
+    return result.text;
+  }, [getStoredSelection, setStoredSelection]);
 
   const showPersistentCaret = recording || transcribing || busy || correcting;
 
@@ -347,12 +409,12 @@ export default function HomePage() {
     }
 
     setCaretOverlays({
-      transcript: getTextareaCaretOverlay(transcriptTextareaRef.current, textSelections.transcript),
-      methodik: getTextareaCaretOverlay(methodikTextareaRef.current, textSelections.methodik),
-      befund: getTextareaCaretOverlay(befundTextareaRef.current, textSelections.befund),
-      beurteilung: getTextareaCaretOverlay(beurteilungTextareaRef.current, textSelections.beurteilung),
+      transcript: getTextareaCaretOverlay(transcriptTextareaRef.current, getStoredSelection('transcript', transcript)),
+      methodik: getTextareaCaretOverlay(methodikTextareaRef.current, getStoredSelection('methodik', methodik)),
+      befund: getTextareaCaretOverlay(befundTextareaRef.current, getStoredSelection('befund', transcript)),
+      beurteilung: getTextareaCaretOverlay(beurteilungTextareaRef.current, getStoredSelection('beurteilung', beurteilung)),
     });
-  }, [transcript, methodik, beurteilung, textSelections, showPersistentCaret]);
+  }, [transcript, methodik, beurteilung, textSelections, showPersistentCaret, getStoredSelection]);
 
   // SpeaKING Import State
   const [speakingMetadata, setSpeakingMetadata] = useState<SpeaKINGMetadata | null>(null);
@@ -952,30 +1014,30 @@ export default function HomePage() {
       
       // Setze jeden Feldinhalt wenn vorhanden
       if (parsed.methodik !== null) {
-        setMethodik(combineTextForField('methodik', existingMethodikRef.current, parsed.methodik));
+        setMethodik(combineTextForField('methodik', methodik, parsed.methodik));
       }
       if (parsed.befund !== null) {
-        setTranscript(combineTextForField('befund', existingTextRef.current, parsed.befund));
+        setTranscript(combineTextForField('befund', transcript, parsed.befund));
       }
       if (parsed.beurteilung !== null) {
-        setBeurteilung(combineTextForField('beurteilung', existingBeurteilungRef.current, parsed.beurteilung));
+        setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung));
       }
     } else {
       // Kein Steuerbefehl erkannt - Text geht ins aktive Feld
       switch (activeField) {
         case 'methodik':
-          setMethodik(combineTextForField('methodik', existingMethodikRef.current, formattedText));
+          setMethodik(combineTextForField('methodik', methodik, formattedText));
           break;
         case 'beurteilung':
-          setBeurteilung(combineTextForField('beurteilung', existingBeurteilungRef.current, formattedText));
+          setBeurteilung(combineTextForField('beurteilung', beurteilung, formattedText));
           break;
         case 'befund':
         default:
-          setTranscript(combineTextForField('befund', existingTextRef.current, formattedText));
+          setTranscript(combineTextForField('befund', transcript, formattedText));
           break;
       }
     }
-  }, [mode, activeField, parseFieldCommands, combineTexts]);
+  }, [mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript]);
 
   // Kontinuierliche Transkription während der Aufnahme
   const processLiveTranscription = useCallback(async () => {
@@ -985,10 +1047,16 @@ export default function HomePage() {
     try {
       const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
       const currentTranscript = await transcribeChunk(blob, true);
+      const previousTranscript = lastTranscriptRef.current;
+      const transcriptDelta = getIncrementalTranscript(previousTranscript, currentTranscript);
       
       // Nur aktualisieren wenn sich etwas geändert hat
       if (currentTranscript && currentTranscript !== lastTranscriptRef.current) {
         lastTranscriptRef.current = currentTranscript;
+
+        if (!transcriptDelta.trim()) {
+          return;
+        }
         
         // HINWEIS: Während der Live-Transkription wird KEINE Formatierung angewendet,
         // um Hin-und-Her-Springen des Textes zu vermeiden (Whisper arbeitet in Chunks
@@ -998,7 +1066,7 @@ export default function HomePage() {
         if (mode === 'befund') {
           // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
           // Hier nur grob nach Feldwechsel-Kommandos schauen, ohne Formatierung
-          const parsed = parseFieldCommands(currentTranscript);
+          const parsed = parseFieldCommands(transcriptDelta);
           
           if (parsed.lastField) {
             setActiveField(parsed.lastField);
@@ -1006,42 +1074,42 @@ export default function HomePage() {
             // Verteile Text auf die entsprechenden Felder
             if (parsed.methodik !== null) {
               lastMethodikRef.current = parsed.methodik;
-              setMethodik(combineTextForField('methodik', existingMethodikRef.current, parsed.methodik));
+              setMethodik(combineTextForField('methodik', methodik, parsed.methodik));
             }
             if (parsed.befund !== null) {
-              setTranscript(combineTextForField('befund', existingTextRef.current, parsed.befund));
+              setTranscript(combineTextForField('befund', transcript, parsed.befund));
             }
             if (parsed.beurteilung !== null) {
               lastBeurteilungRef.current = parsed.beurteilung;
-              setBeurteilung(combineTextForField('beurteilung', existingBeurteilungRef.current, parsed.beurteilung));
+              setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung));
             }
           } else {
             // Kein Steuerbefehl - Text geht ins aktive Feld
             switch (activeField) {
               case 'methodik':
-                lastMethodikRef.current = currentTranscript;
-                setMethodik(combineTextForField('methodik', existingMethodikRef.current, currentTranscript));
+                lastMethodikRef.current = transcriptDelta;
+                setMethodik(combineTextForField('methodik', methodik, transcriptDelta));
                 break;
               case 'beurteilung':
-                lastBeurteilungRef.current = currentTranscript;
-                setBeurteilung(combineTextForField('beurteilung', existingBeurteilungRef.current, currentTranscript));
+                lastBeurteilungRef.current = transcriptDelta;
+                setBeurteilung(combineTextForField('beurteilung', beurteilung, transcriptDelta));
                 break;
               case 'befund':
               default:
-                setTranscript(combineTextForField('befund', existingTextRef.current, currentTranscript));
+                setTranscript(combineTextForField('befund', transcript, transcriptDelta));
                 break;
             }
           }
         } else {
           // Im Arztbrief-Modus: Normales Verhalten
-          const fullText = combineTextForField('transcript', existingTextRef.current, currentTranscript);
+          const fullText = combineTextForField('transcript', transcript, transcriptDelta);
           setTranscript(fullText);
         }
       }
     } finally {
       setTranscribing(false);
     }
-  }, [transcribeChunk, combineTexts, mode, activeField, parseFieldCommands]);
+  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript]);
 
   useEffect(() => {
     return () => {

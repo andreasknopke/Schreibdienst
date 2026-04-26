@@ -127,6 +127,41 @@ function getIncrementalTranscript(previousText: string, currentText: string): st
     return currentText.slice(previousText.length);
   }
 
+  const normalizeToken = (token: string) => token
+    .toLowerCase()
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+
+  const previousWords = (previousText.match(/\S+/g) || []).map(normalizeToken).filter(Boolean);
+  const currentWordMatches = Array.from(currentText.matchAll(/\S+/g));
+  const currentWords = currentWordMatches
+    .map((match) => ({
+      raw: match[0],
+      start: match.index ?? 0,
+      normalized: normalizeToken(match[0]),
+    }))
+    .filter((word) => word.normalized.length > 0);
+
+  const maxOverlap = Math.min(previousWords.length, currentWords.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+    let matches = true;
+    for (let index = 0; index < overlap; index += 1) {
+      if (previousWords[previousWords.length - overlap + index] !== currentWords[index].normalized) {
+        matches = false;
+        break;
+      }
+    }
+
+    if (!matches) {
+      continue;
+    }
+
+    if (overlap === currentWords.length) {
+      return '';
+    }
+
+    return currentText.slice(currentWords[overlap].start);
+  }
+
   let prefixLength = 0;
   const maxPrefixLength = Math.min(previousText.length, currentText.length);
   while (prefixLength < maxPrefixLength && previousText[prefixLength] === currentText[prefixLength]) {
@@ -389,11 +424,64 @@ export default function HomePage() {
     return textSelectionsRef.current[field] ?? getDefaultSelection(currentText);
   }, []);
 
+  const isSelectionAtEnd = useCallback((field: TextInsertionTarget, currentText: string) => {
+    const selection = getStoredSelection(field, currentText);
+    return selection.start === currentText.length && selection.end === currentText.length;
+  }, [getStoredSelection]);
+
+  const getCurrentFieldText = useCallback((field: TextInsertionTarget) => {
+    switch (field) {
+      case 'methodik':
+        return methodik;
+      case 'beurteilung':
+        return beurteilung;
+      case 'befund':
+      case 'transcript':
+      default:
+        return transcript;
+    }
+  }, [methodik, beurteilung, transcript]);
+
+  const setFieldText = useCallback((field: TextInsertionTarget, value: string) => {
+    switch (field) {
+      case 'methodik':
+        setMethodik(value);
+        break;
+      case 'beurteilung':
+        setBeurteilung(value);
+        break;
+      case 'befund':
+      case 'transcript':
+      default:
+        setTranscript(value);
+        break;
+    }
+  }, []);
+
   const combineTextForField = useCallback((field: TextInsertionTarget, existing: string, newText: string) => {
     const result = insertTextAtSelection(existing, newText, getStoredSelection(field, existing));
     setStoredSelection(field, result.selection);
     return result.text;
   }, [getStoredSelection, setStoredSelection]);
+
+  const replaceTextAtEndOrInsertDelta = useCallback((
+    field: TextInsertionTarget,
+    fullText: string,
+    incomingDelta: string
+  ) => {
+    const currentText = getCurrentFieldText(field);
+    if (isSelectionAtEnd(field, currentText)) {
+      setFieldText(field, fullText);
+      setStoredSelection(field, getDefaultSelection(fullText));
+      return;
+    }
+
+    if (!incomingDelta.trim()) {
+      return;
+    }
+
+    setFieldText(field, combineTextForField(field, currentText, incomingDelta));
+  }, [getCurrentFieldText, isSelectionAtEnd, setFieldText, setStoredSelection, combineTextForField]);
 
   const showPersistentCaret = recording || transcribing || busy || correcting;
 
@@ -792,6 +880,7 @@ export default function HomePage() {
   const drainVadCommitQueue = useCallback(() => {
     let didCommit = false;
     let combinedCommittedText = committedUtterancesRef.current.join(' ');
+    const previousCommittedText = combinedCommittedText;
     while (vadPendingResultsRef.current.has(vadNextCommitSeqRef.current)) {
       const seq = vadNextCommitSeqRef.current;
       const entry = vadPendingResultsRef.current.get(seq)!;
@@ -844,14 +933,16 @@ export default function HomePage() {
       // committed enthält im VAD-Pfad bereits den vollständigen aktuellen Textzustand,
       // inklusive bestehendem Text vor Session-Start.
       const targetField: TextInsertionTarget = mode === 'befund' ? 'befund' : 'transcript';
-      setTranscript(combineTextForField(targetField, existingTextRef.current, committed[0] || ''));
+      const fullText = committed[0] || '';
+      const incomingDelta = getIncrementalTranscript(previousCommittedText, fullText);
+      replaceTextAtEndOrInsertDelta(targetField, fullText, incomingDelta);
     }
 
     // Tentative nur löschen, wenn keine Requests mehr in flight sind
     if (vadInFlightCountRef.current === 0 && vadPendingResultsRef.current.size === 0) {
       setTentativeText('');
     }
-  }, []);
+  }, [mode, replaceTextAtEndOrInsertDelta]);
 
   // VAD Utterance Handler: Reiht Utterance reihenfolgetreu ein, retried bei Fehlern.
   // GARANTIE: Eine Utterance geht NIE verloren – bei permanentem Fehler wird ein
@@ -1440,8 +1531,8 @@ export default function HomePage() {
       const targetField: TextInsertionTarget = mode === 'befund'
         ? (activeField === 'methodik' ? 'methodik' : activeField === 'beurteilung' ? 'beurteilung' : 'befund')
         : 'transcript';
-      const displayText = combineTextForField(targetField, existingRef.current, finalRef.current);
-      setText(displayText);
+      const fullText = [existingRef.current, finalRef.current].filter(p => p.trim()).join(' ');
+      replaceTextAtEndOrInsertDelta(targetField, fullText, '.');
       return; // Fertig, kein weiterer Text zu verarbeiten
     }
     
@@ -1540,20 +1631,9 @@ export default function HomePage() {
       return existingTextRef;
     };
     
-    const setText = (value: string) => {
-      if (mode === 'befund') {
-        switch (activeField) {
-          case 'methodik': setMethodik(value); break;
-          case 'beurteilung': setBeurteilung(value); break;
-          default: setTranscript(value); break;
-        }
-      } else {
-        setTranscript(value);
-      }
-    };
-    
     const finalRef = getFinalRef();
     const existingRef = getExistingRef();
+    const previousFinalText = finalRef.current;
     
     // Text akkumulieren und danach Löschbefehle auf den Gesamtkontext anwenden.
     finalRef.current = applyOnlineUtteranceToText(finalRef.current, correctedText);
@@ -1563,8 +1643,9 @@ export default function HomePage() {
       const targetField: TextInsertionTarget = mode === 'befund'
         ? (activeField === 'methodik' ? 'methodik' : activeField === 'beurteilung' ? 'beurteilung' : 'befund')
         : 'transcript';
-      const displayText = combineTextForField(targetField, existingRef.current, finalRef.current);
-      setText(displayText);
+      const fullText = [existingRef.current, finalRef.current].filter(p => p.trim()).join(' ');
+      const incomingDelta = getIncrementalTranscript(previousFinalText, finalRef.current);
+      replaceTextAtEndOrInsertDelta(targetField, fullText, incomingDelta);
     };
     
     updateDisplay();
@@ -1581,7 +1662,7 @@ export default function HomePage() {
       }
       updateDisplay();
     }
-  }, [mode, activeField, applyDictionaryToText, quickCorrectWithLLM]);
+  }, [mode, activeField, applyDictionaryToText, quickCorrectWithLLM, replaceTextAtEndOrInsertDelta]);
 
   async function startRecording() {
     setError(null);

@@ -329,6 +329,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   // Revert/Re-Correct state
   const [isReverted, setIsReverted] = useState(false);
   const [isReCorrecting, setIsReCorrecting] = useState(false);
+  const [isReTranscribing, setIsReTranscribing] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [applyFormatting, setApplyFormatting] = useState(false); // Formatierung auf unkorrigierten Text anwenden
   
@@ -913,6 +914,48 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     }
   }, [selectedId, dictations, loadDictationDetails, isRootUser, selectedDictationDetails?.raw_transcript]);
 
+  // Re-transcribe: delete all logs and re-run the full pipeline (transcription + correction)
+  const handleReTranscribe = useCallback(async () => {
+    const selected = dictations.find(d => d.id === selectedId);
+    if (!selected) return;
+
+    const confirmed = window.confirm(
+      `Diktat #${selected.id} (${selected.order_number}) erneut transkribieren?\n\n` +
+      'Alle Korrekturprotokolle werden gelöscht und das Audio wird erneut durch die gesamte Pipeline (Transkription + Korrektur) verarbeitet.'
+    );
+    if (!confirmed) return;
+
+    setIsReTranscribing(true);
+    setError(null);
+    try {
+      const res = await fetchWithDbToken('/api/offline-dictations/retranscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dictationId: selected.id }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        console.log(`[DictationQueue] Re-transcribe triggered:`, data);
+
+        // Close detail view and refresh list
+        setIsFullscreen(false);
+        setSelectedId(null);
+        loadDictations();
+
+        // Show success message
+        alert(`✅ Diktat #${selected.id} wird erneut transkribiert.\n\nDas Audio wird neu verarbeitet. Bitte aktualisieren Sie die Ansicht in Kürze.`);
+      } else {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Transkription fehlgeschlagen');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Fehler bei erneuter Transkription');
+    } finally {
+      setIsReTranscribing(false);
+    }
+  }, [selectedId, dictations, loadDictations]);
+
   // Save corrected text to database
   const handleSave = useCallback(async () => {
     const selected = dictations.find(d => d.id === selectedId);
@@ -1349,6 +1392,35 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             {copyFeedback === d.id ? '✓' : '📋'}
                           </button>
                         )}
+                        {d.status === 'completed' && (
+                          <button
+                            className="btn btn-xs btn-outline"
+                            onClick={async () => {
+                              const confirmed = window.confirm(
+                                `Diktat #${d.id} (${d.order_number}) erneut transkribieren?\n\nAlle Korrekturprotokolle werden gelöscht und das Audio wird erneut verarbeitet.`
+                              );
+                              if (!confirmed) return;
+                              try {
+                                const res = await fetchWithDbToken('/api/offline-dictations/retranscribe', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ dictationId: d.id }),
+                                });
+                                if (res.ok) {
+                                  loadDictations();
+                                } else {
+                                  const err = await res.json();
+                                  alert(err.error || 'Fehler');
+                                }
+                              } catch (err: any) {
+                                alert(err.message);
+                              }
+                            }}
+                            title="Erneut transkribieren (löscht alle Protokolle und verarbeitet Audio neu)"
+                          >
+                            🔄🎤
+                          </button>
+                        )}
                         {d.status === 'completed' && d.change_score !== undefined && (
                           <ChangeIndicatorDot score={d.change_score} />
                         )}
@@ -1687,6 +1759,21 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                       </>
                     ) : (
                       '🔄 Komplett neu korrigieren'
+                    )}
+                  </button>
+                  <button
+                    className="btn btn-sm btn-warning"
+                    onClick={handleReTranscribe}
+                    disabled={isReTranscribing}
+                    title="Erneut transkribieren – löscht alle Protokolle und verarbeitet das Audio neu (Transkription + Korrektur)"
+                  >
+                    {isReTranscribing ? (
+                      <>
+                        <Spinner size={12} className="mr-1" />
+                        Transkribiere...
+                      </>
+                    ) : (
+                      '🔄🎤 Erneut transkribieren'
                     )}
                   </button>
                 </div>
@@ -2314,6 +2401,21 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                           </>
                         ) : (
                           '🔄 Komplett neu korrigieren'
+                        )}
+                      </button>
+                      <button
+                        className="btn btn-sm btn-warning"
+                        onClick={handleReTranscribe}
+                        disabled={isReTranscribing}
+                        title="Erneut transkribieren – löscht alle Protokolle und verarbeitet das Audio neu (Transkription + Korrektur)"
+                      >
+                        {isReTranscribing ? (
+                          <>
+                            <Spinner size={12} className="mr-1" />
+                            Transkribiere...
+                          </>
+                        ) : (
+                          '🔄🎤 Erneut transkribieren'
                         )}
                       </button>
                     </div>

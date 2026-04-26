@@ -484,6 +484,26 @@ async function _retryDictation(db: mysql.Pool, id: number): Promise<void> {
   );
 }
 
+async function _resetDictationForRetranscribe(db: mysql.Pool, id: number): Promise<void> {
+  await db.execute(
+    `UPDATE offline_dictations 
+     SET status = 'pending',
+         raw_transcript = NULL,
+         transcript = NULL,
+         methodik = NULL,
+         befund = NULL,
+         beurteilung = NULL,
+         corrected_text = NULL,
+         change_score = NULL,
+         error_message = NULL,
+         processing_started_at = NULL,
+         completed_at = NULL
+     WHERE id = ?`, [id]
+  );
+  // Delete segments
+  await db.execute(`DELETE FROM dictation_segments WHERE dictation_id = ?`, [id]);
+}
+
 async function _updateAudioData(db: mysql.Pool, id: number, audioData: Buffer, mimeType: string): Promise<void> {
   await db.execute(
     `INSERT INTO dictation_audio (dictation_id, audio_data) VALUES (?, ?)
@@ -598,6 +618,10 @@ export async function retryDictation(id: number): Promise<void> {
   return _retryDictation(await getPool(), id);
 }
 
+export async function resetDictationForRetranscribe(id: number): Promise<void> {
+  return _resetDictationForRetranscribe(await getPool(), id);
+}
+
 export async function updateAudioData(id: number, data: Buffer, mime: string): Promise<void> {
   return _updateAudioData(await getPool(), id, data, mime);
 }
@@ -685,6 +709,10 @@ export async function getQueueStatsWithRequest(req: NextRequest) {
 
 export async function retryDictationWithRequest(req: NextRequest, id: number): Promise<void> {
   return _retryDictation(await getPoolForRequest(req), id);
+}
+
+export async function resetDictationForRetranscribeWithRequest(req: NextRequest, id: number): Promise<void> {
+  return _resetDictationForRetranscribe(await getPoolForRequest(req), id);
 }
 
 export async function updateAudioDataWithRequest(req: NextRequest, id: number, data: Buffer, mime: string): Promise<void> {

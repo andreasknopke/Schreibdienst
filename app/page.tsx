@@ -340,6 +340,11 @@ export default function HomePage() {
   const [beurteilung, setBeurteilung] = useState("");
   // Aktuelles aktives Feld für Befund-Modus
   const [activeField, setActiveField] = useState<BefundField>('befund');
+  // Spiegel von activeField als Ref, damit asynchrone VAD-Commits (Voxtral online)
+  // den aktuell aktiven Feld-Wert sehen, ohne dass der useCallback-Closure neu
+  // erzeugt werden muss.
+  const activeFieldRef = useRef<BefundField>('befund');
+  useEffect(() => { activeFieldRef.current = activeField; }, [activeField]);
   // Refs für existierenden Text pro Feld
   const existingMethodikRef = useRef<string>("");
   const existingBeurteilungRef = useRef<string>("");
@@ -946,7 +951,11 @@ export default function HomePage() {
       // Transcript-State synchronisieren (für Export, Korrektur etc.).
       // committed enthält im VAD-Pfad bereits den vollständigen aktuellen Textzustand,
       // inklusive bestehendem Text vor Session-Start.
-      const targetField: TextInsertionTarget = mode === 'befund' ? 'befund' : 'transcript';
+      // Im Befund-Modus muss in das aktuell aktive Feld diktiert werden
+      // (methodik / befund / beurteilung), nicht pauschal in 'befund'.
+      const targetField: TextInsertionTarget = mode === 'befund'
+        ? activeFieldRef.current
+        : 'transcript';
       const fullText = committed[0] || '';
       const incomingDelta = getIncrementalTranscript(previousCommittedText, fullText);
       replaceTextAtEndOrInsertDelta(targetField, fullText, incomingDelta);
@@ -2037,7 +2046,15 @@ export default function HomePage() {
     if (useVadMode) {
       // VAD-Modus: Kein MediaRecorder, VAD übernimmt Mikrofon und liefert Utterances
       vadSessionIdRef.current += 1;
-      const existingVADText = existingTextRef.current.trim();
+      // Im Befund-Modus startet der Kontext-Buffer mit dem Inhalt des aktuell
+      // aktiven Feldes (methodik / befund / beurteilung), damit Online-Steuerwörter
+      // sich auf den richtigen Text beziehen und der Delta-Vergleich pro Utterance
+      // gegen das richtige Feld läuft. Das eigentliche Einfügen erfolgt
+      // ohnehin an der aktuellen Cursor-Position des aktiven Feldes.
+      const startingFieldText = mode === 'befund'
+        ? (activeField === 'methodik' ? methodik : activeField === 'beurteilung' ? beurteilung : transcript)
+        : transcript;
+      const existingVADText = startingFieldText.trim();
       committedUtterancesRef.current = existingVADText ? [existingVADText] : [];
       setCommittedUtterances(existingVADText ? [existingVADText] : []);
       setTentativeText('');

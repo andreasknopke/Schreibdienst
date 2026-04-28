@@ -1458,13 +1458,114 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
 
         {/* Detail View für Sekretariat - Vollständige Ansicht wie normale User */}
         {selectedDictation && isFullscreen && (
-          <div className="fixed inset-4 z-50 overflow-auto card">
+          <div className="fixed inset-4 z-50 card overflow-hidden">
             {/* Fullscreen backdrop */}
             <div 
               className="fixed inset-0 bg-black/50 -z-10" 
               onClick={() => { setIsFullscreen(false); setSelectedId(null); }}
             />
-            <div className="card-body space-y-4">
+            <div className="card-body flex h-full min-h-0 flex-col gap-4">
+              {selectedDictation.status === 'completed' && (
+                <div className="shrink-0 bg-gray-100 dark:bg-gray-800 rounded-lg p-3">
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    <span>🎵 Audio-Wiedergabe</span>
+                    {audioLoading && <Spinner size={14} />}
+                    {audioError && <span className="text-orange-500">{audioError}</span>}
+                  </div>
+                  
+                  {audioUrl && (
+                    <>
+                      <audio
+                        ref={audioRef}
+                        src={audioUrl}
+                        onTimeUpdate={(e) => setAudioCurrentTime(e.currentTarget.currentTime)}
+                        onLoadedMetadata={(e) => {
+                          setAudioDuration(e.currentTarget.duration);
+                          e.currentTarget.playbackRate = playbackSpeed;
+                        }}
+                        onEnded={() => setIsPlaying(false)}
+                        onPlay={() => setIsPlaying(true)}
+                        onPause={() => setIsPlaying(false)}
+                      />
+                      
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button className="btn btn-sm btn-outline" onClick={seekToStart} title="Zum Anfang">⏮️</button>
+                        <button className="btn btn-sm btn-outline" onClick={() => seekRelative(-10)} title="10s zurück">⏪ 10</button>
+                        <button className="btn btn-sm btn-primary" onClick={togglePlayPause} title={isPlaying ? 'Pause' : 'Abspielen'}>
+                          {isPlaying ? '⏸️' : '▶️'}
+                        </button>
+                        <button className="btn btn-sm btn-outline" onClick={() => seekRelative(10)} title="10s vorwärts">10 ⏩</button>
+                        
+                        <span className="text-sm font-mono text-gray-600 dark:text-gray-400 ml-2">
+                          {formatTime(audioCurrentTime)} / {formatTime(audioDuration)}
+                        </span>
+                        
+                        <input
+                          type="range"
+                          min="0"
+                          max={audioDuration || 100}
+                          value={audioCurrentTime}
+                          onChange={(e) => {
+                            if (audioRef.current) {
+                              audioRef.current.currentTime = parseFloat(e.target.value);
+                            }
+                          }}
+                          className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-gray-300 dark:bg-gray-600"
+                        />
+                        
+                        <button className="btn btn-sm btn-outline ml-2" onClick={downloadAudio} title="Audio herunterladen">⬇️</button>
+                        
+                        <select
+                          value={playbackSpeed}
+                          onChange={(e) => changePlaybackSpeed(parseFloat(e.target.value))}
+                          className="select select-sm select-bordered text-xs w-20"
+                          title="Wiedergabegeschwindigkeit"
+                        >
+                          {SPEED_OPTIONS.map(speed => (
+                            <option key={speed} value={speed}>{speed === 1 ? '1x' : `${speed}x`}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </>
+                  )}
+                  
+                  {!audioUrl && !audioLoading && !audioError && (
+                    <button className="btn btn-sm btn-outline" onClick={() => loadAudio(selectedDictation.id)}>
+                      🔄 Audio laden
+                    </button>
+                  )}
+                  
+                  {audioUrl && (
+                    <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 flex items-center gap-2 flex-wrap">
+                      {parsedSegments.length > 0 ? (
+                        <>
+                          <button
+                            className={`btn btn-sm ${showMitlesen ? 'btn-primary' : 'btn-outline'}`}
+                            onClick={() => setShowMitlesen(!showMitlesen)}
+                            title="Originaltext mit Wortmarkierung beim Abspielen"
+                          >
+                            {showMitlesen ? '📖 Mitlesen aus' : '📖 Mitlesen an'}
+                          </button>
+                          {showMitlesen && (
+                            <button
+                              className={`btn btn-sm ${autoScrollMitlesen ? 'btn-secondary' : 'btn-outline'}`}
+                              onClick={() => setAutoScrollMitlesen(!autoScrollMitlesen)}
+                              title="Automatisch zum aktuellen Wort scrollen"
+                            >
+                              {autoScrollMitlesen ? '📍 Auto-Scroll aus' : '📍 Auto-Scroll an'}
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-xs text-gray-400">
+                          ℹ️ Mitlesen nicht verfügbar (keine Wort-Zeitstempel)
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
               {/* Loading indicator for details */}
               {detailsLoading && (
                 <div className="flex items-center justify-center py-4">
@@ -1540,109 +1641,6 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                 <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
                   <Spinner size={16} />
                   <span>Wird verarbeitet...</span>
-                </div>
-              )}
-
-              {/* Audio Player for Sekretariat - with Mitlesen support */}
-              {selectedDictation.status === 'completed' && (
-                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3">
-                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
-                    <span>🎵 Audio-Wiedergabe</span>
-                    {audioLoading && <Spinner size={14} />}
-                    {audioError && <span className="text-orange-500">{audioError}</span>}
-                  </div>
-                  
-                  {audioUrl && (
-                    <>
-                      <audio
-                        ref={audioRef}
-                        src={audioUrl}
-                        onTimeUpdate={(e) => setAudioCurrentTime(e.currentTarget.currentTime)}
-                        onLoadedMetadata={(e) => {
-                          setAudioDuration(e.currentTarget.duration);
-                          e.currentTarget.playbackRate = playbackSpeed;
-                        }}
-                        onEnded={() => setIsPlaying(false)}
-                        onPlay={() => setIsPlaying(true)}
-                        onPause={() => setIsPlaying(false)}
-                      />
-                      
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <button className="btn btn-sm btn-outline" onClick={seekToStart} title="Zum Anfang">⏮️</button>
-                        <button className="btn btn-sm btn-outline" onClick={() => seekRelative(-10)} title="10s zurück">⏪ 10</button>
-                        <button className="btn btn-sm btn-primary" onClick={togglePlayPause} title={isPlaying ? 'Pause' : 'Abspielen'}>
-                          {isPlaying ? '⏸️' : '▶️'}
-                        </button>
-                        <button className="btn btn-sm btn-outline" onClick={() => seekRelative(10)} title="10s vorwärts">10 ⏩</button>
-                        
-                        <span className="text-sm font-mono text-gray-600 dark:text-gray-400 ml-2">
-                          {formatTime(audioCurrentTime)} / {formatTime(audioDuration)}
-                        </span>
-                        
-                        <input
-                          type="range"
-                          min="0"
-                          max={audioDuration || 100}
-                          value={audioCurrentTime}
-                          onChange={(e) => {
-                            if (audioRef.current) {
-                              audioRef.current.currentTime = parseFloat(e.target.value);
-                            }
-                          }}
-                          className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-gray-300 dark:bg-gray-600"
-                        />
-                        
-                        <button className="btn btn-sm btn-outline ml-2" onClick={downloadAudio} title="Audio herunterladen">⬇️</button>
-                        
-                        <select
-                          value={playbackSpeed}
-                          onChange={(e) => changePlaybackSpeed(parseFloat(e.target.value))}
-                          className="select select-sm select-bordered text-xs w-20"
-                          title="Wiedergabegeschwindigkeit"
-                        >
-                          {SPEED_OPTIONS.map(speed => (
-                            <option key={speed} value={speed}>{speed === 1 ? '1x' : `${speed}x`}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </>
-                  )}
-                  
-                  {!audioUrl && !audioLoading && !audioError && (
-                    <button className="btn btn-sm btn-outline" onClick={() => loadAudio(selectedDictation.id)}>
-                      🔄 Audio laden
-                    </button>
-                  )}
-                  
-                  {/* Mitlesen toggle */}
-                  {audioUrl && (
-                    <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 flex items-center gap-2 flex-wrap">
-                      {parsedSegments.length > 0 ? (
-                        <>
-                          <button
-                            className={`btn btn-sm ${showMitlesen ? 'btn-primary' : 'btn-outline'}`}
-                            onClick={() => setShowMitlesen(!showMitlesen)}
-                            title="Originaltext mit Wortmarkierung beim Abspielen"
-                          >
-                            {showMitlesen ? '📖 Mitlesen aus' : '📖 Mitlesen an'}
-                          </button>
-                          {showMitlesen && (
-                            <button
-                              className={`btn btn-sm ${autoScrollMitlesen ? 'btn-secondary' : 'btn-outline'}`}
-                              onClick={() => setAutoScrollMitlesen(!autoScrollMitlesen)}
-                              title="Automatisch zum aktuellen Wort scrollen"
-                            >
-                              {autoScrollMitlesen ? '📍 Auto-Scroll aus' : '📍 Auto-Scroll an'}
-                            </button>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-xs text-gray-400">
-                          ℹ️ Mitlesen nicht verfügbar (keine Wort-Zeitstempel)
-                        </span>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -1778,6 +1776,8 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   </button>
                 </div>
               )}
+
+              </div>
 
               {/* Actions */}
               <div className="flex gap-2 pt-2 border-t flex-wrap">
@@ -1988,7 +1988,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
           {selectedDictation && (
             <div className={`card ${
               isFullscreen 
-                ? 'fixed inset-4 z-50 overflow-auto' 
+                ? 'fixed inset-4 z-50 overflow-hidden' 
                 : 'sticky top-20'
             }`}>
               {/* Fullscreen backdrop */}
@@ -1998,7 +1998,145 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   onClick={() => setIsFullscreen(false)}
                 />
               )}
-              <div className="card-body space-y-4">
+              <div className={`card-body ${isFullscreen ? 'flex h-full min-h-0 flex-col gap-4' : 'space-y-4'}`}>
+                {isFullscreen && selectedDictation.status === 'completed' && (
+                  <div className="shrink-0 bg-gray-100 dark:bg-gray-800 rounded-lg p-3">
+                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                      <span>🎵 Audio-Wiedergabe</span>
+                      {audioLoading && <Spinner size={14} />}
+                      {audioError && <span className="text-orange-500">{audioError}</span>}
+                    </div>
+                    
+                    {audioUrl && (
+                      <>
+                        <audio
+                          ref={audioRef}
+                          src={audioUrl}
+                          onTimeUpdate={(e) => setAudioCurrentTime(e.currentTarget.currentTime)}
+                          onLoadedMetadata={(e) => {
+                            setAudioDuration(e.currentTarget.duration);
+                            e.currentTarget.playbackRate = playbackSpeed;
+                          }}
+                          onEnded={() => setIsPlaying(false)}
+                          onPlay={() => setIsPlaying(true)}
+                          onPause={() => setIsPlaying(false)}
+                        />
+                        
+                        <div className="flex items-center gap-2">
+                          <button
+                            className="btn btn-sm btn-outline"
+                            onClick={seekToStart}
+                            title="Zum Anfang"
+                          >
+                            ⏮️
+                          </button>
+                          <button
+                            className="btn btn-sm btn-outline"
+                            onClick={() => seekRelative(-10)}
+                            title="10s zurück"
+                          >
+                            ⏪ 10
+                          </button>
+                          <button
+                            className="btn btn-sm btn-primary"
+                            onClick={togglePlayPause}
+                            title={isPlaying ? 'Pause' : 'Abspielen'}
+                          >
+                            {isPlaying ? '⏸️' : '▶️'}
+                          </button>
+                          <button
+                            className="btn btn-sm btn-outline"
+                            onClick={() => seekRelative(10)}
+                            title="10s vorwärts"
+                          >
+                            10 ⏩
+                          </button>
+                          <span className="text-sm font-mono text-gray-600 dark:text-gray-400 ml-2">
+                            {formatTime(audioCurrentTime)} / {formatTime(audioDuration)}
+                          </span>
+                          <input
+                            type="range"
+                            min="0"
+                            max={audioDuration || 100}
+                            value={audioCurrentTime}
+                            onChange={(e) => {
+                              if (audioRef.current) {
+                                audioRef.current.currentTime = parseFloat(e.target.value);
+                              }
+                            }}
+                            className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-gray-300 dark:bg-gray-600"
+                          />
+                          <button
+                            className="btn btn-sm btn-outline ml-2"
+                            onClick={downloadAudio}
+                            title="Audio herunterladen"
+                          >
+                            ⬇️
+                          </button>
+                          <div className="flex items-center gap-1 ml-2">
+                            <span className="text-xs text-gray-500 dark:text-gray-400">🏃</span>
+                            <select
+                              value={playbackSpeed}
+                              onChange={(e) => changePlaybackSpeed(parseFloat(e.target.value))}
+                              className="select select-sm select-bordered text-xs w-20"
+                              title="Wiedergabegeschwindigkeit"
+                            >
+                              {SPEED_OPTIONS.map(speed => (
+                                <option key={speed} value={speed}>
+                                  {speed === 1 ? '1x' : `${speed}x`}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                    
+                    {!audioUrl && !audioLoading && !audioError && (
+                      <button
+                        className="btn btn-sm btn-outline"
+                        onClick={() => loadAudio(selectedDictation.id)}
+                      >
+                        🔄 Audio laden
+                      </button>
+                    )}
+                    
+                    {audioUrl && (
+                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 flex items-center gap-2 flex-wrap">
+                        {parsedSegments.length > 0 ? (
+                          <>
+                            <button
+                              className={`btn btn-sm ${showMitlesen ? 'btn-primary' : 'btn-outline'}`}
+                              onClick={() => setShowMitlesen(!showMitlesen)}
+                              title="Zeigt die originale Transkription mit Wort-Highlighting während der Wiedergabe"
+                            >
+                              {showMitlesen ? '📖 Mitlesen aus' : '📖 Mitlesen an'}
+                            </button>
+                            {showMitlesen && (
+                              <>
+                                <button
+                                  className={`btn btn-sm ${autoScrollMitlesen ? 'btn-secondary' : 'btn-outline'}`}
+                                  onClick={() => setAutoScrollMitlesen(!autoScrollMitlesen)}
+                                  title="Automatisch zum aktuellen Wort scrollen"
+                                >
+                                  {autoScrollMitlesen ? '📍 Auto-Scroll aus' : '📍 Auto-Scroll an'}
+                                </button>
+                                <span className="text-xs text-gray-500">
+                                  Original + korrigierter Text synchron
+                                </span>
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-xs text-gray-400">
+                            📖 Mitlesen nicht verfügbar (Diktat wurde vor dem Update erstellt)
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className={isFullscreen ? 'min-h-0 flex-1 space-y-4 overflow-y-auto pr-1' : 'space-y-4'}>
                 {/* Loading indicator for details */}
                 {detailsLoading && (
                   <div className="flex items-center justify-center py-4">
@@ -2069,161 +2207,6 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   </div>
                 )}
 
-                {/* Audio Player - only in fullscreen mode */}
-                {isFullscreen && selectedDictation.status === 'completed' && (
-                  <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3">
-                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
-                      <span>🎵 Audio-Wiedergabe</span>
-                      {audioLoading && <Spinner size={14} />}
-                      {audioError && <span className="text-orange-500">{audioError}</span>}
-                    </div>
-                    
-                    {audioUrl && (
-                      <>
-                        <audio
-                          ref={audioRef}
-                          src={audioUrl}
-                          onTimeUpdate={(e) => setAudioCurrentTime(e.currentTarget.currentTime)}
-                          onLoadedMetadata={(e) => {
-                            setAudioDuration(e.currentTarget.duration);
-                            e.currentTarget.playbackRate = playbackSpeed;
-                          }}
-                          onEnded={() => setIsPlaying(false)}
-                          onPlay={() => setIsPlaying(true)}
-                          onPause={() => setIsPlaying(false)}
-                        />
-                        
-                        <div className="flex items-center gap-2">
-                          {/* Skip to start */}
-                          <button
-                            className="btn btn-sm btn-outline"
-                            onClick={seekToStart}
-                            title="Zum Anfang"
-                          >
-                            ⏮️
-                          </button>
-                          
-                          {/* Rewind 10s */}
-                          <button
-                            className="btn btn-sm btn-outline"
-                            onClick={() => seekRelative(-10)}
-                            title="10s zurück"
-                          >
-                            ⏪ 10
-                          </button>
-                          
-                          {/* Play/Pause */}
-                          <button
-                            className="btn btn-sm btn-primary"
-                            onClick={togglePlayPause}
-                            title={isPlaying ? 'Pause' : 'Abspielen'}
-                          >
-                            {isPlaying ? '⏸️' : '▶️'}
-                          </button>
-                          
-                          {/* Forward 10s */}
-                          <button
-                            className="btn btn-sm btn-outline"
-                            onClick={() => seekRelative(10)}
-                            title="10s vorwärts"
-                          >
-                            10 ⏩
-                          </button>
-                          
-                          {/* Time display */}
-                          <span className="text-sm font-mono text-gray-600 dark:text-gray-400 ml-2">
-                            {formatTime(audioCurrentTime)} / {formatTime(audioDuration)}
-                          </span>
-                          
-                          {/* Progress bar */}
-                          <input
-                            type="range"
-                            min="0"
-                            max={audioDuration || 100}
-                            value={audioCurrentTime}
-                            onChange={(e) => {
-                              if (audioRef.current) {
-                                audioRef.current.currentTime = parseFloat(e.target.value);
-                              }
-                            }}
-                            className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-gray-300 dark:bg-gray-600"
-                          />
-                          
-                          {/* Download button */}
-                          <button
-                            className="btn btn-sm btn-outline ml-2"
-                            onClick={downloadAudio}
-                            title="Audio herunterladen"
-                          >
-                            ⬇️
-                          </button>
-                          
-                          {/* Speed control */}
-                          <div className="flex items-center gap-1 ml-2">
-                            <span className="text-xs text-gray-500 dark:text-gray-400">🏃</span>
-                            <select
-                              value={playbackSpeed}
-                              onChange={(e) => changePlaybackSpeed(parseFloat(e.target.value))}
-                              className="select select-sm select-bordered text-xs w-20"
-                              title="Wiedergabegeschwindigkeit"
-                            >
-                              {SPEED_OPTIONS.map(speed => (
-                                <option key={speed} value={speed}>
-                                  {speed === 1 ? '1x' : `${speed}x`}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                      </>
-                    )}
-                    
-                    {!audioUrl && !audioLoading && !audioError && (
-                      <button
-                        className="btn btn-sm btn-outline"
-                        onClick={() => loadAudio(selectedDictation.id)}
-                      >
-                        🔄 Audio laden
-                      </button>
-                    )}
-                    
-                    {/* Mitlesen toggle button - show even without segments for info */}
-                    {audioUrl && (
-                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 flex items-center gap-2 flex-wrap">
-                        {parsedSegments.length > 0 ? (
-                          <>
-                            <button
-                              className={`btn btn-sm ${showMitlesen ? 'btn-primary' : 'btn-outline'}`}
-                              onClick={() => setShowMitlesen(!showMitlesen)}
-                              title="Zeigt die originale Transkription mit Wort-Highlighting während der Wiedergabe"
-                            >
-                              {showMitlesen ? '📖 Mitlesen aus' : '📖 Mitlesen an'}
-                            </button>
-                            {showMitlesen && (
-                              <>
-                                <button
-                                  className={`btn btn-sm ${autoScrollMitlesen ? 'btn-secondary' : 'btn-outline'}`}
-                                  onClick={() => setAutoScrollMitlesen(!autoScrollMitlesen)}
-                                  title="Automatisch zum aktuellen Wort scrollen"
-                                >
-                                  {autoScrollMitlesen ? '📍 Auto-Scroll aus' : '📍 Auto-Scroll an'}
-                                </button>
-                                <span className="text-xs text-gray-500">
-                                  Original + korrigierter Text synchron
-                                </span>
-                              </>
-                            )}
-                          </>
-                        ) : (
-                          <span className="text-xs text-gray-400">
-                            📖 Mitlesen nicht verfügbar (Diktat wurde vor dem Update erstellt)
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-                
                 {/* Mitlesen Panel - Word-level highlighting of original transcription */}
                 {isFullscreen && showMitlesen && parsedSegments.length > 0 && (
                   <div className="space-y-3">
@@ -2578,6 +2561,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                     </div>
                   </div>
                 )}
+                </div>
               </div>
             </div>
           )}

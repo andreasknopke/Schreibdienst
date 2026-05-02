@@ -11,6 +11,10 @@ interface User {
   createdBy: string;
 }
 
+function hasBadgeFlag(value: unknown): boolean {
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
 export default function UserManagement() {
   const { isAdmin, getAuthHeader, getDbTokenHeader } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -267,10 +271,10 @@ export default function UserManagement() {
               <div key={user.username} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-medium">{user.username}</span>
-                  {user.isAdmin && (
+                  {hasBadgeFlag(user.isAdmin) && (
                     <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded">Admin</span>
                   )}
-                  {user.canViewAllDictations && (
+                  {hasBadgeFlag(user.canViewAllDictations) && (
                     <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded">Alle Diktate</span>
                   )}
                   <select

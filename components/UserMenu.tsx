@@ -8,17 +8,18 @@ import TemplatesManager from './TemplatesManager';
 import ConfigPanel from './ConfigPanel';
 import HelpPanel from './HelpPanel';
 import StandardDictionaryManager from './StandardDictionaryManager';
+import BugReportForm from './BugReportForm';
 
 export default function UserMenu() {
-  const { isLoggedIn, username, isAdmin, autoCorrect, setAutoCorrect, logout } = useAuth();
+  const { isLoggedIn, username, isAdmin, logout } = useAuth();
   const [showUserManagement, setShowUserManagement] = useState(false);
   const [showDictionary, setShowDictionary] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showStandardDict, setShowStandardDict] = useState(false);
+  const [showBugReport, setShowBugReport] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [savingAutoCorrect, setSavingAutoCorrect] = useState(false);
   const [dictionaryInitialWord, setDictionaryInitialWord] = useState('');
 
   // Nur im Browser rendern
@@ -227,28 +228,17 @@ export default function UserMenu() {
           {username}
           {isAdmin && <span className="ml-1 text-blue-600">(Admin)</span>}
         </span>
-        {/* Auto-Correct Toggle */}
         <button
-          onClick={async () => {
-            setSavingAutoCorrect(true);
-            await setAutoCorrect(!autoCorrect);
-            setSavingAutoCorrect(false);
-          }}
-          disabled={savingAutoCorrect}
-          className={`text-xs px-1.5 sm:px-2 py-1 rounded flex items-center gap-1 transition-colors ${
-            autoCorrect 
-              ? 'text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20' 
-              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
-          }`}
-          title={autoCorrect ? 'Auto-Korrektur aktiv (klicken zum Deaktivieren)' : 'Auto-Korrektur deaktiviert (klicken zum Aktivieren)'}
+          onClick={() => setShowBugReport(true)}
+          className="flex items-center gap-1 rounded px-1.5 py-1 text-xs text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-900/20"
+          title="Bug oder Feature melden"
         >
-          {savingAutoCorrect ? (
-            <span className="animate-spin">⏳</span>
-          ) : autoCorrect ? (
-            <>🤖<span className="hidden sm:inline"> Auto</span></>
-          ) : (
-            <>🤖<span className="hidden sm:inline"> Manuell</span></>
-          )}
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M8.25 9.75h7.5" />
+            <path d="M7.5 6.75h9a3.75 3.75 0 0 1 3.75 3.75v2.25a5.25 5.25 0 0 1-5.25 5.25h-6a5.25 5.25 0 0 1-5.25-5.25V10.5A3.75 3.75 0 0 1 7.5 6.75Z" />
+            <path d="M9 3.75 10.125 6M15 3.75 13.875 6M4.5 9.375 6.75 10.5m12.75-1.125L17.25 10.5m-10.5 6 1.5 2.25m7.5-2.25-1.5 2.25" />
+          </svg>
+          <span className="hidden sm:inline">Melden</span>
         </button>
         <button
           onClick={handleOpenDictionary}
@@ -315,6 +305,7 @@ export default function UserMenu() {
       {userManagementModal}
       {standardDictModal}
       {helpModal}
+      <BugReportForm open={showBugReport} onClose={() => setShowBugReport(false)} />
     </>
   );
 }

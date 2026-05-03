@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { loadDictionaryWithRequest } from '@/lib/dictionaryDb';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { calculateChangeScore } from '@/lib/changeScore';
-import { preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFormatting';
+import { preprocessTranscription, removeMarkdownFormatting, normalizeChunkWhitespace } from '@/lib/textFormatting';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
 
 export const runtime = 'nodejs';
@@ -108,7 +108,7 @@ function splitTextIntoChunks(text: string, maxSentences: number = 5): string[] {
   for (let i = 0; i < sentences.length; i += maxSentences) {
     const chunk = sentences.slice(i, i + maxSentences).join('');
     if (chunk.trim()) {
-      chunks.push(chunk.trim());
+      chunks.push(normalizeChunkWhitespace(chunk));
     }
   }
   

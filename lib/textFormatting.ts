@@ -938,6 +938,17 @@ export function preprocessTranscriptionDetailed(
 }
 
 /**
+ * Normalize whitespace in a chunk: trim leading/trailing and collapse internal whitespace sequences to a single space.
+ * Used to clean up chunk content before sending to LLM or returning.
+ * @param text - Chunk text to normalize
+ * @returns Normalized text
+ */
+export function normalizeChunkWhitespace(text: string): string {
+  if (!text) return '';
+  return text.trim().replace(/\s+/g, ' ');
+}
+
+/**
  * Remove Markdown formatting from text.
  * Used to clean up LLM output that may contain unwanted formatting.
  * 

@@ -11,7 +11,7 @@ import StandardDictionaryManager from './StandardDictionaryManager';
 import BugReportForm from './BugReportForm';
 
 export default function UserMenu() {
-  const { isLoggedIn, username, isAdmin, autoCorrect, setAutoCorrect, logout } = useAuth();
+  const { isLoggedIn, username, isAdmin, logout } = useAuth();
   const [showUserManagement, setShowUserManagement] = useState(false);
   const [showDictionary, setShowDictionary] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
@@ -20,7 +20,6 @@ export default function UserMenu() {
   const [showStandardDict, setShowStandardDict] = useState(false);
   const [showBugReport, setShowBugReport] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [savingAutoCorrect, setSavingAutoCorrect] = useState(false);
   const [dictionaryInitialWord, setDictionaryInitialWord] = useState('');
 
   // Nur im Browser rendern
@@ -229,28 +228,12 @@ export default function UserMenu() {
           {username}
           {isAdmin && <span className="ml-1 text-blue-600">(Admin)</span>}
         </span>
-        {/* Auto-Correct Toggle */}
         <button
-          onClick={async () => {
-            setSavingAutoCorrect(true);
-            await setAutoCorrect(!autoCorrect);
-            setSavingAutoCorrect(false);
-          }}
-          disabled={savingAutoCorrect}
-          className={`text-xs px-1.5 sm:px-2 py-1 rounded flex items-center gap-1 transition-colors ${
-            autoCorrect 
-              ? 'text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20' 
-              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
-          }`}
-          title={autoCorrect ? 'Auto-Korrektur aktiv (klicken zum Deaktivieren)' : 'Auto-Korrektur deaktiviert (klicken zum Aktivieren)'}
+          onClick={() => setShowBugReport(true)}
+          className="text-xs text-red-600 hover:text-red-700 px-1.5 sm:px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
+          title="Bug oder Feature melden"
         >
-          {savingAutoCorrect ? (
-            <span className="animate-spin">⏳</span>
-          ) : autoCorrect ? (
-            <>🤖<span className="hidden sm:inline"> Auto</span></>
-          ) : (
-            <>🤖<span className="hidden sm:inline"> Manuell</span></>
-          )}
+          🐞<span className="hidden sm:inline"> Melden</span>
         </button>
         <button
           onClick={handleOpenDictionary}
@@ -272,13 +255,6 @@ export default function UserMenu() {
           title="Hilfe & Bedienung"
         >
           ❓
-        </button>
-        <button
-          onClick={() => setShowBugReport(true)}
-          className="text-xs text-red-600 hover:text-red-700 px-1.5 sm:px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
-          title="Bug oder Feature melden"
-        >
-          🐞<span className="hidden sm:inline"> Melden</span>
         </button>
         {/* Standard-Wörterbuch nur für Admins */}
         {isAdmin && (

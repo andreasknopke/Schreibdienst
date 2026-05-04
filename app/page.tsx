@@ -1362,11 +1362,6 @@ export default function HomePage() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignoriere Hotkeys wenn in Textfeldern
-      const activeElement = document.activeElement;
-      const isEditing = activeElement?.tagName === 'TEXTAREA' || activeElement?.tagName === 'INPUT';
-      if (isEditing) return;
-
       switch (e.key) {
         case 'F9':
           e.preventDefault();
@@ -1399,8 +1394,8 @@ export default function HomePage() {
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [startRecording, stopRecording, handleReset]);
 
   // Schnelle LLM-Fachwort-Korrektur

@@ -8,6 +8,7 @@ import TemplatesManager from './TemplatesManager';
 import ConfigPanel from './ConfigPanel';
 import HelpPanel from './HelpPanel';
 import StandardDictionaryManager from './StandardDictionaryManager';
+import BugReportForm from './BugReportForm';
 
 export default function UserMenu() {
   const { isLoggedIn, username, isAdmin, autoCorrect, setAutoCorrect, logout } = useAuth();
@@ -17,6 +18,7 @@ export default function UserMenu() {
   const [showConfig, setShowConfig] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showStandardDict, setShowStandardDict] = useState(false);
+  const [showBugReport, setShowBugReport] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [savingAutoCorrect, setSavingAutoCorrect] = useState(false);
   const [dictionaryInitialWord, setDictionaryInitialWord] = useState('');
@@ -271,6 +273,13 @@ export default function UserMenu() {
         >
           ❓
         </button>
+        <button
+          onClick={() => setShowBugReport(true)}
+          className="text-xs text-red-600 hover:text-red-700 px-1.5 sm:px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
+          title="Bug oder Feature melden"
+        >
+          🐞<span className="hidden sm:inline"> Melden</span>
+        </button>
         {/* Standard-Wörterbuch nur für Admins */}
         {isAdmin && (
           <button
@@ -315,6 +324,7 @@ export default function UserMenu() {
       {userManagementModal}
       {standardDictModal}
       {helpModal}
+      <BugReportForm open={showBugReport} onClose={() => setShowBugReport(false)} />
     </>
   );
 }

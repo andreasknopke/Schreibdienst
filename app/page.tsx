@@ -512,6 +512,84 @@ export default function HomePage() {
   const [templateMode, setTemplateMode] = useState(false);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
 
+  const getTextForBefundField = useCallback((field: BefundField): string => {
+    switch (field) {
+      case 'methodik':
+        return methodik;
+      case 'beurteilung':
+        return beurteilung;
+      case 'befund':
+      default:
+        return transcript;
+    }
+  }, [methodik, transcript, beurteilung]);
+
+  const applySelectedTemplate = useCallback(async (changesOverride?: string) => {
+    if (!selectedTemplate) {
+      return false;
+    }
+
+    const changesText = (changesOverride ?? getTextForBefundField(selectedTemplate.field)).trim();
+    setError(null);
+    setCorrecting(true);
+
+    try {
+      let nextText = selectedTemplate.content;
+
+      if (changesText) {
+        console.log('[Template] Adapting template:', selectedTemplate.name);
+        console.log('[Template] Changes:', changesText);
+
+        const res = await fetch('/api/templates/adapt', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': getAuthHeader(),
+            ...getDbTokenHeader(),
+          },
+          body: JSON.stringify({
+            template: selectedTemplate.content,
+            changes: changesText,
+            field: selectedTemplate.field,
+            username,
+          }),
+        });
+
+        if (!res.ok) {
+          const errorData = await res.json();
+          throw new Error(errorData.error || 'Template-Anpassung fehlgeschlagen');
+        }
+
+        const data = await res.json();
+        if (!data.adaptedText) {
+          throw new Error('Template-Anpassung lieferte keinen Text zurück');
+        }
+
+        nextText = data.adaptedText;
+      }
+
+      setPreCorrectionState({
+        methodik,
+        befund: transcript,
+        beurteilung,
+        transcript: '',
+      });
+      setFieldText(selectedTemplate.field, nextText);
+      setCanRevert(true);
+      setIsReverted(false);
+      setPendingCorrection(false);
+      return true;
+    } catch (err: any) {
+      console.error('[Template] Apply error:', err);
+      setError(err.message || 'Fehler bei Template-Anpassung');
+      return false;
+    } finally {
+      setCorrecting(false);
+      setSelectedTemplate(null);
+      setTemplateMode(false);
+    }
+  }, [selectedTemplate, getTextForBefundField, getAuthHeader, getDbTokenHeader, username, methodik, transcript, beurteilung, setFieldText]);
+
   // Wörterbuch-Einträge für Echtzeit-Korrektur und Initial Prompt
   interface DictionaryEntry {
     wrong: string;
@@ -2232,66 +2310,7 @@ export default function HomePage() {
           
           // TEMPLATE-MODUS: Textbaustein mit diktierten Änderungen kombinieren
           if (templateMode && selectedTemplate) {
-            setCorrecting(true);
-            try {
-              console.log('[Template] Adapting template:', selectedTemplate.name);
-              console.log('[Template] Changes:', formattedTranscript);
-              
-              const res = await fetch('/api/templates/adapt', {
-                method: 'POST',
-                headers: { 
-                  'Content-Type': 'application/json',
-                  'Authorization': getAuthHeader(),
-                  ...getDbTokenHeader()
-                },
-                body: JSON.stringify({
-                  template: selectedTemplate.content,
-                  changes: formattedTranscript,
-                  field: selectedTemplate.field,
-                  username
-                }),
-              });
-              
-              if (res.ok) {
-                const data = await res.json();
-                if (data.adaptedText) {
-                  // Speichere aktuellen Zustand für Revert
-                  setPreCorrectionState({
-                    methodik: methodik,
-                    befund: transcript,
-                    beurteilung: beurteilung,
-                    transcript: ''
-                  });
-                  
-                  // Setze den angepassten Text ins entsprechende Feld
-                  switch (selectedTemplate.field) {
-                    case 'methodik':
-                      setMethodik(data.adaptedText);
-                      break;
-                    case 'beurteilung':
-                      setBeurteilung(data.adaptedText);
-                      break;
-                    case 'befund':
-                    default:
-                      setTranscript(data.adaptedText);
-                      break;
-                  }
-                  setCanRevert(true);
-                  setIsReverted(false);
-                }
-              } else {
-                const errorData = await res.json();
-                setError(errorData.error || 'Template-Anpassung fehlgeschlagen');
-              }
-            } catch (err: any) {
-              console.error('[Template] Adapt error:', err);
-              setError(err.message || 'Fehler bei Template-Anpassung');
-            } finally {
-              setCorrecting(false);
-              // Template-Modus nach Anwendung zurücksetzen
-              setSelectedTemplate(null);
-              setTemplateMode(false);
-            }
+            await applySelectedTemplate(formattedTranscript);
           } else {
             // STANDARD-MODUS: Normale Verarbeitung
             // Verarbeite Transkript und setze Text in Felder
@@ -3301,6 +3320,11 @@ export default function HomePage() {
       {/* Textbaustein-Hinweis wenn aktiv */}
       {templateMode && selectedTemplate && !recording && (
         <div className="text-sm bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 px-3 py-2 rounded-lg">
+          {(() => {
+            const hasTemplateChanges = getTextForBefundField(selectedTemplate.field).trim().length > 0;
+
+            return (
+              <>
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-2">
               <span className="text-orange-600 dark:text-orange-400 font-medium">📝 Baustein: {selectedTemplate.name}</span>
@@ -3309,47 +3333,23 @@ export default function HomePage() {
               </span>
             </div>
             <button
-              onClick={() => {
-                // Speichere aktuellen Zustand für Revert
-                setPreCorrectionState({
-                  methodik: methodik,
-                  befund: transcript,
-                  beurteilung: beurteilung,
-                  transcript: ''
-                });
-                
-                // Setze den Textbaustein direkt ins entsprechende Feld
-                switch (selectedTemplate.field) {
-                  case 'methodik':
-                    setMethodik(selectedTemplate.content);
-                    break;
-                  case 'beurteilung':
-                    setBeurteilung(selectedTemplate.content);
-                    break;
-                  case 'befund':
-                  default:
-                    setTranscript(selectedTemplate.content);
-                    break;
-                }
-                setCanRevert(true);
-                setIsReverted(false);
-                
-                // Template-Modus zurücksetzen
-                setSelectedTemplate(null);
-                setTemplateMode(false);
-              }}
+              onClick={() => { void applySelectedTemplate(); }}
+              disabled={correcting || busy}
               className="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors"
-              title="Textbaustein ohne Änderungen einfügen"
+              title={hasTemplateChanges ? 'Diktierte Änderungen in den Textbaustein einarbeiten und übernehmen' : 'Textbaustein ohne Änderungen einfügen'}
             >
-              Einfügen
+              {hasTemplateChanges ? 'Änderungen einfügen' : 'Einfügen'}
             </button>
           </div>
           <p className="text-xs text-orange-700 dark:text-orange-300 line-clamp-2">
             {selectedTemplate.content.substring(0, 150)}...
           </p>
           <p className="text-xs text-orange-600 dark:text-orange-400 mt-1 italic">
-            💡 Diktieren Sie nur die Änderungen, oder klicken Sie "Einfügen" um den Baustein unverändert zu übernehmen
+            💡 Diktieren Sie nur die Änderungen. {hasTemplateChanges ? 'Mit "Änderungen einfügen" werden diese per LLM in den Baustein eingebaut.' : 'Mit "Einfügen" wird der Baustein unverändert übernommen.'}
           </p>
+              </>
+            );
+          })()}
         </div>
       )}
 

@@ -375,6 +375,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [parsedSegments, setParsedSegments] = useState<TranscriptSegment[]>([]);
   const mitlesenRef = useRef<HTMLDivElement>(null);
   const [rawTranscriptCollapsed, setRawTranscriptCollapsed] = useState(false); // Collapse raw transcript panel
+  const [anchorRawTranscript, setAnchorRawTranscript] = useState(false);
   
   // Selected dictation details - loaded on demand to avoid fetching large TEXT fields in list
   const [selectedDictationDetails, setSelectedDictationDetails] = useState<Dictation | null>(null);
@@ -639,6 +640,83 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     link.click();
     document.body.removeChild(link);
   };
+
+  const renderOriginalTranscriptPanel = useCallback((variant: 'compact' | 'default') => {
+    if (!showMitlesen || parsedSegments.length === 0) return null;
+
+    const isCompact = variant === 'compact';
+
+    return (
+      <div
+        ref={mitlesenRef}
+        className={isCompact
+          ? 'bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 border border-yellow-200 dark:border-yellow-800'
+          : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4'}
+      >
+        <div
+          className={isCompact
+            ? 'text-sm font-medium flex items-center justify-between cursor-pointer select-none'
+            : 'text-sm font-medium flex items-center justify-between cursor-pointer select-none text-blue-600 dark:text-blue-400'}
+          onClick={() => setRawTranscriptCollapsed(!rawTranscriptCollapsed)}
+        >
+          <div className="flex items-center gap-2">
+            <span className={`transform transition-transform ${rawTranscriptCollapsed ? '' : 'rotate-90'}`}>▶</span>
+            <span>{isCompact ? '📖 Originaltranskript (Mitlesen)' : '📖 Original Whisper-Transkription'}</span>
+            <span className="text-xs text-gray-500">- Klicke auf ein Wort zum Springen</span>
+          </div>
+          <span className="text-xs text-gray-400">
+            {rawTranscriptCollapsed ? '(eingeklappt)' : '(einklappen)'}
+          </span>
+        </div>
+        {!rawTranscriptCollapsed && (
+          <div className={`text-sm leading-relaxed mt-2 overflow-auto ${isCompact ? 'max-h-48' : 'max-h-40'}`}>
+            {parsedSegments.map((segment, segIdx) => (
+              <span key={segIdx}>
+                {segment.words ? (
+                  segment.words.map((word, wordIdx) => {
+                    if (word.start === undefined || word.end === undefined) {
+                      return <span key={`${segIdx}-${wordIdx}`}>{word.word}{' '}</span>;
+                    }
+
+                    const isCurrentWord = audioCurrentTime >= word.start && audioCurrentTime < word.end;
+                    return (
+                      <span
+                        key={`${segIdx}-${wordIdx}`}
+                        className={`cursor-pointer rounded px-0.5 transition-colors duration-100 ${
+                          isCurrentWord
+                            ? 'bg-yellow-300 dark:bg-yellow-600 font-medium'
+                            : audioCurrentTime > word.end
+                              ? 'text-gray-500 dark:text-gray-500'
+                              : 'hover:bg-yellow-200 dark:hover:bg-yellow-700'
+                        }`}
+                        onClick={() => seekToWord(word.start)}
+                        title={`${word.start.toFixed(1)}s - ${word.end.toFixed(1)}s`}
+                      >
+                        {word.word}{' '}
+                      </span>
+                    );
+                  })
+                ) : (
+                  <span
+                    className={`cursor-pointer rounded px-0.5 transition-colors duration-100 ${
+                      audioCurrentTime >= segment.start && audioCurrentTime < segment.end
+                        ? 'bg-yellow-300 dark:bg-yellow-600 font-medium'
+                        : audioCurrentTime > segment.end
+                          ? 'text-gray-500 dark:text-gray-500'
+                          : 'hover:bg-yellow-200 dark:hover:bg-yellow-700'
+                    }`}
+                    onClick={() => seekToWord(segment.start)}
+                  >
+                    {segment.text}{' '}
+                  </span>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }, [audioCurrentTime, parsedSegments, rawTranscriptCollapsed, showMitlesen]);
   
   // Auto-scroll to current word in Mitlesen panel (only if enabled by user)
   useEffect(() => {
@@ -686,6 +764,20 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       }
     };
   }, [audioUrl]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const storedValue = window.localStorage.getItem('offline-raw-transcript-anchored');
+    if (storedValue === 'true') {
+      setAnchorRawTranscript(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('offline-raw-transcript-anchored', anchorRawTranscript ? 'true' : 'false');
+  }, [anchorRawTranscript]);
 
   // Delete dictation
   const handleDelete = async (id: number, audioOnly: boolean = false) => {
@@ -1547,13 +1639,22 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             {showMitlesen ? '📖 Mitlesen aus' : '📖 Mitlesen an'}
                           </button>
                           {showMitlesen && (
-                            <button
-                              className={`btn btn-sm ${autoScrollMitlesen ? 'btn-secondary' : 'btn-outline'}`}
-                              onClick={() => setAutoScrollMitlesen(!autoScrollMitlesen)}
-                              title="Automatisch zum aktuellen Wort scrollen"
-                            >
-                              {autoScrollMitlesen ? '📍 Auto-Scroll aus' : '📍 Auto-Scroll an'}
-                            </button>
+                            <>
+                              <button
+                                className={`btn btn-sm ${autoScrollMitlesen ? 'btn-secondary' : 'btn-outline'}`}
+                                onClick={() => setAutoScrollMitlesen(!autoScrollMitlesen)}
+                                title="Automatisch zum aktuellen Wort scrollen"
+                              >
+                                {autoScrollMitlesen ? '📍 Auto-Scroll aus' : '📍 Auto-Scroll an'}
+                              </button>
+                              <button
+                                className={`btn btn-sm ${anchorRawTranscript ? 'btn-secondary' : 'btn-outline'}`}
+                                onClick={() => setAnchorRawTranscript(!anchorRawTranscript)}
+                                title="Verankert das Originaltranskript direkt unter der Audioleiste"
+                              >
+                                {anchorRawTranscript ? '📌 Verankerung aus' : '📌 Verankern'}
+                              </button>
+                            </>
                           )}
                         </>
                       ) : (
@@ -1561,6 +1662,11 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                           ℹ️ Mitlesen nicht verfügbar (keine Wort-Zeitstempel)
                         </span>
                       )}
+                    </div>
+                  )}
+                  {audioUrl && showMitlesen && anchorRawTranscript && parsedSegments.length > 0 && (
+                    <div className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-700">
+                      {renderOriginalTranscriptPanel('compact')}
                     </div>
                   )}
                 </div>
@@ -1655,61 +1761,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   )}
                   
                   {/* Mitlesen Panel - einklappbar */}
-                  {showMitlesen && parsedSegments.length > 0 && (
-                    <div 
-                      ref={mitlesenRef}
-                      className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 border border-yellow-200 dark:border-yellow-800"
-                    >
-                      <div 
-                        className="text-sm font-medium flex items-center justify-between cursor-pointer select-none"
-                        onClick={() => setRawTranscriptCollapsed(!rawTranscriptCollapsed)}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className={`transform transition-transform ${rawTranscriptCollapsed ? '' : 'rotate-90'}`}>▶</span>
-                          📖 Originaltranskript (Mitlesen)
-                          <span className="text-xs text-gray-500">
-                            - Klicke auf ein Wort zum Springen
-                          </span>
-                        </div>
-                        <span className="text-xs text-gray-400">
-                          {rawTranscriptCollapsed ? '(eingeklappt)' : '(einklappen)'}
-                        </span>
-                      </div>
-                      {!rawTranscriptCollapsed && (
-                        <div className="text-sm leading-relaxed mt-2 max-h-48 overflow-auto">
-                          {parsedSegments.map((segment, segIdx) => (
-                          <span key={segIdx}>
-                            {segment.words ? (
-                              segment.words.map((word, wordIdx) => {
-                                const isCurrentWord = audioCurrentTime >= word.start && audioCurrentTime < word.end;
-                                return (
-                                  <span
-                                    key={`${segIdx}-${wordIdx}`}
-                                    className={`cursor-pointer hover:bg-yellow-200 dark:hover:bg-yellow-700 rounded px-0.5 transition-colors ${
-                                      isCurrentWord ? 'bg-yellow-300 dark:bg-yellow-600 font-medium' : ''
-                                    }`}
-                                    onClick={() => seekToWord(word.start)}
-                                  >
-                                    {word.word}{' '}
-                                  </span>
-                                );
-                              })
-                            ) : (
-                              <span
-                                className={`cursor-pointer hover:bg-yellow-200 dark:hover:bg-yellow-700 rounded px-0.5 transition-colors ${
-                                  audioCurrentTime >= segment.start && audioCurrentTime < segment.end ? 'bg-yellow-300 dark:bg-yellow-600 font-medium' : ''
-                                }`}
-                                onClick={() => seekToWord(segment.start)}
-                              >
-                                {segment.text}{' '}
-                              </span>
-                            )}
-                          </span>
-                        ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {showMitlesen && parsedSegments.length > 0 && !anchorRawTranscript && renderOriginalTranscriptPanel('compact')}
                   
                   {/* View Toggle - nur Diff-Button als Toggle */}
                   <div className="flex items-center gap-2">
@@ -2121,6 +2173,13 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                                 >
                                   {autoScrollMitlesen ? '📍 Auto-Scroll aus' : '📍 Auto-Scroll an'}
                                 </button>
+                                <button
+                                  className={`btn btn-sm ${anchorRawTranscript ? 'btn-secondary' : 'btn-outline'}`}
+                                  onClick={() => setAnchorRawTranscript(!anchorRawTranscript)}
+                                  title="Verankert das Originaltranskript direkt unter der Audioleiste"
+                                >
+                                  {anchorRawTranscript ? '📌 Verankerung aus' : '📌 Verankern'}
+                                </button>
                                 <span className="text-xs text-gray-500">
                                   Original + korrigierter Text synchron
                                 </span>
@@ -2132,6 +2191,11 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             📖 Mitlesen nicht verfügbar (Diktat wurde vor dem Update erstellt)
                           </span>
                         )}
+                      </div>
+                    )}
+                    {audioUrl && showMitlesen && anchorRawTranscript && parsedSegments.length > 0 && (
+                      <div className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-700">
+                        {renderOriginalTranscriptPanel('default')}
                       </div>
                     )}
                   </div>
@@ -2208,79 +2272,9 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                 )}
 
                 {/* Mitlesen Panel - Word-level highlighting of original transcription */}
-                {isFullscreen && showMitlesen && parsedSegments.length > 0 && (
+                {isFullscreen && showMitlesen && parsedSegments.length > 0 && !anchorRawTranscript && (
                   <div className="space-y-3">
-                    {/* Original Transcription with word-level timestamps */}
-                    <div 
-                      ref={mitlesenRef}
-                      className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 max-h-40 overflow-y-auto"
-                    >
-                      <div className="text-xs text-blue-600 dark:text-blue-400 mb-2 font-medium">
-                        📖 Original Whisper-Transkription
-                      </div>
-                      <div className="text-sm leading-relaxed">
-                        {parsedSegments.map((segment, segIdx) => (
-                          <span key={segIdx}>
-                            {segment.words ? (
-                              // Word-level highlighting
-                              segment.words.map((word, wordIdx) => {
-                                // Skip words without valid timestamps
-                                if (word.start === undefined || word.end === undefined) {
-                                  return <span key={`${segIdx}-${wordIdx}`}>{word.word}{' '}</span>;
-                                }
-                                const isCurrentWord = audioCurrentTime >= word.start && audioCurrentTime < word.end;
-                                return (
-                                  <span
-                                    key={`${segIdx}-${wordIdx}`}
-                                    className={`transition-colors duration-100 ${
-                                      isCurrentWord 
-                                        ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold rounded px-0.5' 
-                                        : audioCurrentTime > word.end 
-                                          ? 'text-gray-500 dark:text-gray-500' 
-                                          : ''
-                                    }`}
-                                    onClick={() => {
-                                      if (audioRef.current) {
-                                        audioRef.current.currentTime = word.start;
-                                      }
-                                    }}
-                                    style={{ cursor: 'pointer' }}
-                                    title={`${word.start.toFixed(1)}s - ${word.end.toFixed(1)}s`}
-                                  >
-                                    {word.word}{' '}
-                                  </span>
-                                );
-                              })
-                            ) : (
-                              // Segment-level highlighting (fallback if no words)
-                              segment.start !== undefined && segment.end !== undefined ? (
-                                <span
-                                  className={`transition-colors duration-100 ${
-                                    audioCurrentTime >= segment.start && audioCurrentTime < segment.end
-                                      ? 'bg-yellow-300 dark:bg-yellow-600 font-semibold rounded px-0.5'
-                                      : audioCurrentTime > segment.end
-                                        ? 'text-gray-500 dark:text-gray-500'
-                                        : ''
-                                  }`}
-                                  onClick={() => {
-                                    if (audioRef.current) {
-                                      audioRef.current.currentTime = segment.start;
-                                    }
-                                  }}
-                                  style={{ cursor: 'pointer' }}
-                                >
-                                  {segment.text}{' '}
-                                </span>
-                              ) : (
-                                <span>{segment.text}{' '}</span>
-                              )
-                            )}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    
-                    {/* Corrected Text with smart timestamp mapping - now integrated in EditableTextWithMitlesen below */}
+                    {renderOriginalTranscriptPanel('default')}
                   </div>
                 )}
 

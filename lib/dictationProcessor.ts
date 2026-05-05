@@ -690,6 +690,31 @@ async function transcribeAudio(
       result1.provider = `whisperx (${primaryWhisperModel})`;
       result2.provider = `whisperx (${dpWhisperModel})`;
     }
+
+    const standardDictionaryEntries = await getStandardDictEntries(request);
+    const preprocessedResult1 = preprocessTranscriptionDetailed(
+      result1.text,
+      dictionaryEntries,
+      standardDictionaryEntries,
+      { targetUsername: username }
+    );
+    const preprocessedResult2 = preprocessTranscriptionDetailed(
+      result2.text,
+      dictionaryEntries,
+      standardDictionaryEntries,
+      { targetUsername: username }
+    );
+
+    if (preprocessedResult1.text !== result1.text || preprocessedResult2.text !== result2.text) {
+      console.log(
+        `[Worker DoublePrecision] Preprocessed merge inputs: ` +
+        `${result1.provider} ${result1.text.length}→${preprocessedResult1.text.length} chars, ` +
+        `${result2.provider} ${result2.text.length}→${preprocessedResult2.text.length} chars`
+      );
+    }
+
+    result1 = { ...result1, text: preprocessedResult1.text };
+    result2 = { ...result2, text: preprocessedResult2.text };
     
     console.log(`[Worker DoublePrecision] Got transcriptions: ${result1.provider}=${result1.text.length} chars, ${result2.provider}=${result2.text.length} chars`);
     

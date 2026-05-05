@@ -630,12 +630,33 @@ export async function POST(req: NextRequest) {
           patientDob,
           doctorName,
         };
+
+        const preprocessedResult1 = preprocessTranscriptionDetailed(
+          parsed.text1,
+          dictionaryEntries,
+          standardEntries,
+          { targetUsername: dictation.username }
+        );
+        const preprocessedResult2 = preprocessTranscriptionDetailed(
+          parsed.text2,
+          dictionaryEntries,
+          standardEntries,
+          { targetUsername: dictation.username }
+        );
+
+        if (preprocessedResult1.text !== parsed.text1 || preprocessedResult2.text !== parsed.text2) {
+          console.log(
+            `[ReCorrect] Preprocessed Double Precision inputs: ` +
+            `${parsed.provider1} ${parsed.text1.length}→${preprocessedResult1.text.length} chars, ` +
+            `${parsed.provider2} ${parsed.text2.length}→${preprocessedResult2.text.length} chars`
+          );
+        }
         
         textForCorrection = await doublePrecisionMerge(
           req,
           dictationId,
-          { text: parsed.text1, provider: parsed.provider1 },
-          { text: parsed.text2, provider: parsed.provider2 },
+          { text: preprocessedResult1.text, provider: parsed.provider1 },
+          { text: preprocessedResult2.text, provider: parsed.provider2 },
           mergeContext
         );
         

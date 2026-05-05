@@ -18,6 +18,7 @@ import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath, getEffectiveOf
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
+import { applyLLMPhoneticGuard } from '@/lib/phoneticMatch';
 import { compressAudioForSpeech, normalizeAudioForWhisper } from '@/lib/audioCompression';
 import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
@@ -1587,10 +1588,19 @@ KRITISCH - AUSGABEFORMAT:
   
   // Remove any Markdown formatting that the LLM may have added despite instructions
   cleaned = removeMarkdownFormatting(cleaned);
+
+  const phoneticGuardResult = applyLLMPhoneticGuard(text, cleaned);
+  if (phoneticGuardResult.rejectedWordReplacements > 0) {
+    console.log(
+      `[Worker] LLM phonetic guard rejected ${phoneticGuardResult.rejectedWordReplacements} ` +
+      `word replacements in ${phoneticGuardResult.revertedChunks} chunks ` +
+      `(checked: ${phoneticGuardResult.checkedWordReplacements})`
+    );
+  }
   
   // Note: Dictionary corrections are already applied in preprocessTranscription()
   // No need for cleanupText here anymore
-  return cleaned;
+  return phoneticGuardResult.text;
 }
 
 // LLM helper

@@ -16,6 +16,7 @@ import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
+import { applyLLMPhoneticGuard } from '@/lib/phoneticMatch';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
 import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 
@@ -525,8 +526,17 @@ REGELN:
   
   // Remove any Markdown formatting that the LLM may have added despite instructions
   correctedText = removeMarkdownFormatting(correctedText);
+
+  const phoneticGuardResult = applyLLMPhoneticGuard(text, correctedText);
+  if (phoneticGuardResult.rejectedWordReplacements > 0) {
+    console.log(
+      `[ReCorrect] LLM phonetic guard rejected ${phoneticGuardResult.rejectedWordReplacements} ` +
+      `word replacements in ${phoneticGuardResult.revertedChunks} chunks ` +
+      `(checked: ${phoneticGuardResult.checkedWordReplacements})`
+    );
+  }
   
-  return correctedText;
+  return phoneticGuardResult.text;
 }
 
 /**

@@ -7,6 +7,8 @@
  * erkannt, auch wenn das STT-Modell die Schreibweise variiert.
  */
 
+import { diffWordsWithSpace } from 'diff';
+
 /**
  * Kölner Phonetik — Phonetischer Code für deutsche Wörter.
  * Basiert auf Hans Joachim Postel (1969), optimiert für medizinisches Deutsch.
@@ -161,6 +163,164 @@ function normalizeForComparison(word: string): string {
   return word.toLowerCase()
     .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
     .replace(/[^a-z]/g, '');
+}
+
+function normalizedSimilarity(a: string, b: string): number {
+  const maxLen = Math.max(a.length, b.length, 1);
+  return 1 - (levenshtein(a, b) / maxLen);
+}
+
+function tokenizeWordsAndSeparators(text: string): string[] {
+  return text.match(/[A-Za-zÄÖÜäöüß]+|[^A-Za-zÄÖÜäöüß]+/g) ?? [];
+}
+
+function isWordToken(token: string): boolean {
+  return /^[A-Za-zÄÖÜäöüß]+$/.test(token);
+}
+
+function shouldKeepLLMReplacement(originalWord: string, replacementWord: string): boolean {
+  const originalNorm = normalizeForComparison(originalWord);
+  const replacementNorm = normalizeForComparison(replacementWord);
+
+  if (!originalNorm || !replacementNorm || originalNorm === replacementNorm) {
+    return true;
+  }
+
+  const lexicalSimilarity = normalizedSimilarity(originalNorm, replacementNorm);
+  if (lexicalSimilarity >= 0.88) {
+    return true;
+  }
+
+  const originalPhonetic = colognePhonetic(originalWord);
+  const replacementPhonetic = colognePhonetic(replacementWord);
+  if (!originalPhonetic || !replacementPhonetic) {
+    return false;
+  }
+
+  const phoneticSimilarity = normalizedSimilarity(originalPhonetic, replacementPhonetic);
+  const minWordLength = Math.min(originalNorm.length, replacementNorm.length);
+
+  if (minWordLength < 4) {
+    return phoneticSimilarity >= 0.8 && lexicalSimilarity >= 0.5;
+  }
+
+  return phoneticSimilarity >= 0.67 && lexicalSimilarity >= 0.34;
+}
+
+export interface LLMPhoneticGuardResult {
+  text: string;
+  checkedWordReplacements: number;
+  rejectedWordReplacements: number;
+  revertedChunks: number;
+}
+
+/**
+ * Verhindert, dass das LLM einzelne Wörter oder ganze Wortgruppen durch
+ * phonetisch unplausible Alternativen ersetzt.
+ */
+export function applyLLMPhoneticGuard(originalText: string, correctedText: string): LLMPhoneticGuardResult {
+  if (!originalText || !correctedText || originalText === correctedText) {
+    return {
+      text: correctedText,
+      checkedWordReplacements: 0,
+      rejectedWordReplacements: 0,
+      revertedChunks: 0,
+    };
+  }
+
+  const diffs = diffWordsWithSpace(originalText, correctedText);
+  const guardedParts: string[] = [];
+  let checkedWordReplacements = 0;
+  let rejectedWordReplacements = 0;
+  let revertedChunks = 0;
+
+  for (let index = 0; index < diffs.length; ) {
+    const part = diffs[index];
+
+    if (!part.added && !part.removed) {
+      guardedParts.push(part.value);
+      index++;
+      continue;
+    }
+
+    let removedText = '';
+    while (index < diffs.length && diffs[index].removed) {
+      removedText += diffs[index].value;
+      index++;
+    }
+
+    let addedText = '';
+    while (index < diffs.length && diffs[index].added) {
+      addedText += diffs[index].value;
+      index++;
+    }
+
+    if (!removedText) {
+      guardedParts.push(addedText);
+      continue;
+    }
+
+    if (!addedText) {
+      guardedParts.push(removedText);
+      revertedChunks++;
+      continue;
+    }
+
+    const removedTokens = tokenizeWordsAndSeparators(removedText);
+    const addedTokens = tokenizeWordsAndSeparators(addedText);
+    const removedWords = removedTokens.filter(isWordToken);
+    const addedWords = addedTokens.filter(isWordToken);
+
+    if (removedWords.length === 0 || addedWords.length === 0) {
+      guardedParts.push(addedText);
+      continue;
+    }
+
+    if (removedWords.length !== addedWords.length) {
+      guardedParts.push(removedText);
+      rejectedWordReplacements += Math.max(removedWords.length, addedWords.length);
+      revertedChunks++;
+      continue;
+    }
+
+    let wordIndex = 0;
+    let chunkRejected = false;
+    const guardedChunk = addedTokens.map((token) => {
+      if (!isWordToken(token)) {
+        return token;
+      }
+
+      const originalWord = removedWords[wordIndex];
+      const replacementWord = addedWords[wordIndex];
+      wordIndex++;
+
+      if (normalizeForComparison(originalWord) === normalizeForComparison(replacementWord)) {
+        return token;
+      }
+
+      checkedWordReplacements++;
+      if (shouldKeepLLMReplacement(originalWord, replacementWord)) {
+        return token;
+      }
+
+      rejectedWordReplacements++;
+      chunkRejected = true;
+      return originalWord;
+    }).join('');
+
+    if (chunkRejected) {
+      revertedChunks++;
+    }
+
+    guardedParts.push(guardedChunk);
+  }
+
+  return {
+    text: guardedParts.join(''),
+    checkedWordReplacements,
+    rejectedWordReplacements,
+    revertedChunks,
+  };
 }
 
 // Deutsche Beuge-/Pluralendungen, längste zuerst (wichtig für korrektes Strippen).

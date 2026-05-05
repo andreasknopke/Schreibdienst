@@ -6,54 +6,49 @@ export const runtime = 'nodejs';
 
 type LLMProvider = 'openai' | 'lmstudio' | 'mistral';
 
+function hasUsableApiKey(value: string | undefined): value is string {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized !== '' && normalized !== 'not set' && normalized !== '(not set)' && normalized !== 'undefined' && normalized !== 'null';
+}
+
 async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; baseUrl: string; apiKey: string; model: string }> {
   const runtimeConfig = await getRuntimeConfigWithRequest(req);
 
-  if (process.env.OPENAI_API_KEY) {
-    const model = process.env.TEMPLATE_OPENAI_MODEL || runtimeConfig.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o';
-    console.log(`[Template] Using OpenAI for template adaptation, model: ${model}`);
-    return {
-      provider: 'openai',
-      baseUrl: 'https://api.openai.com',
-      apiKey: process.env.OPENAI_API_KEY,
-      model,
-    };
-  }
-
-  if (runtimeConfig.llmProvider === 'mistral' && process.env.MISTRAL_API_KEY) {
-    const model = runtimeConfig.mistralModel || process.env.MISTRAL_MODEL || 'mistral-large-latest';
-    console.log(`[Template] OpenAI unavailable, falling back to Mistral, model: ${model}`);
-    return {
-      provider: 'mistral',
-      baseUrl: 'https://api.mistral.ai',
-      apiKey: process.env.MISTRAL_API_KEY,
-      model,
-    };
-  }
-
-  if (process.env.LLM_STUDIO_URL) {
+  if (runtimeConfig.llmProvider === 'lmstudio') {
     const model = runtimeConfig.lmStudioModelOverride || process.env.LLM_STUDIO_MODEL || 'meta-llama-3.1-8b-instruct';
-    console.log(`[Template] OpenAI unavailable, falling back to LM Studio, model: ${model}`);
+    console.log(`[Template] Using LM Studio for template adaptation, model: ${model}`);
     return {
       provider: 'lmstudio',
-      baseUrl: process.env.LLM_STUDIO_URL,
+      baseUrl: process.env.LLM_STUDIO_URL || 'http://localhost:1234',
       apiKey: 'lm-studio',
       model,
     };
   }
 
-  if (process.env.MISTRAL_API_KEY) {
+  if (runtimeConfig.llmProvider === 'mistral') {
     const model = runtimeConfig.mistralModel || process.env.MISTRAL_MODEL || 'mistral-large-latest';
-    console.log(`[Template] OpenAI unavailable, falling back to available Mistral model: ${model}`);
+    console.log(`[Template] Using Mistral for template adaptation, model: ${model}`);
     return {
       provider: 'mistral',
       baseUrl: 'https://api.mistral.ai',
-      apiKey: process.env.MISTRAL_API_KEY,
+      apiKey: process.env.MISTRAL_API_KEY || '',
       model,
     };
   }
 
-  throw new Error('Kein LLM fuer die Template-Anpassung konfiguriert. OPENAI_API_KEY, LLM_STUDIO_URL oder MISTRAL_API_KEY wird benoetigt.');
+  const model = process.env.TEMPLATE_OPENAI_MODEL || runtimeConfig.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o';
+  console.log(`[Template] Using OpenAI for template adaptation, model: ${model}`);
+
+  return {
+    provider: 'openai',
+    baseUrl: 'https://api.openai.com',
+    apiKey: process.env.OPENAI_API_KEY || '',
+    model,
+  };
 }
 
 interface LLMMessage {
@@ -81,22 +76,38 @@ async function callLLM(
   const { temperature = 0.3, maxTokens = 2000 } = options;
   
   try {
-    const endpoint = config.provider === 'openai'
-      ? 'https://api.openai.com/v1/chat/completions'
-      : `${config.baseUrl.replace(/\/+$/, '')}/v1/chat/completions`;
+    if (config.provider === 'openai' && !hasUsableApiKey(config.apiKey)) {
+      throw new Error('OPENAI_API_KEY not configured');
+    }
+
+    if (config.provider === 'mistral' && !hasUsableApiKey(config.apiKey)) {
+      throw new Error('MISTRAL_API_KEY not configured');
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (config.provider === 'openai' || config.provider === 'mistral') {
+      headers.Authorization = `Bearer ${config.apiKey}`;
+    }
+
+    const body: Record<string, unknown> = {
+      model: config.model,
+      messages,
+      temperature,
+    };
+
+    if (config.provider === 'lmstudio') {
+      body.max_tokens = maxTokens;
+    }
+
+    const endpoint = `${config.baseUrl.replace(/\/+$/, '')}/v1/chat/completions`;
     
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages,
-        temperature,
-        max_tokens: maxTokens,
-      }),
+      headers,
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {

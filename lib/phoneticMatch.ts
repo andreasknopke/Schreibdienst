@@ -183,6 +183,25 @@ function hasLLMUncertaintySuffix(tokens: string[], tokenIndex: number): boolean 
   return typeof nextToken === 'string' && nextToken.trimStart().startsWith('[???]');
 }
 
+function markWordAsUncertain(word: string): string {
+  return `${word} [???]`;
+}
+
+function markTextAsUncertain(text: string): string {
+  const tokens = tokenizeWordsAndSeparators(text);
+  return tokens.map((token, tokenIndex) => {
+    if (!isWordToken(token)) {
+      return token;
+    }
+
+    if (hasLLMUncertaintySuffix(tokens, tokenIndex)) {
+      return token;
+    }
+
+    return markWordAsUncertain(token);
+  }).join('');
+}
+
 function shouldKeepLLMReplacement(originalWord: string, replacementWord: string): boolean {
   const originalNorm = normalizeForComparison(originalWord);
   const replacementNorm = normalizeForComparison(replacementWord);
@@ -266,7 +285,7 @@ export function applyLLMPhoneticGuard(originalText: string, correctedText: strin
     }
 
     if (!addedText) {
-      guardedParts.push(removedText);
+      guardedParts.push(markTextAsUncertain(removedText));
       revertedChunks++;
       continue;
     }
@@ -282,7 +301,7 @@ export function applyLLMPhoneticGuard(originalText: string, correctedText: strin
     }
 
     if (removedWords.length !== addedWords.length) {
-      guardedParts.push(removedText);
+      guardedParts.push(markTextAsUncertain(removedText));
       rejectedWordReplacements += Math.max(removedWords.length, addedWords.length);
       revertedChunks++;
       continue;
@@ -314,7 +333,7 @@ export function applyLLMPhoneticGuard(originalText: string, correctedText: strin
 
       rejectedWordReplacements++;
       chunkRejected = true;
-      return originalWord;
+      return markWordAsUncertain(originalWord);
     }).join('');
 
     if (chunkRejected) {

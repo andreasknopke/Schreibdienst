@@ -73,8 +73,30 @@ export function mergeTranscriptionsWithMarkers(
         const versionB = addedPart.value.trim();
         
         if (versionA && versionB) {
-          mergedParts.push(`<<<A: ${versionA} | B: ${versionB}>>>`);
-          unresolvedDifferences++;
+          // Wenn eine Seite deutlich mehr Inhalt hat als die andere,
+          // ist davon auszugehen, dass der zusätzliche Inhalt nicht verloren
+          // gehen darf (z. B. eine Passage, die nur ein Modell verstanden hat).
+          // In diesem Fall übernehmen wir automatisch die längere Variante,
+          // statt dem LLM eine kurze Auswahl-Entscheidung zu geben.
+          const wordsA = versionA.split(/\s+/).filter(Boolean);
+          const wordsB = versionB.split(/\s+/).filter(Boolean);
+          const lenA = wordsA.length;
+          const lenB = wordsB.length;
+          const diffWords = Math.abs(lenA - lenB);
+          const longer = Math.max(lenA, lenB);
+          const shorter = Math.max(Math.min(lenA, lenB), 1);
+          const ratio = longer / shorter;
+          const SIGNIFICANT_RATIO = 2;
+          const SIGNIFICANT_WORD_DELTA = 5;
+
+          if (diffWords >= SIGNIFICANT_WORD_DELTA && ratio >= SIGNIFICANT_RATIO) {
+            // Inhaltliche Asymmetrie -> längere Version vollständig übernehmen
+            mergedParts.push(lenB > lenA ? addedPart.value : current.value);
+            autoResolvedDifferences++;
+          } else {
+            mergedParts.push(`<<<A: ${versionA} | B: ${versionB}>>>`);
+            unresolvedDifferences++;
+          }
         } else if (versionA) {
           mergedParts.push(current.value);
           autoResolvedDifferences++;
@@ -169,6 +191,11 @@ DEINE AUFGABE - NUR DIESE KORREKTUREN:
 • Ändere NIEMALS den Satzbau oder die Satzstruktur
 • Ersetze NIEMALS medizinische Fachbegriffe durch Synonyme
 • Wenn ein Wort in beiden Versionen unklar/unverständlich ist, markiere es mit [?]
+
+INHALTSERHALT (KRITISCH - kein gesprochener Inhalt darf verloren gehen):
+• Text AUSSERHALB von <<<A: ... | B: ...>>> MUSS exakt und vollständig übernommen werden – auch dann, wenn er nur in einer der beiden Transkriptionen vorkam.
+• Wenn innerhalb eines <<<A: ... | B: ...>>>-Markers eine Seite deutlich mehr medizinisch sinnvollen Inhalt enthält als die andere (z. B. ein ganzer Satz vs. ein einzelnes Wort), übernimm die längere Version VOLLSTÄNDIG. Es ist davon auszugehen, dass das andere Modell diese Passage einfach nicht verstanden hat.
+• Lasse niemals ganze Sätze, Diagnosen, Befunde oder Anweisungen weg, die in einer der beiden Versionen klar enthalten sind.
 
 TRANSKRIPTION A (${merged.provider1}):
 ${merged.text1}

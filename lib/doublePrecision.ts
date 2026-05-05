@@ -21,6 +21,7 @@ export interface MergedResult {
   provider1: string;
   provider2: string;
   hasDifferences: boolean;
+  autoResolvedDifferences: number;
 }
 
 /**
@@ -43,6 +44,7 @@ export function mergeTranscriptionsWithMarkers(
       provider1: result1.provider,
       provider2: result2.provider,
       hasDifferences: false,
+      autoResolvedDifferences: 0,
     };
   }
   
@@ -51,6 +53,8 @@ export function mergeTranscriptionsWithMarkers(
   
   let mergedParts: string[] = [];
   let i = 0;
+  let unresolvedDifferences = 0;
+  let autoResolvedDifferences = 0;
   
   while (i < diffs.length) {
     const current = diffs[i];
@@ -70,17 +74,21 @@ export function mergeTranscriptionsWithMarkers(
         
         if (versionA && versionB) {
           mergedParts.push(`<<<A: ${versionA} | B: ${versionB}>>>`);
+          unresolvedDifferences++;
         } else if (versionA) {
-          mergedParts.push(`<<<A: ${versionA} | B: [FEHLT]>>>`);
+          mergedParts.push(current.value);
+          autoResolvedDifferences++;
         } else if (versionB) {
-          mergedParts.push(`<<<A: [FEHLT] | B: ${versionB}>>>`);
+          mergedParts.push(addedPart.value);
+          autoResolvedDifferences++;
         }
         i += 2;
       } else {
         // Nur gelöscht in Version 2
         const versionA = current.value.trim();
         if (versionA) {
-          mergedParts.push(`<<<A: ${versionA} | B: [FEHLT]>>>`);
+          mergedParts.push(current.value);
+          autoResolvedDifferences++;
         }
         i++;
       }
@@ -88,7 +96,8 @@ export function mergeTranscriptionsWithMarkers(
       // Nur hinzugefügt in Version 2 (ohne vorherige Löschung)
       const versionB = current.value.trim();
       if (versionB) {
-        mergedParts.push(`<<<A: [FEHLT] | B: ${versionB}>>>`);
+        mergedParts.push(current.value);
+        autoResolvedDifferences++;
       }
       i++;
     }
@@ -100,7 +109,8 @@ export function mergeTranscriptionsWithMarkers(
     text2,
     provider1: result1.provider,
     provider2: result2.provider,
-    hasDifferences: true,
+    hasDifferences: unresolvedDifferences > 0,
+    autoResolvedDifferences,
   };
 }
 

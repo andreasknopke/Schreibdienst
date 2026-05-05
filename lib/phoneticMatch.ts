@@ -178,6 +178,11 @@ function isWordToken(token: string): boolean {
   return /^[A-Za-zÄÖÜäöüß]+$/.test(token);
 }
 
+function hasLLMUncertaintySuffix(tokens: string[], tokenIndex: number): boolean {
+  const nextToken = tokens[tokenIndex + 1];
+  return typeof nextToken === 'string' && nextToken.trimStart().startsWith('[???]');
+}
+
 function shouldKeepLLMReplacement(originalWord: string, replacementWord: string): boolean {
   const originalNorm = normalizeForComparison(originalWord);
   const replacementNorm = normalizeForComparison(replacementWord);
@@ -285,7 +290,7 @@ export function applyLLMPhoneticGuard(originalText: string, correctedText: strin
 
     let wordIndex = 0;
     let chunkRejected = false;
-    const guardedChunk = addedTokens.map((token) => {
+    const guardedChunk = addedTokens.map((token, tokenIndex) => {
       if (!isWordToken(token)) {
         return token;
       }
@@ -293,6 +298,10 @@ export function applyLLMPhoneticGuard(originalText: string, correctedText: strin
       const originalWord = removedWords[wordIndex];
       const replacementWord = addedWords[wordIndex];
       wordIndex++;
+
+      if (hasLLMUncertaintySuffix(addedTokens, tokenIndex)) {
+        return token;
+      }
 
       if (normalizeForComparison(originalWord) === normalizeForComparison(replacementWord)) {
         return token;

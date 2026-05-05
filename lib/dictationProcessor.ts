@@ -409,21 +409,25 @@ async function doublePrecisionMerge(
   const llmProvider = runtimeConfig.llmProvider;
   
   if (!merged.hasDifferences) {
-    console.log('[Worker DoublePrecision] No differences found, using first transcription');
+    const sourceText = merged.mergedTextWithMarkers;
+    console.log(
+      `[Worker DoublePrecision] No unresolved differences found, using merged transcription ` +
+      `(auto-resolved omissions: ${merged.autoResolvedDifferences})`
+    );
     
-    // Log that Double Precision was performed, but no differences were found
+    // Log that Double Precision was performed without unresolved conflicts
     try {
-      const dpLogText = `[DOUBLE PRECISION - KEINE UNTERSCHIEDE]\n\n` +
+      const dpLogText = `[DOUBLE PRECISION - KEINE UNAUFLÖSBAREN UNTERSCHIEDE]\n\n` +
         `Transkription A (${result1.provider}):\n${result1.text}\n\n` +
         `Transkription B (${result2.provider}):\n${result2.text}\n\n` +
-        `Ergebnis: Beide Transkriptionen sind identisch.`;
+        `Ergebnis: Einseitig fehlende Wörter wurden automatisch aus der vollständigeren Transkription übernommen.`;
       
       await logDoublePrecisionCorrectionWithRequest(
         request,
         dictationId,
         dpLogText,
-        result1.text,
-        'keine Unterschiede',
+        sourceText,
+        'keine unresolved Unterschiede',
         'double-precision',
         0 // No changes = 0%
       );
@@ -432,7 +436,7 @@ async function doublePrecisionMerge(
       console.warn(`[Worker DoublePrecision] Failed to log no-differences: ${logError.message}`);
     }
     
-    return { text: result1.text, segments: result1.segments };
+    return { text: sourceText, segments: result1.segments };
   }
   
   console.log('[Worker DoublePrecision] Differences found, sending to LLM for resolution');

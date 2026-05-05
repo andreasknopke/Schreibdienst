@@ -4,22 +4,56 @@ import { loadDictionaryWithRequest, formatDictionaryForPrompt } from '@/lib/dict
 
 export const runtime = 'nodejs';
 
-// LLM Provider configuration - Template-Modus verwendet IMMER OpenAI für bessere Qualität
-type LLMProvider = 'openai' | 'lmstudio';
+type LLMProvider = 'openai' | 'lmstudio' | 'mistral';
 
 async function getLLMConfig(req: NextRequest): Promise<{ provider: LLMProvider; baseUrl: string; apiKey: string; model: string }> {
-  // Template-Anpassung verwendet IMMER OpenAI, da LM Studio bei komplexen Kontextänderungen
-  // oft Fehler macht (z.B. Text mitten im Satz einfügt)
-  // Modell über TEMPLATE_OPENAI_MODEL konfigurierbar, Standard: gpt-4o
-  const model = process.env.TEMPLATE_OPENAI_MODEL || 'gpt-4o';
-  console.log(`[Template] Forcing OpenAI for template adaptation, model: ${model}`);
-  
-  return {
-    provider: 'openai',
-    baseUrl: 'https://api.openai.com',
-    apiKey: process.env.OPENAI_API_KEY || '',
-    model
-  };
+  const runtimeConfig = await getRuntimeConfigWithRequest(req);
+
+  if (process.env.OPENAI_API_KEY) {
+    const model = process.env.TEMPLATE_OPENAI_MODEL || runtimeConfig.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o';
+    console.log(`[Template] Using OpenAI for template adaptation, model: ${model}`);
+    return {
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com',
+      apiKey: process.env.OPENAI_API_KEY,
+      model,
+    };
+  }
+
+  if (runtimeConfig.llmProvider === 'mistral' && process.env.MISTRAL_API_KEY) {
+    const model = runtimeConfig.mistralModel || process.env.MISTRAL_MODEL || 'mistral-large-latest';
+    console.log(`[Template] OpenAI unavailable, falling back to Mistral, model: ${model}`);
+    return {
+      provider: 'mistral',
+      baseUrl: 'https://api.mistral.ai',
+      apiKey: process.env.MISTRAL_API_KEY,
+      model,
+    };
+  }
+
+  if (process.env.LLM_STUDIO_URL) {
+    const model = runtimeConfig.lmStudioModelOverride || process.env.LLM_STUDIO_MODEL || 'meta-llama-3.1-8b-instruct';
+    console.log(`[Template] OpenAI unavailable, falling back to LM Studio, model: ${model}`);
+    return {
+      provider: 'lmstudio',
+      baseUrl: process.env.LLM_STUDIO_URL,
+      apiKey: 'lm-studio',
+      model,
+    };
+  }
+
+  if (process.env.MISTRAL_API_KEY) {
+    const model = runtimeConfig.mistralModel || process.env.MISTRAL_MODEL || 'mistral-large-latest';
+    console.log(`[Template] OpenAI unavailable, falling back to available Mistral model: ${model}`);
+    return {
+      provider: 'mistral',
+      baseUrl: 'https://api.mistral.ai',
+      apiKey: process.env.MISTRAL_API_KEY,
+      model,
+    };
+  }
+
+  throw new Error('Kein LLM fuer die Template-Anpassung konfiguriert. OPENAI_API_KEY, LLM_STUDIO_URL oder MISTRAL_API_KEY wird benoetigt.');
 }
 
 interface LLMMessage {
@@ -47,9 +81,9 @@ async function callLLM(
   const { temperature = 0.3, maxTokens = 2000 } = options;
   
   try {
-    const endpoint = config.provider === 'lmstudio' 
-      ? `${config.baseUrl}/v1/chat/completions`
-      : 'https://api.openai.com/v1/chat/completions';
+    const endpoint = config.provider === 'openai'
+      ? 'https://api.openai.com/v1/chat/completions'
+      : `${config.baseUrl.replace(/\/+$/, '')}/v1/chat/completions`;
     
     const response = await fetch(endpoint, {
       method: 'POST',

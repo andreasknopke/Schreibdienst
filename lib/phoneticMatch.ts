@@ -184,7 +184,7 @@ function hasLLMUncertaintySuffix(tokens: string[], tokenIndex: number): boolean 
 }
 
 function markWordAsUncertain(word: string): string {
-  return `${word} [???]`;
+  return word;
 }
 
 function markTextAsUncertain(text: string): string {

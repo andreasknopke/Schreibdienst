@@ -1,5 +1,5 @@
 "use client";
-import { ReactNode } from 'react';
+import { ReactNode, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { AuthProvider, useAuth } from '@/components/AuthProvider';
@@ -7,6 +7,7 @@ import ThemeToggle from '@/components/ThemeToggle';
 import VoiceAgentButton from '@/components/VoiceAgentButton';
 import UserMenu from '@/components/UserMenu';
 import LoginForm from '@/components/LoginForm';
+import { startHidMediaControls, stopHidMediaControls } from '@/lib/hidMediaControls';
 
 function LayoutContent({ children }: { children: ReactNode }) {
   const { isLoggedIn, canViewAllDictations } = useAuth();
@@ -92,6 +93,18 @@ function LayoutContent({ children }: { children: ReactNode }) {
 }
 
 export default function ClientLayout({ children }: { children: ReactNode }) {
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_ENABLE_HID_MEDIA_CONTROLS === 'false') {
+      return;
+    }
+
+    startHidMediaControls();
+
+    return () => {
+      stopHidMediaControls();
+    };
+  }, []);
+
   return (
     <AuthProvider>
       <LayoutContent>{children}</LayoutContent>

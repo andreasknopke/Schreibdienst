@@ -1,5 +1,6 @@
 "use client";
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import Spinner from './Spinner';
 
 interface OfflineRecorderProps {
@@ -276,6 +277,27 @@ export default function OfflineRecorder({ username, onSubmit, onCancel, availabl
       setIsPaused(false);
     }
   };
+
+  useEffect(() => {
+    const handleHidMediaControl = (event: Event) => {
+      const detail = (event as CustomEvent<HidMediaControlEventDetail>).detail;
+      if (!detail || detail.phase !== 'keydown' || detail.action !== 'record') {
+        return;
+      }
+
+      if (isRecording) {
+        stopRecording();
+        return;
+      }
+
+      if (!audioUrl) {
+        void startRecording();
+      }
+    };
+
+    window.addEventListener(HID_MEDIA_CONTROL_EVENT, handleHidMediaControl as EventListener);
+    return () => window.removeEventListener(HID_MEDIA_CONTROL_EVENT, handleHidMediaControl as EventListener);
+  }, [isRecording, audioUrl]);
 
   // Pause/Resume recording
   const togglePause = () => {

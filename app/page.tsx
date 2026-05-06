@@ -13,6 +13,7 @@ import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
+import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
@@ -1473,6 +1474,24 @@ export default function HomePage() {
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [startRecording, stopRecording, handleReset]);
+
+  useEffect(() => {
+    const handleHidMediaControl = (event: Event) => {
+      const detail = (event as CustomEvent<HidMediaControlEventDetail>).detail;
+      if (!detail || detail.phase !== 'keydown' || detail.action !== 'record') {
+        return;
+      }
+
+      if (recordingRef.current) {
+        void stopRecording();
+      } else {
+        void startRecording();
+      }
+    };
+
+    window.addEventListener(HID_MEDIA_CONTROL_EVENT, handleHidMediaControl as EventListener);
+    return () => window.removeEventListener(HID_MEDIA_CONTROL_EVENT, handleHidMediaControl as EventListener);
+  }, [startRecording, stopRecording]);
 
   // Schnelle LLM-Fachwort-Korrektur
   // Schnelle LLM-Fachwort-Korrektur (mit Halluzinations-Filter auf Server-Seite)

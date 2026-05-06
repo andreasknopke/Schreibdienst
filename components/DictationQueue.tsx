@@ -11,6 +11,11 @@ import DiffHighlight, { DiffStats } from './DiffHighlight';
 import CorrectionLogViewer from './CorrectionLogViewer';
 import ArchiveView from './ArchiveView';
 import EditableTextWithMitlesen from './EditableTextWithMitlesen';
+import {
+  HID_MEDIA_CONTROL_EVENT,
+  type HidMediaControlAction,
+  type HidMediaControlEventDetail,
+} from '@/lib/hidMediaControls';
 
 interface Dictation {
   id: number;
@@ -368,6 +373,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [audioDuration, setAudioDuration] = useState(0);
   const [audioLoading, setAudioLoading] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const pendingHidActionRef = useRef<HidMediaControlAction | null>(null);
   
   // "Mitlesen" mode - show original transcript with word highlighting
   const [showMitlesen, setShowMitlesen] = useState(false);
@@ -621,6 +627,79 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       audioRef.current.playbackRate = speed;
     }
   };
+
+  const executeOfflineMediaControl = useCallback((action: HidMediaControlAction) => {
+    switch (action) {
+      case 'play':
+        togglePlayPause();
+        break;
+      case 'pause':
+        if (audioRef.current) {
+          audioRef.current.pause();
+        }
+        setIsPlaying(false);
+        break;
+      case 'fast-forward':
+        seekRelative(5);
+        break;
+      case 'rewind':
+        seekRelative(-5);
+        break;
+      case 'stop':
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+        }
+        setAudioCurrentTime(0);
+        setIsPlaying(false);
+        break;
+      case 'record':
+        break;
+    }
+  }, [seekRelative, togglePlayPause]);
+
+  useEffect(() => {
+    if (!audioUrl || audioLoading) {
+      return;
+    }
+
+    const pendingAction = pendingHidActionRef.current;
+    if (!pendingAction) {
+      return;
+    }
+
+    pendingHidActionRef.current = null;
+    executeOfflineMediaControl(pendingAction);
+  }, [audioUrl, audioLoading, executeOfflineMediaControl]);
+
+  useEffect(() => {
+    const handleHidMediaControl = (event: Event) => {
+      const detail = (event as CustomEvent<HidMediaControlEventDetail>).detail;
+      if (!detail || detail.phase !== 'keydown' || currentView !== 'queue') {
+        return;
+      }
+
+      if (!['play', 'pause', 'fast-forward', 'rewind', 'stop'].includes(detail.action)) {
+        return;
+      }
+
+      const selected = selectedDictationDetails || dictations.find((dictation) => dictation.id === selectedId);
+      if (!selected || selected.status !== 'completed') {
+        return;
+      }
+
+      if (!audioUrl) {
+        pendingHidActionRef.current = detail.action;
+        void loadAudio(selected.id);
+        return;
+      }
+
+      executeOfflineMediaControl(detail.action);
+    };
+
+    window.addEventListener(HID_MEDIA_CONTROL_EVENT, handleHidMediaControl as EventListener);
+    return () => window.removeEventListener(HID_MEDIA_CONTROL_EVENT, handleHidMediaControl as EventListener);
+  }, [currentView, selectedDictationDetails, dictations, selectedId, audioUrl, loadAudio, executeOfflineMediaControl]);
   
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);

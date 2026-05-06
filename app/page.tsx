@@ -3734,11 +3734,8 @@ export default function HomePage() {
                     {vad.isSpeaking ? '🎙️ Sprache erkannt...' : '⏳ Transkribiere...'}
                   </div>
                 )}
-                <div className="flex gap-2 mt-2">
-                  <button className="btn btn-primary flex-1 text-sm py-2" onClick={handleFormat} disabled={busy || !transcript}>
-                    {busy && <Spinner className="mr-2" size={14} />} Formatieren
-                  </button>
-                  <button className="btn btn-outline text-sm py-2" onClick={handleExportDocx} disabled={!transcript}>.docx</button>
+                <div className="mt-2">
+                  <button className="btn btn-outline text-sm py-2 w-full" onClick={handleExportDocx} disabled={!transcript}>.docx</button>
                 </div>
               </div>
               {/* Action Buttons für Arztbrief */}

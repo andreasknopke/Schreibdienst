@@ -1,0 +1,76 @@
+{
+  "ticket_id": "cf5982ec-27a2-469b-9560-e3a45670a567",
+  "title": "HID-Consumer-Controls im Schreibdienst",
+  "type": "feature",
+  "urgency": "normal",
+  "system": {
+    "id": 2,
+    "name": "Schreibdienst",
+    "repo": "andreasknopke/Schreibdienst"
+  },
+  "run": {
+    "id": 115,
+    "started_at": "2026-05-06 10:05:29",
+    "current_stage": "triage",
+    "recommended_executor": null
+  },
+  "steps": [
+    {
+      "id": 749,
+      "stage": "triage",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 5,
+      "staff_name": "Triage-Bot",
+      "provider": "openai_local",
+      "model": "gemma-4",
+      "duration_ms": 5133
+    },
+    {
+      "id": 750,
+      "stage": "security",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 7,
+      "staff_name": "Security-Bot",
+      "provider": "openai_local",
+      "model": "gemma-4",
+      "duration_ms": 9804
+    },
+    {
+      "id": 751,
+      "stage": "planning",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 6,
+      "staff_name": "Architect-Bot",
+      "provider": "openrouter",
+      "model": "inclusionai/ling-2.6-1t:free",
+      "duration_ms": 1348
+    },
+    {
+      "id": 752,
+      "stage": "integration",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 8,
+      "staff_name": "Integration-Bot",
+      "provider": "mistral",
+      "model": "mistral-large-latest",
+      "duration_ms": 23862
+    },
+    {
+      "id": 753,
+      "stage": "approval",
+      "status": "waiting_human",
+      "executor_kind": "human",
+      "staff_id": 1,
+      "staff_name": "Christian",
+      "provider": null,
+      "model": null,
+      "duration_ms": null
+    }
+  ],
+  "exported_at": "2026-05-06T10:38:58.099Z",
+  "dispatch_note": null
+}

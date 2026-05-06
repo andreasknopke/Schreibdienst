@@ -15,14 +15,12 @@ import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import { useVadChunking } from '@/lib/useVadChunking';
 
-// Identifier für PowerShell Clipboard-Listener (RadCentre Integration)
-const CLIPBOARD_IDENTIFIER = '##RAD##';
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
 
-// Hilfsfunktion zum Kopieren in Zwischenablage mit Identifier
+// Hilfsfunktion zum Kopieren in die Zwischenablage
 async function copyToClipboard(text: string): Promise<void> {
-  await navigator.clipboard.writeText(CLIPBOARD_IDENTIFIER + text);
+  await navigator.clipboard.writeText(text);
 }
 
 // Intervall für kontinuierliche Transkription (in ms)

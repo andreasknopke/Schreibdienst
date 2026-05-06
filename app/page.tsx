@@ -2747,24 +2747,7 @@ export default function HomePage() {
     await handleFile(files[0]);
   }
 
-  async function handleFormat() {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetchWithDbToken('/api/format', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: transcript, mode }),
-      });
-      if (!res.ok) throw new Error('Formatierung fehlgeschlagen');
-      const data = await res.json();
-      setTranscript(data.text);
-    } catch (err: any) {
-      setError(err.message || 'Fehler bei der Formatierung');
-    } finally {
-      setBusy(false);
-    }
-  }
+
 
   // Befund-spezifische Handler
   async function handleFormatBefund() {

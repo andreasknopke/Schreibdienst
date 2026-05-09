@@ -19,6 +19,7 @@ export interface HidMediaControlStatusDetail {
   supported: boolean;
   connected: boolean;
   deviceName?: string;
+  connectedDeviceCount: number;
 }
 
 export interface HidMediaControlsOptions {
@@ -159,13 +160,7 @@ function normalizeGrundigReportPayload(reportId: number, bytes: number[]): numbe
   return bytes;
 }
 
-function isGrundigRecordReport(reportId: number, bytes: number[]): boolean {
-  if (reportId !== GRUNDIG_SONICMIC_RECORD_REPORT_ID) {
-    return false;
-  }
-
-  const payload = normalizeGrundigReportPayload(reportId, bytes);
-
+function matchesGrundigRecordPayload(payload: number[]): boolean {
   return (
     payload.length >= 8 &&
     payload[0] === 0x01 &&
@@ -177,6 +172,25 @@ function isGrundigRecordReport(reportId: number, bytes: number[]): boolean {
     payload[6] === 0x40 &&
     payload[7] === 0x02
   );
+}
+
+function isGrundigRecordReport(reportId: number, bytes: number[]): boolean {
+  if (reportId !== GRUNDIG_SONICMIC_RECORD_REPORT_ID) {
+    return false;
+  }
+
+  const normalizedPayload = normalizeGrundigReportPayload(reportId, bytes);
+  const payloads = [normalizedPayload, bytes];
+
+  for (const payload of payloads) {
+    for (let offset = 0; offset <= payload.length - 8; offset += 1) {
+      if (matchesGrundigRecordPayload(payload.slice(offset, offset + 8))) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 function dispatchActionEvent(
@@ -314,6 +328,7 @@ export function getHidMediaControlStatus(): HidMediaControlStatusDetail {
     supported: getWebHidApi() !== null,
     connected: connectedWebHidDevices.size > 0,
     deviceName: firstDevice?.productName,
+    connectedDeviceCount: connectedWebHidDevices.size,
   };
 }
 
@@ -328,14 +343,16 @@ export async function connectGrundigSonicMic(options: HidMediaControlsOptions = 
   }
 
   const target = options.target ?? window;
-  const devices = await hid.requestDevice({
+  const selectedDevices = await hid.requestDevice({
     filters: [{ vendorId: GRUNDIG_SONICMIC_VENDOR_ID, productId: GRUNDIG_SONICMIC_PRODUCT_ID }],
   });
+  const grantedDevices = await hid.getDevices();
+  const devices = grantedDevices.filter(isGrundigSonicMic);
 
   await Promise.all(devices.map((device) => connectWebHidDevice(device, target, options.onEvent)));
   dispatchStatusEvent(target);
 
-  return devices.length;
+  return selectedDevices.length;
 }
 
 export function startHidMediaControls(options: HidMediaControlsOptions = {}): void {

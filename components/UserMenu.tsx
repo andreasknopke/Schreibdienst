@@ -28,8 +28,6 @@ export default function UserMenu() {
   const [mounted, setMounted] = useState(false);
   const [hidSupported, setHidSupported] = useState(false);
   const [hidConnected, setHidConnected] = useState(false);
-  const [hidDeviceName, setHidDeviceName] = useState('');
-  const [hidConnectedDeviceCount, setHidConnectedDeviceCount] = useState(0);
   const [hidConnecting, setHidConnecting] = useState(false);
   const [dictionaryInitialWord, setDictionaryInitialWord] = useState('');
 
@@ -42,8 +40,6 @@ export default function UserMenu() {
     const applyStatus = (status: HidMediaControlStatusDetail) => {
       setHidSupported(status.supported);
       setHidConnected(status.connected);
-      setHidDeviceName(status.deviceName || '');
-      setHidConnectedDeviceCount(status.connectedDeviceCount);
     };
 
     applyStatus(getHidMediaControlStatus());
@@ -271,14 +267,14 @@ export default function UserMenu() {
           {username}
           {isAdmin && <span className="ml-1 text-blue-600">(Admin)</span>}
         </span>
-        {mounted && hidSupported && (
+        {mounted && hidSupported && !hidConnected && (
           <button
             onClick={handleConnectSonicMic}
-            className={`text-xs px-1.5 sm:px-2 py-1 rounded ${hidConnected ? 'text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20' : 'text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20'}`}
-            title={hidConnected ? `SonicMic verbunden: ${hidDeviceName || 'Grundig SonicMic II'} (${hidConnectedDeviceCount} HID-Interface${hidConnectedDeviceCount === 1 ? '' : 's'}). Klicken, um ein weiteres gleichnamiges Interface freizugeben.` : 'Grundig SonicMic II verbinden'}
+            className="text-xs text-blue-600 hover:text-blue-700 px-1.5 py-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20"
+            title="Grundig SonicMic II einmalig freigeben"
             disabled={hidConnecting}
           >
-            🎙️<span className="hidden sm:inline"> {hidConnecting ? 'Verbinde...' : 'SonicMic'}</span>
+            {hidConnecting ? '...' : '🎙️'}
           </button>
         )}
         <button

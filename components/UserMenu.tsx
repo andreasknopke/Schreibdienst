@@ -9,6 +9,12 @@ import ConfigPanel from './ConfigPanel';
 import HelpPanel from './HelpPanel';
 import StandardDictionaryManager from './StandardDictionaryManager';
 import BugReportForm from './BugReportForm';
+import {
+  connectGrundigSonicMic,
+  getHidMediaControlStatus,
+  HID_MEDIA_CONTROL_STATUS_EVENT,
+  type HidMediaControlStatusDetail,
+} from '@/lib/hidMediaControls';
 
 export default function UserMenu() {
   const { isLoggedIn, username, isAdmin, logout } = useAuth();
@@ -20,11 +26,46 @@ export default function UserMenu() {
   const [showStandardDict, setShowStandardDict] = useState(false);
   const [showBugReport, setShowBugReport] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [hidSupported, setHidSupported] = useState(false);
+  const [hidConnected, setHidConnected] = useState(false);
+  const [hidDeviceName, setHidDeviceName] = useState('');
+  const [hidConnecting, setHidConnecting] = useState(false);
   const [dictionaryInitialWord, setDictionaryInitialWord] = useState('');
 
   // Nur im Browser rendern
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    const applyStatus = (status: HidMediaControlStatusDetail) => {
+      setHidSupported(status.supported);
+      setHidConnected(status.connected);
+      setHidDeviceName(status.deviceName || '');
+    };
+
+    applyStatus(getHidMediaControlStatus());
+
+    const handleStatus = (event: Event) => {
+      applyStatus((event as CustomEvent<HidMediaControlStatusDetail>).detail);
+    };
+
+    window.addEventListener(HID_MEDIA_CONTROL_STATUS_EVENT, handleStatus as EventListener);
+    return () => window.removeEventListener(HID_MEDIA_CONTROL_STATUS_EVENT, handleStatus as EventListener);
+  }, []);
+
+  const handleConnectSonicMic = useCallback(async () => {
+    setHidConnecting(true);
+    try {
+      const connectedCount = await connectGrundigSonicMic();
+      if (connectedCount === 0) {
+        window.alert('Kein Grundig SonicMic II ausgewählt.');
+      }
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'SonicMic konnte nicht verbunden werden.');
+    } finally {
+      setHidConnecting(false);
+    }
   }, []);
 
   // Öffnet das Wörterbuch und übernimmt selektierten Text
@@ -228,6 +269,16 @@ export default function UserMenu() {
           {username}
           {isAdmin && <span className="ml-1 text-blue-600">(Admin)</span>}
         </span>
+        {mounted && hidSupported && (
+          <button
+            onClick={handleConnectSonicMic}
+            className={`text-xs px-1.5 sm:px-2 py-1 rounded ${hidConnected ? 'text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-900/20' : 'text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20'}`}
+            title={hidConnected ? `SonicMic verbunden: ${hidDeviceName || 'Grundig SonicMic II'}` : 'Grundig SonicMic II verbinden'}
+            disabled={hidConnecting}
+          >
+            🎙️<span className="hidden sm:inline"> {hidConnecting ? 'Verbinde...' : 'SonicMic'}</span>
+          </button>
+        )}
         <button
           onClick={() => setShowBugReport(true)}
           className="text-xs text-red-600 hover:text-red-700 px-1.5 sm:px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"

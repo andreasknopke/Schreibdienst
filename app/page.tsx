@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, useCallback, type SetStateAction } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Tabs } from '@/components/Tabs';
 import { exportDocx } from '@/lib/formatMedical';
 import Spinner from '@/components/Spinner';
@@ -13,15 +13,16 @@ import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
-import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
 
+// Identifier für PowerShell Clipboard-Listener (RadCentre Integration)
+const CLIPBOARD_IDENTIFIER = '##RAD##';
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
 
-// Hilfsfunktion zum Kopieren in die Zwischenablage
+// Hilfsfunktion zum Kopieren in Zwischenablage mit Identifier
 async function copyToClipboard(text: string): Promise<void> {
-  await navigator.clipboard.writeText(text);
+  await navigator.clipboard.writeText(CLIPBOARD_IDENTIFIER + text);
 }
 
 // Intervall für kontinuierliche Transkription (in ms)
@@ -246,6 +247,8 @@ export default function HomePage() {
   const streamRef = useRef<MediaStream | null>(null);
   const allChunksRef = useRef<BlobPart[]>([]);
   const transcriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const manualCorrectionTimersRef = useRef<Partial<Record<TextInsertionTarget, ReturnType<typeof setTimeout>>>>({});
   
   // Fast Whisper WebSocket State
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
@@ -428,7 +431,25 @@ export default function HomePage() {
     return textSelectionsRef.current[field] ?? getDefaultSelection(currentText);
   }, []);
 
-  const setFieldText = useCallback((field: TextInsertionTarget, value: SetStateAction<string>) => {
+  const isSelectionAtEnd = useCallback((field: TextInsertionTarget, currentText: string) => {
+    const selection = getStoredSelection(field, currentText);
+    return selection.start === currentText.length && selection.end === currentText.length;
+  }, [getStoredSelection]);
+
+  const getCurrentFieldText = useCallback((field: TextInsertionTarget) => {
+    switch (field) {
+      case 'methodik':
+        return methodik;
+      case 'beurteilung':
+        return beurteilung;
+      case 'befund':
+      case 'transcript':
+      default:
+        return transcript;
+    }
+  }, [methodik, beurteilung, transcript]);
+
+  const setFieldText = useCallback((field: TextInsertionTarget, value: string) => {
     switch (field) {
       case 'methodik':
         setMethodik(value);
@@ -455,29 +476,33 @@ export default function HomePage() {
     fullText: string,
     incomingDelta: string
   ) => {
-    // WICHTIG: Neu transkribierter Text wird IMMER gegen den aktuellsten Feld-State
-    // berechnet. Der vorherige Stand darf nicht aus einem Render-Closure stammen,
-    // weil mehrere VAD-Commits kurz hintereinander eintreffen koennen.
-    setFieldText(field, (currentText) => {
-      // Neu transkribierter Text wird an der aktuellen Cursor-Position eingefuegt,
-      // nie per Vollersetzung des Feldinhalts.
-      if (incomingDelta && incomingDelta.trim()) {
-        return combineTextForField(field, currentText, incomingDelta);
-      }
+    const currentText = getCurrentFieldText(field);
 
-      // Kein textuelles Delta, aber `fullText` weicht vom aktuellen Feldinhalt ab
-      // (z. B. nach einem Loesch-Steuerbefehl) UND der Vorzustand ist ein striktes
-      // Praefix von `fullText`. Dann kann die Erweiterung sicher angehaengt werden.
-      if (fullText && fullText !== currentText && fullText.startsWith(currentText)) {
-        const extension = fullText.slice(currentText.length);
-        if (extension) {
-          return combineTextForField(field, currentText, extension);
-        }
-      }
+    // WICHTIG: Neu transkribierter Text wird IMMER an der aktuellen Cursor-Position
+    // eingefügt – nie wird der ganze Feldinhalt durch `fullText` ersetzt. Eine
+    // Voll-Ersetzung wäre zwar bei Cursor-am-Ende theoretisch äquivalent, führt aber
+    // zu Race-Conditions (z. B. bei parallelen Voxtral-Online-Requests, deren
+    // Reihenfolge der State-Updates leicht von der internen `committedUtterancesRef`
+    // abweichen kann), wodurch zuvor gesprochene Sätze unbeabsichtigt überschrieben
+    // wurden. Insert-am-Cursor ist deterministisch und respektiert eine vom Benutzer
+    // umpositionierte Eingabemarke.
+    if (incomingDelta && incomingDelta.trim()) {
+      setFieldText(field, combineTextForField(field, currentText, incomingDelta));
+      return;
+    }
 
-      return currentText;
-    });
-  }, [setFieldText, combineTextForField]);
+    // Kein textuelles Delta, aber `fullText` weicht vom aktuellen Feldinhalt ab
+    // (z. B. nach einem Lösch-Steuerbefehl in der Online-Verarbeitung) UND der
+    // Vorzustand ist ein striktes Präfix von `fullText`. In dem Fall können wir
+    // sicher die "Erweiterung" anhängen, ohne bereits geschriebenen Text zu
+    // verlieren.
+    if (fullText && fullText !== currentText && fullText.startsWith(currentText)) {
+      const extension = fullText.slice(currentText.length);
+      if (extension) {
+        setFieldText(field, combineTextForField(field, currentText, extension));
+      }
+    }
+  }, [getCurrentFieldText, setFieldText, combineTextForField]);
 
   const showPersistentCaret = recording || transcribing || busy || correcting;
 
@@ -510,84 +535,6 @@ export default function HomePage() {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [templateMode, setTemplateMode] = useState(false);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
-
-  const getTextForBefundField = useCallback((field: BefundField): string => {
-    switch (field) {
-      case 'methodik':
-        return methodik;
-      case 'beurteilung':
-        return beurteilung;
-      case 'befund':
-      default:
-        return transcript;
-    }
-  }, [methodik, transcript, beurteilung]);
-
-  const applySelectedTemplate = useCallback(async (changesOverride?: string) => {
-    if (!selectedTemplate) {
-      return false;
-    }
-
-    const changesText = (changesOverride ?? getTextForBefundField(selectedTemplate.field)).trim();
-    setError(null);
-    setCorrecting(true);
-
-    try {
-      let nextText = selectedTemplate.content;
-
-      if (changesText) {
-        console.log('[Template] Adapting template:', selectedTemplate.name);
-        console.log('[Template] Changes:', changesText);
-
-        const res = await fetch('/api/templates/adapt', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': getAuthHeader(),
-            ...getDbTokenHeader(),
-          },
-          body: JSON.stringify({
-            template: selectedTemplate.content,
-            changes: changesText,
-            field: selectedTemplate.field,
-            username,
-          }),
-        });
-
-        if (!res.ok) {
-          const errorData = await res.json();
-          throw new Error(errorData.error || 'Template-Anpassung fehlgeschlagen');
-        }
-
-        const data = await res.json();
-        if (!data.adaptedText) {
-          throw new Error('Template-Anpassung lieferte keinen Text zurück');
-        }
-
-        nextText = data.adaptedText;
-      }
-
-      setPreCorrectionState({
-        methodik,
-        befund: transcript,
-        beurteilung,
-        transcript: '',
-      });
-      setFieldText(selectedTemplate.field, nextText);
-      setCanRevert(true);
-      setIsReverted(false);
-      setPendingCorrection(false);
-      return true;
-    } catch (err: any) {
-      console.error('[Template] Apply error:', err);
-      setError(err.message || 'Fehler bei Template-Anpassung');
-      return false;
-    } finally {
-      setCorrecting(false);
-      setSelectedTemplate(null);
-      setTemplateMode(false);
-    }
-  }, [selectedTemplate, getTextForBefundField, getAuthHeader, getDbTokenHeader, username, methodik, transcript, beurteilung, setFieldText]);
 
   // Wörterbuch-Einträge für Echtzeit-Korrektur und Initial Prompt
   interface DictionaryEntry {
@@ -852,7 +799,38 @@ export default function HomePage() {
   }, [activeField, selectedTemplate]);
 
   // Funktion zum Transkribieren eines Blobs
-  const transcribeChunk = useCallback(async (blob: Blob, isLive: boolean = false): Promise<string> => {
+  const logManualCorrection = useCallback((field: TextInsertionTarget) => {
+    if (!username) return;
+    const existingTimer = manualCorrectionTimersRef.current[field];
+    if (existingTimer) clearTimeout(existingTimer);
+
+    manualCorrectionTimersRef.current[field] = setTimeout(() => {
+      fetchWithDbToken('/api/online-usage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username,
+          eventType: 'manual_correction',
+          manualCorrections: 1,
+        }),
+      }).catch((err) => console.warn('[Stats] Manual correction tracking failed:', err));
+      delete manualCorrectionTimersRef.current[field];
+    }, 1500);
+  }, [username]);
+
+  const handleManualTextChange = useCallback((
+    field: TextInsertionTarget,
+    value: string,
+    setter: (nextValue: string) => void,
+    textarea: HTMLTextAreaElement
+  ) => {
+    setter(value);
+    setPendingCorrection(true);
+    syncTextSelection(field, textarea);
+    logManualCorrection(field);
+  }, [logManualCorrection, syncTextSelection]);
+
+  const transcribeChunk = useCallback(async (blob: Blob, isLive: boolean = false, audioDurationSeconds?: number): Promise<string> => {
     try {
       const fd = new FormData();
       fd.append('file', blob, 'audio.webm');
@@ -861,6 +839,10 @@ export default function HomePage() {
       }
       // Online-Diktat: Turbo-Modus (kein Alignment, schnellere Antwort)
       fd.append('speed_mode', 'turbo');
+      fd.append('stats_event', isLive ? 'false' : 'true');
+      if (audioDurationSeconds && audioDurationSeconds > 0) {
+        fd.append('audio_duration_seconds', String(audioDurationSeconds));
+      }
       const res = await fetchWithDbToken('/api/transcribe', { method: 'POST', body: fd });
       if (!res.ok) throw new Error(`Transkription fehlgeschlagen (${res.status})`);
       const data = await res.json();
@@ -1294,6 +1276,9 @@ export default function HomePage() {
       if (audioContextRef.current) {
         audioContextRef.current.close();
       }
+      Object.values(manualCorrectionTimersRef.current).forEach((timer) => {
+        if (timer) clearTimeout(timer);
+      });
     };
   }, []);
 
@@ -1439,6 +1424,11 @@ export default function HomePage() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignoriere Hotkeys wenn in Textfeldern
+      const activeElement = document.activeElement;
+      const isEditing = activeElement?.tagName === 'TEXTAREA' || activeElement?.tagName === 'INPUT';
+      if (isEditing) return;
+
       switch (e.key) {
         case 'F9':
           e.preventDefault();
@@ -1471,27 +1461,9 @@ export default function HomePage() {
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [startRecording, stopRecording, handleReset]);
-
-  useEffect(() => {
-    const handleHidMediaControl = (event: Event) => {
-      const detail = (event as CustomEvent<HidMediaControlEventDetail>).detail;
-      if (!detail || detail.phase !== 'keydown' || detail.action !== 'record') {
-        return;
-      }
-
-      if (recordingRef.current) {
-        void stopRecording();
-      } else {
-        void startRecording();
-      }
-    };
-
-    window.addEventListener(HID_MEDIA_CONTROL_EVENT, handleHidMediaControl as EventListener);
-    return () => window.removeEventListener(HID_MEDIA_CONTROL_EVENT, handleHidMediaControl as EventListener);
-  }, [startRecording, stopRecording]);
 
   // Schnelle LLM-Fachwort-Korrektur
   // Schnelle LLM-Fachwort-Korrektur (mit Halluzinations-Filter auf Server-Seite)
@@ -1757,6 +1729,7 @@ export default function HomePage() {
 
   async function startRecording() {
     setError(null);
+    recordingStartedAtRef.current = Date.now();
     // Bestehenden Text behalten
     existingTextRef.current = transcript;
     lastTranscriptRef.current = "";
@@ -2236,6 +2209,7 @@ export default function HomePage() {
       
       setAudioLevel(0);
       setRecording(false);
+      recordingStartedAtRef.current = null;
       
       // Bei Fast Whisper: Direkt Korrektur anbieten (kein finaler Transkriptions-Chunk nötig)
       setPendingCorrection(true);
@@ -2291,6 +2265,7 @@ export default function HomePage() {
       
       setAudioLevel(0);
       setRecording(false);
+      recordingStartedAtRef.current = null;
       setPendingCorrection(true);
       return;
     }
@@ -2303,6 +2278,7 @@ export default function HomePage() {
       setAudioLevel(0);
       setRecording(false);
       setTentativeText('');
+      recordingStartedAtRef.current = null;
       setPendingCorrection(true);
       return;
     }
@@ -2320,14 +2296,77 @@ export default function HomePage() {
       setBusy(true);
       try {
         const blob = new Blob(allChunksRef.current, { type: 'audio/webm' });
-        const sessionTranscript = await transcribeChunk(blob, false);
+        const audioDurationSeconds = recordingStartedAtRef.current
+          ? Math.max(0, (Date.now() - recordingStartedAtRef.current) / 1000)
+          : undefined;
+        recordingStartedAtRef.current = null;
+        const sessionTranscript = await transcribeChunk(blob, false, audioDurationSeconds);
         if (sessionTranscript) {
           // Formatierung auf den Text anwenden (um Steuerwörter sofort zu ersetzen)
           const formattedTranscript = applyFormattingControlWords(sessionTranscript);
           
           // TEMPLATE-MODUS: Textbaustein mit diktierten Änderungen kombinieren
           if (templateMode && selectedTemplate) {
-            await applySelectedTemplate(formattedTranscript);
+            setCorrecting(true);
+            try {
+              console.log('[Template] Adapting template:', selectedTemplate.name);
+              console.log('[Template] Changes:', formattedTranscript);
+              
+              const res = await fetch('/api/templates/adapt', {
+                method: 'POST',
+                headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': getAuthHeader(),
+                  ...getDbTokenHeader()
+                },
+                body: JSON.stringify({
+                  template: selectedTemplate.content,
+                  changes: formattedTranscript,
+                  field: selectedTemplate.field,
+                  username
+                }),
+              });
+              
+              if (res.ok) {
+                const data = await res.json();
+                if (data.adaptedText) {
+                  // Speichere aktuellen Zustand für Revert
+                  setPreCorrectionState({
+                    methodik: methodik,
+                    befund: transcript,
+                    beurteilung: beurteilung,
+                    transcript: ''
+                  });
+                  
+                  // Setze den angepassten Text ins entsprechende Feld
+                  switch (selectedTemplate.field) {
+                    case 'methodik':
+                      setMethodik(data.adaptedText);
+                      break;
+                    case 'beurteilung':
+                      setBeurteilung(data.adaptedText);
+                      break;
+                    case 'befund':
+                    default:
+                      setTranscript(data.adaptedText);
+                      break;
+                  }
+                  setCanRevert(true);
+                  setIsReverted(false);
+                }
+              } else {
+                const errorData = await res.json();
+                setError(errorData.error || 'Template-Anpassung fehlgeschlagen');
+              }
+            } catch (err: any) {
+              console.error('[Template] Adapt error:', err);
+              setError(err.message || 'Fehler bei Template-Anpassung');
+            } finally {
+              setCorrecting(false);
+              // Template-Modus nach Anwendung zurücksetzen
+              setSelectedTemplate(null);
+              setTemplateMode(false);
+            }
           } else {
             // STANDARD-MODUS: Normale Verarbeitung
             // Verarbeite Transkript und setze Text in Felder
@@ -2747,7 +2786,24 @@ export default function HomePage() {
     await handleFile(files[0]);
   }
 
-
+  async function handleFormat() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetchWithDbToken('/api/format', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: transcript, mode }),
+      });
+      if (!res.ok) throw new Error('Formatierung fehlgeschlagen');
+      const data = await res.json();
+      setTranscript(data.text);
+    } catch (err: any) {
+      setError(err.message || 'Fehler bei der Formatierung');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // Befund-spezifische Handler
   async function handleFormatBefund() {
@@ -3320,11 +3376,6 @@ export default function HomePage() {
       {/* Textbaustein-Hinweis wenn aktiv */}
       {templateMode && selectedTemplate && !recording && (
         <div className="text-sm bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 px-3 py-2 rounded-lg">
-          {(() => {
-            const hasTemplateChanges = getTextForBefundField(selectedTemplate.field).trim().length > 0;
-
-            return (
-              <>
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-2">
               <span className="text-orange-600 dark:text-orange-400 font-medium">📝 Baustein: {selectedTemplate.name}</span>
@@ -3333,23 +3384,47 @@ export default function HomePage() {
               </span>
             </div>
             <button
-              onClick={() => { void applySelectedTemplate(); }}
-              disabled={correcting || busy}
+              onClick={() => {
+                // Speichere aktuellen Zustand für Revert
+                setPreCorrectionState({
+                  methodik: methodik,
+                  befund: transcript,
+                  beurteilung: beurteilung,
+                  transcript: ''
+                });
+                
+                // Setze den Textbaustein direkt ins entsprechende Feld
+                switch (selectedTemplate.field) {
+                  case 'methodik':
+                    setMethodik(selectedTemplate.content);
+                    break;
+                  case 'beurteilung':
+                    setBeurteilung(selectedTemplate.content);
+                    break;
+                  case 'befund':
+                  default:
+                    setTranscript(selectedTemplate.content);
+                    break;
+                }
+                setCanRevert(true);
+                setIsReverted(false);
+                
+                // Template-Modus zurücksetzen
+                setSelectedTemplate(null);
+                setTemplateMode(false);
+              }}
               className="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors"
-              title={hasTemplateChanges ? 'Diktierte Änderungen in den Textbaustein einarbeiten und übernehmen' : 'Textbaustein ohne Änderungen einfügen'}
+              title="Textbaustein ohne Änderungen einfügen"
             >
-              {hasTemplateChanges ? 'Änderungen einfügen' : 'Einfügen'}
+              Einfügen
             </button>
           </div>
           <p className="text-xs text-orange-700 dark:text-orange-300 line-clamp-2">
             {selectedTemplate.content.substring(0, 150)}...
           </p>
           <p className="text-xs text-orange-600 dark:text-orange-400 mt-1 italic">
-            💡 Diktieren Sie nur die Änderungen. {hasTemplateChanges ? 'Mit "Änderungen einfügen" werden diese per LLM in den Baustein eingebaut.' : 'Mit "Einfügen" wird der Baustein unverändert übernommen.'}
+            💡 Diktieren Sie nur die Änderungen, oder klicken Sie "Einfügen" um den Baustein unverändert zu übernehmen
           </p>
-              </>
-            );
-          })()}
         </div>
       )}
 
@@ -3436,7 +3511,7 @@ export default function HomePage() {
                     ref={methodikTextareaRef}
                     className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                     value={methodik}
-                    onChange={(e) => { setMethodik(e.target.value); setPendingCorrection(true); syncTextSelection('methodik', e.currentTarget); }}
+                    onChange={(e) => handleManualTextChange('methodik', e.target.value, setMethodik, e.currentTarget)}
                     onFocus={(e) => { setActiveField('methodik'); setFocusedTextField('methodik'); syncTextSelection('methodik', e.currentTarget); }}
                     onBlur={() => setFocusedTextField((current) => current === 'methodik' ? null : current)}
                     onSelect={(e) => syncTextSelection('methodik', e.currentTarget)}
@@ -3516,7 +3591,7 @@ export default function HomePage() {
                     ref={befundTextareaRef}
                     className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                     value={transcript}
-                    onChange={(e) => { setTranscript(e.target.value); setPendingCorrection(true); syncTextSelection('befund', e.currentTarget); }}
+                    onChange={(e) => handleManualTextChange('befund', e.target.value, setTranscript, e.currentTarget)}
                     onFocus={(e) => { setActiveField('befund'); setFocusedTextField('befund'); syncTextSelection('befund', e.currentTarget); }}
                     onBlur={() => setFocusedTextField((current) => current === 'befund' ? null : current)}
                     onSelect={(e) => syncTextSelection('befund', e.currentTarget)}
@@ -3611,7 +3686,7 @@ export default function HomePage() {
                     ref={beurteilungTextareaRef}
                     className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                     value={beurteilung}
-                    onChange={(e) => { setBeurteilung(e.target.value); setPendingCorrection(true); syncTextSelection('beurteilung', e.currentTarget); }}
+                    onChange={(e) => handleManualTextChange('beurteilung', e.target.value, setBeurteilung, e.currentTarget)}
                     onFocus={(e) => { setActiveField('beurteilung'); setFocusedTextField('beurteilung'); syncTextSelection('beurteilung', e.currentTarget); }}
                     onBlur={() => setFocusedTextField((current) => current === 'beurteilung' ? null : current)}
                     onSelect={(e) => syncTextSelection('beurteilung', e.currentTarget)}
@@ -3707,7 +3782,7 @@ export default function HomePage() {
                     ref={transcriptTextareaRef}
                     className={`textarea font-mono text-sm min-h-40 w-full ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                     value={transcript}
-                    onChange={(e) => { setTranscript(e.target.value); setPendingCorrection(true); syncTextSelection('transcript', e.currentTarget); }}
+                    onChange={(e) => handleManualTextChange('transcript', e.target.value, setTranscript, e.currentTarget)}
                     onFocus={(e) => { setFocusedTextField('transcript'); syncTextSelection('transcript', e.currentTarget); }}
                     onBlur={() => setFocusedTextField((current) => current === 'transcript' ? null : current)}
                     onSelect={(e) => syncTextSelection('transcript', e.currentTarget)}
@@ -3734,8 +3809,11 @@ export default function HomePage() {
                     {vad.isSpeaking ? '🎙️ Sprache erkannt...' : '⏳ Transkribiere...'}
                   </div>
                 )}
-                <div className="mt-2">
-                  <button className="btn btn-outline text-sm py-2 w-full" onClick={handleExportDocx} disabled={!transcript}>.docx</button>
+                <div className="flex gap-2 mt-2">
+                  <button className="btn btn-primary flex-1 text-sm py-2" onClick={handleFormat} disabled={busy || !transcript}>
+                    {busy && <Spinner className="mr-2" size={14} />} Formatieren
+                  </button>
+                  <button className="btn btn-outline text-sm py-2" onClick={handleExportDocx} disabled={!transcript}>.docx</button>
                 </div>
               </div>
               {/* Action Buttons für Arztbrief */}

@@ -2,8 +2,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getRuntimeConfigWithRequest, getEffectiveOnlineService } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { normalizeAudioForWhisper } from '@/lib/audioCompression';
+import { countWords, logOnlineUsageEventWithRequest } from '@/lib/onlineUsageDb';
 
 export const runtime = 'nodejs';
+
+const WAV_HEADER_BYTES = 44;
+const WAV_BYTES_PER_SECOND = 16000 * 2;
+
+function estimateAudioDurationSeconds(file: Blob, filename: string, explicitDuration?: string | null): number {
+  const parsedDuration = Number(explicitDuration || 0);
+  if (Number.isFinite(parsedDuration) && parsedDuration > 0) {
+    return parsedDuration;
+  }
+
+  if (file.type.includes('wav') || filename.toLowerCase().endsWith('.wav')) {
+    return Math.max(0, (file.size - WAV_HEADER_BYTES) / WAV_BYTES_PER_SECOND);
+  }
+
+  return 0;
+}
 
 /**
  * Parst eine Gradio SSE-Antwort und extrahiert Daten oder Fehler
@@ -727,6 +744,8 @@ export async function POST(request: NextRequest) {
     const username = form.get('username') as string | null;
     const speedModeParam = form.get('speed_mode') as string | null;
     const promptContext = form.get('prompt_context') as string | null;
+    const audioDurationParam = form.get('audio_duration_seconds') as string | null;
+    const shouldLogStats = form.get('stats_event') !== 'false';
     
     if (!file || !(file instanceof Blob)) {
       console.error('[Error] Invalid file:', file);
@@ -735,6 +754,7 @@ export async function POST(request: NextRequest) {
 
     const filename = (file as File).name || 'audio.webm';
     const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+    const audioDurationSeconds = estimateAudioDurationSeconds(file, filename, audioDurationParam);
     console.log(`[Input] File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type || 'unknown'}, User: ${username || 'unknown'}, Speed: ${speedModeParam || 'default'}`);
 
     // Lade Wörterbuch für initial_prompt bei WhisperX
@@ -855,6 +875,18 @@ export async function POST(request: NextRequest) {
 
     const totalDuration = ((Date.now() - requestStart) / 1000).toFixed(2);
     console.log(`[Success] Provider: ${result.provider}, Total duration: ${totalDuration}s, Segments: ${result.segments?.length || 0}`);
+    if (username && shouldLogStats) {
+      logOnlineUsageEventWithRequest(request, {
+        username,
+        eventType: 'utterance',
+        provider: result.provider,
+        wordCount: countWords(result.text || ''),
+        utteranceCount: result.text?.trim() ? 1 : 0,
+        audioDurationSeconds,
+      }).catch((logError) => {
+        console.warn('[Stats] Failed to log online transcription usage:', logError?.message || logError);
+      });
+    }
     console.log('=== Transcription Request Complete ===\n');
     return NextResponse.json({
       text: result.text,

@@ -13,8 +13,8 @@ function LayoutContent({ children }: { children: ReactNode }) {
   const { isLoggedIn, canViewAllDictations } = useAuth();
   const pathname = usePathname();
   
-  // Offline-Seite bekommt volle Breite (für alle Benutzer mit Tabellenansicht)
-  const isFullWidth = pathname === '/offline';
+  // Offline- und Statistik-Seiten bekommen volle Breite (Tabellen/Dashboards)
+  const isFullWidth = pathname === '/offline' || pathname === '/stats';
 
   if (!isLoggedIn) {
     return (
@@ -84,6 +84,18 @@ function LayoutContent({ children }: { children: ReactNode }) {
             >
               📁 Offline-Diktat
             </Link>
+            {canViewAllDictations && (
+              <Link
+                href="/stats"
+                className={`flex-1 py-1.5 px-3 text-center text-sm font-medium rounded-md transition-all ${
+                  pathname === '/stats'
+                    ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                }`}
+              >
+                📊 Stats
+              </Link>
+            )}
           </div>
         </div>
       </header>

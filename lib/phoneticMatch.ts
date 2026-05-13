@@ -170,6 +170,18 @@ function normalizedSimilarity(a: string, b: string): number {
   return 1 - (levenshtein(a, b) / maxLen);
 }
 
+function isAcronymLikeTerm(term: string): boolean {
+  const asciiLetters = term.replace(/[^A-Za-z]/g, '');
+  if (asciiLetters.length < 2 || asciiLetters.length > 6) {
+    return false;
+  }
+
+  const uppercaseCount = (term.match(/[A-Z]/g) ?? []).length;
+  const lowercaseCount = (term.match(/[a-z]/g) ?? []).length;
+
+  return uppercaseCount >= 2 || (uppercaseCount >= 1 && lowercaseCount >= 1 && asciiLetters.length <= 4);
+}
+
 function tokenizeWordsAndSeparators(text: string): string[] {
   return text.match(/[A-Za-zÄÖÜäöüß]+|[^A-Za-zÄÖÜäöüß]+/g) ?? [];
 }
@@ -475,8 +487,10 @@ export interface PhoneticDictEntry {
   correct: string;        // Korrekte Schreibweise
   wrongPhonetic: string;  // Kölner Phonetik Code von "wrong"
   wrongNorm: string;      // Normalisiertes "wrong"
+  correctNorm: string;    // Normalisierte korrekte Schreibweise
   correctPhonetic: string;// Kölner Phonetik Code von "correct"
   isSelfMapping: boolean; // Reiner Fachbegriff ohne explizite Fehlvariante
+  isAcronymLike: boolean;
   source?: 'standard' | 'private';
   phoneticMinSimilarity?: number;
   targetUsername?: string;
@@ -541,8 +555,10 @@ export function buildPhoneticIndex(entries: { wrong: string; correct: string; so
       correct: entry.correct,
       wrongPhonetic: colognePhonetic(entry.wrong),
       wrongNorm: normalizeForComparison(entry.wrong),
+      correctNorm: normalizeForComparison(entry.correct),
       correctPhonetic: colognePhonetic(entry.correct),
       isSelfMapping: normalizeForComparison(entry.wrong) === normalizeForComparison(entry.correct),
+      isAcronymLike: isAcronymLikeTerm(entry.wrong) || isAcronymLikeTerm(entry.correct),
       source: entry.source,
       phoneticMinSimilarity: entry.phoneticMinSimilarity,
       targetUsername: entry.targetUsername,
@@ -632,10 +648,27 @@ export function findPhoneticMatch(
 
   let bestMatch: PhoneticMatchResult | null = null;
 
+  const isCompatibleAcronymCandidate = (candidate: PhoneticDictEntry): boolean => {
+    if (!candidate.isAcronymLike) {
+      return true;
+    }
+
+    const acronymBaseLength = Math.max(candidate.wrongNorm.length, candidate.correctNorm.length);
+    if (acronymBaseLength === 0) {
+      return false;
+    }
+
+    return wordNorm.length <= acronymBaseLength + 1;
+  };
+
   // Pass 1: Exakter phonetischer Code-Match
   const candidates = index.byPhoneticCode.get(wordPhonetic);
   if (candidates) {
     for (const cand of candidates) {
+      if (!isCompatibleAcronymCandidate(cand)) {
+        continue;
+      }
+
       const dist = levenshtein(wordNorm, cand.wrongNorm);
       const maxLen = Math.max(wordNorm.length, cand.wrongNorm.length);
       const similarity = 1 - (dist / maxLen);
@@ -659,6 +692,10 @@ export function findPhoneticMatch(
       if (!varCandidates) continue;
       
       for (const cand of varCandidates) {
+        if (!isCompatibleAcronymCandidate(cand)) {
+          continue;
+        }
+
         const dist = levenshtein(wordNorm, cand.wrongNorm);
         const maxLen = Math.max(wordNorm.length, cand.wrongNorm.length);
         const similarity = 1 - (dist / maxLen);

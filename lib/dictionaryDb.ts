@@ -79,7 +79,7 @@ export async function addEntry(
   const wrongTrimmed = wrong.trim();
   const correctTrimmed = correct.trim();
 
-  if (wrongTrimmed.toLowerCase() === correctTrimmed.toLowerCase()) {
+  if (wrongTrimmed === correctTrimmed) {
     return { success: false, error: 'Falsches und korrektes Wort sind identisch' };
   }
 
@@ -408,7 +408,7 @@ export async function addEntryWithRequest(
   const wrongTrimmed = wrong.trim();
   const correctTrimmed = correct.trim();
 
-  if (wrongTrimmed.toLowerCase() === correctTrimmed.toLowerCase()) {
+  if (wrongTrimmed === correctTrimmed) {
     return { success: false, error: 'Falsches und korrektes Wort sind identisch' };
   }
 

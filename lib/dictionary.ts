@@ -81,7 +81,7 @@ export function addEntry(username: string, wrong: string, correct: string): { su
   const wrongTrimmed = wrong.trim();
   const correctTrimmed = correct.trim();
 
-  if (wrongTrimmed.toLowerCase() === correctTrimmed.toLowerCase()) {
+  if (wrongTrimmed === correctTrimmed) {
     return { success: false, error: 'Falsches und korrektes Wort sind identisch' };
   }
 
@@ -163,8 +163,9 @@ export function applyDictionary(username: string, text: string): string {
   let result = text;
   
   for (const entry of entries) {
-    // Case-insensitive replacement, preserving word boundaries
-    const regex = new RegExp(`\\b${escapeRegExp(entry.wrong)}\\b`, 'gi');
+    // Unicode-sichere Wortgrenzen statt \b, damit Umlaute/ß nicht als
+    // Wortgrenze innerhalb eines Worts fehlinterpretiert werden.
+    const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapeRegExp(entry.wrong)}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
     result = result.replace(regex, entry.correct);
   }
 

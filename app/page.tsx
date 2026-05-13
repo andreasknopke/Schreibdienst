@@ -663,9 +663,10 @@ export default function HomePage() {
     // Pass 1: Exaktes Wort-Matching (User + Standard)
     let result = text;
     for (const entry of mergedEntriesRef.current) {
-      // Case-insensitive Ersetzung mit Wortgrenzen
+      // Unicode-sichere Wortgrenzen, damit z.B. "IgE" nicht das Suffix in
+      // "übermäßige" trifft. \b ist dafür mit Umlauten/ß zu ungenau.
       const escaped = entry.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
+      const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escaped}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
       result = result.replace(regex, entry.correct);
     }
     

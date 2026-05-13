@@ -512,6 +512,8 @@ export default function HomePage() {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [templateMode, setTemplateMode] = useState(false);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const currentTemplateField: BefundField = mode === 'befund' ? activeField : 'befund';
+  const availableTemplates = templates.filter((template) => template.field === currentTemplateField);
 
   const getTextForBefundField = useCallback((field: BefundField): string => {
     switch (field) {
@@ -804,10 +806,10 @@ export default function HomePage() {
 
   // Templates beim Start laden
   useEffect(() => {
-    if (username && mode === 'befund') {
+    if (username) {
       fetchTemplates();
     }
-  }, [username, mode, fetchTemplates]);
+  }, [username, fetchTemplates]);
 
   // Wörterbuch beim Start laden (für Echtzeit-Korrektur bei Fast Whisper)
   useEffect(() => {
@@ -847,11 +849,11 @@ export default function HomePage() {
   }, [fetchTemplates]);
 
   useEffect(() => {
-    if (selectedTemplate && selectedTemplate.field !== activeField) {
+    if (selectedTemplate && selectedTemplate.field !== currentTemplateField) {
       setSelectedTemplate(null);
       setTemplateMode(false);
     }
-  }, [activeField, selectedTemplate]);
+  }, [currentTemplateField, selectedTemplate]);
 
   // Funktion zum Transkribieren eines Blobs
   const logManualCorrection = useCallback((field: TextInsertionTarget) => {
@@ -3289,22 +3291,25 @@ export default function HomePage() {
               </button>
             )}
             
-            {/* Textbaustein-Auswahl (nur im Befund-Modus) */}
-            {mode === 'befund' && templates.filter(t => t.field === activeField).length > 0 && (
+            {/* Textbaustein-Auswahl */}
+            {availableTemplates.length > 0 && (
               <div className="flex items-center gap-1">
                 <select 
                   className={`select text-sm py-1.5 max-w-[10rem] truncate ${templateMode ? 'border-orange-400 ring-1 ring-orange-300' : ''}`}
                   value={selectedTemplate?.id || ''}
                   onChange={(e) => {
                     const id = parseInt(e.target.value);
-                    const template = templates.find(t => t.id === id);
+                    const template = availableTemplates.find(t => t.id === id);
                     setSelectedTemplate(template || null);
                     setTemplateMode(!!template);
                   }}
-                  title="Textbaustein auswählen - diktieren Sie nur die Änderungen"
+                  title={mode === 'befund'
+                    ? 'Textbaustein für das aktive Feld auswählen - diktieren Sie nur die Änderungen'
+                    : 'Textbaustein für den Arztbrief auswählen - diktieren Sie nur die Änderungen'}
+                  disabled={loadingTemplates}
                 >
-                  <option value="">📝 Baustein...</option>
-                  {templates.filter(t => t.field === activeField).map(t => (
+                  <option value="">{loadingTemplates ? 'Lade Bausteine...' : '📝 Baustein...'}</option>
+                  {availableTemplates.map(t => (
                     <option key={t.id} value={t.id}>
                       {t.name.length > 20 ? t.name.substring(0, 20) + '…' : t.name}
                     </option>

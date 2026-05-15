@@ -8,6 +8,7 @@ import TemplatesManager from './TemplatesManager';
 import ConfigPanel from './ConfigPanel';
 import HelpPanel from './HelpPanel';
 import StandardDictionaryManager from './StandardDictionaryManager';
+import GroupDictionaryManager from './GroupDictionaryManager';
 import BugReportForm from './BugReportForm';
 import {
   connectGrundigSonicMic,
@@ -24,6 +25,7 @@ export default function UserMenu() {
   const [showConfig, setShowConfig] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showStandardDict, setShowStandardDict] = useState(false);
+  const [showGroupDict, setShowGroupDict] = useState(false);
   const [showBugReport, setShowBugReport] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [hidSupported, setHidSupported] = useState(false);
@@ -229,6 +231,38 @@ export default function UserMenu() {
     document.body
   ) : null;
 
+  const groupDictModal = showGroupDict && isAdmin && mounted ? createPortal(
+    <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-5xl w-full my-8 flex flex-col max-h-[calc(100vh-4rem)]">
+        <div className="flex items-center justify-between p-4 border-b dark:border-gray-700 flex-shrink-0">
+          <h2 className="font-semibold flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+            Gruppen-Wörterbücher
+          </h2>
+          <button
+            onClick={() => setShowGroupDict(false)}
+            className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            title="Schließen"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6L6 18"/>
+              <path d="M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div className="p-4 overflow-y-auto flex-1">
+          <GroupDictionaryManager />
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null;
+
   const helpModal = showHelp && mounted ? createPortal(
     <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
       <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-lg w-full my-8 flex flex-col max-h-[calc(100vh-4rem)]">
@@ -315,6 +349,15 @@ export default function UserMenu() {
             📚<span className="hidden sm:inline"> Standard</span>
           </button>
         )}
+        {isAdmin && (
+          <button
+            onClick={() => setShowGroupDict(!showGroupDict)}
+            className="text-xs text-cyan-600 hover:text-cyan-700 px-1.5 sm:px-2 py-1 rounded hover:bg-cyan-50 dark:hover:bg-cyan-900/20"
+            title="Gruppen-Wörterbücher verwalten"
+          >
+            👥<span className="hidden sm:inline"> Gruppen</span>
+          </button>
+        )}
         {/* Config only visible for root user */}
         {username?.toLowerCase() === 'root' && (
           <button
@@ -348,6 +391,7 @@ export default function UserMenu() {
       {configModal}
       {userManagementModal}
       {standardDictModal}
+      {groupDictModal}
       {helpModal}
       <BugReportForm open={showBugReport} onClose={() => setShowBugReport(false)} />
     </>

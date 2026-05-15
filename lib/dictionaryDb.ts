@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { query, execute, getPoolForRequest } from './db';
+import { getEntriesForUserGroupsWithRequest } from './groupDictionaryDb';
 
 export interface DictionaryEntry {
   wrong: string;
@@ -8,6 +9,9 @@ export interface DictionaryEntry {
   useInPrompt?: boolean;  // Wort wird im Whisper initial_prompt verwendet
   matchStem?: boolean;    // Wortstamm-Matching aktivieren (z.B. "Schole" -> "Chole" korrigiert auch "Scholezystitis" -> "Cholezystitis")
   phoneticMinSimilarity?: number;
+  scope?: 'private' | 'group';
+  groupId?: number;
+  groupName?: string;
 }
 
 interface DbDictionaryEntry {
@@ -483,7 +487,39 @@ export async function removeEntryWithRequest(
 
 // Load dictionary with Request context
 export async function loadDictionaryWithRequest(request: NextRequest, username: string): Promise<{ entries: DictionaryEntry[] }> {
-  const entries = await getEntriesWithRequest(request, username);
+  const [groupEntries, privateEntries] = await Promise.all([
+    getEntriesForUserGroupsWithRequest(request, username).catch(error => {
+      console.error('[Dictionary] Group entries load error:', error);
+      return [];
+    }),
+    getEntriesWithRequest(request, username),
+  ]);
+
+  const entries: DictionaryEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of privateEntries) {
+    seen.add(entry.wrong.toLowerCase());
+    entries.push({ ...entry, scope: 'private' });
+  }
+
+  for (const entry of groupEntries) {
+    const key = entry.wrong.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push({
+      wrong: entry.wrong,
+      correct: entry.correct,
+      addedAt: entry.addedAt,
+      useInPrompt: entry.useInPrompt,
+      matchStem: entry.matchStem,
+      phoneticMinSimilarity: entry.phoneticMinSimilarity,
+      scope: 'group',
+      groupId: entry.groupId,
+      groupName: entry.groupName,
+    });
+  }
+
   return { entries };
 }
 

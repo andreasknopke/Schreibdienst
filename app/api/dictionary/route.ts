@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addEntryWithRequest, removeEntryWithRequest, getEntriesWithRequest, updateEntryOptionsWithRequest } from '@/lib/dictionaryDb';
+import { addEntryWithRequest, removeEntryWithRequest, getEntriesWithRequest, updateEntryOptionsWithRequest, loadDictionaryWithRequest } from '@/lib/dictionaryDb';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
 
 interface AuthResult {
@@ -46,7 +46,10 @@ export async function GET(request: NextRequest) {
     const targetUser = searchParams.get('user');
     const username = (auth.canViewAllDictations && targetUser) ? targetUser : auth.username;
 
-    const entries = await getEntriesWithRequest(request, username);
+    const scope = searchParams.get('scope');
+    const entries = scope === 'private'
+      ? await getEntriesWithRequest(request, username)
+      : (await loadDictionaryWithRequest(request, username)).entries;
     return NextResponse.json({ entries });
   } catch (error) {
     console.error('[Dictionary GET] Error:', error);

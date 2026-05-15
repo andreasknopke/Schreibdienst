@@ -38,7 +38,7 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
 
   const fetchEntries = async () => {
     try {
-      const response = await fetch('/api/dictionary', {
+      const response = await fetch('/api/dictionary?scope=private', {
         headers: { 
           'Authorization': getAuthHeader(),
           ...getDbTokenHeader()

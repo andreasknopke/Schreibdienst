@@ -324,6 +324,7 @@ export default function HomePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [liveInjectEnabled, setLiveInjectEnabled] = useState(false);
+  const [liveInjectStatus, setLiveInjectStatus] = useState<string | null>(null);
   const liveInjectEnabledRef = useRef(false);
   const liveInjectQueueRef = useRef<Promise<void>>(Promise.resolve());
   
@@ -458,6 +459,7 @@ export default function HomePage() {
 
   useEffect(() => {
     liveInjectEnabledRef.current = liveInjectEnabled;
+    setLiveInjectStatus(liveInjectEnabled ? 'Bereit – Ziel-App fokussieren oder zuletzt verwendete App nutzen' : null);
   }, [liveInjectEnabled]);
 
   const queueLiveInject = useCallback((text: string) => {
@@ -466,18 +468,25 @@ export default function HomePage() {
     liveInjectQueueRef.current = liveInjectQueueRef.current
       .catch(() => undefined)
       .then(async () => {
+        const shouldRestorePreviousWindow = typeof document !== 'undefined' && document.hasFocus();
+        setLiveInjectStatus(shouldRestorePreviousWindow ? 'Sende an vorherige Ziel-App…' : 'Sende an aktive Ziel-App…');
+
         const result = await injectToActiveWindow({
           text,
-          restorePreviousWindow: false,
-          delayMs: 0,
+          restorePreviousWindow: shouldRestorePreviousWindow,
+          delayMs: shouldRestorePreviousWindow ? 120 : 0,
           charDelayMs: 2,
           fallbackToClipboard: false,
         });
 
         if (!result.ok) {
           setLiveInjectEnabled(false);
+          setLiveInjectStatus('Live-Übertragung fehlgeschlagen');
           setError(result.error || 'Live-Übertragung in die Ziel-App fehlgeschlagen');
+          return;
         }
+
+        setLiveInjectStatus(`Gesendet: ${text.trim().length} Zeichen`);
       });
   }, []);
 
@@ -3271,13 +3280,20 @@ export default function HomePage() {
         <div className="card-body py-3 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3 flex-wrap">
             {RecordButton}
-            <button
-              className={`btn text-sm py-1.5 px-3 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
-              onClick={() => setLiveInjectEnabled((enabled) => !enabled)}
-              title="Während der Aufnahme neue Wörter direkt in das aktuell aktive Windows-Fenster schreiben"
-            >
-              {liveInjectEnabled ? '⌨️ Live Ziel-App an' : '⌨️ Live Ziel-App'}
-            </button>
+            <div className="flex flex-col gap-1">
+              <button
+                className={`btn text-sm py-1.5 px-3 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
+                onClick={() => setLiveInjectEnabled((enabled) => !enabled)}
+                title="Während der Aufnahme neue Wörter direkt in das aktuell aktive Windows-Fenster schreiben"
+              >
+                {liveInjectEnabled ? '⌨️ Live Ziel-App an' : '⌨️ Live Ziel-App'}
+              </button>
+              {liveInjectStatus && (
+                <span className="text-[11px] text-gray-500 dark:text-gray-400 max-w-64 truncate" title={liveInjectStatus}>
+                  {liveInjectStatus}
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button 

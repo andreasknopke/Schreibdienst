@@ -76,8 +76,14 @@ function getDefaultSelection(text: string): CaretSelection {
   };
 }
 
+function normalizeChunkLeadingWhitespace(text: string): string {
+  return text.replace(/^\s+/, '');
+}
+
 function insertTextAtSelection(existing: string, incomingText: string, selection?: CaretSelection | null): TextInsertionResult {
-  if (!incomingText) {
+  const normalizedIncomingText = normalizeChunkLeadingWhitespace(incomingText);
+
+  if (!normalizedIncomingText) {
     return {
       text: existing,
       selection: selection ?? getDefaultSelection(existing),
@@ -91,7 +97,7 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
   const after = existing.slice(end);
   const needsPrefixSeparator = before.length > 0 && !before.endsWith('\n') && !before.endsWith(' ');
   const prefix = needsPrefixSeparator ? ' ' : '';
-  const inserted = `${before}${prefix}${incomingText}`;
+  const inserted = `${before}${prefix}${normalizedIncomingText}`;
   const caretIndex = inserted.length;
 
   if (!after) {
@@ -473,7 +479,9 @@ export default function HomePage() {
   }, [liveInjectEnabled]);
 
   const queueLiveInject = useCallback((text: string) => {
-    if (!liveInjectEnabledRef.current || !text.trim()) return;
+    const normalizedText = normalizeChunkLeadingWhitespace(text);
+
+    if (!liveInjectEnabledRef.current || !normalizedText.trim()) return;
 
     liveInjectQueueRef.current = liveInjectQueueRef.current
       .catch(() => undefined)
@@ -482,7 +490,7 @@ export default function HomePage() {
         setLiveInjectStatus(shouldRestorePreviousWindow ? 'Sende an vorherige Ziel-App…' : 'Sende an aktive Ziel-App…');
 
         const result = await injectToActiveWindow({
-          text,
+          text: normalizedText,
           mode: 'clipboard',
           restorePreviousWindow: shouldRestorePreviousWindow,
           delayMs: shouldRestorePreviousWindow ? 250 : 0,
@@ -497,7 +505,7 @@ export default function HomePage() {
           return;
         }
 
-        setLiveInjectStatus(`Gesendet: ${text.trim().length} Zeichen`);
+        setLiveInjectStatus(`Gesendet: ${normalizedText.trim().length} Zeichen`);
       });
   }, []);
 
@@ -732,7 +740,7 @@ export default function HomePage() {
   }, [dictionaryEntries]);
 
   const prepareLiveInjectDelta = useCallback((text: string): string => {
-    return applyDictionaryToText(applyFormattingControlWords(text));
+    return normalizeChunkLeadingWhitespace(applyDictionaryToText(applyFormattingControlWords(text)));
   }, [applyDictionaryToText]);
 
   const queueFinalSessionLiveInject = useCallback((sessionTranscript: string) => {
@@ -3319,11 +3327,22 @@ export default function HomePage() {
             {RecordButton}
             <div className="flex flex-col gap-1">
               <button
-                className={`btn text-sm py-1.5 px-3 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
+                className={`btn h-9 w-9 p-0 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
                 onClick={() => setLiveInjectEnabled((enabled) => !enabled)}
-                title="Während der Aufnahme neue Wörter direkt in das aktuell aktive Windows-Fenster schreiben"
+                title={liveInjectEnabled
+                  ? 'Live-Übertragung an Ziel-App ist aktiv'
+                  : 'Live-Übertragung an Ziel-App aktivieren'}
+                aria-label={liveInjectEnabled
+                  ? 'Live-Übertragung an Ziel-App deaktivieren'
+                  : 'Live-Übertragung an Ziel-App aktivieren'}
+                aria-pressed={liveInjectEnabled}
               >
-                {liveInjectEnabled ? '⌨️ Live Ziel-App an' : '⌨️ Live Ziel-App'}
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M17 3l4 4-4 4" />
+                  <path d="M3 7h18" />
+                  <path d="M7 21l-4-4 4-4" />
+                  <path d="M21 17H3" />
+                </svg>
               </button>
               {liveInjectStatus && (
                 <span className="text-[11px] text-gray-500 dark:text-gray-400 max-w-64 truncate" title={liveInjectStatus}>

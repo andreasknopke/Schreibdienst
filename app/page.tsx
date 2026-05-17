@@ -460,7 +460,7 @@ export default function HomePage() {
 
   useEffect(() => {
     liveInjectEnabledRef.current = liveInjectEnabled;
-    setLiveInjectStatus(liveInjectEnabled ? 'Bereit – Ziel-App fokussieren oder zuletzt verwendete App nutzen' : null);
+    setLiveInjectStatus(liveInjectEnabled ? 'Bereit – Ziel-App fokussieren, dann sprechen' : null);
   }, [liveInjectEnabled]);
 
   const queueLiveInject = useCallback((text: string): Promise<void> => {
@@ -469,15 +469,14 @@ export default function HomePage() {
     const queuedSend = liveInjectQueueRef.current
       .catch(() => undefined)
       .then(async () => {
-        const shouldRestorePreviousWindow = typeof document !== 'undefined' && document.hasFocus();
-        setLiveInjectStatus(shouldRestorePreviousWindow ? 'Sende an vorherige Ziel-App…' : 'Sende an aktive Ziel-App…');
+        setLiveInjectStatus('Sende an aktive Ziel-App…');
         setLiveInjectInFlight(true);
 
         try {
           const result = await injectToActiveWindow({
             text,
-            restorePreviousWindow: shouldRestorePreviousWindow,
-            delayMs: shouldRestorePreviousWindow ? 120 : 0,
+            restorePreviousWindow: false,
+            delayMs: 0,
             charDelayMs: 2,
             fallbackToClipboard: false,
           });

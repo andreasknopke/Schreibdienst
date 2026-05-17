@@ -3268,8 +3268,17 @@ export default function HomePage() {
     <div className="space-y-3 min-h-[calc(100vh-120px)]" onContextMenu={handleContextMenu}>
       {/* Kompakte Steuerleiste */}
       <div className="card">
-        <div className="card-body py-3 flex items-center justify-between gap-3">
-          {RecordButton}
+        <div className="card-body py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
+            {RecordButton}
+            <button
+              className={`btn text-sm py-1.5 px-3 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
+              onClick={() => setLiveInjectEnabled((enabled) => !enabled)}
+              title="Während der Aufnahme neue Wörter direkt in das aktuell aktive Windows-Fenster schreiben"
+            >
+              {liveInjectEnabled ? '⌨️ Live Ziel-App an' : '⌨️ Live Ziel-App'}
+            </button>
+          </div>
           <div className="flex items-center gap-2">
             <button 
               className="btn btn-outline text-sm py-1.5 px-3" 

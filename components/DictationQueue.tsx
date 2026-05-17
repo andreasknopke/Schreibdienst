@@ -16,7 +16,6 @@ import {
   type HidMediaControlAction,
   type HidMediaControlEventDetail,
 } from '@/lib/hidMediaControls';
-import { injectToActiveWindow, isClipboardFallback } from '@/lib/injectClient';
 
 interface Dictation {
   id: number;
@@ -310,7 +309,6 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<number | null>(null);
-  const [injectFeedback, setInjectFeedback] = useState<{ id: number; fallback: boolean } | null>(null);
   const [workerStatus, setWorkerStatus] = useState<{ isProcessing: boolean } | null>(null);
   // Users with canViewAll start with 'all', regular users start with 'mine'
   const [viewMode, setViewMode] = useState<'mine' | 'all'>(canViewAll ? 'all' : 'mine');
@@ -929,38 +927,12 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
     return text;
   };
 
-  const handleInject = async (text: string, id: number) => {
-    const result = await injectToActiveWindow({ text, charDelayMs: 2 });
-    if (!result.ok) {
-      throw new Error(result.error || 'Text konnte nicht in die Ziel-App eingefügt werden');
-    }
-
-    const fallback = isClipboardFallback(result);
-    setInjectFeedback({ id, fallback });
-    setTimeout(() => setInjectFeedback(null), 2000);
-
-    if (fallback) {
-      setError('Schreibdienst-Injector nicht erreichbar – Text wurde in die Zwischenablage kopiert. Ziel-App fokussieren und Strg+V drücken.');
-    } else {
-      setError(null);
-    }
-  };
-
   const handleCopyFromList = async (d: Dictation) => {
     try {
       const text = await getTextForDictation(d);
       await handleCopy(text, d.id);
     } catch (err: any) {
       setError(err.message || 'Fehler beim Kopieren');
-    }
-  };
-
-  const handleInjectFromList = async (d: Dictation) => {
-    try {
-      const text = await getTextForDictation(d);
-      await handleInject(text, d.id);
-    } catch (err: any) {
-      setError(err.message || 'Fehler beim Einfügen in die Ziel-App');
     }
   };
 
@@ -1595,15 +1567,6 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                         )}
                         {d.status === 'completed' && (
                           <button
-                            className={`btn btn-xs ${injectFeedback?.id === d.id ? 'btn-success' : 'btn-outline'}`}
-                            onClick={() => handleInjectFromList(d)}
-                            title="In vorherige Ziel-App einfügen"
-                          >
-                            {injectFeedback?.id === d.id ? (injectFeedback.fallback ? '📋' : '✓') : '⌨️'}
-                          </button>
-                        )}
-                        {d.status === 'completed' && (
-                          <button
                             className="btn btn-xs btn-outline"
                             onClick={async () => {
                               const confirmed = window.confirm(
@@ -1959,15 +1922,6 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                     >
                       {copyFeedback === selectedDictation.id ? '✓ Kopiert!' : '📋 In Zwischenablage'}
                     </button>
-                    <button
-                      className={`btn btn-sm flex-1 ${injectFeedback?.id === selectedDictation.id ? 'btn-success' : 'btn-outline'}`}
-                      onClick={() => handleInject(getCombinedTextEdited(), selectedDictation.id).catch((err) => setError(err.message || 'Fehler beim Einfügen in die Ziel-App'))}
-                      title="Text in die vorher fokussierte Ziel-App einfügen"
-                    >
-                      {injectFeedback?.id === selectedDictation.id
-                        ? (injectFeedback.fallback ? '📋 Fallback' : '✓ Eingefügt')
-                        : '⌨️ In Ziel-App'}
-                    </button>
                     {hasUnsavedChanges && (
                       <button className="btn btn-sm btn-warning" onClick={handleSave} title="Änderungen speichern">
                         💾 Speichern
@@ -2122,28 +2076,16 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                     </div>
                     
                     {d.status === 'completed' && (
-                      <div className="flex gap-1">
-                        <button
-                          className={`btn btn-sm ${copyFeedback === d.id ? 'btn-success' : 'btn-outline'}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCopyFromList(d);
-                          }}
-                          title="Text kopieren"
-                        >
-                          {copyFeedback === d.id ? '✓' : '📋'}
-                        </button>
-                        <button
-                          className={`btn btn-sm ${injectFeedback?.id === d.id ? 'btn-success' : 'btn-outline'}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleInjectFromList(d);
-                          }}
-                          title="In vorherige Ziel-App einfügen"
-                        >
-                          {injectFeedback?.id === d.id ? (injectFeedback.fallback ? '📋' : '✓') : '⌨️'}
-                        </button>
-                      </div>
+                      <button
+                        className={`btn btn-sm ${copyFeedback === d.id ? 'btn-success' : 'btn-outline'}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCopyFromList(d);
+                        }}
+                        title="Text kopieren"
+                      >
+                        {copyFeedback === d.id ? '✓' : '📋'}
+                      </button>
                     )}
                     
                     {d.status === 'error' && (
@@ -2555,15 +2497,6 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                         onClick={() => handleCopy(getCombinedTextEdited(), selectedDictation.id)}
                       >
                         {copyFeedback === selectedDictation.id ? '✓ Kopiert!' : '📋 In Zwischenablage'}
-                      </button>
-                      <button
-                        className={`btn btn-sm flex-1 ${injectFeedback?.id === selectedDictation.id ? 'btn-success' : 'btn-outline'}`}
-                        onClick={() => handleInject(getCombinedTextEdited(), selectedDictation.id).catch((err) => setError(err.message || 'Fehler beim Einfügen in die Ziel-App'))}
-                        title="Text in die vorher fokussierte Ziel-App einfügen"
-                      >
-                        {injectFeedback?.id === selectedDictation.id
-                          ? (injectFeedback.fallback ? '📋 Fallback' : '✓ Eingefügt')
-                          : '⌨️ In Ziel-App'}
                       </button>
                       {hasUnsavedChanges && (
                         <button

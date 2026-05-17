@@ -325,6 +325,7 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [liveInjectEnabled, setLiveInjectEnabled] = useState(false);
   const [liveInjectStatus, setLiveInjectStatus] = useState<string | null>(null);
+  const [liveInjectInFlight, setLiveInjectInFlight] = useState(false);
   const liveInjectEnabledRef = useRef(false);
   const liveInjectQueueRef = useRef<Promise<void>>(Promise.resolve());
   
@@ -462,43 +463,60 @@ export default function HomePage() {
     setLiveInjectStatus(liveInjectEnabled ? 'Bereit – Ziel-App fokussieren oder zuletzt verwendete App nutzen' : null);
   }, [liveInjectEnabled]);
 
-  const queueLiveInject = useCallback((text: string) => {
-    if (!liveInjectEnabledRef.current || !text.trim()) return;
+  const queueLiveInject = useCallback((text: string): Promise<void> => {
+    if (!liveInjectEnabledRef.current || !text.trim()) return Promise.resolve();
 
-    liveInjectQueueRef.current = liveInjectQueueRef.current
+    const queuedSend = liveInjectQueueRef.current
       .catch(() => undefined)
       .then(async () => {
         const shouldRestorePreviousWindow = typeof document !== 'undefined' && document.hasFocus();
         setLiveInjectStatus(shouldRestorePreviousWindow ? 'Sende an vorherige Ziel-App…' : 'Sende an aktive Ziel-App…');
+        setLiveInjectInFlight(true);
 
-        const result = await injectToActiveWindow({
-          text,
-          restorePreviousWindow: shouldRestorePreviousWindow,
-          delayMs: shouldRestorePreviousWindow ? 120 : 0,
-          charDelayMs: 2,
-          fallbackToClipboard: false,
-        });
+        try {
+          const result = await injectToActiveWindow({
+            text,
+            restorePreviousWindow: shouldRestorePreviousWindow,
+            delayMs: shouldRestorePreviousWindow ? 120 : 0,
+            charDelayMs: 2,
+            fallbackToClipboard: false,
+          });
 
-        if (!result.ok) {
-          setLiveInjectEnabled(false);
-          setLiveInjectStatus('Live-Übertragung fehlgeschlagen');
-          setError(result.error || 'Live-Übertragung in die Ziel-App fehlgeschlagen');
-          return;
+          if (!result.ok) {
+            setLiveInjectEnabled(false);
+            setLiveInjectStatus('Live-Übertragung fehlgeschlagen');
+            setError(result.error || 'Live-Übertragung in die Ziel-App fehlgeschlagen');
+            return;
+          }
+
+          setLiveInjectStatus(`Gesendet: ${text.trim().length} Zeichen`);
+        } finally {
+          setLiveInjectInFlight(false);
         }
-
-        setLiveInjectStatus(`Gesendet: ${text.trim().length} Zeichen`);
       });
+
+    liveInjectQueueRef.current = queuedSend;
+    return queuedSend;
   }, []);
 
-  const queueFinalSessionLiveInject = useCallback((sessionTranscript: string) => {
-    if (!sessionTranscript.trim()) return;
+  const queueFinalSessionLiveInject = useCallback((sessionTranscript: string): Promise<void> => {
+    if (!sessionTranscript.trim()) return Promise.resolve();
 
     const transcriptDelta = getIncrementalTranscript(lastTranscriptRef.current, sessionTranscript);
-    if (!transcriptDelta.trim()) return;
+    if (!transcriptDelta.trim()) return Promise.resolve();
 
     lastTranscriptRef.current = sessionTranscript;
-    queueLiveInject(applyFormattingControlWords(transcriptDelta));
-  }, [queueLiveInject]);
+    const formattedDelta = applyFormattingControlWords(transcriptDelta);
+    const existingTargetText = mode === 'befund'
+      ? (activeField === 'methodik' ? existingMethodikRef.current : activeField === 'beurteilung' ? existingBeurteilungRef.current : existingTextRef.current)
+      : existingTextRef.current;
+    const needsPrefixSpace = existingTargetText.trim().length > 0
+      && formattedDelta.trim().length > 0
+      && !/^\s/.test(formattedDelta)
+      && !/^[,.;:!?)]/.test(formattedDelta);
+
+    return queueLiveInject(`${needsPrefixSpace ? ' ' : ''}${formattedDelta}`);
+  }, [activeField, mode, queueLiveInject]);
 
   const replaceTextAtEndOrInsertDelta = useCallback((
     field: TextInsertionTarget,
@@ -1853,6 +1871,8 @@ export default function HomePage() {
   }, [mode, activeField, applyDictionaryToText, quickCorrectWithLLM, replaceTextAtEndOrInsertDelta]);
 
   async function startRecording() {
+    if (busy || liveInjectInFlight) return;
+
     setError(null);
     recordingStartedAtRef.current = Date.now();
     // Bestehenden Text behalten
@@ -2427,7 +2447,7 @@ export default function HomePage() {
         recordingStartedAtRef.current = null;
         const sessionTranscript = await transcribeChunk(blob, false, audioDurationSeconds);
         if (sessionTranscript) {
-          queueFinalSessionLiveInject(sessionTranscript);
+          await queueFinalSessionLiveInject(sessionTranscript);
 
           // Formatierung auf den Text anwenden (um Steuerwörter sofort zu ersetzen)
           const formattedTranscript = applyFormattingControlWords(sessionTranscript);
@@ -3038,8 +3058,9 @@ export default function HomePage() {
       <div className="flex gap-2 items-center">
         {!recording ? (
           <button 
-            className="w-16 h-16 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-lg transition-all hover:scale-105" 
+            className={`w-16 h-16 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-lg transition-all hover:scale-105 ${busy || liveInjectInFlight ? 'opacity-60 cursor-not-allowed' : ''}`}
             onClick={startRecording}
+            disabled={busy || liveInjectInFlight}
             title="Aufnahme starten"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
@@ -3050,7 +3071,7 @@ export default function HomePage() {
         ) : (
           <button 
             className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-lg transition-all hover:scale-105 animate-pulse" 
-            onClick={stopRecording} 
+            onClick={stopRecording}
             disabled={busy}
             title="Aufnahme stoppen"
           >
@@ -3231,8 +3252,9 @@ export default function HomePage() {
       {!recording ? (
         <button 
           ref={recordButtonRef}
-          className="w-12 h-12 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-md transition-all hover:scale-105" 
+          className={`w-12 h-12 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-md transition-all hover:scale-105 ${busy || liveInjectInFlight ? 'opacity-60 cursor-not-allowed' : ''}`}
           onClick={startRecording}
+          disabled={busy || liveInjectInFlight}
           title="Aufnahme starten"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">

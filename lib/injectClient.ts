@@ -19,6 +19,11 @@ const MESSAGE_SOURCE = 'schreibdienst-pwa';
 const RESPONSE_SOURCE = 'schreibdienst-extension';
 const RESPONSE_TIMEOUT_MS = 1500;
 
+function logInjectorEvent(event: string, details: Record<string, unknown>): void {
+  if (typeof console === 'undefined') return;
+  console.log(`[Injector] ${event}`, details);
+}
+
 function createRequestId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
@@ -27,20 +32,31 @@ function createRequestId(): string {
 }
 
 async function copyToClipboard(text: string): Promise<InjectResult> {
+  logInjectorEvent('Clipboard fallback write', {
+    text,
+    textLength: text.length,
+  });
   await navigator.clipboard.writeText(text);
   return { ok: true, fallback: 'clipboard' };
 }
 
-function sendToExtension(request: Required<Pick<InjectRequest, 'text' | 'mode' | 'restorePreviousWindow' | 'delayMs' | 'charDelayMs'>>): Promise<InjectResult> {
+function sendToExtension(
+  request: Required<Pick<InjectRequest, 'text' | 'mode' | 'restorePreviousWindow' | 'delayMs' | 'charDelayMs'>>,
+  requestId: string,
+): Promise<InjectResult> {
   return new Promise((resolve) => {
     if (typeof window === 'undefined') {
       resolve({ ok: false, error: 'Browserfenster nicht verfügbar' });
       return;
     }
 
-    const requestId = createRequestId();
     const timeout = window.setTimeout(() => {
       window.removeEventListener('message', handleResponse);
+      logInjectorEvent('Extension timeout', {
+        requestId,
+        text: request.text,
+        textLength: request.text.length,
+      });
       resolve({ ok: false, error: 'Schreibdienst-Injector nicht erreichbar' });
     }, RESPONSE_TIMEOUT_MS);
 
@@ -51,10 +67,22 @@ function sendToExtension(request: Required<Pick<InjectRequest, 'text' | 'mode' |
 
       window.clearTimeout(timeout);
       window.removeEventListener('message', handleResponse);
-      resolve(data.result ?? { ok: false, error: 'Ungültige Injector-Antwort' });
+      const result = data.result ?? { ok: false, error: 'Ungültige Injector-Antwort' };
+      logInjectorEvent('Extension response', {
+        requestId,
+        text: request.text,
+        textLength: request.text.length,
+        result,
+      });
+      resolve(result);
     }
 
     window.addEventListener('message', handleResponse);
+    logInjectorEvent('Extension request', {
+      requestId,
+      ...request,
+      textLength: request.text.length,
+    });
     window.postMessage({
       source: MESSAGE_SOURCE,
       type: 'inject-text',
@@ -80,17 +108,42 @@ export async function injectToActiveWindow({
     return { ok: false, error: 'Nur im Browser verfügbar' };
   }
 
+  const requestId = createRequestId();
+  logInjectorEvent('Inject request', {
+    requestId,
+    text,
+    textLength: text.length,
+    mode,
+    restorePreviousWindow,
+    delayMs,
+    charDelayMs,
+    fallbackToClipboard,
+  });
+
   const extensionResult = await sendToExtension({
     text,
     mode,
     restorePreviousWindow,
     delayMs,
     charDelayMs,
+  }, requestId);
+
+  logInjectorEvent('Inject result', {
+    requestId,
+    text,
+    textLength: text.length,
+    result: extensionResult,
   });
 
   if (extensionResult.ok || !fallbackToClipboard) {
     return extensionResult;
   }
+
+  logInjectorEvent('Inject fallback to clipboard', {
+    requestId,
+    text,
+    textLength: text.length,
+  });
 
   return copyToClipboard(text);
 }

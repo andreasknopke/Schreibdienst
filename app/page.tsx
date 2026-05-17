@@ -175,6 +175,16 @@ function getIncrementalTranscript(previousText: string, currentText: string): st
   return currentText;
 }
 
+function isUnstableLiveInjectText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  if (trimmed.includes(UNRECOGNIZED_UTTERANCE_PLACEHOLDER)) return true;
+  if (!/[\p{L}\p{N}]/u.test(trimmed)) return true;
+  if (/(?:…\s*){2,}|\.{3,}|(?:\.\s*){3,}/u.test(trimmed)) return true;
+  if (/([\p{L}])\1{3,}/iu.test(trimmed.normalize('NFC'))) return true;
+  return false;
+}
+
 function hiddenCaretOverlay(): CaretOverlayPosition {
   return { top: 0, left: 0, height: 0, visible: false };
 }
@@ -495,6 +505,10 @@ export default function HomePage() {
 
     const transcriptDelta = getIncrementalTranscript(lastTranscriptRef.current, sessionTranscript);
     if (!transcriptDelta.trim()) return;
+    if (isUnstableLiveInjectText(transcriptDelta)) {
+      setLiveInjectStatus('Live-Übertragung wartet auf stabiles Transkript');
+      return;
+    }
 
     lastTranscriptRef.current = sessionTranscript;
     queueLiveInject(applyFormattingControlWords(transcriptDelta));
@@ -1313,11 +1327,16 @@ export default function HomePage() {
       
       // Nur aktualisieren wenn sich etwas geändert hat
       if (currentTranscript && currentTranscript !== lastTranscriptRef.current) {
-        lastTranscriptRef.current = currentTranscript;
-
         if (!transcriptDelta.trim()) {
           return;
         }
+
+        if (isUnstableLiveInjectText(transcriptDelta)) {
+          setLiveInjectStatus('Live-Übertragung wartet auf stabiles Transkript');
+          return;
+        }
+
+        lastTranscriptRef.current = currentTranscript;
 
         queueLiveInject(transcriptDelta);
         

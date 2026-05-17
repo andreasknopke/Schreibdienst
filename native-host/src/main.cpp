@@ -308,103 +308,7 @@ INPUT makeUnicodeInput(wchar_t unit, bool keyUp) {
     return input;
 }
 
-void releaseModifierKeys() {
-    const WORD keys[] = {
-        VK_MENU, VK_LMENU, VK_RMENU,
-        VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
-        VK_SHIFT, VK_LSHIFT, VK_RSHIFT,
-        VK_LWIN, VK_RWIN,
-    };
-
-    std::vector<INPUT> inputs;
-    inputs.reserve(std::size(keys));
-    for (const WORD key : keys) {
-        inputs.push_back(makeVirtualKeyInput(key, true));
-    }
-    sendInputs(inputs);
-}
-
-bool isCandidateWindow(HWND window, HWND foregroundWindow) {
-    if (!window || window == foregroundWindow) return false;
-    if (!IsWindowVisible(window) || !IsWindowEnabled(window)) return false;
-    if (GetWindow(window, GW_OWNER) != nullptr) return false;
-
-    const LONG_PTR exStyle = GetWindowLongPtrW(window, GWL_EXSTYLE);
-    if ((exStyle & WS_EX_TOOLWINDOW) != 0) return false;
-
-    RECT rect{};
-    if (!GetWindowRect(window, &rect)) return false;
-    if (rect.right <= rect.left || rect.bottom <= rect.top) return false;
-
-    return true;
-}
-
-std::vector<HWND> getCandidateWindows(HWND foregroundWindow) {
-    struct EnumContext {
-        HWND foregroundWindow;
-        std::vector<HWND> windows;
-    } context{ foregroundWindow, {} };
-
-    EnumWindows([](HWND window, LPARAM parameter) -> BOOL {
-        auto* ctx = reinterpret_cast<EnumContext*>(parameter);
-        if (isCandidateWindow(window, ctx->foregroundWindow)) {
-            ctx->windows.push_back(window);
-        }
-        return TRUE;
-    }, reinterpret_cast<LPARAM>(&context));
-
-    return context.windows;
-}
-
-bool activateWindow(HWND targetWindow, std::uint32_t delayMs) {
-    if (!targetWindow) return false;
-
-    if (IsIconic(targetWindow)) {
-        ShowWindow(targetWindow, SW_RESTORE);
-    }
-
-    const HWND foregroundWindow = GetForegroundWindow();
-    const DWORD currentThread = GetCurrentThreadId();
-    const DWORD foregroundThread = foregroundWindow ? GetWindowThreadProcessId(foregroundWindow, nullptr) : 0;
-    const DWORD targetThread = GetWindowThreadProcessId(targetWindow, nullptr);
-
-    if (foregroundThread && foregroundThread != currentThread) {
-        AttachThreadInput(currentThread, foregroundThread, TRUE);
-    }
-    if (targetThread && targetThread != currentThread) {
-        AttachThreadInput(currentThread, targetThread, TRUE);
-    }
-
-    BringWindowToTop(targetWindow);
-    const bool activated = SetForegroundWindow(targetWindow) != FALSE;
-    SetActiveWindow(targetWindow);
-    SetFocus(targetWindow);
-
-    if (targetThread && targetThread != currentThread) {
-        AttachThreadInput(currentThread, targetThread, FALSE);
-    }
-    if (foregroundThread && foregroundThread != currentThread) {
-        AttachThreadInput(currentThread, foregroundThread, FALSE);
-    }
-
-    if (delayMs > 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
-    }
-
-    return activated || GetForegroundWindow() == targetWindow;
-}
-
 bool activatePreviousWindow(std::uint32_t delayMs) {
-    releaseModifierKeys();
-
-    const HWND foregroundWindow = GetForegroundWindow();
-    for (const HWND candidate : getCandidateWindows(foregroundWindow)) {
-        if (activateWindow(candidate, delayMs)) {
-            releaseModifierKeys();
-            return true;
-        }
-    }
-
     std::vector<INPUT> inputs;
     inputs.push_back(makeVirtualKeyInput(VK_MENU, false));
     inputs.push_back(makeVirtualKeyInput(VK_TAB, false));
@@ -418,7 +322,6 @@ bool activatePreviousWindow(std::uint32_t delayMs) {
     if (delayMs > 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
     }
-    releaseModifierKeys();
     return true;
 }
 
@@ -474,13 +377,9 @@ std::string handleRequest(const std::string& message) {
         std::this_thread::sleep_for(std::chrono::milliseconds(request.payload.delayMs));
     }
 
-    releaseModifierKeys();
-
     if (!sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
         return makeResponse(false, "SendInput failed", "");
     }
-
-    releaseModifierKeys();
 
     return makeResponse(true, "", request.payload.mode == L"uia" ? "sendinput-uia-fallback" : "sendinput");
 }

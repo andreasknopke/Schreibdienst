@@ -179,8 +179,8 @@ function isUnstableLiveInjectText(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return true;
   if (trimmed.includes(UNRECOGNIZED_UTTERANCE_PLACEHOLDER)) return true;
-  if (!/[\p{L}\p{N}]/u.test(trimmed)) return true;
   if (/(?:…\s*){2,}|\.{3,}|(?:\.\s*){3,}/u.test(trimmed)) return true;
+  if (!/[\p{L}\p{N}]/u.test(trimmed)) return !/^[.,;:!?)]$/u.test(trimmed);
   if (/([\p{L}])\1{3,}/iu.test(trimmed.normalize('NFC'))) return true;
   return false;
 }
@@ -500,20 +500,6 @@ export default function HomePage() {
       });
   }, []);
 
-  const queueFinalSessionLiveInject = useCallback((sessionTranscript: string) => {
-    if (!sessionTranscript.trim()) return;
-
-    const transcriptDelta = getIncrementalTranscript(lastTranscriptRef.current, sessionTranscript);
-    if (!transcriptDelta.trim()) return;
-    if (isUnstableLiveInjectText(transcriptDelta)) {
-      setLiveInjectStatus('Live-Übertragung wartet auf stabiles Transkript');
-      return;
-    }
-
-    lastTranscriptRef.current = sessionTranscript;
-    queueLiveInject(applyFormattingControlWords(transcriptDelta));
-  }, [queueLiveInject]);
-
   const replaceTextAtEndOrInsertDelta = useCallback((
     field: TextInsertionTarget,
     fullText: string,
@@ -743,6 +729,26 @@ export default function HomePage() {
     
     return result;
   }, [dictionaryEntries]);
+
+  const prepareLiveInjectDelta = useCallback((text: string): string => {
+    return applyDictionaryToText(applyFormattingControlWords(text));
+  }, [applyDictionaryToText]);
+
+  const queueFinalSessionLiveInject = useCallback((sessionTranscript: string) => {
+    if (!sessionTranscript.trim()) return;
+
+    const transcriptDelta = getIncrementalTranscript(lastTranscriptRef.current, sessionTranscript);
+    if (!transcriptDelta.trim()) return;
+
+    const preparedDelta = prepareLiveInjectDelta(transcriptDelta);
+    if (isUnstableLiveInjectText(preparedDelta)) {
+      setLiveInjectStatus('Live-Übertragung wartet auf stabiles Transkript');
+      return;
+    }
+
+    lastTranscriptRef.current = sessionTranscript;
+    queueLiveInject(preparedDelta);
+  }, [prepareLiveInjectDelta, queueLiveInject]);
 
   // Templates laden
   const fetchTemplates = useCallback(async () => {
@@ -1331,24 +1337,23 @@ export default function HomePage() {
           return;
         }
 
-        if (isUnstableLiveInjectText(transcriptDelta)) {
+        const preparedDelta = prepareLiveInjectDelta(transcriptDelta);
+
+        if (isUnstableLiveInjectText(preparedDelta)) {
           setLiveInjectStatus('Live-Übertragung wartet auf stabiles Transkript');
           return;
         }
 
         lastTranscriptRef.current = currentTranscript;
 
-        queueLiveInject(transcriptDelta);
+        queueLiveInject(preparedDelta);
         
-        // HINWEIS: Während der Live-Transkription wird KEINE Formatierung angewendet,
-        // um Hin-und-Her-Springen des Textes zu vermeiden (Whisper arbeitet in Chunks
-        // und kann sich wiederholen). Die Formatierung wird erst nach Aufnahmeende
-        // in stopRecording() angewendet.
+        // Live-Deltas laufen durch dieselbe Vorverarbeitung wie die Ziel-App-Übertragung:
+        // Formatierungswörter, Wörterbuch und phonetische Korrektur.
         
         if (mode === 'befund') {
           // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
-          // Hier nur grob nach Feldwechsel-Kommandos schauen, ohne Formatierung
-          const parsed = parseFieldCommands(transcriptDelta);
+          const parsed = parseFieldCommands(preparedDelta);
           
           if (parsed.lastField) {
             setActiveField(parsed.lastField);
@@ -1369,29 +1374,29 @@ export default function HomePage() {
             // Kein Steuerbefehl - Text geht ins aktive Feld
             switch (activeField) {
               case 'methodik':
-                lastMethodikRef.current = transcriptDelta;
-                setMethodik(combineTextForField('methodik', methodik, transcriptDelta));
+                lastMethodikRef.current = preparedDelta;
+                setMethodik(combineTextForField('methodik', methodik, preparedDelta));
                 break;
               case 'beurteilung':
-                lastBeurteilungRef.current = transcriptDelta;
-                setBeurteilung(combineTextForField('beurteilung', beurteilung, transcriptDelta));
+                lastBeurteilungRef.current = preparedDelta;
+                setBeurteilung(combineTextForField('beurteilung', beurteilung, preparedDelta));
                 break;
               case 'befund':
               default:
-                setTranscript(combineTextForField('befund', transcript, transcriptDelta));
+                setTranscript(combineTextForField('befund', transcript, preparedDelta));
                 break;
             }
           }
         } else {
           // Im Arztbrief-Modus: Normales Verhalten
-          const fullText = combineTextForField('transcript', transcript, transcriptDelta);
+          const fullText = combineTextForField('transcript', transcript, preparedDelta);
           setTranscript(fullText);
         }
       }
     } finally {
       setTranscribing(false);
     }
-  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, queueLiveInject]);
+  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, prepareLiveInjectDelta, queueLiveInject]);
 
   useEffect(() => {
     return () => {
@@ -2448,8 +2453,8 @@ export default function HomePage() {
         if (sessionTranscript) {
           queueFinalSessionLiveInject(sessionTranscript);
 
-          // Formatierung auf den Text anwenden (um Steuerwörter sofort zu ersetzen)
-          const formattedTranscript = applyFormattingControlWords(sessionTranscript);
+          // Formatierung, Wörterbuch und phonetische Korrektur anwenden.
+          const formattedTranscript = prepareLiveInjectDelta(sessionTranscript);
           
           // TEMPLATE-MODUS: Textbaustein mit diktierten Änderungen kombinieren
           if (templateMode && selectedTemplate) {

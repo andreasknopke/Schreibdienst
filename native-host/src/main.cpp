@@ -2,11 +2,14 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <future>
 #include <fcntl.h>
 #include <io.h>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -26,6 +29,28 @@ struct InjectPayload {
 struct NativeRequest {
     std::wstring type;
     InjectPayload payload;
+};
+
+struct HotkeyBinding {
+    int id;
+    UINT virtualKey;
+    const char* action;
+    const char* key;
+};
+
+struct HotkeyListener {
+    std::thread thread;
+    std::atomic<bool> running{false};
+    DWORD threadId = 0;
+};
+
+std::mutex g_writeMutex;
+
+constexpr HotkeyBinding HOTKEY_BINDINGS[] = {
+    {1, VK_F9, "toggle-recording", "F9"},
+    {2, VK_F10, "stop-recording", "F10"},
+    {3, VK_F11, "reset", "F11"},
+    {4, VK_ESCAPE, "cancel-recording", "Escape"},
 };
 
 void appendCodePoint(std::wstring& output, std::uint32_t codePoint) {
@@ -250,6 +275,24 @@ std::string makeResponse(bool ok, const std::string& error = "", const std::stri
     return response;
 }
 
+std::string makeTypedResponse(const std::string& type, bool ok, const std::string& error = "") {
+    std::string response = "{\"type\":\"" + jsonEscape(type) + "\",\"ok\":";
+    response += ok ? "true" : "false";
+    if (!error.empty()) {
+        response += ",\"error\":\"" + jsonEscape(error) + "\"";
+    }
+    response += "}";
+    return response;
+}
+
+std::string makeHotkeyEventResponse(const HotkeyBinding& binding) {
+    return "{\"type\":\"hotkey-event\",\"event\":{\"action\":\""
+        + jsonEscape(binding.action)
+        + "\",\"key\":\""
+        + jsonEscape(binding.key)
+        + "\"}}";
+}
+
 bool readExact(void* target, std::size_t size) {
     return std::fread(target, 1, size, stdin) == size;
 }
@@ -276,6 +319,117 @@ bool writeNativeMessage(const std::string& message) {
     return std::fwrite(&length, 1, sizeof(length), stdout) == sizeof(length)
         && std::fwrite(message.data(), 1, message.size(), stdout) == message.size()
         && std::fflush(stdout) == 0;
+}
+
+bool writeNativeMessageLocked(const std::string& message) {
+    const std::lock_guard<std::mutex> lock(g_writeMutex);
+    return writeNativeMessage(message);
+}
+
+const HotkeyBinding* findHotkeyBinding(WPARAM hotkeyId) {
+    for (const auto& binding : HOTKEY_BINDINGS) {
+        if (static_cast<WPARAM>(binding.id) == hotkeyId) {
+            return &binding;
+        }
+    }
+
+    return nullptr;
+}
+
+bool registerGlobalHotkeys(std::string& error) {
+    for (const auto& binding : HOTKEY_BINDINGS) {
+        if (!RegisterHotKey(nullptr, binding.id, MOD_NOREPEAT, binding.virtualKey)) {
+            error = std::string("RegisterHotKey fehlgeschlagen für ") + binding.key;
+            for (const auto& registered : HOTKEY_BINDINGS) {
+                if (registered.id == binding.id) {
+                    break;
+                }
+                UnregisterHotKey(nullptr, registered.id);
+            }
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void unregisterGlobalHotkeys() {
+    for (const auto& binding : HOTKEY_BINDINGS) {
+        UnregisterHotKey(nullptr, binding.id);
+    }
+}
+
+bool startHotkeyListener(HotkeyListener& listener, std::string& error) {
+    if (listener.thread.joinable()) {
+        return true;
+    }
+
+    std::promise<std::pair<bool, std::string>> readyPromise;
+    auto readyFuture = readyPromise.get_future();
+
+    listener.thread = std::thread([&listener, readyPromise = std::move(readyPromise)]() mutable {
+        listener.threadId = GetCurrentThreadId();
+
+        MSG queueMessage{};
+        PeekMessage(&queueMessage, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+
+        std::string registrationError;
+        if (!registerGlobalHotkeys(registrationError)) {
+            readyPromise.set_value({false, registrationError});
+            listener.threadId = 0;
+            return;
+        }
+
+        listener.running = true;
+        readyPromise.set_value({true, ""});
+
+        MSG message{};
+        while (GetMessage(&message, nullptr, 0, 0) > 0) {
+            if (message.message != WM_HOTKEY) {
+                continue;
+            }
+
+            const HotkeyBinding* binding = findHotkeyBinding(message.wParam);
+            if (binding == nullptr) {
+                continue;
+            }
+
+            if (!writeNativeMessageLocked(makeHotkeyEventResponse(*binding))) {
+                break;
+            }
+        }
+
+        unregisterGlobalHotkeys();
+        listener.running = false;
+        listener.threadId = 0;
+    });
+
+    const auto [ok, startupError] = readyFuture.get();
+    if (!ok) {
+        error = startupError;
+        if (listener.thread.joinable()) {
+            listener.thread.join();
+        }
+        return false;
+    }
+
+    return true;
+}
+
+void stopHotkeyListener(HotkeyListener& listener) {
+    if (!listener.thread.joinable()) {
+        listener.running = false;
+        listener.threadId = 0;
+        return;
+    }
+
+    if (listener.threadId != 0) {
+        PostThreadMessage(listener.threadId, WM_QUIT, 0, 0);
+    }
+
+    listener.thread.join();
+    listener.running = false;
+    listener.threadId = 0;
 }
 
 bool sendInputs(const std::vector<INPUT>& inputs) {
@@ -500,11 +654,37 @@ int main() {
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
 
+    HotkeyListener hotkeyListener;
+
     while (const auto message = readNativeMessage()) {
-        if (!writeNativeMessage(handleRequest(*message))) {
+        NativeRequest request;
+        try {
+            request = parseRequest(*message);
+        } catch (const std::exception& error) {
+            if (!writeNativeMessageLocked(makeResponse(false, std::string("Invalid request: ") + error.what(), ""))) {
+                stopHotkeyListener(hotkeyListener);
+                return 1;
+            }
+            continue;
+        }
+
+        if (request.type == L"listen-hotkeys") {
+            std::string error;
+            const bool started = startHotkeyListener(hotkeyListener, error);
+            if (!writeNativeMessageLocked(makeTypedResponse("hotkey-listener-ready", started, error))) {
+                stopHotkeyListener(hotkeyListener);
+                return 1;
+            }
+            continue;
+        }
+
+        if (!writeNativeMessageLocked(handleRequest(*message))) {
+            stopHotkeyListener(hotkeyListener);
             return 1;
         }
     }
+
+    stopHotkeyListener(hotkeyListener);
 
     return 0;
 }

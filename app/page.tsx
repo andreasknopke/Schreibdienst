@@ -19,6 +19,10 @@ import { injectToActiveWindow } from '@/lib/injectClient';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
+const PAGE_BRIDGE_SOURCE = 'schreibdienst-pwa';
+const EXTENSION_BRIDGE_SOURCE = 'schreibdienst-extension';
+
+type GlobalHotkeyAction = 'toggle-recording' | 'stop-recording' | 'reset' | 'cancel-recording';
 
 // Hilfsfunktion zum Kopieren in die Zwischenablage
 async function copyToClipboard(text: string): Promise<void> {
@@ -1566,44 +1570,85 @@ export default function HomePage() {
   // - Escape: Aufnahme abbrechen
   const recordingRef = useRef(recording);
   recordingRef.current = recording;
+  const startRecordingHotkeyRef = useRef(startRecording);
+  const stopRecordingHotkeyRef = useRef(stopRecording);
+  const resetHotkeyRef = useRef(handleReset);
+  startRecordingHotkeyRef.current = startRecording;
+  stopRecordingHotkeyRef.current = stopRecording;
+  resetHotkeyRef.current = handleReset;
+
+  const handleGlobalHotkeyAction = useCallback((action: GlobalHotkeyAction) => {
+    switch (action) {
+      case 'toggle-recording':
+        if (recordingRef.current) {
+          void stopRecordingHotkeyRef.current();
+        } else {
+          void startRecordingHotkeyRef.current();
+        }
+        break;
+      case 'stop-recording':
+      case 'cancel-recording':
+        if (recordingRef.current) {
+          void stopRecordingHotkeyRef.current();
+        }
+        break;
+      case 'reset':
+        resetHotkeyRef.current();
+        break;
+    }
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       switch (e.key) {
         case 'F9':
           e.preventDefault();
-          // Toggle Aufnahme
-          if (recordingRef.current) {
-            stopRecording();
-          } else {
-            startRecording();
-          }
+          handleGlobalHotkeyAction('toggle-recording');
           break;
         case 'F10':
           e.preventDefault();
-          // Stoppe Aufnahme
-          if (recordingRef.current) {
-            stopRecording();
-          }
+          handleGlobalHotkeyAction('stop-recording');
           break;
         case 'F11':
           e.preventDefault();
-          // Neu (alle Felder löschen)
-          handleReset();
+          handleGlobalHotkeyAction('reset');
           break;
         case 'Escape':
           e.preventDefault();
-          // Aufnahme abbrechen
-          if (recordingRef.current) {
-            stopRecording();
-          }
+          handleGlobalHotkeyAction('cancel-recording');
           break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [startRecording, stopRecording, handleReset]);
+  }, [handleGlobalHotkeyAction]);
+
+  useEffect(() => {
+    const handleExtensionMessage = (event: MessageEvent) => {
+      if (event.source !== window) return;
+
+      const data = event.data;
+      if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
+
+      if (data.type === 'global-hotkey' && typeof data.payload?.action === 'string') {
+        handleGlobalHotkeyAction(data.payload.action as GlobalHotkeyAction);
+        return;
+      }
+
+      if (data.type === 'global-hotkeys-registration' && data.result && !data.result.ok) {
+        console.warn('[Hotkeys] Globaler Hotkey-Bridge konnte nicht aktiviert werden:', data.result.error || 'Unbekannter Fehler');
+      }
+    };
+
+    window.addEventListener('message', handleExtensionMessage);
+    window.postMessage({ source: PAGE_BRIDGE_SOURCE, type: 'register-global-hotkeys' }, window.location.origin);
+
+    return () => {
+      window.removeEventListener('message', handleExtensionMessage);
+      window.postMessage({ source: PAGE_BRIDGE_SOURCE, type: 'unregister-global-hotkeys' }, window.location.origin);
+    };
+  }, [handleGlobalHotkeyAction]);
 
   useEffect(() => {
     const handleHidMediaControl = (event: Event) => {

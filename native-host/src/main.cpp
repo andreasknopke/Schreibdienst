@@ -308,6 +308,105 @@ INPUT makeUnicodeInput(wchar_t unit, bool keyUp) {
     return input;
 }
 
+struct ClipboardSnapshot {
+    bool hasText = false;
+    std::wstring text;
+};
+
+ClipboardSnapshot readClipboardText() {
+    ClipboardSnapshot snapshot;
+    if (!OpenClipboard(nullptr)) {
+        return snapshot;
+    }
+
+    HANDLE clipboardData = GetClipboardData(CF_UNICODETEXT);
+    if (clipboardData != nullptr) {
+        const auto* locked = static_cast<const wchar_t*>(GlobalLock(clipboardData));
+        if (locked != nullptr) {
+            snapshot.hasText = true;
+            snapshot.text = locked;
+            GlobalUnlock(clipboardData);
+        }
+    }
+
+    CloseClipboard();
+    return snapshot;
+}
+
+bool writeClipboardText(const std::wstring& text) {
+    if (!OpenClipboard(nullptr)) {
+        return false;
+    }
+
+    if (!EmptyClipboard()) {
+        CloseClipboard();
+        return false;
+    }
+
+    const std::size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (memory == nullptr) {
+        CloseClipboard();
+        return false;
+    }
+
+    auto* target = static_cast<wchar_t*>(GlobalLock(memory));
+    if (target == nullptr) {
+        GlobalFree(memory);
+        CloseClipboard();
+        return false;
+    }
+
+    std::copy(text.begin(), text.end(), target);
+    target[text.size()] = L'\0';
+    GlobalUnlock(memory);
+
+    if (SetClipboardData(CF_UNICODETEXT, memory) == nullptr) {
+        GlobalFree(memory);
+        CloseClipboard();
+        return false;
+    }
+
+    CloseClipboard();
+    return true;
+}
+
+bool restoreClipboardText(const ClipboardSnapshot& snapshot) {
+    if (!snapshot.hasText) {
+        if (!OpenClipboard(nullptr)) {
+            return false;
+        }
+        const bool emptied = EmptyClipboard() != FALSE;
+        CloseClipboard();
+        return emptied;
+    }
+
+    return writeClipboardText(snapshot.text);
+}
+
+bool sendPasteShortcut() {
+    const std::vector<INPUT> inputs = {
+        makeVirtualKeyInput(VK_CONTROL, false),
+        makeVirtualKeyInput('V', false),
+        makeVirtualKeyInput('V', true),
+        makeVirtualKeyInput(VK_CONTROL, true),
+    };
+    return sendInputs(inputs);
+}
+
+bool pasteClipboardText(const std::wstring& text) {
+    const ClipboardSnapshot snapshot = readClipboardText();
+    if (!writeClipboardText(text)) {
+        return false;
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    const bool pasted = sendPasteShortcut();
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    restoreClipboardText(snapshot);
+    return pasted;
+}
+
 bool activatePreviousWindow(std::uint32_t delayMs) {
     std::vector<INPUT> inputs;
     inputs.push_back(makeVirtualKeyInput(VK_MENU, false));
@@ -377,11 +476,22 @@ std::string handleRequest(const std::string& message) {
         std::this_thread::sleep_for(std::chrono::milliseconds(request.payload.delayMs));
     }
 
-    if (!sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
+    const bool success = request.payload.mode == L"clipboard"
+        ? pasteClipboardText(request.payload.text)
+        : sendUnicodeText(request.payload.text, request.payload.charDelayMs);
+
+    if (!success) {
         return makeResponse(false, "SendInput failed", "");
     }
 
-    return makeResponse(true, "", request.payload.mode == L"uia" ? "sendinput-uia-fallback" : "sendinput");
+    return makeResponse(
+        true,
+        "",
+        request.payload.mode == L"clipboard"
+            ? "clipboard"
+            : request.payload.mode == L"uia"
+                ? "sendinput-uia-fallback"
+                : "sendinput");
 }
 
 } // namespace

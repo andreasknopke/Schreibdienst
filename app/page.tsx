@@ -483,6 +483,7 @@ export default function HomePage() {
 
         const result = await injectToActiveWindow({
           text,
+          mode: 'clipboard',
           restorePreviousWindow: shouldRestorePreviousWindow,
           delayMs: shouldRestorePreviousWindow ? 250 : 0,
           charDelayMs: 0,

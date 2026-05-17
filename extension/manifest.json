@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Schreibdienst Injector",
+  "version": "0.1.0",
+  "description": "Leitet Diktattexte aus der Schreibdienst-PWA an den lokalen Windows-Injector weiter.",
+  "permissions": ["nativeMessaging"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content-script.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

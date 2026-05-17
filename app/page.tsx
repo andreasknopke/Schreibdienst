@@ -15,6 +15,7 @@ import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
+import { injectToActiveWindow, isClipboardFallback } from '@/lib/injectClient';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
@@ -322,6 +323,7 @@ export default function HomePage() {
   const [mode, setMode] = useState<'arztbrief' | 'befund'>('befund');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [injectFeedback, setInjectFeedback] = useState<string | null>(null);
   
   // Status tracking for UI indicators
   // Show banner during entire recording session, not just during active processing
@@ -2928,6 +2930,26 @@ export default function HomePage() {
     copyToClipboard(transcript);
   }
 
+  async function handleInjectText(text: string, feedbackKey: string) {
+    try {
+      const result = await injectToActiveWindow({ text });
+      if (!result.ok) {
+        throw new Error(result.error || 'Text konnte nicht in die Ziel-App eingefügt werden');
+      }
+
+      setInjectFeedback(feedbackKey);
+      setTimeout(() => setInjectFeedback(null), 2000);
+
+      if (isClipboardFallback(result)) {
+        setError('Schreibdienst-Injector nicht erreichbar – Text wurde in die Zwischenablage kopiert. Ziel-App fokussieren und Strg+V drücken.');
+      } else {
+        setError(null);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Fehler beim Einfügen in die Ziel-App');
+    }
+  }
+
   async function handleExportDocx() {
     await exportDocx(transcript, mode);
   }
@@ -3473,6 +3495,14 @@ export default function HomePage() {
                     >
                       📋
                     </button>
+                    <button
+                      className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+                      onClick={() => handleInjectText(methodik, 'methodik')}
+                      disabled={!methodik}
+                      title="In Ziel-App einfügen"
+                    >
+                      {injectFeedback === 'methodik' ? '✓' : '⌨️'}
+                    </button>
                   </div>
                 </div>
                 {/* Diff View für Methodik */}
@@ -3552,6 +3582,14 @@ export default function HomePage() {
                       title="Kopieren"
                     >
                       📋
+                    </button>
+                    <button
+                      className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+                      onClick={() => handleInjectText(transcript, 'befund')}
+                      disabled={!transcript}
+                      title="In Ziel-App einfügen"
+                    >
+                      {injectFeedback === 'befund' ? '✓' : '⌨️'}
                     </button>
                   </div>
                 </div>
@@ -3648,6 +3686,14 @@ export default function HomePage() {
                     >
                       📋
                     </button>
+                    <button
+                      className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+                      onClick={() => handleInjectText(beurteilung, 'beurteilung')}
+                      disabled={!beurteilung}
+                      title="In Ziel-App einfügen"
+                    >
+                      {injectFeedback === 'beurteilung' ? '✓' : '⌨️'}
+                    </button>
                   </div>
                 </div>
                 {/* Diff View für Beurteilung */}
@@ -3736,6 +3782,14 @@ export default function HomePage() {
                   title="Kopieren"
                 >
                   📋
+                </button>
+                <button
+                  className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+                  onClick={() => handleInjectText(transcript, 'transcript')}
+                  disabled={!transcript}
+                  title="In Ziel-App einfügen"
+                >
+                  {injectFeedback === 'transcript' ? '✓' : '⌨️'}
                 </button>
               </div>
             </div>

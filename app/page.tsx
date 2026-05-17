@@ -490,6 +490,16 @@ export default function HomePage() {
       });
   }, []);
 
+  const queueFinalSessionLiveInject = useCallback((sessionTranscript: string) => {
+    if (!sessionTranscript.trim()) return;
+
+    const transcriptDelta = getIncrementalTranscript(lastTranscriptRef.current, sessionTranscript);
+    if (!transcriptDelta.trim()) return;
+
+    lastTranscriptRef.current = sessionTranscript;
+    queueLiveInject(applyFormattingControlWords(transcriptDelta));
+  }, [queueLiveInject]);
+
   const replaceTextAtEndOrInsertDelta = useCallback((
     field: TextInsertionTarget,
     fullText: string,
@@ -2417,6 +2427,8 @@ export default function HomePage() {
         recordingStartedAtRef.current = null;
         const sessionTranscript = await transcribeChunk(blob, false, audioDurationSeconds);
         if (sessionTranscript) {
+          queueFinalSessionLiveInject(sessionTranscript);
+
           // Formatierung auf den Text anwenden (um Steuerwörter sofort zu ersetzen)
           const formattedTranscript = applyFormattingControlWords(sessionTranscript);
           

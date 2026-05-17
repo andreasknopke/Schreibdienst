@@ -21,7 +21,18 @@ const RESPONSE_TIMEOUT_MS = 1500;
 
 function logInjectorEvent(event: string, details: Record<string, unknown>): void {
   if (typeof console === 'undefined') return;
-  console.log(`[Injector] ${event}`, details);
+
+  const serialized = JSON.stringify(details, (_key, value) => {
+    if (value instanceof Error) {
+      return {
+        name: value.name,
+        message: value.message,
+      };
+    }
+    return value;
+  });
+
+  console.log(`[Injector] ${event} ${serialized}`);
 }
 
 function createRequestId(): string {

@@ -930,7 +930,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   };
 
   const handleInject = async (text: string, id: number) => {
-    const result = await injectToActiveWindow({ text });
+    const result = await injectToActiveWindow({ text, charDelayMs: 2 });
     if (!result.ok) {
       throw new Error(result.error || 'Text konnte nicht in die Ziel-App eingefügt werden');
     }

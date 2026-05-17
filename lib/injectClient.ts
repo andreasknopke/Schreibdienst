@@ -5,6 +5,8 @@ export interface InjectRequest {
   mode?: InjectMode;
   restorePreviousWindow?: boolean;
   delayMs?: number;
+  charDelayMs?: number;
+  fallbackToClipboard?: boolean;
 }
 
 export interface InjectResult {
@@ -29,7 +31,7 @@ async function copyToClipboard(text: string): Promise<InjectResult> {
   return { ok: true, fallback: 'clipboard' };
 }
 
-function sendToExtension(request: Required<Pick<InjectRequest, 'text' | 'mode' | 'restorePreviousWindow' | 'delayMs'>>): Promise<InjectResult> {
+function sendToExtension(request: Required<Pick<InjectRequest, 'text' | 'mode' | 'restorePreviousWindow' | 'delayMs' | 'charDelayMs'>>): Promise<InjectResult> {
   return new Promise((resolve) => {
     if (typeof window === 'undefined') {
       resolve({ ok: false, error: 'Browserfenster nicht verfügbar' });
@@ -67,9 +69,10 @@ export async function injectToActiveWindow({
   mode = 'sendinput',
   restorePreviousWindow = true,
   delayMs = 120,
+  charDelayMs = 2,
+  fallbackToClipboard = true,
 }: InjectRequest): Promise<InjectResult> {
-  const trimmedText = text.trim();
-  if (!trimmedText) {
+  if (!text.trim()) {
     return { ok: false, error: 'Kein Text zum Einfügen vorhanden' };
   }
 
@@ -78,17 +81,18 @@ export async function injectToActiveWindow({
   }
 
   const extensionResult = await sendToExtension({
-    text: trimmedText,
+    text,
     mode,
     restorePreviousWindow,
     delayMs,
+    charDelayMs,
   });
 
-  if (extensionResult.ok) {
+  if (extensionResult.ok || !fallbackToClipboard) {
     return extensionResult;
   }
 
-  return copyToClipboard(trimmedText);
+  return copyToClipboard(text);
 }
 
 export function isClipboardFallback(result: InjectResult): boolean {

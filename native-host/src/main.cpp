@@ -20,6 +20,7 @@ struct InjectPayload {
     std::wstring mode = L"sendinput";
     bool restorePreviousWindow = true;
     std::uint32_t delayMs = 120;
+    std::uint32_t charDelayMs = 2;
 };
 
 struct NativeRequest {
@@ -216,6 +217,7 @@ NativeRequest parseRequest(const std::string& json) {
     request.payload.mode = getStringValue(json, "mode", L"sendinput");
     request.payload.restorePreviousWindow = getBoolValue(json, "restorePreviousWindow", true);
     request.payload.delayMs = getUIntValue(json, "delayMs", 120);
+    request.payload.charDelayMs = getUIntValue(json, "charDelayMs", 2);
     return request;
 }
 
@@ -323,7 +325,24 @@ bool activatePreviousWindow(std::uint32_t delayMs) {
     return true;
 }
 
-bool sendUnicodeText(const std::wstring& text) {
+bool sendUnicodeText(const std::wstring& text, std::uint32_t charDelayMs) {
+    if (charDelayMs > 0) {
+        for (const wchar_t unit : text) {
+            const std::vector<INPUT> inputs = {
+                makeUnicodeInput(unit, false),
+                makeUnicodeInput(unit, true),
+            };
+
+            if (!sendInputs(inputs)) {
+                return false;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(charDelayMs));
+        }
+
+        return true;
+    }
+
     std::vector<INPUT> inputs;
     inputs.reserve(text.size() * 2);
 
@@ -358,7 +377,7 @@ std::string handleRequest(const std::string& message) {
         std::this_thread::sleep_for(std::chrono::milliseconds(request.payload.delayMs));
     }
 
-    if (!sendUnicodeText(request.payload.text)) {
+    if (!sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
         return makeResponse(false, "SendInput failed", "");
     }
 

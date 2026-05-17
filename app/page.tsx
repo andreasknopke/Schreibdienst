@@ -324,6 +324,9 @@ export default function HomePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [injectFeedback, setInjectFeedback] = useState<string | null>(null);
+  const [liveInjectEnabled, setLiveInjectEnabled] = useState(false);
+  const liveInjectEnabledRef = useRef(false);
+  const liveInjectQueueRef = useRef<Promise<void>>(Promise.resolve());
   
   // Status tracking for UI indicators
   // Show banner during entire recording session, not just during active processing
@@ -454,11 +457,40 @@ export default function HomePage() {
     return result.text;
   }, [getStoredSelection, setStoredSelection]);
 
+  useEffect(() => {
+    liveInjectEnabledRef.current = liveInjectEnabled;
+  }, [liveInjectEnabled]);
+
+  const queueLiveInject = useCallback((text: string) => {
+    if (!liveInjectEnabledRef.current || !text.trim()) return;
+
+    liveInjectQueueRef.current = liveInjectQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const result = await injectToActiveWindow({
+          text,
+          restorePreviousWindow: false,
+          delayMs: 0,
+          charDelayMs: 2,
+          fallbackToClipboard: false,
+        });
+
+        if (!result.ok) {
+          setLiveInjectEnabled(false);
+          setError(result.error || 'Live-Übertragung in die Ziel-App fehlgeschlagen');
+        }
+      });
+  }, []);
+
   const replaceTextAtEndOrInsertDelta = useCallback((
     field: TextInsertionTarget,
     fullText: string,
     incomingDelta: string
   ) => {
+    if (incomingDelta && incomingDelta.trim()) {
+      queueLiveInject(incomingDelta);
+    }
+
     // WICHTIG: Neu transkribierter Text wird IMMER gegen den aktuellsten Feld-State
     // berechnet. Der vorherige Stand darf nicht aus einem Render-Closure stammen,
     // weil mehrere VAD-Commits kurz hintereinander eintreffen koennen.
@@ -481,7 +513,7 @@ export default function HomePage() {
 
       return currentText;
     });
-  }, [setFieldText, combineTextForField]);
+  }, [setFieldText, combineTextForField, queueLiveInject]);
 
   const showPersistentCaret = recording || transcribing || busy || correcting;
 
@@ -1268,6 +1300,8 @@ export default function HomePage() {
         if (!transcriptDelta.trim()) {
           return;
         }
+
+        queueLiveInject(transcriptDelta);
         
         // HINWEIS: Während der Live-Transkription wird KEINE Formatierung angewendet,
         // um Hin-und-Her-Springen des Textes zu vermeiden (Whisper arbeitet in Chunks
@@ -1320,7 +1354,7 @@ export default function HomePage() {
     } finally {
       setTranscribing(false);
     }
-  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript]);
+  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, queueLiveInject]);
 
   useEffect(() => {
     return () => {
@@ -2932,7 +2966,7 @@ export default function HomePage() {
 
   async function handleInjectText(text: string, feedbackKey: string) {
     try {
-      const result = await injectToActiveWindow({ text });
+      const result = await injectToActiveWindow({ text, charDelayMs: 2 });
       if (!result.ok) {
         throw new Error(result.error || 'Text konnte nicht in die Ziel-App eingefügt werden');
       }
@@ -3029,6 +3063,13 @@ export default function HomePage() {
             )}
           </button>
         )}
+        <button
+          className={`btn text-sm py-2 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
+          onClick={() => setLiveInjectEnabled((enabled) => !enabled)}
+          title="Während der Aufnahme neue Wörter direkt in das aktuell aktive Windows-Fenster schreiben"
+        >
+          {liveInjectEnabled ? '⌨️ Live Ziel-App an' : '⌨️ Live Ziel-App'}
+        </button>
       </div>
     </div>
   );

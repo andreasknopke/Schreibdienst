@@ -10,6 +10,7 @@ import {
   listDictionaryGroupsWithRequest,
   removeDictionaryGroupEntryWithRequest,
   setDictionaryGroupMembersWithRequest,
+  updateDictionaryGroupPromptInsertWithRequest,
   upsertDictionaryGroupEntryWithRequest,
 } from '@/lib/groupDictionaryDb';
 
@@ -124,6 +125,15 @@ export async function PATCH(request: NextRequest) {
         request,
         Number(body.groupId),
         Array.isArray(body.usernames) ? body.usernames : []
+      );
+      return NextResponse.json(result, { status: result.success ? 200 : 400 });
+    }
+
+    if (body.action === 'set-prompt-insert') {
+      const result = await updateDictionaryGroupPromptInsertWithRequest(
+        request,
+        Number(body.groupId),
+        typeof body.promptInsert === 'string' ? body.promptInsert : ''
       );
       return NextResponse.json(result, { status: result.success ? 200 : 400 });
     }

@@ -6,6 +6,7 @@ export interface DictionaryGroup {
   id: number;
   name: string;
   description: string;
+  promptInsert?: string;
   createdAt: string;
   createdBy: string;
   memberCount: number;
@@ -28,6 +29,12 @@ export interface GroupImportCandidate extends DictionaryEntry {
   sourceUsername: string;
   alreadyInGroup: boolean;
   groupCorrect?: string;
+}
+
+export interface GroupPromptInsert {
+  groupId: number;
+  groupName: string;
+  promptInsert: string;
 }
 
 const tablesCheckedPerPool = new Map<string, boolean>();
@@ -57,6 +64,7 @@ async function ensureGroupDictionaryTables(request: NextRequest): Promise<void> 
       id INT AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(255) NOT NULL UNIQUE,
       description TEXT,
+      prompt_insert TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_by VARCHAR(255)
     )
@@ -94,6 +102,22 @@ async function ensureGroupDictionaryTables(request: NextRequest): Promise<void> 
     { column: 'phonetic_min_similarity', sql: 'ADD COLUMN phonetic_min_similarity DOUBLE DEFAULT NULL' },
     { column: 'added_by', sql: 'ADD COLUMN added_by VARCHAR(255)' },
   ];
+
+  const [groupColumns] = await db.execute<any[]>(`
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'dictionary_groups'
+  `);
+  const existingGroupColumns = new Set((groupColumns || []).map(row => String(row.COLUMN_NAME).toLowerCase()));
+
+  if (!existingGroupColumns.has('prompt_insert')) {
+    try {
+      await db.execute(`ALTER TABLE dictionary_groups ADD COLUMN prompt_insert TEXT`);
+    } catch {
+      // Concurrent startup or existing column; safe to ignore.
+    }
+  }
 
   const [entryColumns] = await db.execute<any[]>(`
     SELECT COLUMN_NAME
@@ -167,6 +191,7 @@ export async function listDictionaryGroupsWithRequest(request: NextRequest): Pro
       g.id,
       g.name,
       COALESCE(g.description, '') AS description,
+      COALESCE(g.prompt_insert, '') AS prompt_insert,
       g.created_at,
       COALESCE(g.created_by, '') AS created_by,
       COUNT(DISTINCT m.username) AS member_count,
@@ -174,7 +199,7 @@ export async function listDictionaryGroupsWithRequest(request: NextRequest): Pro
     FROM dictionary_groups g
     LEFT JOIN dictionary_group_members m ON m.group_id = g.id
     LEFT JOIN dictionary_group_entries e ON e.group_id = g.id
-    GROUP BY g.id, g.name, g.description, g.created_at, g.created_by
+    GROUP BY g.id, g.name, g.description, g.prompt_insert, g.created_at, g.created_by
     ORDER BY g.name ASC
   `);
 
@@ -182,6 +207,7 @@ export async function listDictionaryGroupsWithRequest(request: NextRequest): Pro
     id: Number(row.id),
     name: row.name,
     description: row.description || '',
+    promptInsert: row.prompt_insert || '',
     createdAt: row.created_at?.toISOString?.() || new Date().toISOString(),
     createdBy: row.created_by || '',
     memberCount: Number(row.member_count || 0),
@@ -267,6 +293,30 @@ export async function setDictionaryGroupMembersWithRequest(
   }
 }
 
+export async function updateDictionaryGroupPromptInsertWithRequest(
+  request: NextRequest,
+  groupId: number,
+  promptInsert: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await ensureGroupDictionaryTables(request);
+    const db = await getPoolForRequest(request);
+    const [result] = await db.execute<any>(
+      'UPDATE dictionary_groups SET prompt_insert = ? WHERE id = ?',
+      [promptInsert.trim(), groupId]
+    );
+
+    if (result.affectedRows === 0) {
+      return { success: false, error: 'Gruppe nicht gefunden' };
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('[GroupDictionary] Update prompt insert error:', error);
+    return { success: false, error: 'Datenbankfehler' };
+  }
+}
+
 export async function getDictionaryGroupEntriesWithRequest(request: NextRequest, groupId: number): Promise<GroupDictionaryEntry[]> {
   await ensureGroupDictionaryTables(request);
   const db = await getPoolForRequest(request);
@@ -302,6 +352,40 @@ export async function getEntriesForUserGroupsWithRequest(request: NextRequest, u
     entries.push(rowToEntry(row));
   }
   return entries;
+}
+
+export async function getPromptInsertsForUserGroupsWithRequest(request: NextRequest, username: string): Promise<GroupPromptInsert[]> {
+  await ensureGroupDictionaryTables(request);
+  const db = await getPoolForRequest(request);
+  const [rows] = await db.execute<any[]>(`
+    SELECT DISTINCT
+      g.id,
+      g.name,
+      COALESCE(g.prompt_insert, '') AS prompt_insert
+    FROM dictionary_groups g
+    JOIN dictionary_group_members m ON m.group_id = g.id
+    WHERE m.username = ?
+      AND g.prompt_insert IS NOT NULL
+      AND TRIM(g.prompt_insert) != ''
+    ORDER BY g.name ASC
+  `, [username]);
+
+  return rows.map((row) => ({
+    groupId: Number(row.id),
+    groupName: row.name,
+    promptInsert: row.prompt_insert,
+  }));
+}
+
+export function formatGroupPromptInsertSection(promptInserts: GroupPromptInsert[]): string {
+  if (!promptInserts.length) return '';
+
+  const lines = promptInserts.map((entry) => `- ${entry.groupName}: ${entry.promptInsert.trim()}`);
+  return `
+
+ABTEILUNGS-/GRUPPENSPEZIFISCHE HINWEISE:
+${lines.join('\n')}
+Nutze diese Hinweise nur dann, wenn sie helfen, unklare oder phonetisch verzerrte Wortfolgen korrekt aufzulösen.`;
 }
 
 export async function upsertDictionaryGroupEntryWithRequest(

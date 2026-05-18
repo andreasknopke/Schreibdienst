@@ -72,6 +72,8 @@ interface TimestampedWord {
   isInterpolated?: boolean; // True if timestamp was estimated
 }
 
+const LAST_OPENED_DICTATION_STORAGE_KEY = 'offline-last-opened-dictation-id';
+
 /**
  * Maps timestamps from original transcription to corrected text using word matching.
  * Unchanged words get their exact timestamps, changed words get interpolated timestamps.
@@ -308,6 +310,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [lastOpenedDictationId, setLastOpenedDictationId] = useState<number | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<number | null>(null);
   const [workerStatus, setWorkerStatus] = useState<{ isProcessing: boolean } | null>(null);
   // Users with canViewAll start with 'all', regular users start with 'mine'
@@ -390,6 +393,23 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   // Playback speed control
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
+  const rememberLastOpenedDictation = useCallback((dictationId: number) => {
+    setLastOpenedDictationId(dictationId);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LAST_OPENED_DICTATION_STORAGE_KEY, String(dictationId));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedValue = window.localStorage.getItem(LAST_OPENED_DICTATION_STORAGE_KEY);
+    if (!storedValue) return;
+    const parsed = Number(storedValue);
+    if (Number.isInteger(parsed) && parsed > 0) {
+      setLastOpenedDictationId(parsed);
+    }
+  }, []);
 
   // Load available users for filter
   const loadUsers = useCallback(async () => {
@@ -1518,14 +1538,21 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                 {filteredAndSortedDictations.map((d) => (
+                  (() => {
+                    const isSelected = selectedId === d.id;
+                    const isLastOpened = !isSelected && lastOpenedDictationId === d.id;
+                    return (
                   <tr 
                     key={d.id}
                     className={`cursor-pointer transition-colors ${
-                      selectedId === d.id 
-                        ? 'bg-blue-50 dark:bg-blue-900/20' 
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                      isSelected
+                        ? 'bg-blue-50 dark:bg-blue-900/20'
+                        : isLastOpened
+                          ? 'bg-amber-50 dark:bg-amber-900/20 ring-1 ring-inset ring-amber-200 dark:ring-amber-800'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
                     }`}
                     onClick={() => {
+                      rememberLastOpenedDictation(d.id);
                       setSelectedId(d.id);
                       if (d.status === 'completed') {
                         setIsFullscreen(true);
@@ -1618,6 +1645,8 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                       </div>
                     </td>
                   </tr>
+                    );
+                  })()
                 ))}
               </tbody>
             </table>
@@ -1635,7 +1664,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
             {/* Fullscreen backdrop */}
             <div 
               className="fixed inset-0 bg-black/50 -z-10" 
-              onClick={() => { setIsFullscreen(false); setSelectedId(null); }}
+              onClick={() => { setIsFullscreen(false); }}
             />
             <div className="card-body flex h-full min-h-0 flex-col gap-4">
               {selectedDictation.status === 'completed' && (
@@ -1668,7 +1697,6 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                           {isPlaying ? '⏸️' : '▶️'}
                         </button>
                         <button className="btn btn-sm btn-outline" onClick={() => seekRelative(10)} title="10s vorwärts">10 ⏩</button>
-                        
                         <span className="text-sm font-mono text-gray-600 dark:text-gray-400 ml-2">
                           {formatTime(audioCurrentTime)} / {formatTime(audioDuration)}
                         </span>
@@ -2009,14 +2037,21 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
           {/* List */}
           <div className="space-y-2">
             {filteredAndSortedDictations.map((d) => (
+              (() => {
+                const isSelected = selectedId === d.id;
+                const isLastOpened = !isSelected && lastOpenedDictationId === d.id;
+                return (
               <div
                 key={d.id}
                 className={`card cursor-pointer transition-all ${
-                  selectedId === d.id 
-                    ? 'ring-2 ring-blue-500' 
-                    : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                  isSelected
+                    ? 'ring-2 ring-blue-500'
+                    : isLastOpened
+                      ? 'ring-2 ring-amber-400 bg-amber-50/70 dark:bg-amber-900/10'
+                      : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'
                 }`}
                 onClick={() => {
+                  rememberLastOpenedDictation(d.id);
                   setSelectedId(d.id);
                   // Bei fertigen Diktaten direkt Vollbild öffnen
                   if (d.status === 'completed') {
@@ -2115,6 +2150,8 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   </div>
                 </div>
               </div>
+                );
+              })()
             ))}
           </div>
 

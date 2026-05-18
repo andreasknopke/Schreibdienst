@@ -11,6 +11,7 @@ interface DictionaryGroup {
   id: number;
   name: string;
   description: string;
+  promptInsert?: string;
   memberCount: number;
   entryCount: number;
 }
@@ -36,6 +37,18 @@ interface ImportCandidate {
   matchStem?: boolean;
   alreadyInGroup: boolean;
   groupCorrect?: string;
+}
+
+interface EditableEntryDraft {
+  originalWrong: string;
+  wrong: string;
+  correct: string;
+  useInPrompt: boolean;
+  matchStem: boolean;
+}
+
+interface EditableCandidateDraft extends EditableEntryDraft {
+  sourceUsername: string;
 }
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
@@ -70,10 +83,34 @@ export default function GroupDictionaryManager() {
   const [useInPrompt, setUseInPrompt] = useState(false);
   const [matchStem, setMatchStem] = useState(false);
   const [overwriteExisting, setOverwriteExisting] = useState(false);
+  const [filter, setFilter] = useState('');
+  const [editingGroupEntry, setEditingGroupEntry] = useState<EditableEntryDraft | null>(null);
+  const [editingCandidate, setEditingCandidate] = useState<EditableCandidateDraft | null>(null);
+  const [savingCandidateEdit, setSavingCandidateEdit] = useState(false);
+  const [groupPromptInsert, setGroupPromptInsert] = useState('');
+  const [savingGroupPromptInsert, setSavingGroupPromptInsert] = useState(false);
 
   const selectedGroup = groups.find(group => group.id === selectedGroupId) || null;
   const selectedMemberNames = useMemo(() => new Set(members.map(member => member.username)), [members]);
-  const visibleCandidates = candidates;
+  const normalizedFilter = filter.trim().toLowerCase();
+  const visibleEntries = useMemo(
+    () => entries.filter((entry) => {
+      if (!normalizedFilter) return true;
+      return [entry.wrong, entry.correct, entry.addedBy]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(normalizedFilter));
+    }),
+    [entries, normalizedFilter]
+  );
+  const visibleCandidates = useMemo(
+    () => candidates.filter((candidate) => {
+      if (!normalizedFilter) return true;
+      return [candidate.sourceUsername, candidate.wrong, candidate.correct, candidate.groupCorrect]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(normalizedFilter));
+    }),
+    [candidates, normalizedFilter]
+  );
   const selectableCandidateKeys = useMemo(
     () => visibleCandidates
       .filter(candidate => overwriteExisting || !candidate.alreadyInGroup)
@@ -136,6 +173,8 @@ export default function GroupDictionaryManager() {
       setMembers(detailData.members || []);
       setCandidates(candidatesData.candidates || []);
       setSelectedCandidateKeys(new Set());
+      setEditingGroupEntry(null);
+      setEditingCandidate(null);
     } catch {
       setError('Fehler beim Laden der Gruppe');
     } finally {
@@ -156,6 +195,18 @@ export default function GroupDictionaryManager() {
       setCandidates([]);
     }
   }, [selectedGroupId]);
+
+  useEffect(() => {
+    setGroupPromptInsert(selectedGroup?.promptInsert || '');
+  }, [selectedGroup?.id, selectedGroup?.promptInsert]);
+
+  const resetEntryForm = () => {
+    setWrong('');
+    setCorrect('');
+    setUseInPrompt(false);
+    setMatchStem(false);
+    setEditingGroupEntry(null);
+  };
 
   const handleCreateGroup = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -216,21 +267,34 @@ export default function GroupDictionaryManager() {
     setSuccess('');
 
     try {
+      const trimmedWrong = wrong.trim();
+      const trimmedCorrect = correct.trim();
       const response = await fetch('/api/dictionary-groups', {
         method: 'POST',
         headers: requestJsonHeaders(),
-        body: JSON.stringify({ action: 'add-entry', groupId: selectedGroupId, wrong, correct, useInPrompt, matchStem }),
+        body: JSON.stringify({ action: 'add-entry', groupId: selectedGroupId, wrong: trimmedWrong, correct: trimmedCorrect, useInPrompt, matchStem }),
       });
       const data = await response.json();
       if (!response.ok || !data.success) {
         setError(data.error || 'Fehler beim Speichern');
         return;
       }
-      setSuccess(`"${wrong}" in Gruppe übernommen`);
-      setWrong('');
-      setCorrect('');
-      setUseInPrompt(false);
-      setMatchStem(false);
+
+      if (editingGroupEntry && editingGroupEntry.originalWrong !== trimmedWrong) {
+        const deleteResponse = await fetch('/api/dictionary-groups', {
+          method: 'DELETE',
+          headers: requestJsonHeaders(),
+          body: JSON.stringify({ action: 'delete-entry', groupId: selectedGroupId, wrong: editingGroupEntry.originalWrong }),
+        });
+        const deleteData = await deleteResponse.json();
+        if (!deleteResponse.ok || !deleteData.success) {
+          setError(deleteData.error || 'Eintrag aktualisiert, alter Schlüssel konnte aber nicht entfernt werden');
+          return;
+        }
+      }
+
+      setSuccess(editingGroupEntry ? `"${trimmedWrong}" aktualisiert` : `"${trimmedWrong}" in Gruppe übernommen`);
+      resetEntryForm();
       await fetchGroupDetails(selectedGroupId);
       await fetchOverview();
       notifyDictionaryChanged();
@@ -258,6 +322,90 @@ export default function GroupDictionaryManager() {
       notifyDictionaryChanged();
     } catch {
       setError('Verbindungsfehler');
+    }
+  };
+
+  const handleEditGroupEntry = (entry: GroupEntry) => {
+    setEditingCandidate(null);
+    setEditingGroupEntry({
+      originalWrong: entry.wrong,
+      wrong: entry.wrong,
+      correct: entry.correct,
+      useInPrompt: Boolean(entry.useInPrompt),
+      matchStem: Boolean(entry.matchStem),
+    });
+    setWrong(entry.wrong);
+    setCorrect(entry.correct);
+    setUseInPrompt(Boolean(entry.useInPrompt));
+    setMatchStem(Boolean(entry.matchStem));
+    setSuccess('');
+    setError('');
+  };
+
+  const handleEditCandidate = (candidate: ImportCandidate) => {
+    setEditingGroupEntry(null);
+    setEditingCandidate({
+      sourceUsername: candidate.sourceUsername,
+      originalWrong: candidate.wrong,
+      wrong: candidate.wrong,
+      correct: candidate.correct,
+      useInPrompt: Boolean(candidate.useInPrompt),
+      matchStem: Boolean(candidate.matchStem),
+    });
+    setSuccess('');
+    setError('');
+  };
+
+  const handleSaveCandidateEdit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingCandidate) return;
+
+    setSavingCandidateEdit(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const trimmedWrong = editingCandidate.wrong.trim();
+      const trimmedCorrect = editingCandidate.correct.trim();
+
+      const upsertResponse = await fetch('/api/dictionary', {
+        method: 'POST',
+        headers: requestJsonHeaders(),
+        body: JSON.stringify({
+          username: editingCandidate.sourceUsername,
+          wrong: trimmedWrong,
+          correct: trimmedCorrect,
+          useInPrompt: editingCandidate.useInPrompt,
+          matchStem: editingCandidate.matchStem,
+        }),
+      });
+      const upsertData = await upsertResponse.json();
+      if (!upsertResponse.ok || !upsertData.success) {
+        setError(upsertData.error || 'Fehler beim Aktualisieren des Benutzereintrag');
+        return;
+      }
+
+      if (editingCandidate.originalWrong !== trimmedWrong) {
+        const deleteResponse = await fetch('/api/dictionary', {
+          method: 'DELETE',
+          headers: requestJsonHeaders(),
+          body: JSON.stringify({ username: editingCandidate.sourceUsername, wrong: editingCandidate.originalWrong }),
+        });
+        const deleteData = await deleteResponse.json();
+        if (!deleteResponse.ok || !deleteData.success) {
+          setError(deleteData.error || 'Eintrag aktualisiert, alter Schlüssel konnte aber nicht entfernt werden');
+          return;
+        }
+      }
+
+      setSuccess(`Benutzereintrag von ${editingCandidate.sourceUsername} aktualisiert`);
+      setEditingCandidate(null);
+      await fetchGroupDetails(selectedGroupId!);
+      notifyDictionaryChanged();
+    } catch {
+      setError('Verbindungsfehler');
+    } finally {
+      setSavingCandidateEdit(false);
     }
   };
 
@@ -329,6 +477,37 @@ export default function GroupDictionaryManager() {
     }
   };
 
+  const handleSaveGroupPromptInsert = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedGroupId) return;
+
+    try {
+      setSavingGroupPromptInsert(true);
+      setError('');
+      setSuccess('');
+      const response = await fetch('/api/dictionary-groups', {
+        method: 'PATCH',
+        headers: requestJsonHeaders(),
+        body: JSON.stringify({
+          action: 'set-prompt-insert',
+          groupId: selectedGroupId,
+          promptInsert: groupPromptInsert,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        setError(data.error || 'Fehler beim Speichern des Prompt-Insert');
+        return;
+      }
+      setSuccess(`Prompt-Insert für "${selectedGroup?.name}" gespeichert`);
+      await fetchOverview();
+    } catch {
+      setError('Verbindungsfehler');
+    } finally {
+      setSavingGroupPromptInsert(false);
+    }
+  };
+
   if (loading) {
     return <div className="text-sm text-gray-500 p-4">Lade Gruppenwörterbücher...</div>;
   }
@@ -383,6 +562,24 @@ export default function GroupDictionaryManager() {
 
             {detailLoading ? <div className="text-sm text-gray-500">Lade Gruppe...</div> : (
               <>
+                <form onSubmit={handleSaveGroupPromptInsert} className="space-y-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h5 className="font-medium text-sm">Gruppenspezifischer Prompt-Insert</h5>
+                      <div className="text-xs text-gray-500">Zusätzlicher Hinweis für das Korrekturmodul, z.B. für häufig verunstaltete Floskeln der Abteilung.</div>
+                    </div>
+                    <button type="submit" className="btn btn-primary text-sm" disabled={savingGroupPromptInsert}>
+                      {savingGroupPromptInsert ? 'Speichere...' : 'Prompt speichern'}
+                    </button>
+                  </div>
+                  <textarea
+                    className="textarea textarea-bordered w-full min-h-28 text-sm"
+                    value={groupPromptInsert}
+                    onChange={(event) => setGroupPromptInsert(event.target.value)}
+                    placeholder="z.B. Bei unverständlichen Wortkombinationen rund um Ambulanz-/Abteilungsnamen prüfen, ob 'Rheumatologische Fachambulanz' gemeint ist."
+                  />
+                </form>
+
                 <div className="space-y-2">
                   <h5 className="font-medium text-sm">Mitglieder</h5>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-36 overflow-y-auto p-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
@@ -396,7 +593,12 @@ export default function GroupDictionaryManager() {
                 </div>
 
                 <form onSubmit={handleAddEntry} className="space-y-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                  <h5 className="font-medium text-sm">Gruppeneintrag hinzufügen</h5>
+                  <div className="flex items-center justify-between gap-3">
+                    <h5 className="font-medium text-sm">{editingGroupEntry ? 'Gruppeneintrag bearbeiten' : 'Gruppeneintrag hinzufügen'}</h5>
+                    {editingGroupEntry && (
+                      <button type="button" onClick={resetEntryForm} className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">Bearbeitung abbrechen</button>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <input className="input text-sm" value={wrong} onChange={event => setWrong(event.target.value)} placeholder="Falsch erkannt" required />
                     <input className="input text-sm" value={correct} onChange={event => setCorrect(event.target.value)} placeholder="Korrekt" required />
@@ -406,29 +608,79 @@ export default function GroupDictionaryManager() {
                       <label className="flex items-center gap-2"><input type="checkbox" checked={useInPrompt} onChange={event => setUseInPrompt(event.target.checked)} /> Im Prompt</label>
                       <label className="flex items-center gap-2"><input type="checkbox" checked={matchStem} onChange={event => setMatchStem(event.target.checked)} /> Wortstamm</label>
                     </div>
-                    <button type="submit" className="btn btn-primary text-sm">Hinzufügen</button>
+                    <button type="submit" className="btn btn-primary text-sm">{editingGroupEntry ? 'Speichern' : 'Hinzufügen'}</button>
                   </div>
                 </form>
 
+                <div className="space-y-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <h5 className="font-medium text-sm">Suche</h5>
+                    {filter && (
+                      <button type="button" onClick={() => setFilter('')} className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">Filter löschen</button>
+                    )}
+                  </div>
+                  <input
+                    className="input text-sm"
+                    value={filter}
+                    onChange={(event) => setFilter(event.target.value)}
+                    placeholder="Nach Begriff, Korrektur oder Benutzer suchen"
+                  />
+                </div>
+
                 <div className="space-y-2">
-                  <h5 className="font-medium text-sm flex justify-between"><span>Gruppenwörterbuch</span><span className="text-xs text-gray-500 font-normal">{entries.length} Einträge</span></h5>
+                  <h5 className="font-medium text-sm flex justify-between"><span>Gruppenwörterbuch</span><span className="text-xs text-gray-500 font-normal">{visibleEntries.length}{visibleEntries.length !== entries.length ? ` / ${entries.length}` : ''} Einträge</span></h5>
                   {entries.length === 0 ? (
                     <div className="text-sm text-gray-500 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">Noch keine Gruppeneinträge.</div>
+                  ) : visibleEntries.length === 0 ? (
+                    <div className="text-sm text-gray-500 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">Keine Gruppeneinträge für den aktuellen Suchbegriff.</div>
                   ) : (
                     <div className="max-h-48 overflow-y-auto space-y-1">
-                      {entries.map(entry => (
+                      {visibleEntries.map(entry => (
                         <div key={entry.id} className="flex items-center justify-between gap-2 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm">
-                          <div className="min-w-0 flex-1 flex items-center gap-2">
-                            <span className="text-red-600 dark:text-red-400 line-through truncate">{entry.wrong}</span>
-                            <span className="text-gray-400">→</span>
-                            <span className="text-green-600 dark:text-green-400 font-medium truncate">{entry.correct}</span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-red-600 dark:text-red-400 line-through truncate">{entry.wrong}</span>
+                              <span className="text-gray-400">→</span>
+                              <span className="text-green-600 dark:text-green-400 font-medium truncate">{entry.correct}</span>
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
+                              {entry.addedBy && <span>von {entry.addedBy}</span>}
+                              {entry.useInPrompt && <span>🎤 Prompt</span>}
+                              {entry.matchStem && <span>🌿 Wortstamm</span>}
+                            </div>
                           </div>
-                          <button type="button" onClick={() => handleDeleteEntry(entry.wrong)} className="text-gray-400 hover:text-red-600" title="Löschen">×</button>
+                          <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => handleEditGroupEntry(entry)} className="text-xs text-blue-600 hover:text-blue-700" title="Bearbeiten">Bearbeiten</button>
+                            <button type="button" onClick={() => handleDeleteEntry(entry.wrong)} className="text-gray-400 hover:text-red-600" title="Löschen">×</button>
+                          </div>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
+
+                {editingCandidate && (
+                  <form onSubmit={handleSaveCandidateEdit} className="space-y-3 p-3 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-900/30">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h5 className="font-medium text-sm">Eintrag von {editingCandidate.sourceUsername} bearbeiten</h5>
+                        <div className="text-xs text-gray-500">Änderungen werden direkt im persönlichen Wörterbuch gespeichert.</div>
+                      </div>
+                      <button type="button" onClick={() => setEditingCandidate(null)} className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">Abbrechen</button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input className="input text-sm" value={editingCandidate.wrong} onChange={event => setEditingCandidate(prev => prev ? { ...prev, wrong: event.target.value } : prev)} placeholder="Falsch erkannt" required />
+                      <input className="input text-sm" value={editingCandidate.correct} onChange={event => setEditingCandidate(prev => prev ? { ...prev, correct: event.target.value } : prev)} placeholder="Korrekt" required />
+                    </div>
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div className="flex gap-4 text-xs">
+                        <label className="flex items-center gap-2"><input type="checkbox" checked={editingCandidate.useInPrompt} onChange={event => setEditingCandidate(prev => prev ? { ...prev, useInPrompt: event.target.checked } : prev)} /> Im Prompt</label>
+                        <label className="flex items-center gap-2"><input type="checkbox" checked={editingCandidate.matchStem} onChange={event => setEditingCandidate(prev => prev ? { ...prev, matchStem: event.target.checked } : prev)} /> Wortstamm</label>
+                      </div>
+                      <button type="submit" className="btn btn-primary text-sm" disabled={savingCandidateEdit}>{savingCandidateEdit ? 'Speichere...' : 'Benutzereintrag speichern'}</button>
+                    </div>
+                  </form>
+                )}
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -442,22 +694,33 @@ export default function GroupDictionaryManager() {
                     </label>
                     <button type="button" onClick={handleImportSelected} className="btn btn-secondary text-xs" disabled={selectedCandidateKeys.size === 0}>Ausgewählte übernehmen ({selectedCandidateKeys.size})</button>
                   </div>
-                  {visibleCandidates.length === 0 ? (
+                  {candidates.length === 0 ? (
                     <div className="text-sm text-gray-500 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">Keine Individualeinträge bei Gruppenmitgliedern gefunden.</div>
+                  ) : visibleCandidates.length === 0 ? (
+                    <div className="text-sm text-gray-500 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">Keine Mitgliedereinträge für den aktuellen Suchbegriff.</div>
                   ) : (
                     <div className="max-h-64 overflow-y-auto border dark:border-gray-700 rounded-lg divide-y dark:divide-gray-700">
                       {visibleCandidates.map(candidate => {
                         const key = candidateKey(candidate);
                         const disabled = candidate.alreadyInGroup && !overwriteExisting;
                         return (
-                          <label key={key} className={`flex items-center gap-2 p-2 text-sm ${disabled ? 'opacity-50' : ''}`}>
+                          <div key={key} className={`flex items-center gap-2 p-2 text-sm ${disabled ? 'opacity-50' : ''}`}>
                             <input type="checkbox" disabled={disabled} checked={selectedCandidateKeys.has(key)} onChange={event => toggleCandidate(key, event.target.checked)} />
                             <span className="text-xs text-gray-500 w-24 truncate flex-shrink-0">{candidate.sourceUsername}</span>
-                            <span className="text-red-600 dark:text-red-400 line-through truncate min-w-0">{candidate.wrong}</span>
-                            <span className="text-gray-400 flex-shrink-0">→</span>
-                            <span className="text-green-600 dark:text-green-400 font-medium truncate min-w-0">{candidate.correct}</span>
-                            {candidate.alreadyInGroup && <span className="text-xs text-amber-600 flex-shrink-0">vorhanden</span>}
-                          </label>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-red-600 dark:text-red-400 line-through truncate min-w-0">{candidate.wrong}</span>
+                                <span className="text-gray-400 flex-shrink-0">→</span>
+                                <span className="text-green-600 dark:text-green-400 font-medium truncate min-w-0">{candidate.correct}</span>
+                              </div>
+                              <div className="text-xs text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
+                                {candidate.useInPrompt && <span>🎤 Prompt</span>}
+                                {candidate.matchStem && <span>🌿 Wortstamm</span>}
+                                {candidate.alreadyInGroup && <span className="text-amber-600">vorhanden{candidate.groupCorrect ? `: ${candidate.groupCorrect}` : ''}</span>}
+                              </div>
+                            </div>
+                            <button type="button" onClick={() => handleEditCandidate(candidate)} className="text-xs text-blue-600 hover:text-blue-700 flex-shrink-0" title="Persönlichen Eintrag bearbeiten">Bearbeiten</button>
+                          </div>
                         );
                       })}
                     </div>

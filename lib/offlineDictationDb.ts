@@ -192,6 +192,7 @@ async function _doInitTables(db: mysql.Pool, poolKey: string): Promise<void> {
       text_before LONGTEXT NOT NULL,
       text_after LONGTEXT NOT NULL,
       change_score INT DEFAULT NULL,
+      metadata_json LONGTEXT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_dictation_id (dictation_id),
       INDEX idx_correction_type (correction_type),
@@ -204,6 +205,15 @@ async function _doInitTables(db: mysql.Pool, poolKey: string): Promise<void> {
     ALTER TABLE correction_log
     MODIFY COLUMN correction_type ${CORRECTION_TYPE_ENUM} NOT NULL
   `);
+
+  try {
+    await db.execute(`
+      ALTER TABLE correction_log
+      ADD COLUMN metadata_json LONGTEXT DEFAULT NULL
+    `);
+  } catch {
+    // Column already exists.
+  }
 
   // ── Migrate legacy: move audio_data from main table to dictation_audio ──
   try {

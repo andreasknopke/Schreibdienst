@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { loadDictionaryWithRequest } from '@/lib/dictionaryDb';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
+import { formatGroupPromptInsertSection, getPromptInsertsForUserGroupsWithRequest } from '@/lib/groupDictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFormatting';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
@@ -784,6 +785,9 @@ export async function POST(req: NextRequest) {
     // Load runtime config to get custom prompt addition (using request context for dynamic DB)
     const runtimeConfig = await getRuntimeConfigWithRequest(req);
     const promptAddition = runtimeConfig.llmPromptAddition?.trim();
+    const groupPromptInsertSection = username
+      ? formatGroupPromptInsertSection(await getPromptInsertsForUserGroupsWithRequest(req, username))
+      : '';
     console.log(`[Correct] Runtime config loaded: llmProvider=${runtimeConfig.llmProvider}, promptAddition=${promptAddition ? promptAddition.substring(0, 50) + '...' : 'none'}`);
     
     // Build dictionary prompt section for LLM hints (words to correct if similar found)
@@ -820,7 +824,7 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
     
     // Note: Dictionary is now applied programmatically above, so we don't need it in the prompt
     // for deterministic corrections. The LLM section above is for catching similar words.
-    const promptSuffix = (dictionaryPromptSection + patientNamePromptSection + (promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : '')).trim();
+    const promptSuffix = (dictionaryPromptSection + patientNamePromptSection + groupPromptInsertSection + (promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : '')).trim();
     
     // Combine system prompt with dictionary and custom additions
     const enhancedSystemPrompt = promptSuffix 

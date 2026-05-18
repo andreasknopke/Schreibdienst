@@ -10,12 +10,14 @@ import {
   updateAudioDataWithRequest,
 } from '@/lib/offlineDictationDb';
 import {
+  initCorrectionLogTableWithRequest,
   logTextFormattingCorrectionWithRequest,
   logLLMCorrectionWithRequest,
   logDoublePrecisionCorrectionWithRequest,
 } from '@/lib/correctionLogDb';
 import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath, getEffectiveOfflineService, getEffectiveDoublePrecisionService, RuntimeConfig } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
+import { formatGroupPromptInsertSection, getPromptInsertsForUserGroupsWithRequest } from '@/lib/groupDictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
 import { applyLLMPhoneticGuard } from '@/lib/phoneticMatch';
@@ -153,6 +155,7 @@ export async function processAllPending(request: NextRequest, limit = 5): Promis
 
   try {
     await initOfflineDictationTableWithRequest(request);
+    await initCorrectionLogTableWithRequest(request);
     const pending = await getPendingDictationsWithRequest(request, limit);
     if (pending.length === 0) return { processed: 0, errors: 0 };
 
@@ -180,6 +183,7 @@ export async function processAllPending(request: NextRequest, limit = 5): Promis
 // Process a single dictation - exported for direct use from other handlers
 export async function processDictation(request: NextRequest, dictationId: number): Promise<void> {
   console.log(`[Worker] Processing dictation #${dictationId}`);
+  await initCorrectionLogTableWithRequest(request);
   
   // Load metadata (without audio – fetched separately from dictation_audio table)
   const dictation = await getDictationByIdWithRequest(request, dictationId);
@@ -1359,6 +1363,9 @@ async function correctText(
   // Load runtime config to get custom prompt addition
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
   const promptAddition = runtimeConfig.llmPromptAddition?.trim();
+  const groupPromptInsertSection = username
+    ? formatGroupPromptInsertSection(await getPromptInsertsForUserGroupsWithRequest(request, username))
+    : '';
   
   // Build dictionary prompt section for LLM hints (words to correct if similar found)
   // Note: Dictionary corrections are also applied programmatically in preprocessTranscription()
@@ -1401,7 +1408,7 @@ Korrigiere phonetisch ähnliche Namen zu diesen korrekten Schreibweisen.`;
   }
   
   // Combine all prompt additions
-  const promptSuffix = (dictionaryPromptSection + contextPromptSection + (promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : '')).trim();
+  const promptSuffix = (dictionaryPromptSection + contextPromptSection + groupPromptInsertSection + (promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : '')).trim();
   
   // Full system prompt for OpenAI or single-chunk processing
   const systemPrompt = `Du bist ein medizinischer Diktat-Korrektur-Assistent. Deine EINZIGE Aufgabe ist die sprachliche Korrektur diktierter medizinischer Texte.

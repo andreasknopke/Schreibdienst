@@ -14,6 +14,7 @@ import {
 } from '@/lib/correctionLogDb';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
+import { formatGroupPromptInsertSection, getPromptInsertsForUserGroupsWithRequest } from '@/lib/groupDictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
 import { applyLLMPhoneticGuard } from '@/lib/phoneticMatch';
@@ -382,6 +383,9 @@ async function correctText(
   const llmConfig = await getLLMConfig(request);
   const doctorName = extractDoctorName(username);
   const promptAddition = runtimeConfig.llmPromptAddition?.trim();
+  const groupPromptInsertSection = formatGroupPromptInsertSection(
+    await getPromptInsertsForUserGroupsWithRequest(request, username)
+  );
   
   // Build dictionary section
   let dictionaryPromptSection = '';
@@ -412,7 +416,7 @@ REGELN:
 2. Korrigiere falsch transkribierte medizinische Fachbegriffe
 3. Wandle ausgeschriebene Zahlen in Ziffern um: "acht Millimeter" → "8 mm"
 4. Behalte den Stil des Diktierenden bei
-5. Gib AUSSCHLIESSLICH den korrigierten Text zurück - keine Erklärungen!${dictionaryPromptSection}${contextPromptSection}${promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : ''}`;
+5. Gib AUSSCHLIESSLICH den korrigierten Text zurück - keine Erklärungen!${dictionaryPromptSection}${contextPromptSection}${groupPromptInsertSection}${promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : ''}`;
 
   // Helper to call a cloud LLM (OpenAI/Mistral) for a single chunk
   async function callCloudLLM(prompt: string, chunkText: string): Promise<string> {

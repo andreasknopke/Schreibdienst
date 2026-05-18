@@ -21,7 +21,9 @@
 7. Den **Entwicklermodus** aktivieren.
 8. **Entpackte Erweiterung laden** wählen.
 9. Den Ordner `extension` aus dem entpackten Paket auswählen.
-10. Schreibdienst/PWA neu öffnen oder bestehende Seite neu laden.
+10. Die Chrome-Extension-ID kopieren.
+11. `scripts/install-schreibdienst-injector.cmd -ExtensionId DIE_EXTENSION_ID` erneut ausführen.
+12. Schreibdienst/PWA neu öffnen oder bestehende Seite neu laden.
 
 ## Funktionstest
 1. Schreibdienst öffnen.
@@ -37,6 +39,8 @@ Wenn der Injector korrekt installiert ist, stehen zusätzlich folgende Hotkeys z
 - `Escape` – Aufnahme abbrechen
 
 ## Wichtige Hinweise
+- Der Installer schreibt standardmäßig nach `%LOCALAPPDATA%\Schreibdienst\Injector`.
+- Der Native Host wird erst nach dem zweiten Aufruf mit `-ExtensionId` vollständig für Chrome registriert.
 - Wenn globale Hotkeys nicht reagieren, ist die Taste eventuell bereits durch eine andere Software belegt.
 - Nach Updates der EXE oder der Erweiterung Chrome einmal neu starten oder die Erweiterung neu laden.
 - Wenn die PWA bereits geöffnet war, die Seite nach der Installation neu laden.

@@ -497,7 +497,7 @@ export default function HomePage() {
           text: normalizedText,
           mode: 'clipboard',
           restorePreviousWindow: shouldRestorePreviousWindow,
-          delayMs: shouldRestorePreviousWindow ? 250 : 0,
+          delayMs: shouldRestorePreviousWindow ? 80 : 0,
           charDelayMs: 0,
           fallbackToClipboard: false,
         });

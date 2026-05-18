@@ -8,8 +8,31 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$defaultInstallRoot = Join-Path $env:LOCALAPPDATA 'Schreibdienst\Injector'
+
 function Resolve-FullPath([string]$Path) {
   $executionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+}
+
+function Test-ChromeExtensionId([string]$Value) {
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return $false
+  }
+
+  return $Value -match '^[a-p]{32}$'
+}
+
+function Resolve-InstallArguments {
+  if ([string]::IsNullOrWhiteSpace($ExtensionId) -and (Test-ChromeExtensionId $InstallRoot)) {
+    Write-Warning "Es wurde nur eine Chrome-Extension-ID uebergeben. Verwende '$InstallRoot' als -ExtensionId und setze -InstallRoot auf den Standardpfad zurueck."
+    $script:ExtensionId = $InstallRoot
+    $script:InstallRoot = $defaultInstallRoot
+    return
+  }
+
+  if (-not [System.IO.Path]::IsPathRooted($InstallRoot)) {
+    throw "-InstallRoot muss ein absoluter Pfad sein. Relativer Wert erkannt: '$InstallRoot'. Standardpfad: $defaultInstallRoot"
+  }
 }
 
 function Find-CMake {
@@ -67,6 +90,8 @@ if ($Build) {
   Build-NativeHost
 }
 
+Resolve-InstallArguments
+
 $hostSourcePath = Find-HostExe $HostExePath
 $extensionSourcePath = Resolve-FullPath $ExtensionSource
 
@@ -87,6 +112,7 @@ Remove-Item -LiteralPath (Join-Path $extensionInstallDir '*') -Recurse -Force -E
 Copy-Item -Path (Join-Path $extensionSourcePath '*') -Destination $extensionInstallDir -Recurse -Force
 
 Write-Host 'Schreibdienst Injector wurde kopiert:'
+Write-Host "  Ziel:      $installRootPath"
 Write-Host "  Host:      $hostInstallPath"
 Write-Host "  Extension: $extensionInstallDir"
 

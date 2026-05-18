@@ -18,6 +18,9 @@
 
 namespace {
 
+constexpr std::uint32_t CLIPBOARD_READY_DELAY_MS = 15;
+constexpr std::uint32_t CLIPBOARD_RESTORE_DELAY_MS = 30;
+
 struct InjectPayload {
     std::wstring text;
     std::wstring mode = L"sendinput";
@@ -554,9 +557,9 @@ bool pasteClipboardText(const std::wstring& text) {
         return false;
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_READY_DELAY_MS));
     const bool pasted = sendPasteShortcut();
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_RESTORE_DELAY_MS));
     restoreClipboardText(snapshot);
     return pasted;
 }
@@ -626,7 +629,7 @@ std::string handleRequest(const std::string& message) {
         return makeResponse(false, "Alt-Tab focus handover failed", "");
     }
 
-    if (request.payload.delayMs > 0) {
+    if (request.payload.mode != L"clipboard" && request.payload.delayMs > 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(request.payload.delayMs));
     }
 

@@ -13,6 +13,9 @@ export interface DictionaryEntry {
   useInPrompt?: boolean;  // Wort wird im Whisper initial_prompt verwendet
   matchStem?: boolean;    // Wortstamm-Matching aktivieren
   phoneticMinSimilarity?: number;
+  scope?: 'private' | 'group';
+  groupId?: number;
+  groupName?: string;
 }
 
 export interface DictionaryCorrectionOperation {
@@ -20,12 +23,14 @@ export interface DictionaryCorrectionOperation {
   replacementText: string;
   dictionaryWrong: string;
   dictionaryCorrect: string;
-  source: 'standard' | 'private';
+  source: 'standard' | 'private' | 'group';
   matchType: 'exact' | 'stem' | 'phonetic';
   confidence?: number;
   similarity?: number;
   minSimilarity?: number;
   targetUsername?: string;
+  groupId?: number;
+  groupName?: string;
 }
 
 export interface PreprocessTranscriptionResult {
@@ -33,7 +38,7 @@ export interface PreprocessTranscriptionResult {
   operations: DictionaryCorrectionOperation[];
 }
 
-type DictionarySource = 'standard' | 'private';
+type DictionarySource = 'standard' | 'private' | 'group';
 
 type AnnotatedDictionaryEntry = DictionaryEntry & {
   source: DictionarySource;
@@ -65,8 +70,8 @@ export function applyDictionaryCorrectionsDetailed(
 
   const annotatedUserEntries: AnnotatedDictionaryEntry[] = (entries ?? []).map((entry) => ({
     ...entry,
-    source: 'private',
-    targetUsername: options?.targetUsername,
+    source: entry.scope === 'group' ? 'group' : 'private',
+    targetUsername: entry.scope === 'group' ? undefined : options?.targetUsername,
   }));
   const annotatedStandardEntries: AnnotatedDictionaryEntry[] = (standardEntries ?? []).map((entry) => ({
     ...entry,
@@ -118,6 +123,8 @@ export function applyDictionaryCorrectionsDetailed(
           source: entry.source,
           matchType: 'exact',
           targetUsername: entry.targetUsername,
+          groupId: entry.groupId,
+          groupName: entry.groupName,
         });
         return replacement;
       });
@@ -139,6 +146,8 @@ export function applyDictionaryCorrectionsDetailed(
           source: entry.source,
           matchType: 'stem',
           targetUsername: entry.targetUsername,
+          groupId: entry.groupId,
+          groupName: entry.groupName,
         });
         return replacement;
       });
@@ -158,6 +167,8 @@ export function applyDictionaryCorrectionsDetailed(
           source: entry.source,
           matchType: 'exact',
           targetUsername: entry.targetUsername,
+          groupId: entry.groupId,
+          groupName: entry.groupName,
         });
         return replacement;
       });

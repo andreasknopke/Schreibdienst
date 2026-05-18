@@ -434,6 +434,42 @@ export async function removeDictionaryGroupEntryWithRequest(request: NextRequest
   }
 }
 
+export async function increaseDictionaryGroupEntryPhoneticMinSimilarityWithRequest(
+  request: NextRequest,
+  groupId: number,
+  wrong: string,
+  step: number = 0.05
+): Promise<{ success: boolean; oldValue?: number; newValue?: number; error?: string }> {
+  try {
+    await ensureGroupDictionaryTables(request);
+    const db = await getPoolForRequest(request);
+    const [rows] = await db.execute<any[]>(
+      'SELECT wrong_word, correct_word, phonetic_min_similarity FROM dictionary_group_entries WHERE group_id = ? AND wrong_word = ? LIMIT 1',
+      [groupId, wrong]
+    );
+
+    const entry = rows?.[0];
+    if (!entry) {
+      return { success: false, error: 'Eintrag nicht gefunden' };
+    }
+
+    const isSelfMapping = String(entry.wrong_word).trim().toLowerCase() === String(entry.correct_word).trim().toLowerCase();
+    const defaultValue = isSelfMapping ? 0.82 : 0.5;
+    const oldValue = typeof entry.phonetic_min_similarity === 'number' ? entry.phonetic_min_similarity : defaultValue;
+    const newValue = Math.min(0.99, Math.max(defaultValue, oldValue) + step);
+
+    await db.execute(
+      'UPDATE dictionary_group_entries SET phonetic_min_similarity = ? WHERE group_id = ? AND wrong_word = ?',
+      [newValue, groupId, wrong]
+    );
+
+    return { success: true, oldValue, newValue };
+  } catch (error) {
+    console.error('[GroupDictionary] Increase group phonetic similarity error:', error);
+    return { success: false, error: 'Datenbankfehler' };
+  }
+}
+
 export async function getGroupImportCandidatesWithRequest(request: NextRequest, groupId: number): Promise<GroupImportCandidate[]> {
   await ensureGroupDictionaryTables(request);
   const db = await getPoolForRequest(request);

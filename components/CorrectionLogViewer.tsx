@@ -10,12 +10,14 @@ interface DictionaryOperation {
   replacementText: string;
   dictionaryWrong: string;
   dictionaryCorrect: string;
-  source: 'standard' | 'private';
+  source: 'standard' | 'private' | 'group';
   matchType: 'exact' | 'stem' | 'phonetic';
   confidence?: number;
   similarity?: number;
   minSimilarity?: number;
   targetUsername?: string;
+  groupId?: number;
+  groupName?: string;
 }
 
 interface CorrectionLogMetadata {
@@ -213,7 +215,7 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
   }
 
   const getOperationLabel = (operation: DictionaryOperation) => {
-    const sourceLabel = operation.source === 'standard' ? 'Standard' : 'User';
+    const sourceLabel = operation.source === 'standard' ? 'Standard' : operation.source === 'group' ? 'Gruppe' : 'User';
     const matchLabel = operation.matchType === 'phonetic'
       ? 'phonetisch'
       : operation.matchType === 'stem'
@@ -241,6 +243,7 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
           scope: actionTarget.operation.source,
           wrong: actionTarget.operation.dictionaryWrong,
           targetUsername: actionTarget.operation.targetUsername || logs.find(log => log.id === actionTarget.logId)?.metadata?.targetUsername,
+          groupId: actionTarget.operation.groupId,
         }),
       });
 
@@ -414,7 +417,7 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
                                     <span className="font-medium">{operation.originalText}</span>
                                     <span className="mx-1">→</span>
                                     <span>{operation.replacementText}</span>
-                                    <span className="ml-2 opacity-70">[{operation.source === 'standard' ? 'Standard' : 'User'} / {operation.matchType}]</span>
+                                    <span className="ml-2 opacity-70">[{operation.source === 'standard' ? 'Standard' : operation.source === 'group' ? 'Gruppe' : 'User'} / {operation.matchType}]</span>
                                   </button>
                                 ))}
                               </div>
@@ -487,7 +490,7 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
             </div>
 
             <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-              <div>Quelle: {actionTarget.operation.source === 'standard' ? 'Standard-Wörterbuch' : 'Benutzer-Wörterbuch'}</div>
+              <div>Quelle: {actionTarget.operation.source === 'standard' ? 'Standard-Wörterbuch' : actionTarget.operation.source === 'group' ? `Gruppen-Wörterbuch${actionTarget.operation.groupName ? ` (${actionTarget.operation.groupName})` : ''}` : 'Benutzer-Wörterbuch'}</div>
               <div>Dictionary: {actionTarget.operation.dictionaryWrong} → {actionTarget.operation.dictionaryCorrect}</div>
               <div>Match-Art: {actionTarget.operation.matchType}</div>
               {typeof actionTarget.operation.confidence === 'number' && (

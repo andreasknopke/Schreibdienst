@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
 import { removeEntryWithRequest, increaseEntryPhoneticMinSimilarityWithRequest } from '@/lib/dictionaryDb';
+import { increaseDictionaryGroupEntryPhoneticMinSimilarityWithRequest, removeDictionaryGroupEntryWithRequest } from '@/lib/groupDictionaryDb';
 import { removeStandardDictEntry, increaseStandardDictPhoneticMinSimilarity } from '@/lib/standardDictionaryDb';
 
-type TermActionScope = 'standard' | 'private';
+type TermActionScope = 'standard' | 'private' | 'group';
 type TermActionType = 'remove' | 'weaken';
 
 async function getAuthenticatedRoot(request: NextRequest): Promise<{ username: string } | null> {
@@ -39,6 +40,7 @@ export async function POST(request: NextRequest) {
     const scope = body.scope as TermActionScope | undefined;
     const wrong = typeof body.wrong === 'string' ? body.wrong.trim() : '';
     const targetUsername = typeof body.targetUsername === 'string' ? body.targetUsername.trim() : '';
+    const groupId = Number(body.groupId);
 
     if (!action || !scope || !wrong) {
       return NextResponse.json({ success: false, error: 'action, scope und wrong sind erforderlich' }, { status: 400 });
@@ -48,6 +50,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'targetUsername ist fuer private Eintraege erforderlich' }, { status: 400 });
     }
 
+    if (scope === 'group' && (!Number.isInteger(groupId) || groupId <= 0)) {
+      return NextResponse.json({ success: false, error: 'groupId ist fuer Gruppen-Eintraege erforderlich' }, { status: 400 });
+    }
+
     if (action === 'remove') {
       if (scope === 'standard') {
         const result = await removeStandardDictEntry(request, wrong);
@@ -55,6 +61,14 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ success: false, error: result.error || 'Loeschen fehlgeschlagen' }, { status: 400 });
         }
         return NextResponse.json({ success: true, message: `Standard-Woerterbuch-Eintrag "${wrong}" geloescht` });
+      }
+
+      if (scope === 'group') {
+        const result = await removeDictionaryGroupEntryWithRequest(request, groupId, wrong);
+        if (!result.success) {
+          return NextResponse.json({ success: false, error: result.error || 'Loeschen fehlgeschlagen' }, { status: 400 });
+        }
+        return NextResponse.json({ success: true, message: `Gruppen-Woerterbuch-Eintrag "${wrong}" geloescht` });
       }
 
       const result = await removeEntryWithRequest(request, targetUsername, wrong);
@@ -73,6 +87,19 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           success: true,
           message: `Phonetisches Matching fuer "${wrong}" abgeschwaecht`,
+          oldValue: result.oldValue,
+          newValue: result.newValue,
+        });
+      }
+
+      if (scope === 'group') {
+        const result = await increaseDictionaryGroupEntryPhoneticMinSimilarityWithRequest(request, groupId, wrong);
+        if (!result.success) {
+          return NextResponse.json({ success: false, error: result.error || 'Abschwaechung fehlgeschlagen' }, { status: 400 });
+        }
+        return NextResponse.json({
+          success: true,
+          message: `Phonetisches Matching fuer "${wrong}" im Gruppen-Woerterbuch abgeschwaecht`,
           oldValue: result.oldValue,
           newValue: result.newValue,
         });

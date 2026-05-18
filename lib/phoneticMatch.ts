@@ -491,9 +491,11 @@ export interface PhoneticDictEntry {
   correctPhonetic: string;// Kölner Phonetik Code von "correct"
   isSelfMapping: boolean; // Reiner Fachbegriff ohne explizite Fehlvariante
   isAcronymLike: boolean;
-  source?: 'standard' | 'private';
+  source?: 'standard' | 'private' | 'group';
   phoneticMinSimilarity?: number;
   targetUsername?: string;
+  groupId?: number;
+  groupName?: string;
 }
 
 export interface PhoneticMatchResult {
@@ -509,12 +511,14 @@ export interface PhoneticReplacementOperation {
   replacementText: string;
   dictionaryWrong: string;
   dictionaryCorrect: string;
-  source: 'standard' | 'private';
+  source: 'standard' | 'private' | 'group';
   matchType: 'phonetic';
   confidence: number;
   similarity: number;
   minSimilarity: number;
   targetUsername?: string;
+  groupId?: number;
+  groupName?: string;
 }
 
 const EXPLICIT_MATCH_SIMILARITY = 0.5;
@@ -540,7 +544,7 @@ function getSimilarityThreshold(candidate: PhoneticDictEntry, viaVariation: bool
  * Baut einen phonetischen Index aus Wörterbuch-Einträgen.
  * Einmal beim Laden aufbauen, dann O(1)-Lookup pro phonetischem Code.
  */
-export function buildPhoneticIndex(entries: { wrong: string; correct: string; source?: 'standard' | 'private'; phoneticMinSimilarity?: number; targetUsername?: string }[]): {
+export function buildPhoneticIndex(entries: { wrong: string; correct: string; source?: 'standard' | 'private' | 'group'; phoneticMinSimilarity?: number; targetUsername?: string; groupId?: number; groupName?: string }[]): {
   byPhoneticCode: Map<string, PhoneticDictEntry[]>;
   allEntries: PhoneticDictEntry[];
 } {
@@ -562,6 +566,8 @@ export function buildPhoneticIndex(entries: { wrong: string; correct: string; so
       source: entry.source,
       phoneticMinSimilarity: entry.phoneticMinSimilarity,
       targetUsername: entry.targetUsername,
+      groupId: entry.groupId,
+      groupName: entry.groupName,
     };
     allEntries.push(pe);
 
@@ -823,6 +829,8 @@ export function applyPhoneticCorrectionsDetailed(
             similarity: match.similarity,
             minSimilarity: match.minSimilarity,
             targetUsername: match.matchedEntry.targetUsername,
+            groupId: match.matchedEntry.groupId,
+            groupName: match.matchedEntry.groupName,
           });
           
           // Erstes Wort ersetzen, restliche Wörter + Trennzeichen dazwischen leeren
@@ -873,6 +881,8 @@ export function applyPhoneticCorrectionsDetailed(
           similarity: match.similarity,
           minSimilarity: match.minSimilarity,
           targetUsername: match.matchedEntry.targetUsername,
+          groupId: match.matchedEntry.groupId,
+          groupName: match.matchedEntry.groupName,
         });
       }
     }

@@ -59,6 +59,6 @@ if ($Zip) {
   if (Test-Path -LiteralPath $zipPath) {
     Remove-Item -LiteralPath $zipPath -Force
   }
-  Compress-Archive -LiteralPath (Join-Path $packageRoot '*') -DestinationPath $zipPath
+  Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath $zipPath
   Write-Host "ZIP erstellt: $zipPath" -ForegroundColor Green
 }

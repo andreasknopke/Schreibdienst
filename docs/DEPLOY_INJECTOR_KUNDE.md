@@ -35,7 +35,7 @@
 Wenn der Injector korrekt installiert ist, stehen zusätzlich folgende Hotkeys zur Verfügung:
 - `F9` – Aufnahme starten/stoppen
 - `F10` – Aufnahme stoppen
-- `F11` – Neu / Felder zurücksetzen
+- `F11` – Aktuellen Editor-Text an die fokussierte Ziel-App übertragen
 - `Escape` – Aufnahme abbrechen
 
 ## Wichtige Hinweise

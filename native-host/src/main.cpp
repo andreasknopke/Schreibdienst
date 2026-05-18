@@ -52,7 +52,7 @@ std::mutex g_writeMutex;
 constexpr HotkeyBinding HOTKEY_BINDINGS[] = {
     {1, VK_F9, "toggle-recording", "F9"},
     {2, VK_F10, "stop-recording", "F10"},
-    {3, VK_F11, "reset", "F11"},
+    {3, VK_F11, "transfer-text", "F11"},
     {4, VK_ESCAPE, "cancel-recording", "Escape"},
 };
 

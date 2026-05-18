@@ -22,7 +22,7 @@ const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
 const PAGE_BRIDGE_SOURCE = 'schreibdienst-pwa';
 const EXTENSION_BRIDGE_SOURCE = 'schreibdienst-extension';
 
-type GlobalHotkeyAction = 'toggle-recording' | 'stop-recording' | 'reset' | 'cancel-recording';
+type GlobalHotkeyAction = 'toggle-recording' | 'stop-recording' | 'transfer-text' | 'cancel-recording';
 
 // Hilfsfunktion zum Kopieren in die Zwischenablage
 async function copyToClipboard(text: string): Promise<void> {
@@ -513,6 +513,36 @@ export default function HomePage() {
       });
   }, []);
 
+  const replaceLivePreview = useCallback((field: TextInsertionTarget, text: string) => {
+    if (mode === 'befund') {
+      switch (field) {
+        case 'methodik':
+          setMethodik(text);
+          setTranscript('');
+          setBeurteilung('');
+          break;
+        case 'beurteilung':
+          setMethodik('');
+          setTranscript('');
+          setBeurteilung(text);
+          break;
+        case 'befund':
+        default:
+          setMethodik('');
+          setTranscript(text);
+          setBeurteilung('');
+          break;
+      }
+      return;
+    }
+
+    setTranscript(text);
+  }, [mode]);
+
+  const applyLiveChunkPreview = useCallback((field: TextInsertionTarget, text: string) => {
+    replaceLivePreview(field, text.trim() ? text : '');
+  }, [replaceLivePreview]);
+
   const replaceTextAtEndOrInsertDelta = useCallback((
     field: TextInsertionTarget,
     fullText: string,
@@ -520,6 +550,11 @@ export default function HomePage() {
   ) => {
     if (incomingDelta && incomingDelta.trim()) {
       queueLiveInject(incomingDelta);
+    }
+
+    if (liveInjectEnabledRef.current) {
+      applyLiveChunkPreview(field, incomingDelta && incomingDelta.trim() ? incomingDelta : fullText);
+      return;
     }
 
     // WICHTIG: Neu transkribierter Text wird IMMER gegen den aktuellsten Feld-State
@@ -544,7 +579,7 @@ export default function HomePage() {
 
       return currentText;
     });
-  }, [setFieldText, combineTextForField, queueLiveInject]);
+  }, [setFieldText, combineTextForField, queueLiveInject, applyLiveChunkPreview]);
 
   const showPersistentCaret = recording || transcribing || busy || correcting;
 
@@ -1374,42 +1409,70 @@ export default function HomePage() {
             // Verteile Text auf die entsprechenden Felder
             if (parsed.methodik !== null) {
               lastMethodikRef.current = parsed.methodik;
-              setMethodik(combineTextForField('methodik', methodik, parsed.methodik));
+              if (liveInjectEnabledRef.current) {
+                applyLiveChunkPreview('methodik', parsed.methodik);
+              } else {
+                setMethodik(combineTextForField('methodik', methodik, parsed.methodik));
+              }
             }
             if (parsed.befund !== null) {
-              setTranscript(combineTextForField('befund', transcript, parsed.befund));
+              if (liveInjectEnabledRef.current) {
+                applyLiveChunkPreview('befund', parsed.befund);
+              } else {
+                setTranscript(combineTextForField('befund', transcript, parsed.befund));
+              }
             }
             if (parsed.beurteilung !== null) {
               lastBeurteilungRef.current = parsed.beurteilung;
-              setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung));
+              if (liveInjectEnabledRef.current) {
+                applyLiveChunkPreview('beurteilung', parsed.beurteilung);
+              } else {
+                setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung));
+              }
             }
           } else {
             // Kein Steuerbefehl - Text geht ins aktive Feld
             switch (activeField) {
               case 'methodik':
                 lastMethodikRef.current = preparedDelta;
-                setMethodik(combineTextForField('methodik', methodik, preparedDelta));
+                if (liveInjectEnabledRef.current) {
+                  applyLiveChunkPreview('methodik', preparedDelta);
+                } else {
+                  setMethodik(combineTextForField('methodik', methodik, preparedDelta));
+                }
                 break;
               case 'beurteilung':
                 lastBeurteilungRef.current = preparedDelta;
-                setBeurteilung(combineTextForField('beurteilung', beurteilung, preparedDelta));
+                if (liveInjectEnabledRef.current) {
+                  applyLiveChunkPreview('beurteilung', preparedDelta);
+                } else {
+                  setBeurteilung(combineTextForField('beurteilung', beurteilung, preparedDelta));
+                }
                 break;
               case 'befund':
               default:
-                setTranscript(combineTextForField('befund', transcript, preparedDelta));
+                if (liveInjectEnabledRef.current) {
+                  applyLiveChunkPreview('befund', preparedDelta);
+                } else {
+                  setTranscript(combineTextForField('befund', transcript, preparedDelta));
+                }
                 break;
             }
           }
         } else {
           // Im Arztbrief-Modus: Normales Verhalten
-          const fullText = combineTextForField('transcript', transcript, preparedDelta);
-          setTranscript(fullText);
+          if (liveInjectEnabledRef.current) {
+            applyLiveChunkPreview('transcript', preparedDelta);
+          } else {
+            const fullText = combineTextForField('transcript', transcript, preparedDelta);
+            setTranscript(fullText);
+          }
         }
       }
     } finally {
       setTranscribing(false);
     }
-  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, prepareLiveInjectDelta, queueLiveInject]);
+  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, prepareLiveInjectDelta, queueLiveInject, applyLiveChunkPreview]);
 
   useEffect(() => {
     return () => {
@@ -1566,16 +1629,51 @@ export default function HomePage() {
   // Konfigurieren Sie das SpeechMike im "Keyboard Mode" mit folgenden Tasten:
   // - F9: Aufnahme starten/stoppen (Toggle)
   // - F10: Aufnahme stoppen
-  // - F11: Alle Felder zurücksetzen (Neu)
-  // - Escape: Aufnahme abbrechen
+  // - F11: Aktuellen Editor-Text an die fokussierte Ziel-App uebertragen
+  // - Escape: Online-Modul auf Neu setzen
   const recordingRef = useRef(recording);
   recordingRef.current = recording;
   const startRecordingHotkeyRef = useRef(startRecording);
   const stopRecordingHotkeyRef = useRef(stopRecording);
   const resetHotkeyRef = useRef(handleReset);
+  const hotkeyTransferTextRef = useRef('');
+  const transferTextHotkeyRef = useRef<() => void>(() => undefined);
   startRecordingHotkeyRef.current = startRecording;
   stopRecordingHotkeyRef.current = stopRecording;
   resetHotkeyRef.current = handleReset;
+  hotkeyTransferTextRef.current = mode === 'befund'
+    ? [
+        methodik ? `Methodik:\n${methodik}` : '',
+        transcript ? `Befund:\n${transcript}` : '',
+        beurteilung ? `Beurteilung:\n${beurteilung}` : '',
+      ].filter(Boolean).join('\n\n')
+    : transcript;
+
+  transferTextHotkeyRef.current = () => {
+    if (liveInjectEnabledRef.current) {
+      setError('F11 ist im Live-Ziel-App-Modus deaktiviert.');
+      return;
+    }
+
+    const textToTransfer = hotkeyTransferTextRef.current.trim();
+    if (!textToTransfer) {
+      setError('Kein Text zum Uebertragen vorhanden.');
+      return;
+    }
+
+    void injectToActiveWindow({
+      text: textToTransfer,
+      mode: 'clipboard',
+      restorePreviousWindow: false,
+      delayMs: 0,
+      charDelayMs: 0,
+      fallbackToClipboard: false,
+    }).then((result) => {
+      if (!result.ok) {
+        setError(result.error || 'Text konnte nicht an die Ziel-App uebertragen werden');
+      }
+    });
+  };
 
   const handleGlobalHotkeyAction = useCallback((action: GlobalHotkeyAction) => {
     switch (action) {
@@ -1587,13 +1685,22 @@ export default function HomePage() {
         }
         break;
       case 'stop-recording':
-      case 'cancel-recording':
         if (recordingRef.current) {
           void stopRecordingHotkeyRef.current();
         }
         break;
-      case 'reset':
-        resetHotkeyRef.current();
+      case 'cancel-recording':
+        if (recordingRef.current) {
+          allChunksRef.current = [];
+          void stopRecordingHotkeyRef.current().finally(() => {
+            resetHotkeyRef.current();
+          });
+        } else {
+          resetHotkeyRef.current();
+        }
+        break;
+      case 'transfer-text':
+        transferTextHotkeyRef.current();
         break;
     }
   }, []);
@@ -1611,7 +1718,7 @@ export default function HomePage() {
           break;
         case 'F11':
           e.preventDefault();
-          handleGlobalHotkeyAction('reset');
+          handleGlobalHotkeyAction('transfer-text');
           break;
         case 'Escape':
           e.preventDefault();

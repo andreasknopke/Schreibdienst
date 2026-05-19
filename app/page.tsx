@@ -84,6 +84,27 @@ function normalizeChunkLeadingWhitespace(text: string): string {
   return text.replace(/^\s+/, '');
 }
 
+function sanitizeLiveInjectChunk(text: string): string {
+  return text
+    .replace(/^\s+/, '')
+    .replace(/([,:])\.(?=(\s|$))/g, '$1');
+}
+
+function joinLiveInjectChunk(previousText: string, incomingText: string): string {
+  const sanitizedIncoming = sanitizeLiveInjectChunk(incomingText);
+  if (!sanitizedIncoming.trim()) return '';
+
+  if (!previousText) {
+    return sanitizedIncoming;
+  }
+
+  const previousEndsWithSeparator = /[\s\n([{„"]$/.test(previousText);
+  const incomingStartsWithPunctuation = /^[,.;:!?)]/.test(sanitizedIncoming);
+  const needsSpace = !previousEndsWithSeparator && !incomingStartsWithPunctuation;
+
+  return `${needsSpace ? ' ' : ''}${sanitizedIncoming}`;
+}
+
 function insertTextAtSelection(existing: string, incomingText: string, selection?: CaretSelection | null): TextInsertionResult {
   const normalizedIncomingText = normalizeChunkLeadingWhitespace(incomingText);
 
@@ -347,6 +368,7 @@ export default function HomePage() {
   const [liveInjectStatus, setLiveInjectStatus] = useState<string | null>(null);
   const liveInjectEnabledRef = useRef(false);
   const liveInjectQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const liveInjectSentTextRef = useRef('');
   
   // Status tracking for UI indicators
   // Show banner during entire recording session, not just during active processing
@@ -479,11 +501,14 @@ export default function HomePage() {
 
   useEffect(() => {
     liveInjectEnabledRef.current = liveInjectEnabled;
+    if (!liveInjectEnabled) {
+      liveInjectSentTextRef.current = '';
+    }
     setLiveInjectStatus(liveInjectEnabled ? 'Bereit – Ziel-App fokussieren oder zuletzt verwendete App nutzen' : null);
   }, [liveInjectEnabled]);
 
   const queueLiveInject = useCallback((text: string) => {
-    const normalizedText = normalizeChunkLeadingWhitespace(text);
+    const normalizedText = joinLiveInjectChunk(liveInjectSentTextRef.current, text);
 
     if (!liveInjectEnabledRef.current || !normalizedText.trim()) return;
 
@@ -509,6 +534,7 @@ export default function HomePage() {
           return;
         }
 
+        liveInjectSentTextRef.current += normalizedText;
         setLiveInjectStatus(`Gesendet: ${normalizedText.trim().length} Zeichen`);
       });
   }, []);
@@ -1497,6 +1523,7 @@ export default function HomePage() {
   // Funktion zum Zurücksetzen aller Felder (New-Button) - hier oben für Hotkey-Unterstützung
   const handleReset = useCallback(() => {
     vadSessionIdRef.current += 1;
+    liveInjectSentTextRef.current = '';
     setTranscript('');
     setMethodik('');
     setBeurteilung('');

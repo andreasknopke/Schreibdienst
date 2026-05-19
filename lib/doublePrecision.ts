@@ -6,6 +6,7 @@
  */
 
 import { diffWordsWithSpace } from 'diff';
+import { colognePhonetic, levenshtein } from './phoneticMatch';
 import { DictionaryEntry } from './dictionaryDb';
 
 export interface TranscriptionResult {
@@ -22,6 +23,122 @@ export interface MergedResult {
   provider2: string;
   hasDifferences: boolean;
   autoResolvedDifferences: number;
+}
+
+export interface MergeNovelWordGuardResult {
+  text: string;
+  removedWords: string[];
+}
+
+function normalizeMergeWord(word: string): string {
+  return word.toLowerCase()
+    .replace(/ä/g, 'ae')
+    .replace(/ö/g, 'oe')
+    .replace(/ü/g, 'ue')
+    .replace(/ß/g, 'ss')
+    .replace(/[^a-z]/g, '');
+}
+
+function wordSimilarity(a: string, b: string): number {
+  const maxLen = Math.max(a.length, b.length, 1);
+  return 1 - (levenshtein(a, b) / maxLen);
+}
+
+function isWordToken(token: string): boolean {
+  return /^[A-Za-zÄÖÜäöüß]+$/.test(token);
+}
+
+function tokenizeWordsAndSeparators(text: string): string[] {
+  return text.match(/[A-Za-zÄÖÜäöüß]+|[^A-Za-zÄÖÜäöüß]+/g) ?? [];
+}
+
+function isPlausibleSourceDerivedWord(candidate: string, sourceWords: string[]): boolean {
+  const candidateNorm = normalizeMergeWord(candidate);
+  if (!candidateNorm) {
+    return true;
+  }
+
+  const candidatePhonetic = colognePhonetic(candidate);
+
+  for (const sourceWord of sourceWords) {
+    const sourceNorm = normalizeMergeWord(sourceWord);
+    if (!sourceNorm) {
+      continue;
+    }
+
+    if (candidateNorm === sourceNorm) {
+      return true;
+    }
+
+    const lexicalSimilarity = wordSimilarity(candidateNorm, sourceNorm);
+    if (lexicalSimilarity >= 0.88) {
+      return true;
+    }
+
+    const sourcePhonetic = colognePhonetic(sourceWord);
+    if (!candidatePhonetic || !sourcePhonetic) {
+      continue;
+    }
+
+    const phoneticSimilarity = wordSimilarity(candidatePhonetic, sourcePhonetic);
+    const minWordLength = Math.min(candidateNorm.length, sourceNorm.length);
+
+    if (minWordLength < 4) {
+      if (phoneticSimilarity >= 0.8 && lexicalSimilarity >= 0.5) {
+        return true;
+      }
+      continue;
+    }
+
+    if (phoneticSimilarity >= 0.67 && lexicalSimilarity >= 0.34) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function stripNovelWordsFromMergeOutput(text1: string, text2: string, finalText: string): MergeNovelWordGuardResult {
+  if (!finalText) {
+    return { text: finalText, removedWords: [] };
+  }
+
+  const sourceWords = Array.from(new Set(
+    [...text1.match(/[A-Za-zÄÖÜäöüß]+/g) ?? [], ...text2.match(/[A-Za-zÄÖÜäöüß]+/g) ?? []]
+  ));
+
+  if (sourceWords.length === 0) {
+    return { text: finalText, removedWords: [] };
+  }
+
+  const removedWords: string[] = [];
+  const guardedTokens = tokenizeWordsAndSeparators(finalText).filter(token => {
+    if (!isWordToken(token)) {
+      return true;
+    }
+
+    if (isPlausibleSourceDerivedWord(token, sourceWords)) {
+      return true;
+    }
+
+    removedWords.push(token);
+    return false;
+  });
+
+  if (removedWords.length === 0) {
+    return { text: finalText, removedWords };
+  }
+
+  const cleaned = guardedTokens.join('')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/([({\[] )/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  return {
+    text: cleaned,
+    removedWords,
+  };
 }
 
 /**
@@ -190,6 +307,7 @@ DEINE AUFGABE - NUR DIESE KORREKTUREN:
 • Korrigiere Rechtschreibung und Zeichensetzung
 • Ändere NIEMALS den Satzbau oder die Satzstruktur
 • Ersetze NIEMALS medizinische Fachbegriffe durch Synonyme
+• Füge NIEMALS neue Wörter hinzu, die in keiner der beiden Transkriptionen vorkommen
 • Wenn ein Wort in beiden Versionen unklar/unverständlich ist, markiere es mit [?]
 
 INHALTSERHALT (KRITISCH - kein gesprochener Inhalt darf verloren gehen):

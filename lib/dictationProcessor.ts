@@ -22,7 +22,7 @@ import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
 import { applyLLMPhoneticGuard } from '@/lib/phoneticMatch';
 import { compressAudioForSpeech, normalizeAudioForWhisper } from '@/lib/audioCompression';
-import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
+import { mergeTranscriptionsWithMarkers, createMergePrompt, stripNovelWordsFromMergeOutput, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
 
 // LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
@@ -565,6 +565,15 @@ async function doublePrecisionMerge(
   
   // Remove any Markdown formatting that the LLM may have added despite instructions
   finalText = removeMarkdownFormatting(finalText);
+
+  const guardedMergeResult = stripNovelWordsFromMergeOutput(merged.text1, merged.text2, finalText);
+  if (guardedMergeResult.removedWords.length > 0) {
+    console.log(
+      `[Worker DoublePrecision] Removed ${guardedMergeResult.removedWords.length} novel merge words: ` +
+      `${guardedMergeResult.removedWords.slice(0, 5).join(', ')}`
+    );
+    finalText = guardedMergeResult.text;
+  }
   
   console.log(`[Worker DoublePrecision] ✓ Merged text length: ${finalText.length} chars (after Markdown cleanup)`);
   

@@ -19,7 +19,7 @@ import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
 import { applyLLMPhoneticGuard } from '@/lib/phoneticMatch';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
-import { mergeTranscriptionsWithMarkers, createMergePrompt, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
+import { mergeTranscriptionsWithMarkers, createMergePrompt, stripNovelWordsFromMergeOutput, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120; // 2 minutes max
@@ -342,6 +342,15 @@ async function doublePrecisionMerge(
   
   // Remove any Markdown formatting that the LLM may have added despite instructions
   finalText = removeMarkdownFormatting(finalText);
+
+  const guardedMergeResult = stripNovelWordsFromMergeOutput(merged.text1, merged.text2, finalText);
+  if (guardedMergeResult.removedWords.length > 0) {
+    console.log(
+      `[ReCorrect DoublePrecision] Removed ${guardedMergeResult.removedWords.length} novel merge words: ` +
+      `${guardedMergeResult.removedWords.slice(0, 5).join(', ')}`
+    );
+    finalText = guardedMergeResult.text;
+  }
   
   console.log(`[ReCorrect DoublePrecision] ✓ Merged text length: ${finalText.length} chars (after Markdown cleanup)`);
   

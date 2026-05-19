@@ -24,6 +24,10 @@ import { mergeTranscriptionsWithMarkers, createMergePrompt, stripNovelWordsFromM
 export const runtime = 'nodejs';
 export const maxDuration = 120; // 2 minutes max
 
+interface CorrectionLogMetadata {
+  rawInputsLogged?: boolean;
+}
+
 // LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
 const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);
 
@@ -216,8 +220,8 @@ async function doublePrecisionMerge(
     // Log that Double Precision was performed
     try {
       const dpLogText = `[DOUBLE PRECISION - KEINE UNAUFLÖSBAREN UNTERSCHIEDE]\n\n` +
-        `Transkription A (${result1.provider}):\n${result1.text}\n\n` +
-        `Transkription B (${result2.provider}):\n${result2.text}\n\n` +
+        `Transkription A (${result1.provider}):\n${result1.originalText ?? result1.text}\n\n` +
+        `Transkription B (${result2.provider}):\n${result2.originalText ?? result2.text}\n\n` +
         `Ergebnis: Einseitig fehlende Wörter wurden automatisch aus der vollständigeren Transkription übernommen.`;
       
       await logDoublePrecisionCorrectionWithRequest(
@@ -228,7 +232,7 @@ async function doublePrecisionMerge(
         'keine unresolved Unterschiede',
         'double-precision',
         0,
-        metadata
+        { ...(typeof metadata === 'object' && metadata !== null ? metadata as Record<string, unknown> : {}), rawInputsLogged: true }
       );
     } catch (logError: any) {
       console.warn(`[ReCorrect DoublePrecision] Failed to log: ${logError.message}`);
@@ -358,8 +362,8 @@ async function doublePrecisionMerge(
   try {
     const dpChangeScore = calculateChangeScore(result1.text, finalText);
     const dpLogText = `[DOUBLE PRECISION - UNTERSCHIEDE GEFUNDEN]\n\n` +
-      `Transkription A (${merged.provider1}):\n${merged.text1}\n\n` +
-      `Transkription B (${merged.provider2}):\n${merged.text2}\n\n` +
+      `Transkription A (${merged.provider1}):\n${result1.originalText ?? merged.text1}\n\n` +
+      `Transkription B (${merged.provider2}):\n${result2.originalText ?? merged.text2}\n\n` +
       `Markierte Unterschiede:\n${merged.mergedTextWithMarkers}`;
     
     await logDoublePrecisionCorrectionWithRequest(
@@ -370,7 +374,7 @@ async function doublePrecisionMerge(
       modelName,
       modelProvider,
       dpChangeScore,
-      metadata
+      { ...(typeof metadata === 'object' && metadata !== null ? metadata as Record<string, unknown> : {}), rawInputsLogged: true }
     );
     console.log(`[ReCorrect DoublePrecision] ✓ Logged (model: ${modelProvider}/${modelName}, score: ${dpChangeScore}%)`);
   } catch (logError: any) {
@@ -617,6 +621,7 @@ export async function POST(req: NextRequest) {
     // accidentally resurrect stale merge inputs from an older re-correction run.
     const logs = await getCorrectionLogByDictationIdWithRequest(req, dictationId);
     const doublePrecisionLog = [...logs].reverse().find(l => l.correction_type === 'doublePrecision');
+    const doublePrecisionMetadata = (doublePrecisionLog?.metadata ?? {}) as CorrectionLogMetadata;
     
     // Load dictionary
     const dictionary = dictation.username 
@@ -635,7 +640,7 @@ export async function POST(req: NextRequest) {
     let textForCorrection: string;
     
     // Check if we have Double Precision transcripts to re-merge
-    if (doublePrecisionLog && doublePrecisionLog.text_before) {
+    if (doublePrecisionLog && doublePrecisionLog.text_before && doublePrecisionMetadata.rawInputsLogged) {
       const parsed = parseDoublePrecisionLog(doublePrecisionLog.text_before);
       
       if (parsed && parsed.text1 && parsed.text2) {
@@ -684,8 +689,8 @@ export async function POST(req: NextRequest) {
         textForCorrection = await doublePrecisionMerge(
           req,
           dictationId,
-          { text: preprocessedResult1.text, provider: parsed.provider1 },
-          { text: preprocessedResult2.text, provider: parsed.provider2 },
+          { text: preprocessedResult1.text, originalText: parsed.text1, provider: parsed.provider1 },
+          { text: preprocessedResult2.text, originalText: parsed.text2, provider: parsed.provider2 },
           mergeContext,
           preprocessingMetadata
         );
@@ -696,8 +701,10 @@ export async function POST(req: NextRequest) {
         textForCorrection = dictation.raw_transcript || dictation.transcript || '';
       }
     } else {
-      // No Double Precision - use raw transcript
-      console.log(`[ReCorrect] No Double Precision log found, using raw_transcript`);
+      // Older Double Precision logs stored already-preprocessed inputs. Reusing them
+      // hides deterministic dictionary changes during re-correction, so only
+      // re-run DP when we know raw inputs were logged.
+      console.log(`[ReCorrect] No reusable raw-input Double Precision log found, using raw_transcript`);
       textForCorrection = dictation.raw_transcript || dictation.transcript || '';
     }
     
@@ -779,7 +786,7 @@ export async function POST(req: NextRequest) {
       correctedText,
       changeScore: finalChangeScore,
       hadDoublePrecision: !!doublePrecisionLog,
-      doublePrecisionReRan: !!(doublePrecisionLog && parseDoublePrecisionLog(doublePrecisionLog.text_before)),
+      doublePrecisionReRan: !!(doublePrecisionLog && doublePrecisionMetadata.rawInputsLogged && parseDoublePrecisionLog(doublePrecisionLog.text_before)),
       llmProvider: (await getLLMConfig(req)).provider,
       llmModel: (await getLLMConfig(req)).model,
       discardedOldProtocols: !!discardOldProtocols,

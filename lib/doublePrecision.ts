@@ -13,6 +13,7 @@ export interface TranscriptionResult {
   text: string;
   segments?: any[];
   provider: string;
+  originalText?: string;
 }
 
 export interface MergedResult {

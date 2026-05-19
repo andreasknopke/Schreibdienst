@@ -423,8 +423,8 @@ async function doublePrecisionMerge(
     // Log that Double Precision was performed without unresolved conflicts
     try {
       const dpLogText = `[DOUBLE PRECISION - KEINE UNAUFLÖSBAREN UNTERSCHIEDE]\n\n` +
-        `Transkription A (${result1.provider}):\n${result1.text}\n\n` +
-        `Transkription B (${result2.provider}):\n${result2.text}\n\n` +
+        `Transkription A (${result1.provider}):\n${result1.originalText ?? result1.text}\n\n` +
+        `Transkription B (${result2.provider}):\n${result2.originalText ?? result2.text}\n\n` +
         `Ergebnis: Einseitig fehlende Wörter wurden automatisch aus der vollständigeren Transkription übernommen.`;
       
       await logDoublePrecisionCorrectionWithRequest(
@@ -435,7 +435,7 @@ async function doublePrecisionMerge(
         'keine unresolved Unterschiede',
         'double-precision',
         0, // No changes = 0%
-        metadata
+        { ...(typeof metadata === 'object' && metadata !== null ? metadata as Record<string, unknown> : {}), rawInputsLogged: true }
       );
       console.log(`[Worker DoublePrecision] ✓ No differences log recorded`);
     } catch (logError: any) {
@@ -583,8 +583,8 @@ async function doublePrecisionMerge(
     
     // Create detailed log showing both versions and the marked differences
     const dpLogText = `[DOUBLE PRECISION - UNTERSCHIEDE GEFUNDEN]\n\n` +
-      `Transkription A (${merged.provider1}):\n${merged.text1}\n\n` +
-      `Transkription B (${merged.provider2}):\n${merged.text2}\n\n` +
+      `Transkription A (${merged.provider1}):\n${result1.originalText ?? merged.text1}\n\n` +
+      `Transkription B (${merged.provider2}):\n${result2.originalText ?? merged.text2}\n\n` +
       `Markierte Unterschiede:\n${merged.mergedTextWithMarkers}`;
     
     await logDoublePrecisionCorrectionWithRequest(
@@ -595,7 +595,7 @@ async function doublePrecisionMerge(
       modelName,
       modelProvider,
       dpChangeScore,
-      metadata
+      { ...(typeof metadata === 'object' && metadata !== null ? metadata as Record<string, unknown> : {}), rawInputsLogged: true }
     );
     console.log(`[Worker DoublePrecision] ✓ Double precision correction logged (model: ${modelProvider}/${modelName}, score: ${dpChangeScore}%)`);
   } catch (logError: any) {
@@ -805,8 +805,8 @@ async function transcribeAudio(
       ],
     };
 
-    result1 = { ...result1, text: preprocessedResult1.text };
-    result2 = { ...result2, text: preprocessedResult2.text };
+    result1 = { ...result1, originalText: result1.text, text: preprocessedResult1.text };
+    result2 = { ...result2, originalText: result2.text, text: preprocessedResult2.text };
     
     console.log(`[Worker DoublePrecision] Got transcriptions: ${result1.provider}=${result1.text.length} chars, ${result2.provider}=${result2.text.length} chars`);
     

@@ -220,7 +220,18 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
         ? 'Wortstamm'
         : 'direkt';
 
-    return `${operation.originalText} -> ${operation.replacementText} (${sourceLabel}, ${matchLabel})`;
+    return `${operation.dictionaryWrong} -> ${operation.dictionaryCorrect} (${sourceLabel}, ${matchLabel})`;
+  };
+
+  const getAppliedTextLabel = (operation: DictionaryOperation) => {
+    if (
+      operation.originalText === operation.dictionaryWrong &&
+      operation.replacementText === operation.dictionaryCorrect
+    ) {
+      return null;
+    }
+
+    return `${operation.originalText} -> ${operation.replacementText}`;
   };
 
   const handleTermAction = async (action: 'remove' | 'weaken') => {
@@ -412,9 +423,9 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
                                     }`}
                                     title={getOperationLabel(operation)}
                                   >
-                                    <span className="font-medium">{operation.originalText}</span>
+                                    <span className="font-medium">{operation.dictionaryWrong}</span>
                                     <span className="mx-1">→</span>
-                                    <span>{operation.replacementText}</span>
+                                    <span>{operation.dictionaryCorrect}</span>
                                     <span className="ml-2 opacity-70">[{operation.source === 'standard' ? 'Standard' : operation.source === 'group' ? 'Gruppe' : 'User'} / {operation.matchType}]</span>
                                   </button>
                                 ))}
@@ -490,6 +501,9 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
             <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
               <div>Quelle: {actionTarget.operation.source === 'standard' ? 'Standard-Wörterbuch' : actionTarget.operation.source === 'group' ? `Gruppen-Wörterbuch${actionTarget.operation.groupName ? ` (${actionTarget.operation.groupName})` : ''}` : 'Benutzer-Wörterbuch'}</div>
               <div>Dictionary: {actionTarget.operation.dictionaryWrong} → {actionTarget.operation.dictionaryCorrect}</div>
+              {getAppliedTextLabel(actionTarget.operation) && (
+                <div>Angewendet auf Text: {getAppliedTextLabel(actionTarget.operation)}</div>
+              )}
               <div>Match-Art: {actionTarget.operation.matchType}</div>
               {typeof actionTarget.operation.confidence === 'number' && (
                 <div>Confidence: {(actionTarget.operation.confidence * 100).toFixed(1)}%</div>

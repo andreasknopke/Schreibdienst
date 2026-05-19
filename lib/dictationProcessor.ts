@@ -1379,17 +1379,20 @@ async function correctText(
     ? formatGroupPromptInsertSection(await getPromptInsertsForUserGroupsWithRequest(request, username))
     : '';
   
-  // Dictionary corrections are applied deterministically before the LLM.
-  // The LLM only gets the normalized terms as a protection list so it does not undo them.
+  // Build dictionary prompt section for LLM hints (words to correct if similar found)
+  // Note: Dictionary corrections are also applied programmatically in preprocessTranscription()
+  // The LLM section here catches phonetically similar words that aren't exact matches
   let dictionaryPromptSection = '';
   if (dictionaryEntries && dictionaryEntries.length > 0) {
-    const protectedTerms = Array.from(new Set(dictionaryEntries.map(e => e.correct).filter(Boolean))).join(', ');
+    const dictionaryLines = dictionaryEntries.map(e => 
+      `"${e.wrong}" → "${e.correct}"`
+    ).join(', ');
     dictionaryPromptSection = `
 
-GESCHÜTZTE WÖRTERBUCH-BEGRIFFE:
-${protectedTerms}
-Diese Begriffe wurden bereits vorab deterministisch normalisiert. Wenn sie im Text vorkommen, behalte sie exakt bei. Verwende diese Liste NICHT, um andere phonetisch ähnliche Wörter aktiv umzuschreiben.`;
-    console.log(`[Worker] Dictionary protected terms added to LLM prompt: ${dictionaryEntries.length} entries`);
+WÖRTERBUCH (HÖCHSTE PRIORITÄT - immer anwenden):
+${dictionaryLines}
+Wende diese Korrekturen an, wenn du ein Wort findest das gleich oder phonetisch ähnlich klingt.`;
+    console.log(`[Worker] Dictionary added to LLM prompt: ${dictionaryEntries.length} entries`);
   }
   
   // Build context section for patient and doctor names

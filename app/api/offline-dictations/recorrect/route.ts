@@ -390,12 +390,11 @@ async function correctText(
     await getPromptInsertsForUserGroupsWithRequest(request, username)
   );
   
-  // Dictionary corrections are applied deterministically before the LLM.
-  // The LLM only gets the normalized terms as a protection list so it does not undo them.
+  // Build dictionary section
   let dictionaryPromptSection = '';
   if (dictionaryEntries && dictionaryEntries.length > 0) {
-    const protectedTerms = Array.from(new Set(dictionaryEntries.map(e => e.correct).filter(Boolean))).join(', ');
-    dictionaryPromptSection = `\n\nGESCHÜTZTE WÖRTERBUCH-BEGRIFFE:\n${protectedTerms}\nDiese Begriffe wurden bereits vorab deterministisch normalisiert. Wenn sie im Text vorkommen, behalte sie exakt bei. Verwende diese Liste NICHT, um andere phonetisch ähnliche Wörter aktiv umzuschreiben.`;
+    const dictionaryLines = dictionaryEntries.map(e => `"${e.wrong}" → "${e.correct}"`).join(', ');
+    dictionaryPromptSection = `\n\nWÖRTERBUCH (HÖCHSTE PRIORITÄT):\n${dictionaryLines}`;
   }
   
   // Build context section

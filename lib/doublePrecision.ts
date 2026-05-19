@@ -156,18 +156,16 @@ export function createMergePrompt(merged: MergedResult, context?: MergeContext):
   const patientDob = context?.patientDob;
   const doctorName = context?.doctorName;
 
-  // Dictionary corrections are applied deterministically before the merge.
-  // The merge LLM only gets normalized terms as a protection list so it does not undo them.
+  // Build dictionary section if entries exist with useInPrompt=true
   let dictionarySection = '';
   if (dictionaryEntries && dictionaryEntries.length > 0) {
     const promptEntries = dictionaryEntries.filter(e => e.useInPrompt);
     if (promptEntries.length > 0) {
-      const protectedTerms = Array.from(new Set(promptEntries.map(e => e.correct).filter(Boolean))).join(', ');
+      const dictLines = promptEntries.map(e => `"${e.wrong}" → "${e.correct}"`).join(', ');
       dictionarySection = `
 
-GESCHÜTZTE WÖRTERBUCH-BEGRIFFE:
-${protectedTerms}
-Diese Begriffe wurden bereits vorab deterministisch normalisiert. Wenn sie in einer Transkription vorkommen, behalte sie exakt bei. Verwende diese Liste NICHT, um andere phonetisch ähnliche Wörter aktiv umzuschreiben.`;
+WÖRTERBUCH (HÖCHSTE PRIORITÄT - immer anwenden):
+${dictLines}`;
     }
   }
 

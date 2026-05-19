@@ -612,9 +612,11 @@ export async function POST(req: NextRequest) {
     console.log(`[ReCorrect] Patient context - name: "${patientName || '(none)'}", dob: "${patientDob || '(none)'}", username: "${dictation.username || '(none)'}"`);
     console.log(`[ReCorrect] Raw DB types - patient_name: ${typeof rawPatientName} (${rawPatientName instanceof Date ? 'Date' : 'not Date'}), patient_dob: ${typeof rawPatientDob} (${rawPatientDob instanceof Date ? 'Date' : 'not Date'})`);
     
-    // Get correction logs to find Double Precision entries
+    // Get correction logs to find the most recent Double Precision entry.
+    // Logs are loaded ascending by created_at; using the first match can
+    // accidentally resurrect stale merge inputs from an older re-correction run.
     const logs = await getCorrectionLogByDictationIdWithRequest(req, dictationId);
-    const doublePrecisionLog = logs.find(l => l.correction_type === 'doublePrecision');
+    const doublePrecisionLog = [...logs].reverse().find(l => l.correction_type === 'doublePrecision');
     
     // Load dictionary
     const dictionary = dictation.username 

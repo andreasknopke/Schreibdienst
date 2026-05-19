@@ -426,9 +426,11 @@ AUFGABE: Korrigiere den Text zwischen <<<DIKTAT_START>>> und <<<DIKTAT_ENDE>>> u
 REGELN:
 1. Korrigiere Grammatik- und Rechtschreibfehler
 2. Korrigiere falsch transkribierte medizinische Fachbegriffe
-3. Wandle ausgeschriebene Zahlen in Ziffern um: "acht Millimeter" → "8 mm"
-4. Behalte den Stil des Diktierenden bei
-5. Gib AUSSCHLIESSLICH den korrigierten Text zurück - keine Erklärungen!${dictionaryPromptSection}${contextPromptSection}${groupPromptInsertSection}${promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : ''}`;
+3. Du DARFST kurze lokale Grammatik-Reparaturen vornehmen, auch wenn sich dabei ein Wort in zwei Wörter aufteilt oder umgekehrt, sofern die medizinische Aussage unverändert bleibt
+4. Füge NIEMALS neue Wörter, Überschriften oder Labels wie "Anamnese:" hinzu, wenn sie nicht bereits im Text stehen
+5. Wandle ausgeschriebene Zahlen in Ziffern um: "acht Millimeter" → "8 mm"
+6. Behalte den Stil des Diktierenden bei
+7. Gib AUSSCHLIESSLICH den korrigierten Text zurück - keine Erklärungen!${dictionaryPromptSection}${contextPromptSection}${groupPromptInsertSection}${promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : ''}`;
 
   // Helper to call a cloud LLM (OpenAI/Mistral) for a single chunk
   async function callCloudLLM(prompt: string, chunkText: string): Promise<string> {

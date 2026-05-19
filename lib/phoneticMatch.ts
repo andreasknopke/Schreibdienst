@@ -250,6 +250,12 @@ export interface LLMPhoneticGuardResult {
   revertedChunks: number;
 }
 
+function keepOnlyNonWordTokens(text: string): string {
+  return tokenizeWordsAndSeparators(text)
+    .filter(token => !isWordToken(token))
+    .join('');
+}
+
 /**
  * Verhindert, dass das LLM einzelne Wörter oder ganze Wortgruppen durch
  * phonetisch unplausible Alternativen ersetzt.
@@ -292,7 +298,15 @@ export function applyLLMPhoneticGuard(originalText: string, correctedText: strin
     }
 
     if (!removedText) {
-      guardedParts.push(addedText);
+      const addedWords = tokenizeWordsAndSeparators(addedText).filter(isWordToken);
+      if (addedWords.length === 0) {
+        guardedParts.push(addedText);
+        continue;
+      }
+
+      rejectedWordReplacements += addedWords.length;
+      revertedChunks++;
+      guardedParts.push(keepOnlyNonWordTokens(addedText));
       continue;
     }
 

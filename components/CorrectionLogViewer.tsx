@@ -47,11 +47,9 @@ type SelectedDictionaryAction = {
   operation: DictionaryOperation;
 };
 
-const PREPROCESSING_TYPES = new Set<CorrectionLogEntry['correction_type']>([
+const MERGED_PREPROCESSING_TYPES = new Set<CorrectionLogEntry['correction_type']>([
   'textFormatting',
   'dictionary',
-  'standardDictionary',
-  'privateDictionary',
 ]);
 
 interface CorrectionLogViewerProps {
@@ -175,13 +173,13 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
   for (let index = 0; index < logs.length; index++) {
     const currentLog = logs[index];
 
-    if (!PREPROCESSING_TYPES.has(currentLog.correction_type)) {
+    if (!MERGED_PREPROCESSING_TYPES.has(currentLog.correction_type)) {
       displayLogs.push(currentLog);
       continue;
     }
 
     const mergedLogs = [currentLog];
-    while (index + 1 < logs.length && PREPROCESSING_TYPES.has(logs[index + 1].correction_type)) {
+    while (index + 1 < logs.length && MERGED_PREPROCESSING_TYPES.has(logs[index + 1].correction_type)) {
       mergedLogs.push(logs[index + 1]);
       index++;
     }

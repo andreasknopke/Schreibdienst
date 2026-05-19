@@ -525,8 +525,11 @@ const EXPLICIT_MATCH_SIMILARITY = 0.5;
 const EXPLICIT_VARIATION_SIMILARITY = 0.45;
 const SELF_MAPPING_MATCH_SIMILARITY = 0.82;
 const SELF_MAPPING_VARIATION_SIMILARITY = 0.85;
+const SHORT_EXPLICIT_MATCH_SIMILARITY = 0.75;
+const SHORT_EXPLICIT_VARIATION_SIMILARITY = 0.78;
+const SHORT_PHONETIC_WORD_LENGTH = 8;
 
-function getSimilarityThreshold(candidate: PhoneticDictEntry, viaVariation: boolean): number {
+function getSimilarityThreshold(candidate: PhoneticDictEntry, viaVariation: boolean, wordLength?: number): number {
   const override = typeof candidate.phoneticMinSimilarity === 'number'
     ? Math.min(0.99, Math.max(0, candidate.phoneticMinSimilarity))
     : undefined;
@@ -536,7 +539,10 @@ function getSimilarityThreshold(candidate: PhoneticDictEntry, viaVariation: bool
     return override !== undefined ? Math.max(base, override) : base;
   }
 
-  const base = viaVariation ? EXPLICIT_VARIATION_SIMILARITY : EXPLICIT_MATCH_SIMILARITY;
+  const shortestLength = Math.min(wordLength ?? Number.POSITIVE_INFINITY, candidate.wrongNorm.length || Number.POSITIVE_INFINITY);
+  const base = shortestLength <= SHORT_PHONETIC_WORD_LENGTH
+    ? (viaVariation ? SHORT_EXPLICIT_VARIATION_SIMILARITY : SHORT_EXPLICIT_MATCH_SIMILARITY)
+    : (viaVariation ? EXPLICIT_VARIATION_SIMILARITY : EXPLICIT_MATCH_SIMILARITY);
   return override !== undefined ? Math.max(base, override) : base;
 }
 
@@ -678,7 +684,7 @@ export function findPhoneticMatch(
       const dist = levenshtein(wordNorm, cand.wrongNorm);
       const maxLen = Math.max(wordNorm.length, cand.wrongNorm.length);
       const similarity = 1 - (dist / maxLen);
-      const minSimilarity = getSimilarityThreshold(cand, false);
+      const minSimilarity = getSimilarityThreshold(cand, false, wordNorm.length);
 
       if (similarity >= minSimilarity) {
         const confidence = 0.5 + (similarity * 0.5);
@@ -705,7 +711,7 @@ export function findPhoneticMatch(
         const dist = levenshtein(wordNorm, cand.wrongNorm);
         const maxLen = Math.max(wordNorm.length, cand.wrongNorm.length);
         const similarity = 1 - (dist / maxLen);
-        const minSimilarity = getSimilarityThreshold(cand, true);
+        const minSimilarity = getSimilarityThreshold(cand, true, wordNorm.length);
 
         if (similarity >= minSimilarity) {
           const confidence = 0.4 + (similarity * 0.5);

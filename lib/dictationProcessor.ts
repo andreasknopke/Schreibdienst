@@ -402,7 +402,8 @@ async function doublePrecisionMerge(
   dictationId: number,
   result1: TranscriptionResult,
   result2: TranscriptionResult,
-  mergeContext?: MergeContext
+  mergeContext?: MergeContext,
+  metadata?: unknown
 ): Promise<{ text: string; segments?: any[] }> {
   console.log(`[Worker DoublePrecision] Merging transcriptions from ${result1.provider} and ${result2.provider}`);
   
@@ -433,7 +434,8 @@ async function doublePrecisionMerge(
         sourceText,
         'keine unresolved Unterschiede',
         'double-precision',
-        0 // No changes = 0%
+        0, // No changes = 0%
+        metadata
       );
       console.log(`[Worker DoublePrecision] ✓ No differences log recorded`);
     } catch (logError: any) {
@@ -583,7 +585,8 @@ async function doublePrecisionMerge(
       finalText,
       modelName,
       modelProvider,
-      dpChangeScore
+      dpChangeScore,
+      metadata
     );
     console.log(`[Worker DoublePrecision] ✓ Double precision correction logged (model: ${modelProvider}/${modelName}, score: ${dpChangeScore}%)`);
   } catch (logError: any) {
@@ -717,6 +720,15 @@ async function transcribeAudio(
       );
     }
 
+    const preprocessingMetadata = {
+      version: 1,
+      targetUsername: username,
+      dictionaryOperations: [
+        ...preprocessedResult1.operations,
+        ...preprocessedResult2.operations,
+      ],
+    };
+
     result1 = { ...result1, text: preprocessedResult1.text };
     result2 = { ...result2, text: preprocessedResult2.text };
     
@@ -729,7 +741,7 @@ async function transcribeAudio(
       patientDob,
       doctorName,
     };
-    return doublePrecisionMerge(request, dictationId, result1, result2, mergeContext);
+    return doublePrecisionMerge(request, dictationId, result1, result2, mergeContext, preprocessingMetadata);
   }
   
   // ElevenLabs jetzt im Offline-Modus unterstützt mit Word-Level Timestamps für Mitlesefunktion
@@ -1367,20 +1379,17 @@ async function correctText(
     ? formatGroupPromptInsertSection(await getPromptInsertsForUserGroupsWithRequest(request, username))
     : '';
   
-  // Build dictionary prompt section for LLM hints (words to correct if similar found)
-  // Note: Dictionary corrections are also applied programmatically in preprocessTranscription()
-  // The LLM section here catches phonetically similar words that aren't exact matches
+  // Dictionary corrections are applied deterministically before the LLM.
+  // The LLM only gets the normalized terms as a protection list so it does not undo them.
   let dictionaryPromptSection = '';
   if (dictionaryEntries && dictionaryEntries.length > 0) {
-    const dictionaryLines = dictionaryEntries.map(e => 
-      `"${e.wrong}" → "${e.correct}"`
-    ).join(', ');
+    const protectedTerms = Array.from(new Set(dictionaryEntries.map(e => e.correct).filter(Boolean))).join(', ');
     dictionaryPromptSection = `
 
-WÖRTERBUCH (HÖCHSTE PRIORITÄT - immer anwenden):
-${dictionaryLines}
-Wende diese Korrekturen an, wenn du ein Wort findest das gleich oder phonetisch ähnlich klingt.`;
-    console.log(`[Worker] Dictionary added to LLM prompt: ${dictionaryEntries.length} entries`);
+GESCHÜTZTE WÖRTERBUCH-BEGRIFFE:
+${protectedTerms}
+Diese Begriffe wurden bereits vorab deterministisch normalisiert. Wenn sie im Text vorkommen, behalte sie exakt bei. Verwende diese Liste NICHT, um andere phonetisch ähnliche Wörter aktiv umzuschreiben.`;
+    console.log(`[Worker] Dictionary protected terms added to LLM prompt: ${dictionaryEntries.length} entries`);
   }
   
   // Build context section for patient and doctor names

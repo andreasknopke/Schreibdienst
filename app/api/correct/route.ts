@@ -790,20 +790,17 @@ export async function POST(req: NextRequest) {
       : '';
     console.log(`[Correct] Runtime config loaded: llmProvider=${runtimeConfig.llmProvider}, promptAddition=${promptAddition ? promptAddition.substring(0, 50) + '...' : 'none'}`);
     
-    // Build dictionary prompt section for LLM hints (words to correct if similar found)
+    // Dictionary corrections are applied deterministically before the LLM.
+    // The LLM only gets the normalized terms as a protection list so it does not undo them.
     let dictionaryPromptSection = '';
     if (dictionaryEntries.length > 0) {
-      const dictionaryLines = dictionaryEntries.map(e => 
-        `  "${e.wrong}" → "${e.correct}"`
-      ).join('\n');
+      const protectedTerms = Array.from(new Set(dictionaryEntries.map(e => e.correct).filter(Boolean))).join(', ');
       dictionaryPromptSection = `
 
-BENUTZERWÖRTERBUCH - Bekannte Korrekturen:
-Die folgenden Wörter werden häufig falsch transkribiert. Wenn du im Text ein Wort findest, 
-das einem dieser falschen Wörter entspricht oder sehr ähnlich klingt, korrigiere es zum richtigen Begriff,
-sofern es im medizinischen Kontext Sinn ergibt:
-${dictionaryLines}`;
-      console.log(`[Correct] Dictionary added to LLM prompt: ${dictionaryEntries.length} entries`);
+GESCHÜTZTE WÖRTERBUCH-BEGRIFFE:
+${protectedTerms}
+Diese Begriffe wurden bereits vorab deterministisch normalisiert. Wenn sie im Text vorkommen, behalte sie exakt bei. Verwende diese Liste NICHT, um andere phonetisch ähnliche Wörter aktiv umzuschreiben.`;
+      console.log(`[Correct] Dictionary protected terms added to LLM prompt: ${dictionaryEntries.length} entries`);
     }
     
     // Build patient name section for LLM to correct phonetically similar names

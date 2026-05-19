@@ -155,14 +155,15 @@ export async function loadDictionary(username: string): Promise<{ entries: Dicti
   return { entries };
 }
 
-// Format dictionary for LLM prompt
+// Format dictionary terms for LLM prompt protection. Deterministic dictionary
+// replacement happens before LLM calls; this list must not trigger new matches.
 export function formatDictionaryForPrompt(entries: DictionaryEntry[]): string {
   if (!entries || entries.length === 0) {
     return '';
   }
   
-  const lines = entries.map(e => `- "${e.wrong}" MUSS IMMER ersetzt werden durch "${e.correct}"`);
-  return `\n\nKRITISCH - BENUTZERWÖRTERBUCH (MUSS angewendet werden):\nDie folgenden Ersetzungen sind PFLICHT und müssen IMMER durchgeführt werden, unabhängig vom Kontext:\n${lines.join('\n')}\n\nWenn du eines dieser Wörter im Text findest, MUSST du es ersetzen!`;
+  const protectedTerms = Array.from(new Set(entries.map(e => e.correct).filter(Boolean))).join(', ');
+  return `\n\nGESCHÜTZTE WÖRTERBUCH-BEGRIFFE:\n${protectedTerms}\nDiese Begriffe wurden bereits vorab deterministisch normalisiert. Wenn sie im Text vorkommen, behalte sie exakt bei. Verwende diese Liste NICHT, um andere phonetisch ähnliche Wörter aktiv umzuschreiben.`;
 }
 
 // Apply dictionary corrections to text

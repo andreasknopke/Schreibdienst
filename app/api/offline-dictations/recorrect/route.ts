@@ -197,7 +197,8 @@ async function doublePrecisionMerge(
   dictationId: number,
   result1: TranscriptionResult,
   result2: TranscriptionResult,
-  mergeContext?: MergeContext
+  mergeContext?: MergeContext,
+  metadata?: unknown
 ): Promise<string> {
   console.log(`[ReCorrect DoublePrecision] Merging transcriptions from ${result1.provider} and ${result2.provider}`);
   
@@ -226,7 +227,8 @@ async function doublePrecisionMerge(
         sourceText,
         'keine unresolved Unterschiede',
         'double-precision',
-        0
+        0,
+        metadata
       );
     } catch (logError: any) {
       console.warn(`[ReCorrect DoublePrecision] Failed to log: ${logError.message}`);
@@ -358,7 +360,8 @@ async function doublePrecisionMerge(
       finalText,
       modelName,
       modelProvider,
-      dpChangeScore
+      dpChangeScore,
+      metadata
     );
     console.log(`[ReCorrect DoublePrecision] ✓ Logged (model: ${modelProvider}/${modelName}, score: ${dpChangeScore}%)`);
   } catch (logError: any) {
@@ -387,11 +390,12 @@ async function correctText(
     await getPromptInsertsForUserGroupsWithRequest(request, username)
   );
   
-  // Build dictionary section
+  // Dictionary corrections are applied deterministically before the LLM.
+  // The LLM only gets the normalized terms as a protection list so it does not undo them.
   let dictionaryPromptSection = '';
   if (dictionaryEntries && dictionaryEntries.length > 0) {
-    const dictionaryLines = dictionaryEntries.map(e => `"${e.wrong}" → "${e.correct}"`).join(', ');
-    dictionaryPromptSection = `\n\nWÖRTERBUCH (HÖCHSTE PRIORITÄT):\n${dictionaryLines}`;
+    const protectedTerms = Array.from(new Set(dictionaryEntries.map(e => e.correct).filter(Boolean))).join(', ');
+    dictionaryPromptSection = `\n\nGESCHÜTZTE WÖRTERBUCH-BEGRIFFE:\n${protectedTerms}\nDiese Begriffe wurden bereits vorab deterministisch normalisiert. Wenn sie im Text vorkommen, behalte sie exakt bei. Verwende diese Liste NICHT, um andere phonetisch ähnliche Wörter aktiv umzuschreiben.`;
   }
   
   // Build context section
@@ -656,12 +660,22 @@ export async function POST(req: NextRequest) {
           );
         }
         
+        const preprocessingMetadata = {
+          version: 1,
+          targetUsername: dictation.username,
+          dictionaryOperations: [
+            ...preprocessedResult1.operations,
+            ...preprocessedResult2.operations,
+          ],
+        };
+
         textForCorrection = await doublePrecisionMerge(
           req,
           dictationId,
           { text: preprocessedResult1.text, provider: parsed.provider1 },
           { text: preprocessedResult2.text, provider: parsed.provider2 },
-          mergeContext
+          mergeContext,
+          preprocessingMetadata
         );
         
         console.log(`[ReCorrect] Double Precision merge complete: ${textForCorrection.length} chars`);

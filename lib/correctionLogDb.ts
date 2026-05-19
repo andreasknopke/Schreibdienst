@@ -167,8 +167,8 @@ export function logLLMCorrection(dictationId: number, textBefore: string, textAf
   return getPool().then(db => _logCorrection(db, dictationId, 'llm', textBefore, textAfter, { modelName, modelProvider, changeScore }));
 }
 
-export function logDoublePrecisionCorrection(dictationId: number, textBefore: string, textAfter: string, modelName: string, modelProvider: string, changeScore?: number) {
-  return getPool().then(db => _logCorrection(db, dictationId, 'doublePrecision', textBefore, textAfter, { modelName, modelProvider, changeScore }));
+export function logDoublePrecisionCorrection(dictationId: number, textBefore: string, textAfter: string, modelName: string, modelProvider: string, changeScore?: number, metadata?: unknown) {
+  return getPool().then(db => _logCorrection(db, dictationId, 'doublePrecision', textBefore, textAfter, { modelName, modelProvider, changeScore, metadata }));
 }
 
 export function logManualCorrection(dictationId: number, textBefore: string, textAfter: string, username: string, changeScore?: number) {
@@ -211,8 +211,8 @@ export function logLLMCorrectionWithRequest(req: NextRequest, dictationId: numbe
   return getPoolForRequest(req).then(db => _logCorrection(db, dictationId, 'llm', textBefore, textAfter, { modelName, modelProvider, changeScore }));
 }
 
-export function logDoublePrecisionCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, modelName: string, modelProvider: string, changeScore?: number) {
-  return getPoolForRequest(req).then(db => _logCorrection(db, dictationId, 'doublePrecision', textBefore, textAfter, { modelName, modelProvider, changeScore }));
+export function logDoublePrecisionCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, modelName: string, modelProvider: string, changeScore?: number, metadata?: unknown) {
+  return getPoolForRequest(req).then(db => _logCorrection(db, dictationId, 'doublePrecision', textBefore, textAfter, { modelName, modelProvider, changeScore, metadata }));
 }
 
 export function logManualCorrectionWithRequest(req: NextRequest, dictationId: number, textBefore: string, textAfter: string, username: string, changeScore?: number) {

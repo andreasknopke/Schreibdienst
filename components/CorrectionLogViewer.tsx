@@ -234,6 +234,47 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
     return `${operation.originalText} -> ${operation.replacementText}`;
   };
 
+  const renderDictionaryOperations = (log: DisplayCorrectionLogEntry) => {
+    if (!log.metadata?.dictionaryOperations || log.metadata.dictionaryOperations.length === 0) {
+      return null;
+    }
+
+    return (
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="text-xs font-medium text-gray-600 dark:text-gray-400">
+            Wörterbuch-Ersetzungen:
+          </div>
+          {isRootUser && (
+            <div className="text-[11px] text-gray-500 dark:text-gray-400">
+              Anklicken fuer Root-Aktionen
+            </div>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {log.metadata.dictionaryOperations.map((operation, operationIndex) => (
+            <button
+              key={`${log.id}-${operationIndex}-${operation.dictionaryWrong}-${operation.replacementText}`}
+              type="button"
+              disabled={!isRootUser}
+              onClick={() => isRootUser && setActionTarget({ logId: log.id, operation })}
+              className={`rounded-full border px-3 py-1 text-left text-xs ${isRootUser
+                ? 'border-slate-300 bg-slate-50 text-slate-700 hover:border-slate-400 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200 dark:hover:bg-slate-800'
+                : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-900/20 dark:text-slate-300'
+              }`}
+              title={getOperationLabel(operation)}
+            >
+              <span className="font-medium">{operation.dictionaryWrong}</span>
+              <span className="mx-1">→</span>
+              <span>{operation.dictionaryCorrect}</span>
+              <span className="ml-2 opacity-70">[{operation.source === 'standard' ? 'Standard' : operation.source === 'group' ? 'Gruppe' : 'User'} / {operation.matchType}]</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const handleTermAction = async (action: 'remove' | 'weaken') => {
     if (!actionTarget) return;
 
@@ -374,6 +415,8 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
                             </pre>
                           </div>
 
+                          {renderDictionaryOperations(log)}
+
                           {/* Final merged text */}
                           <div>
                             <div className="text-xs font-medium text-green-700 dark:text-green-300 mb-1">
@@ -398,40 +441,7 @@ export default function CorrectionLogViewer({ dictationId, onClose }: Correction
                             />
                           </div>
 
-                          {log.metadata?.dictionaryOperations && log.metadata.dictionaryOperations.length > 0 && (
-                            <div>
-                              <div className="mb-2 flex items-center justify-between gap-2">
-                                <div className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                                  Wörterbuch-Ersetzungen:
-                                </div>
-                                {isRootUser && (
-                                  <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                                    Anklicken fuer Root-Aktionen
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {log.metadata.dictionaryOperations.map((operation, operationIndex) => (
-                                  <button
-                                    key={`${log.id}-${operationIndex}-${operation.dictionaryWrong}-${operation.replacementText}`}
-                                    type="button"
-                                    disabled={!isRootUser}
-                                    onClick={() => isRootUser && setActionTarget({ logId: log.id, operation })}
-                                    className={`rounded-full border px-3 py-1 text-left text-xs ${isRootUser
-                                      ? 'border-slate-300 bg-slate-50 text-slate-700 hover:border-slate-400 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200 dark:hover:bg-slate-800'
-                                      : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-900/20 dark:text-slate-300'
-                                    }`}
-                                    title={getOperationLabel(operation)}
-                                  >
-                                    <span className="font-medium">{operation.dictionaryWrong}</span>
-                                    <span className="mx-1">→</span>
-                                    <span>{operation.dictionaryCorrect}</span>
-                                    <span className="ml-2 opacity-70">[{operation.source === 'standard' ? 'Standard' : operation.source === 'group' ? 'Gruppe' : 'User'} / {operation.matchType}]</span>
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                          {renderDictionaryOperations(log)}
 
                           {/* Original Text */}
                           <div>

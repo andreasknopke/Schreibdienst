@@ -672,15 +672,77 @@ async function transcribeAudio(
     
     let result1: TranscriptionResult;
     let result2: TranscriptionResult;
+    const getPrimaryProviderLabel = (currentProvider: string) => {
+      if (provider === 'whisperx' && primaryWhisperModel) {
+        return `whisperx (${primaryWhisperModel})`;
+      }
+      return currentProvider;
+    };
+    const getSecondaryProviderLabel = (currentProvider: string) => {
+      if (provider === 'whisperx' && secondProvider === 'whisperx' && dpWhisperModel) {
+        return `whisperx (${dpWhisperModel})`;
+      }
+      return currentProvider;
+    };
+    const fallbackToPrimaryTranscription = async (primaryResult: TranscriptionResult, secondaryError: unknown) => {
+      const primaryProviderLabel = getPrimaryProviderLabel(primaryResult.provider);
+      const secondaryProviderLabel = getSecondaryProviderLabel(secondProvider);
+      const errorMessage = secondaryError instanceof Error ? secondaryError.message : String(secondaryError);
+      const standardDictionaryEntries = await getStandardDictEntries(request);
+      const preprocessedPrimary = preprocessTranscriptionDetailed(
+        primaryResult.text,
+        dictionaryEntries,
+        standardDictionaryEntries,
+        { targetUsername: username }
+      );
+      const fallbackText = preprocessedPrimary.text;
+      const fallbackMetadata = {
+        version: 1,
+        targetUsername: username,
+        dictionaryOperations: [...preprocessedPrimary.operations],
+      };
+
+      try {
+        const dpLogText = `[DOUBLE PRECISION - FALLBACK AUF PRIMAERTRANSKRIPTION]\n\n` +
+          `Primäre Transkription (${primaryProviderLabel}):\n${primaryResult.text}\n\n` +
+          `Sekundäre Transkription (${secondaryProviderLabel}) fehlgeschlagen:\n${errorMessage}\n\n` +
+          `Ergebnis: Double Precision wurde verlassen. Die erfolgreiche Primärtranskription wurde weiterverwendet.`;
+
+        await logDoublePrecisionCorrectionWithRequest(
+          request,
+          dictationId,
+          dpLogText,
+          fallbackText,
+          'secondary transcription failed',
+          'double-precision-fallback',
+          0,
+          fallbackMetadata
+        );
+        console.log(`[Worker DoublePrecision] ✓ Fallback to primary transcription logged (${primaryProviderLabel})`);
+      } catch (logError: any) {
+        console.warn(`[Worker DoublePrecision] Failed to log fallback: ${logError.message}`);
+      }
+
+      return { text: fallbackText, segments: primaryResult.segments };
+    };
     
     if (mode === 'parallel') {
-      // Parallel execution - both use initialPrompt for consistent results
-      const [r1, r2] = await Promise.all([
+      const [r1, r2] = await Promise.allSettled([
         transcribeWithProvider(request, audioBlob, provider, initialPrompt, primaryWhisperModel),
         transcribeWithProvider(request, audioBlob, secondProvider, initialPrompt, dpWhisperModel),
       ]);
-      result1 = r1;
-      result2 = r2;
+
+      if (r1.status === 'fulfilled' && r2.status === 'fulfilled') {
+        result1 = r1.value;
+        result2 = r2.value;
+      } else if (r1.status === 'fulfilled' && r2.status === 'rejected') {
+        console.warn(`[Worker DoublePrecision] Secondary transcription failed, falling back to primary: ${r2.reason instanceof Error ? r2.reason.message : String(r2.reason)}`);
+        return fallbackToPrimaryTranscription(r1.value, r2.reason);
+      } else if (r1.status === 'rejected') {
+        throw (r1.reason instanceof Error ? r1.reason : new Error(String(r1.reason)));
+      } else {
+        throw new Error('Double precision transcription failed unexpectedly');
+      }
     } else {
       // Sequential execution
       result1 = await transcribeWithProvider(request, audioBlob, provider, initialPrompt, primaryWhisperModel);
@@ -688,8 +750,13 @@ async function transcribeAudio(
       // Small delay to allow GPU resources to be released
       console.log(`[Worker DoublePrecision] First transcription complete, starting second...`);
       await new Promise(resolve => setTimeout(resolve, 500));
-      
-      result2 = await transcribeWithProvider(request, audioBlob, secondProvider, initialPrompt, dpWhisperModel);
+
+      try {
+        result2 = await transcribeWithProvider(request, audioBlob, secondProvider, initialPrompt, dpWhisperModel);
+      } catch (error) {
+        console.warn(`[Worker DoublePrecision] Secondary transcription failed, falling back to primary: ${error instanceof Error ? error.message : String(error)}`);
+        return fallbackToPrimaryTranscription(result1, error);
+      }
     }
     
     // If both providers are whisperx with different models, update provider names for clarity

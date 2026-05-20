@@ -433,10 +433,11 @@ function parseInlineFormattingText(text: string, initialState: InlineFormattingS
 
   appendChunk(text.slice(lastIndex));
 
-  const normalizedText = normalizeInlineFormattingSpacing(outputParts.join(''));
+  const rawOutputText = outputParts.join('');
+  const normalizedText = normalizeInlineFormattingSpacing(rawOutputText);
   return {
     text: normalizedText,
-    ranges: normalizeRichTextRanges(ranges, normalizedText.length),
+    ranges: remapRichTextRanges(rawOutputText, normalizedText, ranges),
     nextState,
     consumedCommand,
   };
@@ -685,6 +686,7 @@ export default function HomePage() {
   const [textSelections, setTextSelections] = useState<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
   const textSelectionsRef = useRef<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
   const lastRangeSelectionsRef = useRef<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
+  const pendingRichTextSyncRef = useRef<Partial<Record<TextInsertionTarget, string>>>({});
   const [richTextFormats, setRichTextFormats] = useState<Record<TextInsertionTarget, RichTextFormatRange[]>>(EMPTY_RICH_TEXT_FORMATS);
   const [focusedTextField, setFocusedTextField] = useState<TextInsertionTarget | null>(null);
   const lastSelectionTargetRef = useRef<TextInsertionTarget | null>(null);
@@ -1076,6 +1078,11 @@ export default function HomePage() {
       && result.insertedEnd > result.insertedStart
       && !parsedInlineFormatting.consumedCommand
     ) {
+      pendingRichTextSyncRef.current = {
+        ...pendingRichTextSyncRef.current,
+        [field]: result.text,
+      };
+
       updateRichTextFormats(field, (current) => ([
         ...current,
         {
@@ -1089,6 +1096,11 @@ export default function HomePage() {
     }
 
     if (options?.applyActiveInlineFormatting && parsedInlineFormatting.ranges.length > 0 && result.insertedEnd > result.insertedStart) {
+      pendingRichTextSyncRef.current = {
+        ...pendingRichTextSyncRef.current,
+        [field]: result.text,
+      };
+
       updateRichTextFormats(field, (current) => ([
         ...current,
         ...parsedInlineFormatting.ranges.map((range) => ({
@@ -1118,6 +1130,15 @@ export default function HomePage() {
         const previousText = previousFieldTextsRef.current[field] ?? '';
         const nextText = nextFieldTexts[field] ?? '';
         if (previousText === nextText) {
+          if (pendingRichTextSyncRef.current[field] === nextText) {
+            delete pendingRichTextSyncRef.current[field];
+          }
+          previousFieldTextsRef.current[field] = nextText;
+          return;
+        }
+
+        if (pendingRichTextSyncRef.current[field] === nextText) {
+          delete pendingRichTextSyncRef.current[field];
           previousFieldTextsRef.current[field] = nextText;
           return;
         }

@@ -8,6 +8,7 @@
  */
 
 import { diffWordsWithSpace } from 'diff';
+import { applyDictionaryReplacementCase } from './replacementCase';
 
 /**
  * Kölner Phonetik — Phonetischer Code für deutsche Wörter.
@@ -829,11 +830,8 @@ export function applyPhoneticCorrectionsDetailed(
       if (match && match.confidence >= minConfidence) {
         // Beuge-/Pluralendung des Gesamtphrasenendes bewahren
         let replacement = preserveInflection(combined, match.correct);
-        // Groß/Kleinschreibung vom ersten Wort übernehmen
         const firstWord = parts[positions[0]];
-        if (firstWord[0] === firstWord[0].toUpperCase() && replacement[0] !== replacement[0].toUpperCase()) {
-          replacement = replacement[0].toUpperCase() + replacement.slice(1);
-        }
+        replacement = applyDictionaryReplacementCase(firstWord, replacement);
 
         if (replacement !== combined) {
           const originalPhrase = positions.map(p => parts[p]).join(' ');
@@ -879,11 +877,7 @@ export function applyPhoneticCorrectionsDetailed(
     if (match && match.confidence >= minConfidence) {
       // Beuge-/Pluralendung bewahren (z.B. "arterielle" bleibt "arterielle", nicht "arteriell")
       let replacement = preserveInflection(token, match.correct);
-      if (token[0] === token[0].toUpperCase() && replacement[0] !== replacement[0].toUpperCase()) {
-        replacement = replacement[0].toUpperCase() + replacement.slice(1);
-      } else if (token[0] === token[0].toLowerCase() && replacement[0] !== replacement[0].toLowerCase()) {
-        replacement = replacement[0].toLowerCase() + replacement.slice(1);
-      }
+      replacement = applyDictionaryReplacementCase(token, replacement);
 
       if (replacement !== token) {
         console.log(`[Phonetic] "${token}" → "${replacement}" (confidence: ${match.confidence.toFixed(2)})`);

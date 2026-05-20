@@ -4,6 +4,7 @@
  */
 
 import { buildPhoneticIndex, applyPhoneticCorrectionsDetailed } from './phoneticMatch';
+import { applyDictionaryReplacementCase } from './replacementCase';
 
 // Dictionary entry interface (compatible with dictionaryDb.ts)
 export interface DictionaryEntry {
@@ -112,7 +113,7 @@ export function applyDictionaryCorrectionsDetailed(
       // First: Match standalone words (exact match)
       const standaloneRegex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapedWrong}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
       result = result.replace(standaloneRegex, (match) => {
-        const replacement = preserveCase(match, escapedCorrect);
+        const replacement = applyDictionaryReplacementCase(match, escapedCorrect);
         if (replacement === match) return match;
         replacementCount++;
         operations.push({
@@ -134,7 +135,7 @@ export function applyDictionaryCorrectionsDetailed(
       const stemRegex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapedWrong}([A-ZÄÖÜa-zäöüß]+)`, 'gi');
       result = result.replace(stemRegex, (match, suffix) => {
         // Preserve case of the original stem
-        const correctedStem = preserveCase(match.slice(0, entry.wrong.length), escapedCorrect);
+        const correctedStem = applyDictionaryReplacementCase(match.slice(0, entry.wrong.length), escapedCorrect);
         const replacement = correctedStem + suffix;
         if (replacement === match) return match;
         stemReplacementCount++;
@@ -156,7 +157,7 @@ export function applyDictionaryCorrectionsDetailed(
       const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escapedWrong}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
       
       result = result.replace(regex, (match) => {
-        const replacement = preserveCase(match, escapedCorrect);
+        const replacement = applyDictionaryReplacementCase(match, escapedCorrect);
         if (replacement === match) return match;
         replacementCount++;
         operations.push({
@@ -188,24 +189,6 @@ export function applyDictionaryCorrectionsDetailed(
   }
 
   return { text: result, operations };
-}
-
-/**
- * Preserve case pattern from original match when replacing.
- */
-function preserveCase(original: string, replacement: string): string {
-  if (!original || !replacement) return replacement;
-  
-  // All uppercase -> make replacement uppercase
-  if (original === original.toUpperCase() && replacement.length > 0) {
-    return replacement.toUpperCase();
-  }
-  // First letter uppercase -> capitalize replacement
-  if (original[0] === original[0].toUpperCase() && replacement.length > 0) {
-    return replacement.charAt(0).toUpperCase() + replacement.slice(1);
-  }
-  // Default: return as-is
-  return replacement;
 }
 
 // Replacement function type for control words

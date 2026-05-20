@@ -93,9 +93,16 @@ function getPeriodCaption(period: PeriodKey): string {
   return 'Monatlich kumuliert';
 }
 
+function getBarWidth(period: PeriodKey): string {
+  if (period === 'today') return 'minmax(64px, 64px)';
+  if (period === 'month') return 'minmax(40px, 40px)';
+  return 'minmax(72px, 72px)';
+}
+
 function BarChart({ data, metric, label, period }: { data: TrendPoint[]; metric: keyof Pick<TrendPoint, 'words' | 'minutes' | 'utterances' | 'manualCorrections' | 'vocabularyEntries'>; label: string; period: PeriodKey }) {
   const values = data.map((point) => Number(point[metric] || 0));
   const max = Math.max(1, ...values);
+  const barWidth = getBarWidth(period);
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -103,23 +110,31 @@ function BarChart({ data, metric, label, period }: { data: TrendPoint[]; metric:
         <h3 className="font-semibold text-gray-900 dark:text-white">{label}</h3>
         <span className="text-xs text-gray-500">{getPeriodCaption(period)}</span>
       </div>
-      <div className="flex h-48 items-end gap-1 overflow-hidden sm:gap-2">
-        {data.map((point) => {
-          const value = Number(point[metric] || 0);
-          const height = Math.max(3, (value / max) * 100);
-          return (
-            <div key={point.key} className="group flex min-w-0 flex-1 flex-col items-center gap-2">
-              <div className="relative flex h-40 w-full items-end rounded-t bg-blue-50 dark:bg-blue-950/20">
-                <div
-                  className="w-full rounded-t bg-gradient-to-t from-blue-600 to-cyan-400 transition-all group-hover:from-blue-700"
-                  style={{ height: `${height}%` }}
-                  title={`${point.title}: ${formatNumber(value)}`}
-                />
+      <div className="overflow-x-auto pb-2">
+        <div
+          className="grid h-48 min-w-full items-end gap-2"
+          style={{
+            gridTemplateColumns: `repeat(${Math.max(data.length, 1)}, ${barWidth})`,
+            width: 'max-content',
+          }}
+        >
+          {data.map((point) => {
+            const value = Number(point[metric] || 0);
+            const height = Math.max(3, (value / max) * 100);
+            return (
+              <div key={point.key} className="group flex flex-col items-center gap-2">
+                <div className="relative flex h-40 w-full items-end rounded-t bg-blue-50 dark:bg-blue-950/20">
+                  <div
+                    className="w-full rounded-t bg-gradient-to-t from-blue-600 to-cyan-400 transition-all group-hover:from-blue-700"
+                    style={{ height: `${height}%` }}
+                    title={`${point.title}: ${formatNumber(value)}`}
+                  />
+                </div>
+                <span className="hidden w-full whitespace-normal break-words text-center text-[10px] leading-tight text-gray-400 sm:block">{point.label}</span>
               </div>
-              <span className="hidden max-w-full whitespace-normal break-words text-center text-[10px] leading-tight text-gray-400 sm:block">{point.label}</span>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );

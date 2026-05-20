@@ -91,6 +91,19 @@ interface TextInsertionResult {
 type LiveInjectPostKey = 'F4';
 type SelectionFormattingCommand = 'bold' | 'italic' | 'underline';
 
+function getSelectionFormattingCommandLabel(command: SelectionFormattingCommand): string {
+  switch (command) {
+    case 'bold':
+      return 'fett';
+    case 'italic':
+      return 'kursiv';
+    case 'underline':
+      return 'unterstrichen';
+    default:
+      return command;
+  }
+}
+
 interface LiveInjectInstruction {
   text: string;
   postKey?: LiveInjectPostKey;
@@ -157,6 +170,18 @@ function normalizeSpokenCommand(text: string): string {
     .replace(/ü/g, 'ue')
     .replace(/ß/g, 'ss')
     .replace(/[^a-z0-9]+/g, '');
+}
+
+function tokenizeSpokenCommand(text: string): string[] {
+  return text.toLowerCase()
+    .replace(/ä/g, 'ae')
+    .replace(/ö/g, 'oe')
+    .replace(/ü/g, 'ue')
+    .replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
 }
 
 function similarityScore(a: string, b: string): number {
@@ -264,6 +289,19 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
 
 function detectSelectionFormattingCommand(text: string): SelectionFormattingCommand | null {
   const normalized = normalizeSpokenCommand(text);
+  const tokens = tokenizeSpokenCommand(text);
+
+  const hasSelectionToken = tokens.includes('auswahl') || tokens.includes('markierung');
+  const hasVerbToken = tokens.includes('mach')
+    || tokens.includes('mache')
+    || tokens.includes('formatiere')
+    || tokens.includes('formatieren');
+  const inferCommandFromTokens = (): SelectionFormattingCommand | null => {
+    if (tokens.includes('fett')) return 'bold';
+    if (tokens.includes('kursiv')) return 'italic';
+    if (tokens.includes('unterstrichen') || tokens.includes('unterstreichen')) return 'underline';
+    return null;
+  };
 
   if (normalized === 'fett') return 'bold';
   if (normalized === 'kursiv') return 'italic';
@@ -271,6 +309,15 @@ function detectSelectionFormattingCommand(text: string): SelectionFormattingComm
   if (normalized === 'auswahlfett') return 'bold';
   if (normalized === 'auswahlkursiv') return 'italic';
   if (normalized === 'auswahlunterstrichen') return 'underline';
+
+  if (hasSelectionToken) {
+    return inferCommandFromTokens();
+  }
+
+  if (hasVerbToken && normalized.includes('auswahl')) {
+    return inferCommandFromTokens();
+  }
+
   return null;
 }
 
@@ -485,6 +532,7 @@ export default function HomePage() {
   const lastRangeSelectionsRef = useRef<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
   const [richTextFormats, setRichTextFormats] = useState<Record<TextInsertionTarget, RichTextFormatRange[]>>(EMPTY_RICH_TEXT_FORMATS);
   const [focusedTextField, setFocusedTextField] = useState<TextInsertionTarget | null>(null);
+  const lastSelectionTargetRef = useRef<TextInsertionTarget | null>(null);
   const [caretOverlays, setCaretOverlays] = useState<Record<TextInsertionTarget, CaretOverlayPosition>>({
     transcript: hiddenCaretOverlay(),
     methodik: hiddenCaretOverlay(),
@@ -563,6 +611,8 @@ export default function HomePage() {
   const [showCustomActionsManager, setShowCustomActionsManager] = useState(false);
 
   const syncTextSelection = useCallback((field: TextInsertionTarget, textarea: HTMLTextAreaElement | HTMLDivElement) => {
+    lastSelectionTargetRef.current = field;
+
     const richSelection = textarea instanceof HTMLDivElement ? getRichTextSelection(textarea) : null;
     const nextSelection: CaretSelection = richSelection ?? {
       start: textarea instanceof HTMLTextAreaElement ? (textarea.selectionStart ?? 0) : 0,
@@ -675,8 +725,18 @@ export default function HomePage() {
     const selection = currentSelection.start !== currentSelection.end
       ? currentSelection
       : (lastRangeSelectionsRef.current[field] ?? currentSelection);
+    const commandLabel = getSelectionFormattingCommandLabel(command);
 
     if (selection.start === selection.end) {
+      const message = `Formatierungsbefehl \"${commandLabel}\" erkannt, aber es gibt keine aktive oder zuletzt gespeicherte Markierung im Feld \"${field}\".`;
+      console.warn('[FormattingCommand] Nicht angewendet:', {
+        command,
+        commandLabel,
+        field,
+        selection,
+        textLength: fieldText.length,
+        reason: message,
+      });
       setError('Bitte zuerst einen Textbereich markieren.');
       return false;
     }
@@ -692,23 +752,56 @@ export default function HomePage() {
       return [...current, range];
     });
 
+    console.info('[FormattingCommand] Erfolgreich angewendet:', {
+      command,
+      commandLabel,
+      field,
+      selection: {
+        start: Math.min(selection.start, selection.end),
+        end: Math.max(selection.start, selection.end),
+      },
+      textLength: fieldText.length,
+    });
+
     setError(null);
     return true;
   }, [getFieldTextValue, getStoredSelection, updateRichTextFormats]);
 
   const tryApplySelectionFormattingCommand = useCallback((text: string) => {
-    if (liveInjectEnabledRef.current) {
-      return false;
-    }
-
     const command = detectSelectionFormattingCommand(text);
     if (!command) {
       return false;
     }
 
-    const targetField = focusedTextField ?? (mode === 'befund'
+    const commandLabel = getSelectionFormattingCommandLabel(command);
+
+    if (liveInjectEnabledRef.current) {
+      console.warn('[FormattingCommand] Erkannt, aber nicht ausgefuehrt:', {
+        rawText: text,
+        command,
+        commandLabel,
+        reason: 'Live-Ziel-App-Modus ist aktiv. Auswahl-Formatierungsbefehle sind nur fuer den Online-Editor vorgesehen.',
+      });
+      return false;
+    }
+
+    const targetField = focusedTextField
+      ?? lastSelectionTargetRef.current
+      ?? (mode === 'befund'
       ? (activeField === 'methodik' ? 'methodik' : activeField === 'beurteilung' ? 'beurteilung' : 'befund')
       : 'transcript');
+
+    console.info('[FormattingCommand] Erkannt:', {
+      rawText: text,
+      normalizedText: normalizeSpokenCommand(text),
+      command,
+      commandLabel,
+      targetField,
+      focusedTextField,
+      lastSelectionTarget: lastSelectionTargetRef.current,
+      activeField,
+      mode,
+    });
 
     applySelectionFormatting(targetField, command);
     return true;

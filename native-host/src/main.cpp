@@ -24,6 +24,7 @@ constexpr std::uint32_t CLIPBOARD_RESTORE_DELAY_MS = 30;
 struct InjectPayload {
     std::wstring text;
     std::wstring mode = L"sendinput";
+    std::wstring postKey;
     bool restorePreviousWindow = true;
     std::uint32_t delayMs = 120;
     std::uint32_t charDelayMs = 2;
@@ -243,6 +244,7 @@ NativeRequest parseRequest(const std::string& json) {
     request.type = getStringValue(json, "type");
     request.payload.text = getStringValue(json, "text");
     request.payload.mode = getStringValue(json, "mode", L"sendinput");
+    request.payload.postKey = getStringValue(json, "postKey");
     request.payload.restorePreviousWindow = getBoolValue(json, "restorePreviousWindow", true);
     request.payload.delayMs = getUIntValue(json, "delayMs", 120);
     request.payload.charDelayMs = getUIntValue(json, "charDelayMs", 2);
@@ -551,6 +553,26 @@ bool sendPasteShortcut() {
     return sendInputs(inputs);
 }
 
+bool sendVirtualKeyPress(WORD key) {
+    const std::vector<INPUT> inputs = {
+        makeVirtualKeyInput(key, false),
+        makeVirtualKeyInput(key, true),
+    };
+    return sendInputs(inputs);
+}
+
+bool sendPostKey(const std::wstring& postKey) {
+    if (postKey.empty()) {
+        return true;
+    }
+
+    if (postKey == L"F4") {
+        return sendVirtualKeyPress(VK_F4);
+    }
+
+    return false;
+}
+
 bool pasteClipboardText(const std::wstring& text) {
     const ClipboardSnapshot snapshot = readClipboardText();
     if (!writeClipboardText(text)) {
@@ -639,6 +661,10 @@ std::string handleRequest(const std::string& message) {
 
     if (!success) {
         return makeResponse(false, "SendInput failed", "");
+    }
+
+    if (!sendPostKey(request.payload.postKey)) {
+        return makeResponse(false, "Post key failed", "");
     }
 
     return makeResponse(

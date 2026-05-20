@@ -7,7 +7,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
 import { applyDeleteCommands, applyFormattingControlWords, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, preprocessTranscription, type OnlineUtteranceApplicationDebugStep } from '@/lib/textFormatting';
-import { buildPhoneticIndex, applyPhoneticCorrections } from '@/lib/phoneticMatch';
+import { buildPhoneticIndex, applyPhoneticCorrections, colognePhonetic, levenshtein } from '@/lib/phoneticMatch';
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
@@ -72,6 +72,16 @@ interface TextInsertionResult {
   selection: CaretSelection;
 }
 
+type LiveInjectPostKey = 'F4';
+
+interface LiveInjectInstruction {
+  text: string;
+  postKey?: LiveInjectPostKey;
+}
+
+const TEMPLATE_TRIGGER_NORMALIZED = 'textbaustein';
+const TEMPLATE_TRIGGER_PHONETIC = colognePhonetic(TEMPLATE_TRIGGER_NORMALIZED);
+
 function getDefaultSelection(text: string): CaretSelection {
   return {
     start: text.length,
@@ -103,6 +113,72 @@ function joinLiveInjectChunk(previousText: string, incomingText: string): string
   const needsSpace = !previousEndsWithSeparator && !incomingStartsWithPunctuation;
 
   return `${needsSpace ? ' ' : ''}${sanitizedIncoming}`;
+}
+
+function sanitizeTemplateIdentifier(text: string): string {
+  return text.replace(/^[^\p{L}\p{N}_-]+|[^\p{L}\p{N}_-]+$/gu, '');
+}
+
+function normalizeSpokenCommand(text: string): string {
+  return text.toLowerCase()
+    .replace(/ä/g, 'ae')
+    .replace(/ö/g, 'oe')
+    .replace(/ü/g, 'ue')
+    .replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function similarityScore(a: string, b: string): number {
+  const maxLength = Math.max(a.length, b.length, 1);
+  return 1 - (levenshtein(a, b) / maxLength);
+}
+
+function matchesTemplateTrigger(candidate: string): boolean {
+  const normalizedCandidate = normalizeSpokenCommand(candidate);
+  if (!normalizedCandidate) {
+    return false;
+  }
+
+  if (normalizedCandidate === TEMPLATE_TRIGGER_NORMALIZED) {
+    return true;
+  }
+
+  const phoneticCandidate = colognePhonetic(normalizedCandidate);
+  if (!phoneticCandidate || !TEMPLATE_TRIGGER_PHONETIC) {
+    return false;
+  }
+
+  const lexicalSimilarity = similarityScore(normalizedCandidate, TEMPLATE_TRIGGER_NORMALIZED);
+  const phoneticSimilarity = similarityScore(phoneticCandidate, TEMPLATE_TRIGGER_PHONETIC);
+
+  return phoneticSimilarity >= 0.8 && lexicalSimilarity >= 0.58;
+}
+
+function resolveLiveInjectInstruction(text: string): LiveInjectInstruction {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2 || words.length > 3) {
+    return { text };
+  }
+
+  let identifierCandidate = '';
+
+  if (words.length === 2 && matchesTemplateTrigger(words[0])) {
+    identifierCandidate = words[1];
+  } else if (words.length === 3 && matchesTemplateTrigger(`${words[0]} ${words[1]}`)) {
+    identifierCandidate = words[2];
+  } else {
+    return { text };
+  }
+
+  const identifier = sanitizeTemplateIdentifier(identifierCandidate);
+  if (!identifier) {
+    return { text };
+  }
+
+  return {
+    text: identifier,
+    postKey: 'F4',
+  };
 }
 
 function insertTextAtSelection(existing: string, incomingText: string, selection?: CaretSelection | null): TextInsertionResult {
@@ -508,7 +584,8 @@ export default function HomePage() {
   }, [liveInjectEnabled]);
 
   const queueLiveInject = useCallback((text: string) => {
-    const normalizedText = joinLiveInjectChunk(liveInjectSentTextRef.current, text);
+    const instruction = resolveLiveInjectInstruction(text);
+    const normalizedText = joinLiveInjectChunk(liveInjectSentTextRef.current, instruction.text);
 
     if (!liveInjectEnabledRef.current || !normalizedText.trim()) return;
 
@@ -524,6 +601,7 @@ export default function HomePage() {
           restorePreviousWindow: shouldRestorePreviousWindow,
           delayMs: shouldRestorePreviousWindow ? 80 : 0,
           charDelayMs: 0,
+          postKey: instruction.postKey,
           fallbackToClipboard: false,
         });
 
@@ -535,7 +613,11 @@ export default function HomePage() {
         }
 
         liveInjectSentTextRef.current += normalizedText;
-        setLiveInjectStatus(`Gesendet: ${normalizedText.trim().length} Zeichen`);
+        setLiveInjectStatus(
+          instruction.postKey === 'F4'
+            ? `Textbaustein-Kennung gesendet: ${normalizedText.trim()}`
+            : `Gesendet: ${normalizedText.trim().length} Zeichen`
+        );
       });
   }, []);
 
@@ -579,7 +661,10 @@ export default function HomePage() {
     }
 
     if (liveInjectEnabledRef.current) {
-      applyLiveChunkPreview(field, incomingDelta && incomingDelta.trim() ? incomingDelta : fullText);
+      const previewText = incomingDelta && incomingDelta.trim()
+        ? resolveLiveInjectInstruction(incomingDelta).text
+        : fullText;
+      applyLiveChunkPreview(field, previewText);
       return;
     }
 
@@ -1412,6 +1497,9 @@ export default function HomePage() {
         }
 
         const preparedDelta = prepareLiveInjectDelta(transcriptDelta);
+          const liveInjectPreviewDelta = liveInjectEnabledRef.current
+            ? resolveLiveInjectInstruction(preparedDelta).text
+            : preparedDelta;
 
         if (isUnstableLiveInjectText(preparedDelta)) {
           setLiveInjectStatus('Live-Übertragung wartet auf stabiles Transkript');
@@ -1436,14 +1524,14 @@ export default function HomePage() {
             if (parsed.methodik !== null) {
               lastMethodikRef.current = parsed.methodik;
               if (liveInjectEnabledRef.current) {
-                applyLiveChunkPreview('methodik', parsed.methodik);
+                applyLiveChunkPreview('methodik', resolveLiveInjectInstruction(parsed.methodik).text);
               } else {
                 setMethodik(combineTextForField('methodik', methodik, parsed.methodik));
               }
             }
             if (parsed.befund !== null) {
               if (liveInjectEnabledRef.current) {
-                applyLiveChunkPreview('befund', parsed.befund);
+                applyLiveChunkPreview('befund', resolveLiveInjectInstruction(parsed.befund).text);
               } else {
                 setTranscript(combineTextForField('befund', transcript, parsed.befund));
               }
@@ -1451,7 +1539,7 @@ export default function HomePage() {
             if (parsed.beurteilung !== null) {
               lastBeurteilungRef.current = parsed.beurteilung;
               if (liveInjectEnabledRef.current) {
-                applyLiveChunkPreview('beurteilung', parsed.beurteilung);
+                applyLiveChunkPreview('beurteilung', resolveLiveInjectInstruction(parsed.beurteilung).text);
               } else {
                 setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung));
               }
@@ -1462,7 +1550,7 @@ export default function HomePage() {
               case 'methodik':
                 lastMethodikRef.current = preparedDelta;
                 if (liveInjectEnabledRef.current) {
-                  applyLiveChunkPreview('methodik', preparedDelta);
+                  applyLiveChunkPreview('methodik', liveInjectPreviewDelta);
                 } else {
                   setMethodik(combineTextForField('methodik', methodik, preparedDelta));
                 }
@@ -1470,7 +1558,7 @@ export default function HomePage() {
               case 'beurteilung':
                 lastBeurteilungRef.current = preparedDelta;
                 if (liveInjectEnabledRef.current) {
-                  applyLiveChunkPreview('beurteilung', preparedDelta);
+                  applyLiveChunkPreview('beurteilung', liveInjectPreviewDelta);
                 } else {
                   setBeurteilung(combineTextForField('beurteilung', beurteilung, preparedDelta));
                 }
@@ -1478,7 +1566,7 @@ export default function HomePage() {
               case 'befund':
               default:
                 if (liveInjectEnabledRef.current) {
-                  applyLiveChunkPreview('befund', preparedDelta);
+                  applyLiveChunkPreview('befund', liveInjectPreviewDelta);
                 } else {
                   setTranscript(combineTextForField('befund', transcript, preparedDelta));
                 }

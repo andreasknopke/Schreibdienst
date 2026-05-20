@@ -1,4 +1,5 @@
 export type InjectMode = 'sendinput' | 'uia' | 'clipboard';
+export type InjectPostKey = 'F4';
 
 export interface InjectRequest {
   text: string;
@@ -6,6 +7,7 @@ export interface InjectRequest {
   restorePreviousWindow?: boolean;
   delayMs?: number;
   charDelayMs?: number;
+  postKey?: InjectPostKey;
   fallbackToClipboard?: boolean;
 }
 
@@ -32,7 +34,7 @@ async function copyToClipboard(text: string): Promise<InjectResult> {
 }
 
 function sendToExtension(
-  request: Required<Pick<InjectRequest, 'text' | 'mode' | 'restorePreviousWindow' | 'delayMs' | 'charDelayMs'>>,
+  request: Required<Pick<InjectRequest, 'text' | 'mode' | 'restorePreviousWindow' | 'delayMs' | 'charDelayMs'>> & Pick<InjectRequest, 'postKey'>,
   requestId: string,
 ): Promise<InjectResult> {
   return new Promise((resolve) => {
@@ -73,6 +75,7 @@ export async function injectToActiveWindow({
   restorePreviousWindow = true,
   delayMs = 120,
   charDelayMs = 2,
+  postKey,
   fallbackToClipboard = true,
 }: InjectRequest): Promise<InjectResult> {
   if (!text.trim()) {
@@ -91,6 +94,7 @@ export async function injectToActiveWindow({
     restorePreviousWindow,
     delayMs,
     charDelayMs,
+    postKey,
   }, requestId);
 
   if (extensionResult.ok || !fallbackToClipboard) {

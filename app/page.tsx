@@ -263,15 +263,11 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
 }
 
 function detectSelectionFormattingCommand(text: string): SelectionFormattingCommand | null {
-  const normalized = text
-    .toLowerCase()
-    .replace(/[.,;:!?]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const normalized = normalizeSpokenCommand(text);
 
-  if (normalized === 'auswahl fett') return 'bold';
-  if (normalized === 'auswahl kursiv') return 'italic';
-  if (normalized === 'auswahl unterstrichen') return 'underline';
+  if (normalized === 'auswahlfett') return 'bold';
+  if (normalized === 'auswahlkursiv') return 'italic';
+  if (normalized === 'auswahlunterstrichen') return 'underline';
   return null;
 }
 
@@ -481,6 +477,7 @@ export default function HomePage() {
   const transcriptTextareaRef = useRef<HTMLDivElement | null>(null);
   const [textSelections, setTextSelections] = useState<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
   const textSelectionsRef = useRef<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
+  const lastRangeSelectionsRef = useRef<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
   const [richTextFormats, setRichTextFormats] = useState<Record<TextInsertionTarget, RichTextFormatRange[]>>(EMPTY_RICH_TEXT_FORMATS);
   const [focusedTextField, setFocusedTextField] = useState<TextInsertionTarget | null>(null);
   const [caretOverlays, setCaretOverlays] = useState<Record<TextInsertionTarget, CaretOverlayPosition>>({
@@ -573,6 +570,13 @@ export default function HomePage() {
       [field]: nextSelection,
     };
 
+    if (nextSelection.start !== nextSelection.end) {
+      lastRangeSelectionsRef.current = {
+        ...lastRangeSelectionsRef.current,
+        [field]: nextSelection,
+      };
+    }
+
     setTextSelections((prev) => {
       const current = prev[field];
       if (
@@ -662,7 +666,11 @@ export default function HomePage() {
 
   const applySelectionFormatting = useCallback((field: TextInsertionTarget, command: SelectionFormattingCommand) => {
     const fieldText = getFieldTextValue(field);
-    const selection = getStoredSelection(field, fieldText);
+    const currentSelection = getStoredSelection(field, fieldText);
+    const selection = currentSelection.start !== currentSelection.end
+      ? currentSelection
+      : (lastRangeSelectionsRef.current[field] ?? currentSelection);
+
     if (selection.start === selection.end) {
       setError('Bitte zuerst einen Textbereich markieren.');
       return false;

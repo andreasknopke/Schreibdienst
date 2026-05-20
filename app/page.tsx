@@ -679,6 +679,20 @@ export default function HomePage() {
     }
   }, [methodik, transcript, beurteilung]);
 
+  const getEditorTextRef = useCallback((field: TextInsertionTarget) => {
+    switch (field) {
+      case 'methodik':
+        return methodikTextareaRef;
+      case 'beurteilung':
+        return beurteilungTextareaRef;
+      case 'befund':
+        return befundTextareaRef;
+      case 'transcript':
+      default:
+        return transcriptTextareaRef;
+    }
+  }, []);
+
   const getEffectiveFieldTextLength = useCallback((field: TextInsertionTarget, selection?: CaretSelection | null) => {
     const stateLength = getFieldTextValue(field).length;
     const editor = getEditorTextRef(field).current;
@@ -700,20 +714,6 @@ export default function HomePage() {
       ),
     }));
   }, [getEffectiveFieldTextLength]);
-
-  const getEditorTextRef = useCallback((field: TextInsertionTarget) => {
-    switch (field) {
-      case 'methodik':
-        return methodikTextareaRef;
-      case 'beurteilung':
-        return beurteilungTextareaRef;
-      case 'befund':
-        return befundTextareaRef;
-      case 'transcript':
-      default:
-        return transcriptTextareaRef;
-    }
-  }, []);
 
   const setFieldText = useCallback((field: TextInsertionTarget, value: SetStateAction<string>) => {
     switch (field) {

@@ -86,10 +86,18 @@ interface TextInsertionResult {
   text: string;
   selection: CaretSelection;
   insertedLength: number;
+  insertedStart: number;
+  insertedEnd: number;
 }
 
 type LiveInjectPostKey = 'F4';
 type SelectionFormattingCommand = 'bold' | 'italic' | 'underline';
+type InlineFormattingState = Record<SelectionFormattingCommand, boolean>;
+
+interface InlineFormattingToggleCommand {
+  command: SelectionFormattingCommand;
+  enabled: boolean;
+}
 
 function getSelectionFormattingCommandLabel(command: SelectionFormattingCommand): string {
   switch (command) {
@@ -117,6 +125,19 @@ const EMPTY_RICH_TEXT_FORMATS: Record<TextInsertionTarget, RichTextFormatRange[]
   methodik: [],
   befund: [],
   beurteilung: [],
+};
+
+const EMPTY_INLINE_FORMATTING_STATE: InlineFormattingState = {
+  bold: false,
+  italic: false,
+  underline: false,
+};
+
+const EMPTY_ACTIVE_INLINE_FORMATTING: Record<TextInsertionTarget, InlineFormattingState> = {
+  transcript: { ...EMPTY_INLINE_FORMATTING_STATE },
+  methodik: { ...EMPTY_INLINE_FORMATTING_STATE },
+  befund: { ...EMPTY_INLINE_FORMATTING_STATE },
+  beurteilung: { ...EMPTY_INLINE_FORMATTING_STATE },
 };
 
 const EMPTY_FIELD_TEXTS: Record<TextInsertionTarget, string> = {
@@ -241,10 +262,13 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
   const normalizedIncomingText = normalizeChunkLeadingWhitespace(incomingText);
 
   if (!normalizedIncomingText) {
+    const fallbackSelection = selection ?? getDefaultSelection(existing);
     return {
       text: existing,
-      selection: selection ?? getDefaultSelection(existing),
+      selection: fallbackSelection,
       insertedLength: 0,
+      insertedStart: Math.max(0, Math.min(fallbackSelection.start, existing.length)),
+      insertedEnd: Math.max(0, Math.min(fallbackSelection.end, existing.length)),
     };
   }
 
@@ -256,6 +280,7 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
   const needsPrefixSeparator = before.length > 0 && !before.endsWith('\n') && !before.endsWith(' ');
   const prefix = needsPrefixSeparator ? ' ' : '';
   const inserted = `${before}${prefix}${normalizedIncomingText}`;
+  const insertedStart = before.length + prefix.length;
   const caretIndex = inserted.length;
 
   if (!after) {
@@ -267,6 +292,8 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
         direction: 'none',
       },
       insertedLength: prefix.length + normalizedIncomingText.length,
+      insertedStart,
+      insertedEnd: insertedStart + normalizedIncomingText.length,
     };
   }
 
@@ -284,6 +311,42 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
       direction: 'none',
     },
     insertedLength: prefix.length + normalizedIncomingText.length,
+    insertedStart,
+    insertedEnd: insertedStart + normalizedIncomingText.length,
+  };
+}
+
+function detectInlineFormattingToggleCommand(text: string): InlineFormattingToggleCommand | null {
+  const normalized = normalizeSpokenCommand(text);
+  const tokens = tokenizeSpokenCommand(text);
+
+  const inferCommandFromTokens = (): SelectionFormattingCommand | null => {
+    if (tokens.includes('fett')) return 'bold';
+    if (tokens.includes('kursiv')) return 'italic';
+    if (tokens.includes('unterstrichen') || tokens.includes('unterstreichen')) return 'underline';
+    return null;
+  };
+
+  const command = inferCommandFromTokens();
+  if (!command) {
+    return null;
+  }
+
+  const isBegin = normalized.endsWith('beginn')
+    || tokens.includes('beginn')
+    || tokens.includes('anfang')
+    || tokens.includes('start');
+  const isEnd = normalized.endsWith('ende')
+    || tokens.includes('ende')
+    || tokens.includes('stop');
+
+  if (isBegin === isEnd) {
+    return null;
+  }
+
+  return {
+    command,
+    enabled: isBegin,
   };
 }
 
@@ -533,6 +596,12 @@ export default function HomePage() {
   const [richTextFormats, setRichTextFormats] = useState<Record<TextInsertionTarget, RichTextFormatRange[]>>(EMPTY_RICH_TEXT_FORMATS);
   const [focusedTextField, setFocusedTextField] = useState<TextInsertionTarget | null>(null);
   const lastSelectionTargetRef = useRef<TextInsertionTarget | null>(null);
+  const activeInlineFormattingRef = useRef<Record<TextInsertionTarget, InlineFormattingState>>({
+    transcript: { ...EMPTY_ACTIVE_INLINE_FORMATTING.transcript },
+    methodik: { ...EMPTY_ACTIVE_INLINE_FORMATTING.methodik },
+    befund: { ...EMPTY_ACTIVE_INLINE_FORMATTING.befund },
+    beurteilung: { ...EMPTY_ACTIVE_INLINE_FORMATTING.beurteilung },
+  });
   const [caretOverlays, setCaretOverlays] = useState<Record<TextInsertionTarget, CaretOverlayPosition>>({
     transcript: hiddenCaretOverlay(),
     methodik: hiddenCaretOverlay(),
@@ -666,6 +735,14 @@ export default function HomePage() {
     return textSelectionsRef.current[field] ?? getDefaultSelection(currentText);
   }, []);
 
+  const resolveFormattingTargetField = useCallback((): TextInsertionTarget => {
+    return focusedTextField
+      ?? lastSelectionTargetRef.current
+      ?? (mode === 'befund'
+        ? (activeField === 'methodik' ? 'methodik' : activeField === 'beurteilung' ? 'beurteilung' : 'befund')
+        : 'transcript');
+  }, [focusedTextField, mode, activeField]);
+
   const getFieldTextValue = useCallback((field: TextInsertionTarget) => {
     switch (field) {
       case 'methodik':
@@ -714,6 +791,17 @@ export default function HomePage() {
       ),
     }));
   }, [getEffectiveFieldTextLength]);
+
+  const setActiveInlineFormatting = useCallback((field: TextInsertionTarget, command: SelectionFormattingCommand, enabled: boolean) => {
+    const current = activeInlineFormattingRef.current[field] ?? EMPTY_INLINE_FORMATTING_STATE;
+    activeInlineFormattingRef.current = {
+      ...activeInlineFormattingRef.current,
+      [field]: {
+        ...current,
+        [command]: enabled,
+      },
+    };
+  }, []);
 
   const setFieldText = useCallback((field: TextInsertionTarget, value: SetStateAction<string>) => {
     switch (field) {
@@ -782,6 +870,41 @@ export default function HomePage() {
     return true;
   }, [getFieldTextValue, getStoredSelection, getEffectiveFieldTextLength, updateRichTextFormats]);
 
+  const tryApplyInlineFormattingToggleCommand = useCallback((text: string) => {
+    const toggleCommand = detectInlineFormattingToggleCommand(text);
+    if (!toggleCommand) {
+      return false;
+    }
+
+    const commandLabel = getSelectionFormattingCommandLabel(toggleCommand.command);
+
+    if (liveInjectEnabledRef.current) {
+      console.warn('[FormattingCommand] Beginn/Ende erkannt, aber nicht ausgefuehrt:', {
+        rawText: text,
+        command: toggleCommand.command,
+        commandLabel,
+        enabled: toggleCommand.enabled,
+        reason: 'Live-Ziel-App-Modus ist aktiv. Persistente Inline-Formatierung ist nur fuer den Online-Editor vorgesehen.',
+      });
+      return false;
+    }
+
+    const targetField = resolveFormattingTargetField();
+    setActiveInlineFormatting(targetField, toggleCommand.command, toggleCommand.enabled);
+
+    console.info('[FormattingCommand] Beginn/Ende angewendet:', {
+      rawText: text,
+      command: toggleCommand.command,
+      commandLabel,
+      enabled: toggleCommand.enabled,
+      targetField,
+      activeFormats: activeInlineFormattingRef.current[targetField],
+    });
+
+    setError(null);
+    return true;
+  }, [resolveFormattingTargetField, setActiveInlineFormatting]);
+
   const tryApplySelectionFormattingCommand = useCallback((text: string) => {
     const command = detectSelectionFormattingCommand(text);
     if (!command) {
@@ -800,11 +923,7 @@ export default function HomePage() {
       return false;
     }
 
-    const targetField = focusedTextField
-      ?? lastSelectionTargetRef.current
-      ?? (mode === 'befund'
-      ? (activeField === 'methodik' ? 'methodik' : activeField === 'beurteilung' ? 'beurteilung' : 'befund')
-      : 'transcript');
+    const targetField = resolveFormattingTargetField();
 
     console.info('[FormattingCommand] Erkannt:', {
       rawText: text,
@@ -820,14 +939,36 @@ export default function HomePage() {
 
     applySelectionFormatting(targetField, command);
     return true;
-  }, [focusedTextField, mode, activeField, applySelectionFormatting]);
+  }, [resolveFormattingTargetField, applySelectionFormatting]);
 
-  const combineTextForField = useCallback((field: TextInsertionTarget, existing: string, newText: string) => {
+  const combineTextForField = useCallback((
+    field: TextInsertionTarget,
+    existing: string,
+    newText: string,
+    options?: { applyActiveInlineFormatting?: boolean }
+  ) => {
     const selection = getStoredSelection(field, existing);
     const result = insertTextAtSelection(existing, newText, selection);
     setStoredSelection(field, result.selection);
+
+    const activeFormats = activeInlineFormattingRef.current[field] ?? EMPTY_INLINE_FORMATTING_STATE;
+    const hasActiveInlineFormatting = activeFormats.bold || activeFormats.italic || activeFormats.underline;
+
+    if (options?.applyActiveInlineFormatting && hasActiveInlineFormatting && result.insertedEnd > result.insertedStart) {
+      updateRichTextFormats(field, (current) => ([
+        ...current,
+        {
+          start: result.insertedStart,
+          end: result.insertedEnd,
+          bold: activeFormats.bold,
+          italic: activeFormats.italic,
+          underline: activeFormats.underline,
+        },
+      ]), Math.max(result.text.length, result.insertedEnd));
+    }
+
     return result.text;
-  }, [getStoredSelection, setStoredSelection]);
+  }, [getStoredSelection, setStoredSelection, updateRichTextFormats]);
 
   useEffect(() => {
     const nextFieldTexts: Record<TextInsertionTarget, string> = {
@@ -958,7 +1099,7 @@ export default function HomePage() {
       // Neu transkribierter Text wird an der aktuellen Cursor-Position eingefuegt,
       // nie per Vollersetzung des Feldinhalts.
       if (incomingDelta && incomingDelta.trim()) {
-        return combineTextForField(field, currentText, incomingDelta);
+        return combineTextForField(field, currentText, incomingDelta, { applyActiveInlineFormatting: true });
       }
 
       // Kein textuelles Delta, aber `fullText` weicht vom aktuellen Feldinhalt ab
@@ -967,7 +1108,7 @@ export default function HomePage() {
       if (fullText && fullText !== currentText && fullText.startsWith(currentText)) {
         const extension = fullText.slice(currentText.length);
         if (extension) {
-          return combineTextForField(field, currentText, extension);
+          return combineTextForField(field, currentText, extension, { applyActiveInlineFormatting: true });
         }
       }
 
@@ -1726,6 +1867,10 @@ export default function HomePage() {
 
   // Verarbeitet Text und verteilt auf die richtigen Felder (für Befund-Modus)
   const processTextForBefundFields = useCallback((rawText: string) => {
+    if (tryApplyInlineFormattingToggleCommand(rawText)) {
+      return;
+    }
+
     if (tryApplySelectionFormattingCommand(rawText)) {
       return;
     }
@@ -1746,30 +1891,30 @@ export default function HomePage() {
       
       // Setze jeden Feldinhalt wenn vorhanden
       if (parsed.methodik !== null) {
-        setMethodik(combineTextForField('methodik', methodik, parsed.methodik));
+        setMethodik(combineTextForField('methodik', methodik, parsed.methodik, { applyActiveInlineFormatting: true }));
       }
       if (parsed.befund !== null) {
-        setTranscript(combineTextForField('befund', transcript, parsed.befund));
+        setTranscript(combineTextForField('befund', transcript, parsed.befund, { applyActiveInlineFormatting: true }));
       }
       if (parsed.beurteilung !== null) {
-        setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung));
+        setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung, { applyActiveInlineFormatting: true }));
       }
     } else {
       // Kein Steuerbefehl erkannt - Text geht ins aktive Feld
       switch (activeField) {
         case 'methodik':
-          setMethodik(combineTextForField('methodik', methodik, formattedText));
+          setMethodik(combineTextForField('methodik', methodik, formattedText, { applyActiveInlineFormatting: true }));
           break;
         case 'beurteilung':
-          setBeurteilung(combineTextForField('beurteilung', beurteilung, formattedText));
+          setBeurteilung(combineTextForField('beurteilung', beurteilung, formattedText, { applyActiveInlineFormatting: true }));
           break;
         case 'befund':
         default:
-          setTranscript(combineTextForField('befund', transcript, formattedText));
+          setTranscript(combineTextForField('befund', transcript, formattedText, { applyActiveInlineFormatting: true }));
           break;
       }
     }
-  }, [mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, tryApplySelectionFormattingCommand]);
+  }, [mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, tryApplyInlineFormattingToggleCommand, tryApplySelectionFormattingCommand]);
 
   // Kontinuierliche Transkription während der Aufnahme
   const processLiveTranscription = useCallback(async () => {
@@ -1789,6 +1934,10 @@ export default function HomePage() {
         }
 
         const preparedDelta = prepareLiveInjectDelta(transcriptDelta);
+        if (tryApplyInlineFormattingToggleCommand(preparedDelta)) {
+          lastTranscriptRef.current = currentTranscript;
+          return;
+        }
         if (tryApplySelectionFormattingCommand(preparedDelta)) {
           lastTranscriptRef.current = currentTranscript;
           return;
@@ -1822,14 +1971,14 @@ export default function HomePage() {
               if (liveInjectEnabledRef.current) {
                 applyLiveChunkPreview('methodik', resolveLiveInjectInstruction(parsed.methodik).text);
               } else {
-                setMethodik(combineTextForField('methodik', methodik, parsed.methodik));
+                setMethodik(combineTextForField('methodik', methodik, parsed.methodik, { applyActiveInlineFormatting: true }));
               }
             }
             if (parsed.befund !== null) {
               if (liveInjectEnabledRef.current) {
                 applyLiveChunkPreview('befund', resolveLiveInjectInstruction(parsed.befund).text);
               } else {
-                setTranscript(combineTextForField('befund', transcript, parsed.befund));
+                setTranscript(combineTextForField('befund', transcript, parsed.befund, { applyActiveInlineFormatting: true }));
               }
             }
             if (parsed.beurteilung !== null) {
@@ -1837,7 +1986,7 @@ export default function HomePage() {
               if (liveInjectEnabledRef.current) {
                 applyLiveChunkPreview('beurteilung', resolveLiveInjectInstruction(parsed.beurteilung).text);
               } else {
-                setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung));
+                setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung, { applyActiveInlineFormatting: true }));
               }
             }
           } else {
@@ -1848,7 +1997,7 @@ export default function HomePage() {
                 if (liveInjectEnabledRef.current) {
                   applyLiveChunkPreview('methodik', liveInjectPreviewDelta);
                 } else {
-                  setMethodik(combineTextForField('methodik', methodik, preparedDelta));
+                  setMethodik(combineTextForField('methodik', methodik, preparedDelta, { applyActiveInlineFormatting: true }));
                 }
                 break;
               case 'beurteilung':
@@ -1856,7 +2005,7 @@ export default function HomePage() {
                 if (liveInjectEnabledRef.current) {
                   applyLiveChunkPreview('beurteilung', liveInjectPreviewDelta);
                 } else {
-                  setBeurteilung(combineTextForField('beurteilung', beurteilung, preparedDelta));
+                  setBeurteilung(combineTextForField('beurteilung', beurteilung, preparedDelta, { applyActiveInlineFormatting: true }));
                 }
                 break;
               case 'befund':
@@ -1864,7 +2013,7 @@ export default function HomePage() {
                 if (liveInjectEnabledRef.current) {
                   applyLiveChunkPreview('befund', liveInjectPreviewDelta);
                 } else {
-                  setTranscript(combineTextForField('befund', transcript, preparedDelta));
+                  setTranscript(combineTextForField('befund', transcript, preparedDelta, { applyActiveInlineFormatting: true }));
                 }
                 break;
             }
@@ -1874,7 +2023,7 @@ export default function HomePage() {
           if (liveInjectEnabledRef.current) {
             applyLiveChunkPreview('transcript', preparedDelta);
           } else {
-            const fullText = combineTextForField('transcript', transcript, preparedDelta);
+            const fullText = combineTextForField('transcript', transcript, preparedDelta, { applyActiveInlineFormatting: true });
             setTranscript(fullText);
           }
         }
@@ -1882,7 +2031,7 @@ export default function HomePage() {
     } finally {
       setTranscribing(false);
     }
-  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, prepareLiveInjectDelta, queueLiveInject, applyLiveChunkPreview, tryApplySelectionFormattingCommand]);
+  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, prepareLiveInjectDelta, queueLiveInject, applyLiveChunkPreview, tryApplyInlineFormattingToggleCommand, tryApplySelectionFormattingCommand]);
 
   useEffect(() => {
     return () => {
@@ -2260,6 +2409,11 @@ export default function HomePage() {
     let processedText = text.trim();
     let endsWithPeriod = false;
 
+    if (tryApplyInlineFormattingToggleCommand(processedText)) {
+      console.log('[FastWhisper] Persistenter Formatierungsbefehl angewendet');
+      return;
+    }
+
     if (tryApplySelectionFormattingCommand(processedText)) {
       console.log('[FastWhisper] Auswahlformatierungsbefehl angewendet');
       return;
@@ -2452,7 +2606,7 @@ export default function HomePage() {
       }
       updateDisplay();
     }
-  }, [mode, activeField, applyDictionaryToText, quickCorrectWithLLM, replaceTextAtEndOrInsertDelta, tryApplySelectionFormattingCommand]);
+  }, [mode, activeField, applyDictionaryToText, quickCorrectWithLLM, replaceTextAtEndOrInsertDelta, tryApplyInlineFormattingToggleCommand, tryApplySelectionFormattingCommand]);
 
   async function startRecording() {
     setError(null);
@@ -3031,6 +3185,10 @@ export default function HomePage() {
         recordingStartedAtRef.current = null;
         const sessionTranscript = await transcribeChunk(blob, false, audioDurationSeconds);
         if (sessionTranscript) {
+          if (tryApplyInlineFormattingToggleCommand(sessionTranscript)) {
+            return;
+          }
+
           if (tryApplySelectionFormattingCommand(sessionTranscript)) {
             return;
           }
@@ -3065,13 +3223,13 @@ export default function HomePage() {
               if (parsed.lastField) {
                 // Steuerbefehle erkannt - verteile auf entsprechende Felder
                 if (parsed.methodik !== null) {
-                  currentMethodik = combineTextForField('methodik', existingMethodikRef.current, parsed.methodik);
+                  currentMethodik = combineTextForField('methodik', existingMethodikRef.current, parsed.methodik, { applyActiveInlineFormatting: true });
                 }
                 if (parsed.befund !== null) {
-                  currentBefund = combineTextForField('befund', existingTextRef.current, parsed.befund);
+                  currentBefund = combineTextForField('befund', existingTextRef.current, parsed.befund, { applyActiveInlineFormatting: true });
                 }
                 if (parsed.beurteilung !== null) {
-                  currentBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, parsed.beurteilung);
+                  currentBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, parsed.beurteilung, { applyActiveInlineFormatting: true });
                 }
                 // Rohe Version
                 if (rawParsed.methodik !== null) {
@@ -3087,16 +3245,16 @@ export default function HomePage() {
               // Kein Steuerbefehl - Text geht ins aktive Feld
               switch (activeField) {
                 case 'methodik':
-                  currentMethodik = combineTextForField('methodik', existingMethodikRef.current, formattedTranscript);
+                  currentMethodik = combineTextForField('methodik', existingMethodikRef.current, formattedTranscript, { applyActiveInlineFormatting: true });
                   rawMethodik = combineTextForField('methodik', existingMethodikRef.current, sessionTranscript);
                   break;
                 case 'beurteilung':
-                  currentBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, formattedTranscript);
+                  currentBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, formattedTranscript, { applyActiveInlineFormatting: true });
                   rawBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, sessionTranscript);
                   break;
                 case 'befund':
                 default:
-                  currentBefund = combineTextForField('befund', existingTextRef.current, formattedTranscript);
+                  currentBefund = combineTextForField('befund', existingTextRef.current, formattedTranscript, { applyActiveInlineFormatting: true });
                   rawBefund = combineTextForField('befund', existingTextRef.current, sessionTranscript);
                   break;
               }
@@ -3206,7 +3364,7 @@ export default function HomePage() {
             }
           } else {
             // Im Arztbrief-Modus: Normales Verhalten
-            const fullText = combineTextForField('transcript', existingTextRef.current, formattedTranscript);
+            const fullText = combineTextForField('transcript', existingTextRef.current, formattedTranscript, { applyActiveInlineFormatting: true });
             const rawFullText = combineTextForField('transcript', existingTextRef.current, sessionTranscript);
             
             // Speichere Text VOR der Korrektur für Revert-Funktion (formatierte Version)

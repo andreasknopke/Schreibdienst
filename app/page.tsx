@@ -106,6 +106,15 @@ interface InlineFormattingParseResult {
   consumedCommand: boolean;
 }
 
+const INLINE_FORMAT_COMMAND_VARIANTS: Record<SelectionFormattingCommand, string[]> = {
+  bold: ['fett'],
+  italic: ['kursiv'],
+  underline: ['unterstrichen', 'unterstreichen'],
+};
+
+const INLINE_FORMAT_BEGIN_VARIANTS = ['beginn', 'beginnen', 'beginnt', 'anfang', 'start'];
+const INLINE_FORMAT_END_VARIANTS = ['ende', 'beenden', 'beendet', 'stop', 'stopp'];
+
 function getSelectionFormattingCommandLabel(command: SelectionFormattingCommand): string {
   switch (command) {
     case 'bold':
@@ -327,10 +336,48 @@ function detectInlineFormattingToggleCommand(text: string): InlineFormattingTogg
   const normalized = normalizeSpokenCommand(text);
   const tokens = tokenizeSpokenCommand(text);
 
+  if (tokens.length === 0 || tokens.length > 3) {
+    return null;
+  }
+
+  const matchesSpokenVariant = (candidate: string, variants: string[]) => {
+    if (!candidate) {
+      return false;
+    }
+
+    const normalizedCandidate = normalizeSpokenCommand(candidate);
+    if (!normalizedCandidate) {
+      return false;
+    }
+
+    return variants.some((variant) => {
+      const normalizedVariant = normalizeSpokenCommand(variant);
+      if (normalizedCandidate === normalizedVariant) {
+        return true;
+      }
+
+      const lexicalSimilarity = similarityScore(normalizedCandidate, normalizedVariant);
+      const phoneticCandidate = colognePhonetic(normalizedCandidate);
+      const phoneticVariant = colognePhonetic(normalizedVariant);
+      const phoneticSimilarity = phoneticCandidate && phoneticVariant
+        ? similarityScore(phoneticCandidate, phoneticVariant)
+        : 0;
+
+      return lexicalSimilarity >= 0.72 || phoneticSimilarity >= 0.75;
+    });
+  };
+
   const inferCommandFromTokens = (): SelectionFormattingCommand | null => {
-    if (tokens.includes('fett')) return 'bold';
-    if (tokens.includes('kursiv')) return 'italic';
-    if (tokens.includes('unterstrichen') || tokens.includes('unterstreichen')) return 'underline';
+    for (const [command, variants] of Object.entries(INLINE_FORMAT_COMMAND_VARIANTS) as Array<[SelectionFormattingCommand, string[]]>) {
+      if (tokens.some((token) => matchesSpokenVariant(token, variants))) {
+        return command;
+      }
+
+      if (variants.some((variant) => normalized.startsWith(normalizeSpokenCommand(variant)))) {
+        return command;
+      }
+    }
+
     return null;
   };
 
@@ -339,20 +386,10 @@ function detectInlineFormattingToggleCommand(text: string): InlineFormattingTogg
     return null;
   }
 
-  const isBegin = normalized.endsWith('beginn')
-    || normalized.endsWith('beginnen')
-    || tokens.includes('beginn')
-    || tokens.includes('beginnen')
-    || tokens.includes('beginnt')
-    || tokens.includes('anfang')
-    || tokens.includes('start');
-  const isEnd = normalized.endsWith('ende')
-    || normalized.endsWith('beenden')
-    || tokens.includes('ende')
-    || tokens.includes('beenden')
-    || tokens.includes('beendet')
-    || tokens.includes('stop')
-    || tokens.includes('stopp');
+  const isBegin = tokens.some((token) => matchesSpokenVariant(token, INLINE_FORMAT_BEGIN_VARIANTS))
+    || INLINE_FORMAT_BEGIN_VARIANTS.some((variant) => normalized.endsWith(normalizeSpokenCommand(variant)));
+  const isEnd = tokens.some((token) => matchesSpokenVariant(token, INLINE_FORMAT_END_VARIANTS))
+    || INLINE_FORMAT_END_VARIANTS.some((variant) => normalized.endsWith(normalizeSpokenCommand(variant)));
 
   if (isBegin === isEnd) {
     return null;
@@ -381,13 +418,18 @@ function normalizeInlineFormattingSpacing(text: string): string {
 }
 
 function parseInlineFormattingText(text: string, initialState: InlineFormattingState): InlineFormattingParseResult {
-  const commandPattern = /\b(fett|kursiv|unterstrichen|unterstreichen)\s+(beginn|beginnen|beginnt|anfang|start|ende|beenden|beendet|stop|stopp)\b[.,;:!?]*/gi;
   const nextState = cloneInlineFormattingState(initialState);
   const ranges: RichTextFormatRange[] = [];
   const outputParts: string[] = [];
   let outputLength = 0;
   let consumedCommand = false;
   let lastIndex = 0;
+
+  const tokenMatches = Array.from(text.matchAll(/[\p{L}]+(?:-[\p{L}]+)?[.,;:!?]*/gu)).map((match) => ({
+    index: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+    raw: match[0],
+  }));
 
   const appendChunk = (rawChunk: string) => {
     if (!rawChunk) {
@@ -417,18 +459,30 @@ function parseInlineFormattingText(text: string, initialState: InlineFormattingS
     }
   };
 
-  for (const match of text.matchAll(commandPattern)) {
-    const matchIndex = match.index ?? 0;
-    appendChunk(text.slice(lastIndex, matchIndex));
+  for (let tokenIndex = 0; tokenIndex < tokenMatches.length; tokenIndex += 1) {
+    const currentToken = tokenMatches[tokenIndex];
+    const nextToken = tokenMatches[tokenIndex + 1];
 
-    const commandText = `${match[1] ?? ''} ${match[2] ?? ''}`.trim();
-    const toggleCommand = detectInlineFormattingToggleCommand(commandText);
-    if (toggleCommand) {
-      nextState[toggleCommand.command] = toggleCommand.enabled;
-      consumedCommand = true;
+    const twoTokenCandidate = nextToken
+      ? text.slice(currentToken.index, nextToken.end)
+      : null;
+    const twoTokenCommand = twoTokenCandidate ? detectInlineFormattingToggleCommand(twoTokenCandidate) : null;
+    const singleTokenCommand = detectInlineFormattingToggleCommand(currentToken.raw);
+    const matchedCommand = twoTokenCommand ?? singleTokenCommand;
+    const matchedEnd = twoTokenCommand ? nextToken?.end : (singleTokenCommand ? currentToken.end : null);
+
+    if (!matchedCommand || matchedEnd == null) {
+      continue;
     }
 
-    lastIndex = matchIndex + match[0].length;
+    appendChunk(text.slice(lastIndex, currentToken.index));
+    nextState[matchedCommand.command] = matchedCommand.enabled;
+    consumedCommand = true;
+    lastIndex = matchedEnd;
+
+    if (twoTokenCommand) {
+      tokenIndex += 1;
+    }
   }
 
   appendChunk(text.slice(lastIndex));

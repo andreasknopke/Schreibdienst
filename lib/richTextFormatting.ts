@@ -96,17 +96,21 @@ function escapeHtml(text: string): string {
 
 export function buildRichTextHtml(text: string, formats: RichTextFormatRange[]): string {
   return buildRichTextSegments(text, formats).map((segment) => {
-    const styleParts: string[] = [];
-    if (segment.bold) styleParts.push('font-weight:700');
-    if (segment.italic) styleParts.push('font-style:italic');
-    if (segment.underline) styleParts.push('text-decoration:underline');
+    let escapedText = escapeHtml(segment.text).replace(/\n/g, '<br>');
 
-    const escapedText = escapeHtml(segment.text).replace(/\n/g, '<br>');
-    if (styleParts.length === 0) {
-      return escapedText;
+    if (segment.underline) {
+      escapedText = `<u>${escapedText}</u>`;
     }
 
-    return `<span style="${styleParts.join(';')}">${escapedText}</span>`;
+    if (segment.italic) {
+      escapedText = `<em style="font-style:italic;font-synthesis:style;font-synthesis-small-caps:none">${escapedText}</em>`;
+    }
+
+    if (segment.bold) {
+      escapedText = `<strong>${escapedText}</strong>`;
+    }
+
+    return escapedText;
   }).join('');
 }
 

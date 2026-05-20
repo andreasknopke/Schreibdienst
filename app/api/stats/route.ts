@@ -8,6 +8,17 @@ export const dynamic = 'force-dynamic';
 
 type PeriodKey = 'today' | 'month' | 'year' | 'allTime';
 
+type ChartPoint = {
+    key: string;
+    label: string;
+    title: string;
+    words: number;
+    minutes: number;
+    utterances: number;
+    manualCorrections: number;
+    vocabularyEntries: number;
+};
+
 const PERIODS: Array<{ key: PeriodKey; label: string; where: string }> = [
     { key: 'today', label: 'Heute', where: 'created_at >= CURDATE()' },
     { key: 'month', label: 'Dieser Monat', where: "created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')" },
@@ -110,38 +121,127 @@ async function getOnlineUsageByPeriod(db: any) {
     return summaries;
 }
 
-async function getOnlineTrend(db: any) {
-    const [usageRows] = await db.query(`
+function createChartPoint(key: string, label: string, title: string): ChartPoint {
+    return {
+        key,
+        label,
+        title,
+        words: 0,
+        minutes: 0,
+        utterances: 0,
+        manualCorrections: 0,
+        vocabularyEntries: 0,
+    };
+}
+
+function pad2(value: number): string {
+    return String(value).padStart(2, '0');
+}
+
+function monthKey(date: Date): string {
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+}
+
+function monthLabel(date: Date): string {
+    return date.toLocaleDateString('de-DE', { month: 'long' });
+}
+
+function monthTitle(date: Date): string {
+    return date.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+}
+
+function dayKey(date: Date): string {
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function dayLabel(date: Date): string {
+    return String(date.getDate());
+}
+
+function dayTitle(date: Date): string {
+    return date.toLocaleDateString('de-DE');
+}
+
+async function getOnlineTrends(db: any) {
+    const trends = {} as Record<PeriodKey, ChartPoint[]>;
+
+    const [todayUsageRows] = await db.query(`
         SELECT
-            DATE(created_at) AS day,
+            username,
             SUM(word_count) AS words,
             SUM(audio_duration_seconds) / 60 AS minutes,
             SUM(utterance_count) AS utterances,
             SUM(manual_corrections) AS manual_corrections
         FROM online_usage_events
-        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
-        GROUP BY DATE(created_at)
-        ORDER BY day ASC
+        WHERE created_at >= CURDATE()
+        GROUP BY username
+        ORDER BY words DESC, minutes DESC, utterances DESC
     `);
 
-    const [vocabularyRows] = await db.query(`
-        SELECT DATE(added_at) AS day, COUNT(*) AS vocabulary_entries
+    const [todayVocabularyRows] = await db.query(`
+        SELECT username, COUNT(*) AS vocabulary_entries
         FROM dictionary_entries
-        WHERE added_at >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
-        GROUP BY DATE(added_at)
+        WHERE added_at >= CURDATE()
+        GROUP BY username
     `);
 
-    const byDay = new Map<string, any>();
-    for (let offset = 29; offset >= 0; offset--) {
-        const date = new Date();
-        date.setDate(date.getDate() - offset);
-        const key = date.toISOString().slice(0, 10);
-        byDay.set(key, { day: key, words: 0, minutes: 0, utterances: 0, manualCorrections: 0, vocabularyEntries: 0 });
+    const byUser = new Map<string, ChartPoint>();
+    for (const row of todayUsageRows as any[]) {
+        const username = String(row.username || 'unknown').toLowerCase();
+        byUser.set(username, {
+            ...createChartPoint(username, username, username),
+            words: toNumber(row.words),
+            minutes: toNumber(row.minutes),
+            utterances: toNumber(row.utterances),
+            manualCorrections: toNumber(row.manual_corrections),
+        });
     }
 
-    for (const row of usageRows as any[]) {
-        const key = new Date(row.day).toISOString().slice(0, 10);
-        const existing = byDay.get(key);
+    for (const row of todayVocabularyRows as any[]) {
+        const username = String(row.username || 'unknown').toLowerCase();
+        const existing = byUser.get(username) || createChartPoint(username, username, username);
+        existing.vocabularyEntries = toNumber(row.vocabulary_entries);
+        byUser.set(username, existing);
+    }
+
+    trends.today = Array.from(byUser.values()).sort((a, b) => b.words - a.words || b.minutes - a.minutes || b.utterances - a.utterances);
+
+    const [monthUsageRows] = await db.query(`
+        SELECT
+            DATE(created_at) AS bucket,
+            SUM(word_count) AS words,
+            SUM(audio_duration_seconds) / 60 AS minutes,
+            SUM(utterance_count) AS utterances,
+            SUM(manual_corrections) AS manual_corrections
+        FROM online_usage_events
+        WHERE created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+        GROUP BY DATE(created_at)
+        ORDER BY bucket ASC
+    `);
+
+    const [monthVocabularyRows] = await db.query(`
+        SELECT DATE(added_at) AS bucket, COUNT(*) AS vocabulary_entries
+        FROM dictionary_entries
+        WHERE added_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+        GROUP BY DATE(added_at)
+        ORDER BY bucket ASC
+    `);
+
+    const byMonthDay = new Map<string, ChartPoint>();
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = currentDate.getMonth();
+    const daysInMonth = currentDate.getDate();
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(currentYear, currentMonth, day);
+        const key = dayKey(date);
+        byMonthDay.set(key, createChartPoint(key, dayLabel(date), dayTitle(date)));
+    }
+
+    for (const row of monthUsageRows as any[]) {
+        const key = String(row.bucket);
+        const existing = byMonthDay.get(key);
         if (existing) {
             existing.words = toNumber(row.words);
             existing.minutes = toNumber(row.minutes);
@@ -150,15 +250,139 @@ async function getOnlineTrend(db: any) {
         }
     }
 
-    for (const row of vocabularyRows as any[]) {
-        const key = new Date(row.day).toISOString().slice(0, 10);
-        const existing = byDay.get(key);
+    for (const row of monthVocabularyRows as any[]) {
+        const key = String(row.bucket);
+        const existing = byMonthDay.get(key);
         if (existing) {
             existing.vocabularyEntries = toNumber(row.vocabulary_entries);
         }
     }
 
-    return Array.from(byDay.values());
+    trends.month = Array.from(byMonthDay.values());
+
+    const [yearUsageRows] = await db.query(`
+        SELECT
+            DATE_FORMAT(created_at, '%Y-%m') AS bucket,
+            SUM(word_count) AS words,
+            SUM(audio_duration_seconds) / 60 AS minutes,
+            SUM(utterance_count) AS utterances,
+            SUM(manual_corrections) AS manual_corrections
+        FROM online_usage_events
+        WHERE created_at >= MAKEDATE(YEAR(CURDATE()), 1)
+        GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+        ORDER BY bucket ASC
+    `);
+
+    const [yearVocabularyRows] = await db.query(`
+        SELECT DATE_FORMAT(added_at, '%Y-%m') AS bucket, COUNT(*) AS vocabulary_entries
+        FROM dictionary_entries
+        WHERE added_at >= MAKEDATE(YEAR(CURDATE()), 1)
+        GROUP BY DATE_FORMAT(added_at, '%Y-%m')
+        ORDER BY bucket ASC
+    `);
+
+    const byYearMonth = new Map<string, ChartPoint>();
+    for (let monthIndex = 0; monthIndex <= currentMonth; monthIndex++) {
+        const date = new Date(currentYear, monthIndex, 1);
+        const key = monthKey(date);
+        byYearMonth.set(key, createChartPoint(key, monthLabel(date), monthTitle(date)));
+    }
+
+    for (const row of yearUsageRows as any[]) {
+        const key = String(row.bucket);
+        const existing = byYearMonth.get(key);
+        if (existing) {
+            existing.words = toNumber(row.words);
+            existing.minutes = toNumber(row.minutes);
+            existing.utterances = toNumber(row.utterances);
+            existing.manualCorrections = toNumber(row.manual_corrections);
+        }
+    }
+
+    for (const row of yearVocabularyRows as any[]) {
+        const key = String(row.bucket);
+        const existing = byYearMonth.get(key);
+        if (existing) {
+            existing.vocabularyEntries = toNumber(row.vocabulary_entries);
+        }
+    }
+
+    trends.year = Array.from(byYearMonth.values());
+
+    const [allTimeUsageRows] = await db.query(`
+        SELECT
+            DATE_FORMAT(created_at, '%Y-%m') AS bucket,
+            SUM(word_count) AS words,
+            SUM(audio_duration_seconds) / 60 AS minutes,
+            SUM(utterance_count) AS utterances,
+            SUM(manual_corrections) AS manual_corrections
+        FROM online_usage_events
+        GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+        ORDER BY bucket ASC
+    `);
+
+    const [allTimeVocabularyRows] = await db.query(`
+        SELECT DATE_FORMAT(added_at, '%Y-%m') AS bucket, COUNT(*) AS vocabulary_entries
+        FROM dictionary_entries
+        GROUP BY DATE_FORMAT(added_at, '%Y-%m')
+        ORDER BY bucket ASC
+    `);
+
+    const byAllTimeMonth = new Map<string, ChartPoint>();
+    for (const row of allTimeUsageRows as any[]) {
+        const key = String(row.bucket);
+        const [year, month] = key.split('-').map((part) => Number(part));
+        const date = new Date(year, month - 1, 1);
+        byAllTimeMonth.set(
+            key,
+            createChartPoint(
+                key,
+                date.toLocaleDateString('de-DE', { month: 'long', year: '2-digit' }),
+                monthTitle(date)
+            )
+        );
+    }
+
+    for (const row of allTimeVocabularyRows as any[]) {
+        const key = String(row.bucket);
+        if (!byAllTimeMonth.has(key)) {
+            const [year, month] = key.split('-').map((part) => Number(part));
+            const date = new Date(year, month - 1, 1);
+            byAllTimeMonth.set(
+                key,
+                createChartPoint(
+                    key,
+                    date.toLocaleDateString('de-DE', { month: 'long', year: '2-digit' }),
+                    monthTitle(date)
+                )
+            );
+        }
+    }
+
+    for (const row of allTimeUsageRows as any[]) {
+        const key = String(row.bucket);
+        const existing = byAllTimeMonth.get(key);
+        if (existing) {
+            existing.words = toNumber(row.words);
+            existing.minutes = toNumber(row.minutes);
+            existing.utterances = toNumber(row.utterances);
+            existing.manualCorrections = toNumber(row.manual_corrections);
+        }
+    }
+
+    for (const row of allTimeVocabularyRows as any[]) {
+        const key = String(row.bucket);
+        const existing = byAllTimeMonth.get(key);
+        if (existing) {
+            existing.vocabularyEntries = toNumber(row.vocabulary_entries);
+        }
+    }
+
+    trends.allTime = Array.from(byAllTimeMonth.entries())
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([, value]) => value);
+
+    return trends;
 }
 
 async function getProviderBreakdown(db: any) {
@@ -237,9 +461,9 @@ export async function GET(req: NextRequest) {
         const [llmRows] = await db.query<any[]>(`SELECT count(*) as count FROM correction_log WHERE correction_type = 'llm'`);
         const performanceStats = perfRows[0] || {};
 
-        const [onlineUsage, trend, providerBreakdown] = await Promise.all([
+        const [onlineUsage, trends, providerBreakdown] = await Promise.all([
             getOnlineUsageByPeriod(db),
-            getOnlineTrend(db),
+            getOnlineTrends(db),
             getProviderBreakdown(db),
         ]);
 
@@ -260,7 +484,7 @@ export async function GET(req: NextRequest) {
             timestamp: new Date().toISOString(),
             online: {
                 periods: onlineUsage,
-                trend,
+                trends,
                 providerBreakdown,
             },
             system: systemStats,

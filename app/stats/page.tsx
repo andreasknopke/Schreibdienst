@@ -22,7 +22,9 @@ interface OnlinePeriodStats {
 }
 
 interface TrendPoint {
-  day: string;
+  key: string;
+  label: string;
+  title: string;
   words: number;
   minutes: number;
   utterances: number;
@@ -34,7 +36,7 @@ interface StatsResponse {
   timestamp: string;
   online: {
     periods: Record<PeriodKey, OnlinePeriodStats>;
-    trend: TrendPoint[];
+    trends: Record<PeriodKey, TrendPoint[]>;
     providerBreakdown: Array<{ provider: string; requests: number; words: number }>;
   };
   database: { latency_ms: number; size_mb: number; db_name: string };
@@ -85,7 +87,13 @@ function StatCard({ label, value, hint, color }: { label: string; value: string;
   );
 }
 
-function BarChart({ data, metric, label }: { data: TrendPoint[]; metric: keyof TrendPoint; label: string }) {
+function getPeriodCaption(period: PeriodKey): string {
+  if (period === 'today') return 'Heute nach Nutzer';
+  if (period === 'month') return 'Aktueller Monat nach Tag';
+  return 'Monatlich kumuliert';
+}
+
+function BarChart({ data, metric, label, period }: { data: TrendPoint[]; metric: keyof Pick<TrendPoint, 'words' | 'minutes' | 'utterances' | 'manualCorrections' | 'vocabularyEntries'>; label: string; period: PeriodKey }) {
   const values = data.map((point) => Number(point[metric] || 0));
   const max = Math.max(1, ...values);
 
@@ -93,22 +101,22 @@ function BarChart({ data, metric, label }: { data: TrendPoint[]; metric: keyof T
     <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
       <div className="mb-4 flex items-center justify-between">
         <h3 className="font-semibold text-gray-900 dark:text-white">{label}</h3>
-        <span className="text-xs text-gray-500">30 Tage</span>
+        <span className="text-xs text-gray-500">{getPeriodCaption(period)}</span>
       </div>
       <div className="flex h-48 items-end gap-1 overflow-hidden sm:gap-2">
         {data.map((point) => {
           const value = Number(point[metric] || 0);
           const height = Math.max(3, (value / max) * 100);
           return (
-            <div key={point.day} className="group flex min-w-0 flex-1 flex-col items-center gap-2">
+            <div key={point.key} className="group flex min-w-0 flex-1 flex-col items-center gap-2">
               <div className="relative flex h-40 w-full items-end rounded-t bg-blue-50 dark:bg-blue-950/20">
                 <div
                   className="w-full rounded-t bg-gradient-to-t from-blue-600 to-cyan-400 transition-all group-hover:from-blue-700"
                   style={{ height: `${height}%` }}
-                  title={`${new Date(point.day).toLocaleDateString('de-DE')}: ${formatNumber(value)}`}
+                  title={`${point.title}: ${formatNumber(value)}`}
                 />
               </div>
-              <span className="hidden text-[10px] text-gray-400 sm:block">{new Date(point.day).getDate()}</span>
+              <span className="hidden max-w-full whitespace-normal break-words text-center text-[10px] leading-tight text-gray-400 sm:block">{point.label}</span>
             </div>
           );
         })}
@@ -146,6 +154,7 @@ export default function StatsPage() {
   }, []);
 
   const activePeriod = stats?.online.periods[period];
+  const activeTrend = stats?.online.trends[period] ?? [];
   const topUsers = useMemo(() => activePeriod?.users.slice(0, 12) ?? [], [activePeriod]);
   const maxUserWords = Math.max(1, ...topUsers.map((user) => user.words));
   const memoryPercent = stats ? Math.round((stats.system.memory.process_usage_mb / stats.system.memory.total_mb) * 100) : 0;
@@ -196,9 +205,10 @@ export default function StatsPage() {
             <StatCard label="Wörterbuch" value={formatNumber(activePeriod.totals.vocabularyEntries)} hint="Einträge" color="bg-rose-500" />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <BarChart data={stats?.online.trend ?? []} metric="words" label="Wörter pro Tag" />
-            <BarChart data={stats?.online.trend ?? []} metric="minutes" label="Diktat-Minuten pro Tag" />
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <BarChart data={activeTrend} metric="words" label={period === 'today' ? 'Wörter nach Nutzer' : period === 'month' ? 'Wörter pro Tag' : 'Wörter pro Monat'} period={period} />
+            <BarChart data={activeTrend} metric="minutes" label={period === 'today' ? 'Diktat-Minuten nach Nutzer' : period === 'month' ? 'Diktat-Minuten pro Tag' : 'Diktat-Minuten pro Monat'} period={period} />
+            <BarChart data={activeTrend} metric="manualCorrections" label={period === 'today' ? 'Korrekturen nach Nutzer' : period === 'month' ? 'Korrekturen pro Tag' : 'Korrekturen pro Monat'} period={period} />
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.5fr_1fr]">

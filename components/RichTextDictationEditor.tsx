@@ -152,6 +152,12 @@ export default function RichTextDictationEditor({
         </div>
       )}
       <div
+        className="pointer-events-none absolute bottom-2 right-2 z-10 h-3 w-3 opacity-70"
+        style={{
+          backgroundImage: 'linear-gradient(135deg, transparent 0 42%, currentColor 42% 50%, transparent 50% 64%, currentColor 64% 72%, transparent 72% 100%)',
+        }}
+      />
+      <div
         ref={editorRef}
         contentEditable={!readOnly}
         suppressContentEditableWarning

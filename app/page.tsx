@@ -265,6 +265,9 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
 function detectSelectionFormattingCommand(text: string): SelectionFormattingCommand | null {
   const normalized = normalizeSpokenCommand(text);
 
+  if (normalized === 'fett') return 'bold';
+  if (normalized === 'kursiv') return 'italic';
+  if (normalized === 'unterstrichen') return 'underline';
   if (normalized === 'auswahlfett') return 'bold';
   if (normalized === 'auswahlkursiv') return 'italic';
   if (normalized === 'auswahlunterstrichen') return 'underline';
@@ -414,14 +417,16 @@ export default function HomePage() {
   const recordingStartedAtRef = useRef<number | null>(null);
   const manualCorrectionTimersRef = useRef<Partial<Record<TextInsertionTarget, ReturnType<typeof setTimeout>>>>({});
   
-  // Fast Whisper WebSocket State
+  // LEGACY / DEPRECATED: Historischer Fast-Whisper-WebSocket-Pfad.
+  // Neue Online-Diktatlogik nicht hier ergänzen, sondern im aktuellen Chunk-/Nicht-WebSocket-Pfad.
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
   const fastWhisperWsRef = useRef<WebSocket | null>(null);
   const fastWhisperAudioContextRef = useRef<AudioContext | null>(null);
   const fastWhisperProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const fastWhisperStreamRef = useRef<MediaStream | null>(null);
   
-  // Voxtral Local Realtime WebSocket State (shared audio refs with FastWhisper)
+  // LEGACY / DEPRECATED: Historischer Voxtral-Realtime-WebSocket-Pfad.
+  // Neue Online-Diktatlogik nicht hier ergänzen, sondern im aktuellen Chunk-/Nicht-WebSocket-Pfad.
   const voxtralWsRef = useRef<WebSocket | null>(null);
   const voxtralAudioContextRef = useRef<AudioContext | null>(null);
   const voxtralProcessorRef = useRef<ScriptProcessorNode | null>(null);
@@ -1613,6 +1618,10 @@ export default function HomePage() {
 
   // Verarbeitet Text und verteilt auf die richtigen Felder (für Befund-Modus)
   const processTextForBefundFields = useCallback((rawText: string) => {
+    if (tryApplySelectionFormattingCommand(rawText)) {
+      return;
+    }
+
     if (mode !== 'befund') {
       const formatted = applyFormattingControlWords(rawText);
       setTranscript(formatted);
@@ -1652,7 +1661,7 @@ export default function HomePage() {
           break;
       }
     }
-  }, [mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript]);
+  }, [mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, tryApplySelectionFormattingCommand]);
 
   // Kontinuierliche Transkription während der Aufnahme
   const processLiveTranscription = useCallback(async () => {
@@ -1672,9 +1681,13 @@ export default function HomePage() {
         }
 
         const preparedDelta = prepareLiveInjectDelta(transcriptDelta);
-          const liveInjectPreviewDelta = liveInjectEnabledRef.current
-            ? resolveLiveInjectInstruction(preparedDelta).text
-            : preparedDelta;
+        if (tryApplySelectionFormattingCommand(preparedDelta)) {
+          lastTranscriptRef.current = currentTranscript;
+          return;
+        }
+        const liveInjectPreviewDelta = liveInjectEnabledRef.current
+          ? resolveLiveInjectInstruction(preparedDelta).text
+          : preparedDelta;
 
         if (isUnstableLiveInjectText(preparedDelta)) {
           setLiveInjectStatus('Live-Übertragung wartet auf stabiles Transkript');
@@ -1761,7 +1774,7 @@ export default function HomePage() {
     } finally {
       setTranscribing(false);
     }
-  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, prepareLiveInjectDelta, queueLiveInject, applyLiveChunkPreview]);
+  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, prepareLiveInjectDelta, queueLiveInject, applyLiveChunkPreview, tryApplySelectionFormattingCommand]);
 
   useEffect(() => {
     return () => {
@@ -2122,7 +2135,8 @@ export default function HomePage() {
   // Ref um zu tracken ob der letzte Text mit Punkt endete (für Groß-/Kleinschreibung)
   const fastWhisperEndsWithPeriodRef = useRef<boolean>(true); // Start mit true = erster Buchstabe groß
 
-  // Fast Whisper WebSocket Transkription Handler
+  // LEGACY / DEPRECATED: Handler fuer die alten WebSocket-/Realtime-Pfade.
+  // Neue Online-Features nicht hier anbauen; maßgeblich ist heute der Chunk-/Nicht-WebSocket-Pfad.
   // Diktat-Modus: Kein automatisches Satzende, "Punkt" als Sprachbefehl
   const handleFastWhisperTranscript = useCallback(async (text: string, isFinal: boolean) => {
     if (!text) return;
@@ -2348,7 +2362,8 @@ export default function HomePage() {
       lastBeurteilungRef.current = "";
     }
 
-    // Fast Whisper WebSocket Modus
+    // LEGACY / DEPRECATED: Alter Fast-Whisper-WebSocket-Modus.
+    // Nicht mehr der primaere Onlinepfad; neue Aenderungen bitte im Chunk-/Nicht-WebSocket-Pfad umsetzen.
     if (runtimeConfig?.transcriptionProvider === 'fast_whisper' && runtimeConfig.fastWhisperWsUrl) {
       // Finale Text-Refs zurücksetzen für neue Session
       fastWhisperFinalTextRef.current = "";
@@ -2510,7 +2525,8 @@ export default function HomePage() {
       return;
     }
     
-    // Voxtral Local Realtime WebSocket Modus
+    // LEGACY / DEPRECATED: Alter Voxtral-Realtime-WebSocket-Modus.
+    // Nicht mehr der primaere Onlinepfad; neue Aenderungen bitte im Chunk-/Nicht-WebSocket-Pfad umsetzen.
     if (
       runtimeConfig?.transcriptionProvider === 'voxtral_local' &&
       runtimeConfig.voxtralLocalOnlineMode !== 'chunk' &&
@@ -2778,7 +2794,7 @@ export default function HomePage() {
   }
 
   async function stopRecording() {
-    // Fast Whisper WebSocket Modus stoppen
+    // LEGACY / DEPRECATED: Cleanup fuer den alten Fast-Whisper-WebSocket-Modus.
     if (runtimeConfig?.transcriptionProvider === 'fast_whisper') {
       console.log('[FastWhisper] Stopping WebSocket recording');
       
@@ -2821,7 +2837,7 @@ export default function HomePage() {
       return;
     }
     
-    // Voxtral Local Realtime WebSocket stoppen
+    // LEGACY / DEPRECATED: Cleanup fuer den alten Voxtral-Realtime-WebSocket-Modus.
     if (
       runtimeConfig?.transcriptionProvider === 'voxtral_local' &&
       runtimeConfig.voxtralLocalOnlineMode !== 'chunk' &&
@@ -2907,6 +2923,10 @@ export default function HomePage() {
         recordingStartedAtRef.current = null;
         const sessionTranscript = await transcribeChunk(blob, false, audioDurationSeconds);
         if (sessionTranscript) {
+          if (tryApplySelectionFormattingCommand(sessionTranscript)) {
+            return;
+          }
+
           queueFinalSessionLiveInject(sessionTranscript);
 
           // Formatierung, Wörterbuch und phonetische Korrektur anwenden.

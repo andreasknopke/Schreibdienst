@@ -162,8 +162,16 @@ function dayTitle(date: Date): string {
     return date.toLocaleDateString('de-DE');
 }
 
+function parseDateKey(dateKey: string): Date {
+    const [year, month, day] = dateKey.split('-').map((part) => Number(part));
+    return new Date(year, month - 1, day);
+}
+
 async function getOnlineTrends(db: any) {
     const trends = {} as Record<PeriodKey, ChartPoint[]>;
+    const [currentDateRows] = await db.query(`SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS current_day`);
+    const currentDayKey = String((currentDateRows as any[])[0]?.current_day || new Date().toISOString().slice(0, 10));
+    const currentDate = parseDateKey(currentDayKey);
 
     const [todayUsageRows] = await db.query(`
         SELECT
@@ -208,7 +216,7 @@ async function getOnlineTrends(db: any) {
 
     const [monthUsageRows] = await db.query(`
         SELECT
-            DATE(created_at) AS bucket,
+            DATE_FORMAT(created_at, '%Y-%m-%d') AS bucket,
             SUM(word_count) AS words,
             SUM(audio_duration_seconds) / 60 AS minutes,
             SUM(utterance_count) AS utterances,
@@ -220,7 +228,7 @@ async function getOnlineTrends(db: any) {
     `);
 
     const [monthVocabularyRows] = await db.query(`
-        SELECT DATE(added_at) AS bucket, COUNT(*) AS vocabulary_entries
+        SELECT DATE_FORMAT(added_at, '%Y-%m-%d') AS bucket, COUNT(*) AS vocabulary_entries
         FROM dictionary_entries
         WHERE added_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
         GROUP BY DATE(added_at)
@@ -228,7 +236,6 @@ async function getOnlineTrends(db: any) {
     `);
 
     const byMonthDay = new Map<string, ChartPoint>();
-    const currentDate = new Date();
     const currentYear = currentDate.getFullYear();
     const currentMonth = currentDate.getMonth();
     const daysInMonth = currentDate.getDate();

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { removeMarkdownFormatting } from '@/lib/textFormatting';
+import { applyLLMPhoneticGuard } from '@/lib/phoneticMatch';
 
 export const runtime = 'nodejs';
 
@@ -267,6 +268,16 @@ export async function POST(request: NextRequest) {
     
     // Remove any Markdown formatting that the LLM may have added despite instructions
     corrected = removeMarkdownFormatting(corrected);
+
+    const phoneticGuardResult = applyLLMPhoneticGuard(text, corrected);
+    if (phoneticGuardResult.rejectedWordReplacements > 0) {
+      console.log(
+        `[QuickCorrect] LLM phonetic guard rejected ${phoneticGuardResult.rejectedWordReplacements} ` +
+        `word replacements in ${phoneticGuardResult.revertedChunks} chunks ` +
+        `(checked: ${phoneticGuardResult.checkedWordReplacements})`
+      );
+    }
+    corrected = phoneticGuardResult.text;
     
     // Wenn leer → Original zurück
     if (!corrected) {

@@ -99,6 +99,13 @@ interface InlineFormattingToggleCommand {
   enabled: boolean;
 }
 
+interface InlineFormattingParseResult {
+  text: string;
+  ranges: RichTextFormatRange[];
+  nextState: InlineFormattingState;
+  consumedCommand: boolean;
+}
+
 function getSelectionFormattingCommandLabel(command: SelectionFormattingCommand): string {
   switch (command) {
     case 'bold':
@@ -354,6 +361,84 @@ function detectInlineFormattingToggleCommand(text: string): InlineFormattingTogg
   return {
     command,
     enabled: isBegin,
+  };
+}
+
+function cloneInlineFormattingState(state: InlineFormattingState): InlineFormattingState {
+  return {
+    bold: Boolean(state.bold),
+    italic: Boolean(state.italic),
+    underline: Boolean(state.underline),
+  };
+}
+
+function normalizeInlineFormattingSpacing(text: string): string {
+  return text
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/([,.;:!?])(?!\s|$)/g, '$1 ')
+    .trim();
+}
+
+function parseInlineFormattingText(text: string, initialState: InlineFormattingState): InlineFormattingParseResult {
+  const commandPattern = /\b(fett|kursiv|unterstrichen|unterstreichen)\s+(beginn|beginnen|beginnt|anfang|start|ende|beenden|beendet|stop|stopp)\b[.,;:!?]*/gi;
+  const nextState = cloneInlineFormattingState(initialState);
+  const ranges: RichTextFormatRange[] = [];
+  const outputParts: string[] = [];
+  let outputLength = 0;
+  let consumedCommand = false;
+  let lastIndex = 0;
+
+  const appendChunk = (rawChunk: string) => {
+    if (!rawChunk) {
+      return;
+    }
+
+    const chunk = outputParts.length === 0
+      ? rawChunk.replace(/^\s+/, '')
+      : rawChunk;
+
+    if (!chunk) {
+      return;
+    }
+
+    const start = outputLength;
+    outputParts.push(chunk);
+    outputLength += chunk.length;
+
+    if (nextState.bold || nextState.italic || nextState.underline) {
+      ranges.push({
+        start,
+        end: outputLength,
+        bold: nextState.bold,
+        italic: nextState.italic,
+        underline: nextState.underline,
+      });
+    }
+  };
+
+  for (const match of text.matchAll(commandPattern)) {
+    const matchIndex = match.index ?? 0;
+    appendChunk(text.slice(lastIndex, matchIndex));
+
+    const commandText = `${match[1] ?? ''} ${match[2] ?? ''}`.trim();
+    const toggleCommand = detectInlineFormattingToggleCommand(commandText);
+    if (toggleCommand) {
+      nextState[toggleCommand.command] = toggleCommand.enabled;
+      consumedCommand = true;
+    }
+
+    lastIndex = matchIndex + match[0].length;
+  }
+
+  appendChunk(text.slice(lastIndex));
+
+  const normalizedText = normalizeInlineFormattingSpacing(outputParts.join(''));
+  return {
+    text: normalizedText,
+    ranges: normalizeRichTextRanges(ranges, normalizedText.length),
+    nextState,
+    consumedCommand,
   };
 }
 
@@ -954,14 +1039,43 @@ export default function HomePage() {
     newText: string,
     options?: { applyActiveInlineFormatting?: boolean }
   ) => {
+    const initialFormattingState = activeInlineFormattingRef.current[field] ?? EMPTY_INLINE_FORMATTING_STATE;
+    const parsedInlineFormatting = options?.applyActiveInlineFormatting
+      ? parseInlineFormattingText(newText, initialFormattingState)
+      : {
+          text: newText,
+          ranges: [] as RichTextFormatRange[],
+          nextState: cloneInlineFormattingState(initialFormattingState),
+          consumedCommand: false,
+        };
+
+    if (options?.applyActiveInlineFormatting && parsedInlineFormatting.consumedCommand) {
+      activeInlineFormattingRef.current = {
+        ...activeInlineFormattingRef.current,
+        [field]: parsedInlineFormatting.nextState,
+      };
+
+      console.info('[FormattingCommand] Inline-Befehle im Text verarbeitet:', {
+        field,
+        rawText: newText,
+        normalizedText: parsedInlineFormatting.text,
+        nextState: parsedInlineFormatting.nextState,
+      });
+    }
+
     const selection = getStoredSelection(field, existing);
-    const result = insertTextAtSelection(existing, newText, selection);
+    const result = insertTextAtSelection(existing, parsedInlineFormatting.text, selection);
     setStoredSelection(field, result.selection);
 
     const activeFormats = activeInlineFormattingRef.current[field] ?? EMPTY_INLINE_FORMATTING_STATE;
     const hasActiveInlineFormatting = activeFormats.bold || activeFormats.italic || activeFormats.underline;
 
-    if (options?.applyActiveInlineFormatting && hasActiveInlineFormatting && result.insertedEnd > result.insertedStart) {
+    if (
+      options?.applyActiveInlineFormatting
+      && hasActiveInlineFormatting
+      && result.insertedEnd > result.insertedStart
+      && !parsedInlineFormatting.consumedCommand
+    ) {
       updateRichTextFormats(field, (current) => ([
         ...current,
         {
@@ -971,6 +1085,17 @@ export default function HomePage() {
           italic: activeFormats.italic,
           underline: activeFormats.underline,
         },
+      ]), Math.max(result.text.length, result.insertedEnd));
+    }
+
+    if (options?.applyActiveInlineFormatting && parsedInlineFormatting.ranges.length > 0 && result.insertedEnd > result.insertedStart) {
+      updateRichTextFormats(field, (current) => ([
+        ...current,
+        ...parsedInlineFormatting.ranges.map((range) => ({
+          ...range,
+          start: result.insertedStart + range.start,
+          end: result.insertedStart + range.end,
+        })),
       ]), Math.max(result.text.length, result.insertedEnd));
     }
 

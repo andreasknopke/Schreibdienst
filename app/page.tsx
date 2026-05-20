@@ -333,12 +333,19 @@ function detectInlineFormattingToggleCommand(text: string): InlineFormattingTogg
   }
 
   const isBegin = normalized.endsWith('beginn')
+    || normalized.endsWith('beginnen')
     || tokens.includes('beginn')
+    || tokens.includes('beginnen')
+    || tokens.includes('beginnt')
     || tokens.includes('anfang')
     || tokens.includes('start');
   const isEnd = normalized.endsWith('ende')
+    || normalized.endsWith('beenden')
     || tokens.includes('ende')
-    || tokens.includes('stop');
+    || tokens.includes('beenden')
+    || tokens.includes('beendet')
+    || tokens.includes('stop')
+    || tokens.includes('stopp');
 
   if (isBegin === isEnd) {
     return null;

@@ -1,5 +1,6 @@
 "use client";
 import { Document, Packer, Paragraph, HeadingLevel, TextRun } from 'docx';
+import { buildRichTextSegments, type RichTextFormatRange } from '@/lib/richTextFormatting';
 
 export function normalizeGermanText(input: string): string {
   let t = input.trim();
@@ -59,7 +60,29 @@ function ensureSections(text: string, order: string[]): string {
   return parts.join('\n');
 }
 
-export async function exportDocx(text: string, mode: 'arztbrief' | 'befund') {
+function buildRunsForRange(text: string, formats: RichTextFormatRange[], start: number, end: number): TextRun[] {
+  const lineText = text.slice(start, end);
+  if (!lineText) return [];
+
+  const segments = buildRichTextSegments(lineText, formats.map((range) => ({
+    ...range,
+    start: Math.max(0, range.start - start),
+    end: Math.max(0, range.end - start),
+  })));
+
+  if (segments.length === 0) {
+    return [new TextRun(lineText)];
+  }
+
+  return segments.map((segment) => new TextRun({
+    text: segment.text,
+    bold: segment.bold,
+    italics: segment.italic,
+    underline: segment.underline ? {} : undefined,
+  }));
+}
+
+export async function exportDocx(text: string, mode: 'arztbrief' | 'befund', formats: RichTextFormatRange[] = []) {
   const title = mode === 'befund' ? 'Befundbericht' : 'Arztbrief';
   const paragraphs: Paragraph[] = [];
   paragraphs.push(new Paragraph({
@@ -67,20 +90,26 @@ export async function exportDocx(text: string, mode: 'arztbrief' | 'befund') {
     children: [new TextRun(title)],
   }));
 
-  const blocks = text.split(/\n\n+/).map((b) => b.trim()).filter(Boolean);
-  for (const b of blocks) {
-    const m = b.match(/^([A-ZÄÖÜ][\wÄÖÜäöüß ]{2,}):\s*$/m);
-    if (m) {
+  const lines = text.split('\n');
+  let offset = 0;
+  for (const line of lines) {
+    const lineStart = offset;
+    const lineEnd = offset + line.length;
+    const headingMatch = line.match(/^([A-ZÄÖÜ][\wÄÖÜäöüß ]{2,}):\s*$/);
+
+    if (headingMatch) {
       paragraphs.push(new Paragraph({
         heading: HeadingLevel.HEADING_2,
         spacing: { before: 240, after: 120 },
-        children: [new TextRun(m[1])],
+        children: [new TextRun(headingMatch[1])],
       }));
-      const rest = b.replace(/^.*?:\s*/s, '');
-      if (rest) paragraphs.push(new Paragraph(rest));
     } else {
-      paragraphs.push(new Paragraph(b));
+      paragraphs.push(new Paragraph({
+        children: buildRunsForRange(text, formats, lineStart, lineEnd),
+      }));
     }
+
+    offset = lineEnd + 1;
   }
 
   const doc = new Document({ sections: [{ properties: {}, children: paragraphs }] });

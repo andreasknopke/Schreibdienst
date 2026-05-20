@@ -8,9 +8,11 @@ import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
 import { applyDeleteCommands, applyFormattingControlWords, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, preprocessTranscription, type OnlineUtteranceApplicationDebugStep } from '@/lib/textFormatting';
 import { buildPhoneticIndex, applyPhoneticCorrections, colognePhonetic, levenshtein } from '@/lib/phoneticMatch';
+import { buildRichTextHtml, normalizeRichTextRanges, remapRichTextRanges, type RichTextFormatRange } from '@/lib/richTextFormatting';
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
+import RichTextDictationEditor, { getRichTextSelection } from '@/components/RichTextDictationEditor';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
@@ -27,6 +29,19 @@ type GlobalHotkeyAction = 'toggle-recording' | 'stop-recording' | 'transfer-text
 // Hilfsfunktion zum Kopieren in die Zwischenablage
 async function copyToClipboard(text: string): Promise<void> {
   await navigator.clipboard.writeText(text);
+}
+
+async function copyRichTextToClipboard(text: string, html: string): Promise<void> {
+  if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
+    await copyToClipboard(text);
+    return;
+  }
+
+  const item = new ClipboardItem({
+    'text/plain': new Blob([text], { type: 'text/plain' }),
+    'text/html': new Blob([html], { type: 'text/html' }),
+  });
+  await navigator.clipboard.write([item]);
 }
 
 // Intervall für kontinuierliche Transkription (in ms)
@@ -70,9 +85,11 @@ interface CaretOverlayPosition {
 interface TextInsertionResult {
   text: string;
   selection: CaretSelection;
+  insertedLength: number;
 }
 
 type LiveInjectPostKey = 'F4';
+type SelectionFormattingCommand = 'bold' | 'italic' | 'underline';
 
 interface LiveInjectInstruction {
   text: string;
@@ -81,6 +98,20 @@ interface LiveInjectInstruction {
 
 const TEMPLATE_TRIGGER_NORMALIZED = 'textbaustein';
 const TEMPLATE_TRIGGER_PHONETIC = colognePhonetic(TEMPLATE_TRIGGER_NORMALIZED);
+
+const EMPTY_RICH_TEXT_FORMATS: Record<TextInsertionTarget, RichTextFormatRange[]> = {
+  transcript: [],
+  methodik: [],
+  befund: [],
+  beurteilung: [],
+};
+
+const EMPTY_FIELD_TEXTS: Record<TextInsertionTarget, string> = {
+  transcript: '',
+  methodik: '',
+  befund: '',
+  beurteilung: '',
+};
 
 function getDefaultSelection(text: string): CaretSelection {
   return {
@@ -188,6 +219,7 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
     return {
       text: existing,
       selection: selection ?? getDefaultSelection(existing),
+      insertedLength: 0,
     };
   }
 
@@ -209,6 +241,7 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
         end: caretIndex,
         direction: 'none',
       },
+      insertedLength: prefix.length + normalizedIncomingText.length,
     };
   }
 
@@ -225,7 +258,21 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
       end: caretIndex,
       direction: 'none',
     },
+    insertedLength: prefix.length + normalizedIncomingText.length,
   };
+}
+
+function detectSelectionFormattingCommand(text: string): SelectionFormattingCommand | null {
+  const normalized = text
+    .toLowerCase()
+    .replace(/[.,;:!?]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (normalized === 'auswahl fett') return 'bold';
+  if (normalized === 'auswahl kursiv') return 'italic';
+  if (normalized === 'auswahl unterstrichen') return 'underline';
+  return null;
 }
 
 function getIncrementalTranscript(previousText: string, currentText: string): string {
@@ -297,14 +344,18 @@ function hiddenCaretOverlay(): CaretOverlayPosition {
 }
 
 function getTextareaCaretOverlay(
-  textarea: HTMLTextAreaElement | null,
-  selection?: CaretSelection | null
+  textarea: HTMLTextAreaElement | HTMLDivElement | null,
+  selection?: CaretSelection | null,
+  fallbackText?: string,
 ): CaretOverlayPosition {
   if (!textarea || !selection || selection.start !== selection.end) {
     return hiddenCaretOverlay();
   }
 
-  const caretIndex = Math.max(0, Math.min(selection.end, textarea.value.length));
+  const textValue = textarea instanceof HTMLTextAreaElement
+    ? textarea.value
+    : (fallbackText ?? textarea.textContent ?? '');
+  const caretIndex = Math.max(0, Math.min(selection.end, textValue.length));
   const style = window.getComputedStyle(textarea);
   const mirror = document.createElement('div');
 
@@ -330,8 +381,8 @@ function getTextareaCaretOverlay(
   mirror.style.textAlign = style.textAlign;
   mirror.style.tabSize = style.tabSize;
 
-  const beforeCaret = textarea.value.slice(0, caretIndex);
-  const afterCaret = textarea.value.slice(caretIndex) || ' ';
+  const beforeCaret = textValue.slice(0, caretIndex);
+  const afterCaret = textValue.slice(caretIndex) || ' ';
   mirror.textContent = beforeCaret;
 
   const marker = document.createElement('span');
@@ -424,12 +475,13 @@ export default function HomePage() {
   const [vadFailedUtterances, setVadFailedUtterances] = useState<Array<{ seq: number; blob: Blob; error: string }>>([]);
   
   const [transcript, setTranscript] = useState("");
-  const methodikTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const befundTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const beurteilungTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const transcriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const methodikTextareaRef = useRef<HTMLDivElement | null>(null);
+  const befundTextareaRef = useRef<HTMLDivElement | null>(null);
+  const beurteilungTextareaRef = useRef<HTMLDivElement | null>(null);
+  const transcriptTextareaRef = useRef<HTMLDivElement | null>(null);
   const [textSelections, setTextSelections] = useState<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
   const textSelectionsRef = useRef<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
+  const [richTextFormats, setRichTextFormats] = useState<Record<TextInsertionTarget, RichTextFormatRange[]>>(EMPTY_RICH_TEXT_FORMATS);
   const [focusedTextField, setFocusedTextField] = useState<TextInsertionTarget | null>(null);
   const [caretOverlays, setCaretOverlays] = useState<Record<TextInsertionTarget, CaretOverlayPosition>>({
     transcript: hiddenCaretOverlay(),
@@ -503,15 +555,17 @@ export default function HomePage() {
   
   // Diff-Ansicht: Zeigt Unterschiede zwischen formatiertem Original und KI-korrigiertem Text
   const [showDiffView, setShowDiffView] = useState(false);
+  const previousFieldTextsRef = useRef<Record<TextInsertionTarget, string>>(EMPTY_FIELD_TEXTS);
 
   // Custom Actions Manager
   const [showCustomActionsManager, setShowCustomActionsManager] = useState(false);
 
-  const syncTextSelection = useCallback((field: TextInsertionTarget, textarea: HTMLTextAreaElement) => {
-    const nextSelection: CaretSelection = {
-      start: textarea.selectionStart ?? 0,
-      end: textarea.selectionEnd ?? 0,
-      direction: textarea.selectionDirection ?? 'none',
+  const syncTextSelection = useCallback((field: TextInsertionTarget, textarea: HTMLTextAreaElement | HTMLDivElement) => {
+    const richSelection = textarea instanceof HTMLDivElement ? getRichTextSelection(textarea) : null;
+    const nextSelection: CaretSelection = richSelection ?? {
+      start: textarea instanceof HTMLTextAreaElement ? (textarea.selectionStart ?? 0) : 0,
+      end: textarea instanceof HTMLTextAreaElement ? (textarea.selectionEnd ?? 0) : 0,
+      direction: textarea instanceof HTMLTextAreaElement ? (textarea.selectionDirection ?? 'none') : 'none',
     };
 
     textSelectionsRef.current = {
@@ -553,6 +607,43 @@ export default function HomePage() {
     return textSelectionsRef.current[field] ?? getDefaultSelection(currentText);
   }, []);
 
+  const getFieldTextValue = useCallback((field: TextInsertionTarget) => {
+    switch (field) {
+      case 'methodik':
+        return methodik;
+      case 'beurteilung':
+        return beurteilung;
+      case 'befund':
+      case 'transcript':
+      default:
+        return transcript;
+    }
+  }, [methodik, transcript, beurteilung]);
+
+  const updateRichTextFormats = useCallback((
+    field: TextInsertionTarget,
+    updater: (current: RichTextFormatRange[]) => RichTextFormatRange[]
+  ) => {
+    setRichTextFormats((current) => ({
+      ...current,
+      [field]: normalizeRichTextRanges(updater(current[field] ?? []), getFieldTextValue(field).length),
+    }));
+  }, [getFieldTextValue]);
+
+  const getEditorTextRef = useCallback((field: TextInsertionTarget) => {
+    switch (field) {
+      case 'methodik':
+        return methodikTextareaRef;
+      case 'beurteilung':
+        return beurteilungTextareaRef;
+      case 'befund':
+        return befundTextareaRef;
+      case 'transcript':
+      default:
+        return transcriptTextareaRef;
+    }
+  }, []);
+
   const setFieldText = useCallback((field: TextInsertionTarget, value: SetStateAction<string>) => {
     switch (field) {
       case 'methodik':
@@ -569,11 +660,82 @@ export default function HomePage() {
     }
   }, []);
 
+  const applySelectionFormatting = useCallback((field: TextInsertionTarget, command: SelectionFormattingCommand) => {
+    const fieldText = getFieldTextValue(field);
+    const selection = getStoredSelection(field, fieldText);
+    if (selection.start === selection.end) {
+      setError('Bitte zuerst einen Textbereich markieren.');
+      return false;
+    }
+
+    updateRichTextFormats(field, (current) => {
+      const range: RichTextFormatRange = {
+        start: Math.min(selection.start, selection.end),
+        end: Math.max(selection.start, selection.end),
+        bold: command === 'bold',
+        italic: command === 'italic',
+        underline: command === 'underline',
+      };
+      return [...current, range];
+    });
+
+    setError(null);
+    return true;
+  }, [getFieldTextValue, getStoredSelection, updateRichTextFormats]);
+
+  const tryApplySelectionFormattingCommand = useCallback((text: string) => {
+    if (liveInjectEnabledRef.current) {
+      return false;
+    }
+
+    const command = detectSelectionFormattingCommand(text);
+    if (!command) {
+      return false;
+    }
+
+    const targetField = focusedTextField ?? (mode === 'befund'
+      ? (activeField === 'methodik' ? 'methodik' : activeField === 'beurteilung' ? 'beurteilung' : 'befund')
+      : 'transcript');
+
+    applySelectionFormatting(targetField, command);
+    return true;
+  }, [focusedTextField, mode, activeField, applySelectionFormatting]);
+
   const combineTextForField = useCallback((field: TextInsertionTarget, existing: string, newText: string) => {
-    const result = insertTextAtSelection(existing, newText, getStoredSelection(field, existing));
+    const selection = getStoredSelection(field, existing);
+    const result = insertTextAtSelection(existing, newText, selection);
     setStoredSelection(field, result.selection);
     return result.text;
   }, [getStoredSelection, setStoredSelection]);
+
+  useEffect(() => {
+    const nextFieldTexts: Record<TextInsertionTarget, string> = {
+      transcript,
+      methodik,
+      befund: transcript,
+      beurteilung,
+    };
+
+    setRichTextFormats((current) => {
+      let didChange = false;
+      const nextFormats = { ...current };
+
+      (Object.keys(nextFieldTexts) as TextInsertionTarget[]).forEach((field) => {
+        const previousText = previousFieldTextsRef.current[field] ?? '';
+        const nextText = nextFieldTexts[field] ?? '';
+        if (previousText === nextText) {
+          previousFieldTextsRef.current[field] = nextText;
+          return;
+        }
+
+        nextFormats[field] = remapRichTextRanges(previousText, nextText, current[field] ?? []);
+        previousFieldTextsRef.current[field] = nextText;
+        didChange = true;
+      });
+
+      return didChange ? nextFormats : current;
+    });
+  }, [transcript, methodik, beurteilung]);
 
   useEffect(() => {
     liveInjectEnabledRef.current = liveInjectEnabled;
@@ -706,10 +868,10 @@ export default function HomePage() {
     }
 
     setCaretOverlays({
-      transcript: getTextareaCaretOverlay(transcriptTextareaRef.current, getStoredSelection('transcript', transcript)),
-      methodik: getTextareaCaretOverlay(methodikTextareaRef.current, getStoredSelection('methodik', methodik)),
-      befund: getTextareaCaretOverlay(befundTextareaRef.current, getStoredSelection('befund', transcript)),
-      beurteilung: getTextareaCaretOverlay(beurteilungTextareaRef.current, getStoredSelection('beurteilung', beurteilung)),
+      transcript: getTextareaCaretOverlay(transcriptTextareaRef.current, getStoredSelection('transcript', transcript), transcript),
+      methodik: getTextareaCaretOverlay(methodikTextareaRef.current, getStoredSelection('methodik', methodik), methodik),
+      befund: getTextareaCaretOverlay(befundTextareaRef.current, getStoredSelection('befund', transcript), transcript),
+      beurteilung: getTextareaCaretOverlay(beurteilungTextareaRef.current, getStoredSelection('beurteilung', beurteilung), beurteilung),
     });
   }, [transcript, methodik, beurteilung, textSelections, showPersistentCaret, getStoredSelection]);
 
@@ -1111,7 +1273,7 @@ export default function HomePage() {
     field: TextInsertionTarget,
     value: string,
     setter: (nextValue: string) => void,
-    textarea: HTMLTextAreaElement
+    textarea: HTMLTextAreaElement | HTMLDivElement
   ) => {
     setter(value);
     setPendingCorrection(true);
@@ -1243,6 +1405,11 @@ export default function HomePage() {
         }]);
         combinedCommittedText = combineFormattedText(combinedCommittedText, text);
         didCommit = true;
+        continue;
+      }
+
+      if (tryApplySelectionFormattingCommand(entry.text)) {
+        console.log(`[VAD] Commit utterance #${seq}: selection formatting command applied (${getVadLogPreview(entry.text)})`);
         continue;
       }
 
@@ -1962,6 +2129,11 @@ export default function HomePage() {
     // Diktat-Logik: Sprachbefehle erkennen und Satzenden verarbeiten
     let processedText = text.trim();
     let endsWithPeriod = false;
+
+    if (tryApplySelectionFormattingCommand(processedText)) {
+      console.log('[FastWhisper] Auswahlformatierungsbefehl angewendet');
+      return;
+    }
     
     // Prüfe ob der Text NUR "Punkt" ist (als separater Sprachbefehl)
     const isOnlyPunkt = /^punkt[.!?]?$/i.test(processedText);
@@ -2150,7 +2322,7 @@ export default function HomePage() {
       }
       updateDisplay();
     }
-  }, [mode, activeField, applyDictionaryToText, quickCorrectWithLLM, replaceTextAtEndOrInsertDelta]);
+  }, [mode, activeField, applyDictionaryToText, quickCorrectWithLLM, replaceTextAtEndOrInsertDelta, tryApplySelectionFormattingCommand]);
 
   async function startRecording() {
     setError(null);
@@ -3228,22 +3400,47 @@ export default function HomePage() {
     }
   }
 
+  function buildCombinedRichTextDocument() {
+    const sections = [
+      { label: 'Methodik', text: methodik, formats: richTextFormats.methodik },
+      { label: 'Befund', text: transcript, formats: richTextFormats.befund },
+      { label: 'Beurteilung', text: beurteilung, formats: richTextFormats.beurteilung },
+    ].filter((section) => section.text.trim().length > 0);
+
+    let combinedText = '';
+    const combinedFormats: RichTextFormatRange[] = [];
+
+    for (const section of sections) {
+      if (combinedText) {
+        combinedText += '\n\n';
+      }
+
+      const contentOffset = combinedText.length + section.label.length + 2;
+      combinedText += `${section.label}:\n${section.text}`;
+
+      section.formats.forEach((range) => {
+        combinedFormats.push({
+          ...range,
+          start: range.start + contentOffset,
+          end: range.end + contentOffset,
+        });
+      });
+    }
+
+    return {
+      text: combinedText,
+      formats: normalizeRichTextRanges(combinedFormats, combinedText.length),
+    };
+  }
+
   function handleCopyBefund() {
-    const combinedText = [
-      methodik ? `Methodik:\n${methodik}` : '',
-      transcript ? `Befund:\n${transcript}` : '',
-      beurteilung ? `Beurteilung:\n${beurteilung}` : ''
-    ].filter(Boolean).join('\n\n');
-    copyToClipboard(combinedText);
+    const combinedDocument = buildCombinedRichTextDocument();
+    void copyRichTextToClipboard(combinedDocument.text, buildRichTextHtml(combinedDocument.text, combinedDocument.formats));
   }
 
   async function handleExportDocxBefund() {
-    const combinedText = [
-      methodik ? `Methodik:\n${methodik}` : '',
-      transcript ? `Befund:\n${transcript}` : '',
-      beurteilung ? `Beurteilung:\n${beurteilung}` : ''
-    ].filter(Boolean).join('\n\n');
-    await exportDocx(combinedText, mode);
+    const combinedDocument = buildCombinedRichTextDocument();
+    await exportDocx(combinedDocument.text, mode, combinedDocument.formats);
   }
 
   // Beurteilung durch LLM vorschlagen lassen
@@ -3281,11 +3478,11 @@ export default function HomePage() {
   }
 
   function handleCopy() {
-    copyToClipboard(transcript);
+    void copyRichTextToClipboard(transcript, buildRichTextHtml(transcript, richTextFormats.transcript));
   }
 
   async function handleExportDocx() {
-    await exportDocx(transcript, mode);
+    await exportDocx(transcript, mode, richTextFormats.transcript);
   }
 
   const Aufnahme = (
@@ -3876,19 +4073,17 @@ export default function HomePage() {
                   </div>
                 )}
                 <div className="relative">
-                  <textarea
-                    ref={methodikTextareaRef}
-                    className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  <RichTextDictationEditor
+                    editorRef={methodikTextareaRef}
                     value={methodik}
-                    onChange={(e) => handleManualTextChange('methodik', e.target.value, setMethodik, e.currentTarget)}
-                    onFocus={(e) => { setActiveField('methodik'); setFocusedTextField('methodik'); syncTextSelection('methodik', e.currentTarget); }}
+                    formats={richTextFormats.methodik}
+                    selection={textSelections.methodik}
+                    className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    onChange={(value, editor) => handleManualTextChange('methodik', value, setMethodik, editor)}
+                    onFocus={(editor) => { setActiveField('methodik'); setFocusedTextField('methodik'); syncTextSelection('methodik', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'methodik' ? null : current)}
-                    onSelect={(e) => syncTextSelection('methodik', e.currentTarget)}
-                    onClick={(e) => syncTextSelection('methodik', e.currentTarget)}
-                    onKeyUp={(e) => syncTextSelection('methodik', e.currentTarget)}
-                    onMouseUp={(e) => syncTextSelection('methodik', e.currentTarget)}
+                    onSelectionChange={(editor) => syncTextSelection('methodik', editor)}
                     placeholder="Methodik..."
-                    rows={2}
                     readOnly={isProcessing}
                   />
                   {showPersistentCaret && focusedTextField !== 'methodik' && caretOverlays.methodik.visible && (
@@ -3956,17 +4151,16 @@ export default function HomePage() {
                   </div>
                 )}
                 <div className="relative">
-                  <textarea
-                    ref={befundTextareaRef}
-                    className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  <RichTextDictationEditor
+                    editorRef={befundTextareaRef}
                     value={transcript}
-                    onChange={(e) => handleManualTextChange('befund', e.target.value, setTranscript, e.currentTarget)}
-                    onFocus={(e) => { setActiveField('befund'); setFocusedTextField('befund'); syncTextSelection('befund', e.currentTarget); }}
+                    formats={richTextFormats.befund}
+                    selection={textSelections.befund}
+                    className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    onChange={(value, editor) => handleManualTextChange('befund', value, setTranscript, editor)}
+                    onFocus={(editor) => { setActiveField('befund'); setFocusedTextField('befund'); syncTextSelection('befund', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'befund' ? null : current)}
-                    onSelect={(e) => syncTextSelection('befund', e.currentTarget)}
-                    onClick={(e) => syncTextSelection('befund', e.currentTarget)}
-                    onKeyUp={(e) => syncTextSelection('befund', e.currentTarget)}
-                    onMouseUp={(e) => syncTextSelection('befund', e.currentTarget)}
+                    onSelectionChange={(editor) => syncTextSelection('befund', editor)}
                     placeholder="Befund..."
                     readOnly={isProcessing}
                   />
@@ -4051,19 +4245,17 @@ export default function HomePage() {
                   </div>
                 )}
                 <div className="relative">
-                  <textarea
-                    ref={beurteilungTextareaRef}
-                    className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  <RichTextDictationEditor
+                    editorRef={beurteilungTextareaRef}
                     value={beurteilung}
-                    onChange={(e) => handleManualTextChange('beurteilung', e.target.value, setBeurteilung, e.currentTarget)}
-                    onFocus={(e) => { setActiveField('beurteilung'); setFocusedTextField('beurteilung'); syncTextSelection('beurteilung', e.currentTarget); }}
+                    formats={richTextFormats.beurteilung}
+                    selection={textSelections.beurteilung}
+                    className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    onChange={(value, editor) => handleManualTextChange('beurteilung', value, setBeurteilung, editor)}
+                    onFocus={(editor) => { setActiveField('beurteilung'); setFocusedTextField('beurteilung'); syncTextSelection('beurteilung', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'beurteilung' ? null : current)}
-                    onSelect={(e) => syncTextSelection('beurteilung', e.currentTarget)}
-                    onClick={(e) => syncTextSelection('beurteilung', e.currentTarget)}
-                    onKeyUp={(e) => syncTextSelection('beurteilung', e.currentTarget)}
-                    onMouseUp={(e) => syncTextSelection('beurteilung', e.currentTarget)}
+                    onSelectionChange={(editor) => syncTextSelection('beurteilung', editor)}
                     placeholder="Zusammenfassung..."
-                    rows={2}
                     readOnly={isProcessing}
                   />
                   {showPersistentCaret && focusedTextField !== 'beurteilung' && caretOverlays.beurteilung.visible && (
@@ -4147,17 +4339,16 @@ export default function HomePage() {
             <div className="flex gap-2">
               <div className="flex-1">
                 <div className="relative">
-                  <textarea
-                    ref={transcriptTextareaRef}
-                    className={`textarea font-mono text-sm min-h-40 w-full ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  <RichTextDictationEditor
+                    editorRef={transcriptTextareaRef}
                     value={transcript}
-                    onChange={(e) => handleManualTextChange('transcript', e.target.value, setTranscript, e.currentTarget)}
-                    onFocus={(e) => { setFocusedTextField('transcript'); syncTextSelection('transcript', e.currentTarget); }}
+                    formats={richTextFormats.transcript}
+                    selection={textSelections.transcript}
+                    className={`textarea font-mono text-sm min-h-40 w-full ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    onChange={(value, editor) => handleManualTextChange('transcript', value, setTranscript, editor)}
+                    onFocus={(editor) => { setFocusedTextField('transcript'); syncTextSelection('transcript', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'transcript' ? null : current)}
-                    onSelect={(e) => syncTextSelection('transcript', e.currentTarget)}
-                    onClick={(e) => syncTextSelection('transcript', e.currentTarget)}
-                    onKeyUp={(e) => syncTextSelection('transcript', e.currentTarget)}
-                    onMouseUp={(e) => syncTextSelection('transcript', e.currentTarget)}
+                    onSelectionChange={(editor) => syncTextSelection('transcript', editor)}
                     placeholder="Text erscheint hier..."
                     readOnly={isProcessing}
                   />

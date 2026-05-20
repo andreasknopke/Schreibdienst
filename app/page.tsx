@@ -679,15 +679,27 @@ export default function HomePage() {
     }
   }, [methodik, transcript, beurteilung]);
 
+  const getEffectiveFieldTextLength = useCallback((field: TextInsertionTarget, selection?: CaretSelection | null) => {
+    const stateLength = getFieldTextValue(field).length;
+    const editor = getEditorTextRef(field).current;
+    const editorLength = editor?.textContent?.replace(/\u200B/g, '').length ?? 0;
+    const selectionLength = selection ? Math.max(selection.start, selection.end) : 0;
+    return Math.max(stateLength, editorLength, selectionLength);
+  }, [getEditorTextRef, getFieldTextValue]);
+
   const updateRichTextFormats = useCallback((
     field: TextInsertionTarget,
-    updater: (current: RichTextFormatRange[]) => RichTextFormatRange[]
+    updater: (current: RichTextFormatRange[]) => RichTextFormatRange[],
+    textLengthOverride?: number
   ) => {
     setRichTextFormats((current) => ({
       ...current,
-      [field]: normalizeRichTextRanges(updater(current[field] ?? []), getFieldTextValue(field).length),
+      [field]: normalizeRichTextRanges(
+        updater(current[field] ?? []),
+        textLengthOverride ?? getEffectiveFieldTextLength(field)
+      ),
     }));
-  }, [getFieldTextValue]);
+  }, [getEffectiveFieldTextLength]);
 
   const getEditorTextRef = useCallback((field: TextInsertionTarget) => {
     switch (field) {
@@ -726,6 +738,7 @@ export default function HomePage() {
       ? currentSelection
       : (lastRangeSelectionsRef.current[field] ?? currentSelection);
     const commandLabel = getSelectionFormattingCommandLabel(command);
+    const effectiveTextLength = getEffectiveFieldTextLength(field, selection);
 
     if (selection.start === selection.end) {
       const message = `Formatierungsbefehl \"${commandLabel}\" erkannt, aber es gibt keine aktive oder zuletzt gespeicherte Markierung im Feld \"${field}\".`;
@@ -735,6 +748,7 @@ export default function HomePage() {
         field,
         selection,
         textLength: fieldText.length,
+        effectiveTextLength,
         reason: message,
       });
       setError('Bitte zuerst einen Textbereich markieren.');
@@ -750,7 +764,7 @@ export default function HomePage() {
         underline: command === 'underline',
       };
       return [...current, range];
-    });
+    }, effectiveTextLength);
 
     console.info('[FormattingCommand] Erfolgreich angewendet:', {
       command,
@@ -761,11 +775,12 @@ export default function HomePage() {
         end: Math.max(selection.start, selection.end),
       },
       textLength: fieldText.length,
+      effectiveTextLength,
     });
 
     setError(null);
     return true;
-  }, [getFieldTextValue, getStoredSelection, updateRichTextFormats]);
+  }, [getFieldTextValue, getStoredSelection, getEffectiveFieldTextLength, updateRichTextFormats]);
 
   const tryApplySelectionFormattingCommand = useCallback((text: string) => {
     const command = detectSelectionFormattingCommand(text);

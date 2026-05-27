@@ -472,6 +472,11 @@ struct ClipboardSnapshot {
     std::wstring text;
 };
 
+struct InjectExecutionResult {
+    bool ok = false;
+    std::string error;
+};
+
 ClipboardSnapshot readClipboardText() {
     ClipboardSnapshot snapshot;
     if (!OpenClipboard(nullptr)) {
@@ -543,6 +548,19 @@ bool restoreClipboardText(const ClipboardSnapshot& snapshot) {
     return writeClipboardText(snapshot.text);
 }
 
+bool clipboardMatchesText(const std::wstring& expected) {
+    const ClipboardSnapshot snapshot = readClipboardText();
+    return snapshot.hasText && snapshot.text == expected;
+}
+
+bool restoreClipboardTextIfUnchanged(const ClipboardSnapshot& originalSnapshot, const std::wstring& injectedText) {
+    if (!clipboardMatchesText(injectedText)) {
+        return false;
+    }
+
+    return restoreClipboardText(originalSnapshot);
+}
+
 bool sendPasteShortcut() {
     const std::vector<INPUT> inputs = {
         makeVirtualKeyInput(VK_CONTROL, false),
@@ -573,17 +591,36 @@ bool sendPostKey(const std::wstring& postKey) {
     return false;
 }
 
-bool pasteClipboardText(const std::wstring& text) {
+InjectExecutionResult pasteClipboardText(const std::wstring& text) {
     const ClipboardSnapshot snapshot = readClipboardText();
     if (!writeClipboardText(text)) {
-        return false;
+        return {false, "Clipboard write failed"};
+    }
+
+    if (!clipboardMatchesText(text)) {
+        restoreClipboardTextIfUnchanged(snapshot, text);
+        return {false, "Clipboard verification failed before paste"};
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_READY_DELAY_MS));
+
+    if (!clipboardMatchesText(text)) {
+        restoreClipboardTextIfUnchanged(snapshot, text);
+        return {false, "Clipboard changed before paste"};
+    }
+
     const bool pasted = sendPasteShortcut();
     std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_RESTORE_DELAY_MS));
-    restoreClipboardText(snapshot);
-    return pasted;
+
+    if (!restoreClipboardTextIfUnchanged(snapshot, text) && clipboardMatchesText(text)) {
+        return {false, "Clipboard restore failed"};
+    }
+
+    if (!pasted) {
+        return {false, "Paste shortcut failed"};
+    }
+
+    return {true, ""};
 }
 
 bool activatePreviousWindow(std::uint32_t delayMs) {
@@ -655,12 +692,12 @@ std::string handleRequest(const std::string& message) {
         std::this_thread::sleep_for(std::chrono::milliseconds(request.payload.delayMs));
     }
 
-    const bool success = request.payload.mode == L"clipboard"
+    const InjectExecutionResult injectResult = request.payload.mode == L"clipboard"
         ? pasteClipboardText(request.payload.text)
-        : sendUnicodeText(request.payload.text, request.payload.charDelayMs);
+        : InjectExecutionResult{sendUnicodeText(request.payload.text, request.payload.charDelayMs), "SendInput failed"};
 
-    if (!success) {
-        return makeResponse(false, "SendInput failed", "");
+    if (!injectResult.ok) {
+        return makeResponse(false, injectResult.error, "");
     }
 
     if (!sendPostKey(request.payload.postKey)) {

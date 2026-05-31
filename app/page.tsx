@@ -17,7 +17,7 @@ import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
-import { injectToActiveWindow } from '@/lib/injectClient';
+import { injectToActiveWindow, isClipboardFallback } from '@/lib/injectClient';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
@@ -761,6 +761,12 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [liveInjectEnabled, setLiveInjectEnabled] = useState(false);
   const [liveInjectStatus, setLiveInjectStatus] = useState<string | null>(null);
+  // Visuelle Statusanzeige des Live-Ziel-App-Buttons:
+  // 'connected' nach erfolgreichem Inject ohne Clipboard-Fallback, sonst 'disconnected'.
+  // Hinweis: Der Status flippt nicht zyklisch zurueck, solange keine neue Injection
+  // stattfindet (kein Health-Check verfuegbar). Bei Toggle-Off oder Inject-Fehler
+  // (der zugleich liveInjectEnabled auf false setzt) wird der Status zurueckgesetzt.
+  const [injectConnectionStatus, setInjectConnectionStatus] = useState<'connected' | 'disconnected'>('disconnected');
   const liveInjectEnabledRef = useRef(false);
   const liveInjectQueueRef = useRef<Promise<void>>(Promise.resolve());
   const liveInjectSentTextRef = useRef('');
@@ -1210,6 +1216,7 @@ export default function HomePage() {
     liveInjectEnabledRef.current = liveInjectEnabled;
     if (!liveInjectEnabled) {
       liveInjectSentTextRef.current = '';
+      setInjectConnectionStatus('disconnected');
     }
     setLiveInjectStatus(liveInjectEnabled ? 'Bereit – Ziel-App fokussieren oder zuletzt verwendete App nutzen' : null);
   }, [liveInjectEnabled]);
@@ -1238,11 +1245,13 @@ export default function HomePage() {
 
         if (!result.ok) {
           setLiveInjectEnabled(false);
+          setInjectConnectionStatus('disconnected');
           setLiveInjectStatus('Live-Übertragung fehlgeschlagen');
           setError(result.error || 'Live-Übertragung in die Ziel-App fehlgeschlagen');
           return;
         }
 
+        setInjectConnectionStatus(isClipboardFallback(result) ? 'disconnected' : 'connected');
         liveInjectSentTextRef.current += normalizedText;
         setLiveInjectStatus(
           instruction.postKey === 'F4'
@@ -4062,7 +4071,13 @@ export default function HomePage() {
           </button>
         )}
         <button
-          className={`btn text-sm py-2 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
+          className={`btn text-sm py-2 ${
+            liveInjectEnabled
+              ? injectConnectionStatus === 'connected'
+                ? 'btn-success'
+                : 'btn-warning'
+              : 'btn-outline'
+          }`}
           onClick={() => setLiveInjectEnabled((enabled) => !enabled)}
           title="Während der Aufnahme neue Wörter direkt in das aktuell aktive Windows-Fenster schreiben"
         >
@@ -4292,10 +4307,18 @@ export default function HomePage() {
             {RecordButton}
             <div className="flex flex-col gap-1">
               <button
-                className={`btn h-9 w-9 p-0 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
+                className={`btn h-9 w-9 p-0 ${
+                  liveInjectEnabled
+                    ? injectConnectionStatus === 'connected'
+                      ? 'btn-success'
+                      : 'btn-warning'
+                    : 'btn-outline'
+                }`}
                 onClick={() => setLiveInjectEnabled((enabled) => !enabled)}
                 title={liveInjectEnabled
-                  ? 'Live-Übertragung an Ziel-App ist aktiv'
+                  ? injectConnectionStatus === 'connected'
+                    ? 'Live-Übertragung an Ziel-App ist aktiv (verbunden)'
+                    : 'Live-Übertragung aktiviert – wartet auf erste Bestätigung der Ziel-App'
                   : 'Live-Übertragung an Ziel-App aktivieren'}
                 aria-label={liveInjectEnabled
                   ? 'Live-Übertragung an Ziel-App deaktivieren'

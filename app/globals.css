@@ -68,6 +68,8 @@ body {
   .btn-outline { @apply border border-[rgb(var(--border))]; background: rgb(var(--card)); }
   .btn-outline:hover { background: rgba(0,0,0,0.02); }
   .btn-ghost { @apply text-gray-700 hover:bg-zinc-100; }
+  .btn-success { @apply bg-green-600 text-white border-transparent hover:bg-green-700; }
+  .btn-warning { @apply bg-amber-500 text-white border-transparent hover:bg-amber-600; }
 
   .input, .select, .textarea {
     background: rgb(var(--card));

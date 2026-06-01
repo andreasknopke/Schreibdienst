@@ -7,10 +7,13 @@
 #include <cstdint>
 #include <cstdio>
 #include <future>
+#include <iomanip>
 #include <fcntl.h>
+#include <fstream>
 #include <io.h>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -49,6 +52,89 @@ struct HotkeyListener {
 };
 
 std::mutex g_writeMutex;
+
+std::wstring getLogFilePath() {
+    wchar_t localAppData[MAX_PATH]{};
+    const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+        return L"schreibdienst-native-host.log";
+    }
+
+    const std::wstring baseDir = std::wstring(localAppData) + L"\\Schreibdienst";
+    const std::wstring injectorDir = baseDir + L"\\Injector";
+    const std::wstring logDir = injectorDir + L"\\logs";
+    CreateDirectoryW(baseDir.c_str(), nullptr);
+    CreateDirectoryW(injectorDir.c_str(), nullptr);
+    CreateDirectoryW(logDir.c_str(), nullptr);
+    return logDir + L"\\native-host.log";
+}
+
+std::string narrow(const std::wstring& value) {
+    if (value.empty()) {
+        return {};
+    }
+
+    const int utf8Length = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (utf8Length <= 0) {
+        return {};
+    }
+
+    std::string result(static_cast<std::size_t>(utf8Length), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), result.data(), utf8Length, nullptr, nullptr);
+    return result;
+}
+
+std::string formatWin32Error(DWORD errorCode) {
+    if (errorCode == 0) {
+        return "code=0";
+    }
+
+    LPSTR messageBuffer = nullptr;
+    const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
+    const DWORD length = FormatMessageA(flags, nullptr, errorCode, 0, reinterpret_cast<LPSTR>(&messageBuffer), 0, nullptr);
+
+    std::string message = length > 0 && messageBuffer != nullptr
+        ? std::string(messageBuffer, static_cast<std::size_t>(length))
+        : "unbekannter Win32-Fehler";
+
+    if (messageBuffer != nullptr) {
+        LocalFree(messageBuffer);
+    }
+
+    while (!message.empty() && (message.back() == '\r' || message.back() == '\n' || message.back() == ' ')) {
+        message.pop_back();
+    }
+
+    std::ostringstream output;
+    output << "code=" << errorCode << " (0x" << std::hex << std::uppercase << errorCode << std::dec << "): " << message;
+    return output.str();
+}
+
+void appendNativeLog(const std::string& message) {
+    static const std::wstring logFilePath = getLogFilePath();
+    std::ofstream file(logFilePath.c_str(), std::ios::app | std::ios::binary);
+    if (!file.is_open()) {
+        return;
+    }
+
+    SYSTEMTIME now{};
+    GetLocalTime(&now);
+    file << std::setfill('0')
+         << now.wYear << '-'
+         << std::setw(2) << now.wMonth << '-'
+         << std::setw(2) << now.wDay << ' '
+         << std::setw(2) << now.wHour << ':'
+         << std::setw(2) << now.wMinute << ':'
+         << std::setw(2) << now.wSecond << '.'
+         << std::setw(3) << now.wMilliseconds
+         << " [pid=" << GetCurrentProcessId() << "] "
+         << message
+         << "\n";
+}
+
+void logNativeEvent(const std::string& message) {
+    appendNativeLog(message);
+}
 
 constexpr HotkeyBinding HOTKEY_BINDINGS[] = {
     {1, VK_F9, "toggle-recording", "F9"},
@@ -344,7 +430,9 @@ const HotkeyBinding* findHotkeyBinding(WPARAM hotkeyId) {
 bool registerGlobalHotkeys(std::string& error) {
     for (const auto& binding : HOTKEY_BINDINGS) {
         if (!RegisterHotKey(nullptr, binding.id, MOD_NOREPEAT, binding.virtualKey)) {
-            error = std::string("RegisterHotKey fehlgeschlagen für ") + binding.key;
+            const DWORD lastError = GetLastError();
+            error = std::string("RegisterHotKey fehlgeschlagen für ") + binding.key + " (" + formatWin32Error(lastError) + ")";
+            logNativeEvent(std::string("Hotkey-Registrierung fehlgeschlagen für ") + binding.key + ": " + formatWin32Error(lastError));
             for (const auto& registered : HOTKEY_BINDINGS) {
                 if (registered.id == binding.id) {
                     break;
@@ -353,6 +441,8 @@ bool registerGlobalHotkeys(std::string& error) {
             }
             return false;
         }
+
+        logNativeEvent(std::string("Hotkey registriert: ") + binding.key);
     }
 
     return true;
@@ -366,6 +456,7 @@ void unregisterGlobalHotkeys() {
 
 bool startHotkeyListener(HotkeyListener& listener, std::string& error) {
     if (listener.thread.joinable()) {
+        logNativeEvent("Hotkey-Listener bereits aktiv");
         return true;
     }
 
@@ -374,6 +465,7 @@ bool startHotkeyListener(HotkeyListener& listener, std::string& error) {
 
     listener.thread = std::thread([&listener, readyPromise = std::move(readyPromise)]() mutable {
         listener.threadId = GetCurrentThreadId();
+        logNativeEvent("Hotkey-Listener-Thread gestartet");
 
         MSG queueMessage{};
         PeekMessage(&queueMessage, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
@@ -386,6 +478,7 @@ bool startHotkeyListener(HotkeyListener& listener, std::string& error) {
         }
 
         listener.running = true;
+        logNativeEvent("Hotkey-Listener bereit");
         readyPromise.set_value({true, ""});
 
         MSG message{};
@@ -399,24 +492,38 @@ bool startHotkeyListener(HotkeyListener& listener, std::string& error) {
                 continue;
             }
 
+            logNativeEvent(std::string("Hotkey-Ereignis empfangen: ") + binding->key + " -> " + binding->action);
+
             if (!writeNativeMessageLocked(makeHotkeyEventResponse(*binding))) {
+                logNativeEvent("Schreiben des Hotkey-Ereignisses an Chrome fehlgeschlagen");
                 break;
             }
+        }
+
+        const DWORD messageError = GetLastError();
+        if (messageError != 0) {
+            logNativeEvent(std::string("GetMessage beendet mit Fehler: ") + formatWin32Error(messageError));
+        } else {
+            logNativeEvent("Hotkey-Listener-Message-Loop beendet");
         }
 
         unregisterGlobalHotkeys();
         listener.running = false;
         listener.threadId = 0;
+        logNativeEvent("Hotkey-Listener-Thread beendet");
     });
 
     const auto [ok, startupError] = readyFuture.get();
     if (!ok) {
         error = startupError;
+        logNativeEvent(std::string("Hotkey-Listener-Start fehlgeschlagen: ") + startupError);
         if (listener.thread.joinable()) {
             listener.thread.join();
         }
         return false;
     }
+
+    logNativeEvent("Hotkey-Listener erfolgreich gestartet");
 
     return true;
 }
@@ -427,6 +534,8 @@ void stopHotkeyListener(HotkeyListener& listener) {
         listener.threadId = 0;
         return;
     }
+
+    logNativeEvent("Stoppe Hotkey-Listener");
 
     if (listener.threadId != 0) {
         PostThreadMessage(listener.threadId, WM_QUIT, 0, 0);
@@ -717,40 +826,55 @@ std::string handleRequest(const std::string& message) {
 } // namespace
 
 int main() {
-    _setmode(_fileno(stdin), _O_BINARY);
-    _setmode(_fileno(stdout), _O_BINARY);
+    try {
+        logNativeEvent("Native Host gestartet");
+        _setmode(_fileno(stdin), _O_BINARY);
+        _setmode(_fileno(stdout), _O_BINARY);
 
-    HotkeyListener hotkeyListener;
+        HotkeyListener hotkeyListener;
 
-    while (const auto message = readNativeMessage()) {
-        NativeRequest request;
-        try {
-            request = parseRequest(*message);
-        } catch (const std::exception& error) {
-            if (!writeNativeMessageLocked(makeResponse(false, std::string("Invalid request: ") + error.what(), ""))) {
+        while (const auto message = readNativeMessage()) {
+            NativeRequest request;
+            try {
+                request = parseRequest(*message);
+            } catch (const std::exception& error) {
+                logNativeEvent(std::string("Request konnte nicht geparst werden: ") + error.what());
+                if (!writeNativeMessageLocked(makeResponse(false, std::string("Invalid request: ") + error.what(), ""))) {
+                    stopHotkeyListener(hotkeyListener);
+                    return 1;
+                }
+                continue;
+            }
+
+            logNativeEvent(std::string("Request empfangen: ") + narrow(request.type));
+
+            if (request.type == L"listen-hotkeys") {
+                std::string error;
+                const bool started = startHotkeyListener(hotkeyListener, error);
+                if (!writeNativeMessageLocked(makeTypedResponse("hotkey-listener-ready", started, error))) {
+                    logNativeEvent("Konnte Hotkey-Startantwort nicht an Chrome schreiben");
+                    stopHotkeyListener(hotkeyListener);
+                    return 1;
+                }
+                continue;
+            }
+
+            if (!writeNativeMessageLocked(handleRequest(*message))) {
+                logNativeEvent("Konnte Response nicht an Chrome schreiben");
                 stopHotkeyListener(hotkeyListener);
                 return 1;
             }
-            continue;
         }
 
-        if (request.type == L"listen-hotkeys") {
-            std::string error;
-            const bool started = startHotkeyListener(hotkeyListener, error);
-            if (!writeNativeMessageLocked(makeTypedResponse("hotkey-listener-ready", started, error))) {
-                stopHotkeyListener(hotkeyListener);
-                return 1;
-            }
-            continue;
-        }
+        logNativeEvent("STDIN beendet, Native Host wird heruntergefahren");
+        stopHotkeyListener(hotkeyListener);
 
-        if (!writeNativeMessageLocked(handleRequest(*message))) {
-            stopHotkeyListener(hotkeyListener);
-            return 1;
-        }
+        return 0;
+    } catch (const std::exception& error) {
+        logNativeEvent(std::string("Unbehandelte Ausnahme: ") + error.what());
+        return 1;
+    } catch (...) {
+        logNativeEvent("Unbekannte unbehandelte Ausnahme");
+        return 1;
     }
-
-    stopHotkeyListener(hotkeyListener);
-
-    return 0;
 }

@@ -25,6 +25,16 @@ const PAGE_BRIDGE_SOURCE = 'schreibdienst-pwa';
 const EXTENSION_BRIDGE_SOURCE = 'schreibdienst-extension';
 
 type GlobalHotkeyAction = 'toggle-recording' | 'stop-recording' | 'transfer-text' | 'cancel-recording';
+type HotkeyTriggerSource = 'browser-keydown-fallback' | 'extension-global-hotkey' | 'hid-media-control';
+
+function logHotkeyEvent(action: string, source: HotkeyTriggerSource, details?: Record<string, unknown>) {
+  console.info('[Hotkeys] Aktion ausgelöst', {
+    action,
+    source,
+    timestamp: new Date().toISOString(),
+    ...(details ?? {}),
+  });
+}
 
 // Hilfsfunktion zum Kopieren in die Zwischenablage
 async function copyToClipboard(text: string): Promise<void> {
@@ -2451,7 +2461,12 @@ export default function HomePage() {
     });
   };
 
-  const handleGlobalHotkeyAction = useCallback((action: GlobalHotkeyAction) => {
+  const handleGlobalHotkeyAction = useCallback((action: GlobalHotkeyAction, source: HotkeyTriggerSource, details?: Record<string, unknown>) => {
+    logHotkeyEvent(action, source, {
+      recordingActive: recordingRef.current,
+      ...(details ?? {}),
+    });
+
     switch (action) {
       case 'toggle-recording':
         if (recordingRef.current) {
@@ -2486,19 +2501,19 @@ export default function HomePage() {
       switch (e.key) {
         case 'F9':
           e.preventDefault();
-          handleGlobalHotkeyAction('toggle-recording');
+          handleGlobalHotkeyAction('toggle-recording', 'browser-keydown-fallback', { key: e.key, repeat: e.repeat });
           break;
         case 'F10':
           e.preventDefault();
-          handleGlobalHotkeyAction('stop-recording');
+          handleGlobalHotkeyAction('stop-recording', 'browser-keydown-fallback', { key: e.key, repeat: e.repeat });
           break;
         case 'F11':
           e.preventDefault();
-          handleGlobalHotkeyAction('transfer-text');
+          handleGlobalHotkeyAction('transfer-text', 'browser-keydown-fallback', { key: e.key, repeat: e.repeat });
           break;
         case 'Escape':
           e.preventDefault();
-          handleGlobalHotkeyAction('cancel-recording');
+          handleGlobalHotkeyAction('cancel-recording', 'browser-keydown-fallback', { key: e.key, repeat: e.repeat });
           break;
       }
     };
@@ -2515,7 +2530,14 @@ export default function HomePage() {
       if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
 
       if (data.type === 'global-hotkey' && typeof data.payload?.action === 'string') {
-        handleGlobalHotkeyAction(data.payload.action as GlobalHotkeyAction);
+        handleGlobalHotkeyAction(data.payload.action as GlobalHotkeyAction, 'extension-global-hotkey', {
+          payload: data.payload,
+        });
+        return;
+      }
+
+      if (data.type === 'global-hotkeys-registration' && data.result?.ok) {
+        console.info('[Hotkeys] Globaler Hotkey-Bridge aktiv', data.result);
         return;
       }
 
@@ -2525,10 +2547,12 @@ export default function HomePage() {
     };
 
     window.addEventListener('message', handleExtensionMessage);
+    console.info('[Hotkeys] Registriere globalen Hotkey-Bridge');
     window.postMessage({ source: PAGE_BRIDGE_SOURCE, type: 'register-global-hotkeys' }, window.location.origin);
 
     return () => {
       window.removeEventListener('message', handleExtensionMessage);
+      console.info('[Hotkeys] Deregistriere globalen Hotkey-Bridge');
       window.postMessage({ source: PAGE_BRIDGE_SOURCE, type: 'unregister-global-hotkeys' }, window.location.origin);
     };
   }, [handleGlobalHotkeyAction]);
@@ -2539,6 +2563,11 @@ export default function HomePage() {
       if (!detail || detail.phase !== 'keydown' || detail.action !== 'record') {
         return;
       }
+
+      logHotkeyEvent('toggle-recording', 'hid-media-control', {
+        detail,
+        recordingActive: recordingRef.current,
+      });
 
       if (recordingRef.current) {
         void stopRecording();

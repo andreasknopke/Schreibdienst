@@ -21,6 +21,15 @@ const MESSAGE_SOURCE = 'schreibdienst-pwa';
 const RESPONSE_SOURCE = 'schreibdienst-extension';
 const RESPONSE_TIMEOUT_MS = 1500;
 
+function logInjectorEvent(message: string, details?: Record<string, unknown>) {
+  if (details) {
+    console.info(`[Injector] ${message}`, details);
+    return;
+  }
+
+  console.info(`[Injector] ${message}`);
+}
+
 function createRequestId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
@@ -29,6 +38,7 @@ function createRequestId(): string {
 }
 
 async function copyToClipboard(text: string): Promise<InjectResult> {
+  logInjectorEvent('Clipboard-Fallback wird verwendet', { textLength: text.length });
   await navigator.clipboard.writeText(text);
   return { ok: true, fallback: 'clipboard' };
 }
@@ -43,8 +53,19 @@ function sendToExtension(
       return;
     }
 
+    logInjectorEvent('Sende Anfrage an Extension', {
+      requestId,
+      mode: request.mode,
+      restorePreviousWindow: request.restorePreviousWindow,
+      delayMs: request.delayMs,
+      charDelayMs: request.charDelayMs,
+      postKey: request.postKey ?? null,
+      textLength: request.text.length,
+    });
+
     const timeout = window.setTimeout(() => {
       window.removeEventListener('message', handleResponse);
+      logInjectorEvent('Extension-Timeout', { requestId, timeoutMs: RESPONSE_TIMEOUT_MS });
       resolve({ ok: false, error: 'Schreibdienst-Injector nicht erreichbar' });
     }, RESPONSE_TIMEOUT_MS);
 
@@ -56,6 +77,12 @@ function sendToExtension(
       window.clearTimeout(timeout);
       window.removeEventListener('message', handleResponse);
       const result = data.result ?? { ok: false, error: 'Ungültige Injector-Antwort' };
+      logInjectorEvent('Antwort von Extension erhalten', {
+        requestId,
+        ok: result.ok,
+        fallback: result.fallback ?? null,
+        error: result.error ?? null,
+      });
       resolve(result);
     }
 
@@ -88,6 +115,17 @@ export async function injectToActiveWindow({
 
   const requestId = createRequestId();
 
+  logInjectorEvent('Starte Inject-Vorgang', {
+    requestId,
+    mode,
+    restorePreviousWindow,
+    delayMs,
+    charDelayMs,
+    postKey: postKey ?? null,
+    fallbackToClipboard,
+    textLength: text.length,
+  });
+
   const extensionResult = await sendToExtension({
     text,
     mode,
@@ -98,9 +136,20 @@ export async function injectToActiveWindow({
   }, requestId);
 
   if (extensionResult.ok || !fallbackToClipboard) {
+    logInjectorEvent('Inject-Vorgang abgeschlossen', {
+      requestId,
+      ok: extensionResult.ok,
+      fallback: extensionResult.fallback ?? null,
+      error: extensionResult.error ?? null,
+      via: 'extension',
+    });
     return extensionResult;
   }
 
+  logInjectorEvent('Falle auf Clipboard zurück', {
+    requestId,
+    extensionError: extensionResult.error ?? null,
+  });
   return copyToClipboard(text);
 }
 

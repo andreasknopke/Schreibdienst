@@ -98,12 +98,12 @@ function emptyOnlineSummary(label: string) {
     };
 }
 
-async function getOnlineUsageByPeriod(db: any, monthKey: string) {
+async function getOnlineUsageByPeriod(db: any, requestedMonth: string) {
     const summaries = {} as Record<PeriodKey, ReturnType<typeof emptyOnlineSummary>>;
 
     for (const period of PERIODS) {
         const isMonth = period.key === 'month';
-        const monthClause = isMonth ? buildPeriodForMonth(monthKey, period.whereDateColumn) : null;
+        const monthClause = isMonth ? buildPeriodForMonth(requestedMonth, period.whereDateColumn) : null;
         const whereClause = isMonth ? monthClause!.where : period.where;
         const whereParams = isMonth ? monthClause!.params : [];
         const summary = emptyOnlineSummary(isMonth ? monthClause!.label : period.label);
@@ -124,10 +124,10 @@ async function getOnlineUsageByPeriod(db: any, monthKey: string) {
         );
 
         const vocabWhereClause = isMonth
-            ? buildPeriodForMonth(monthKey, 'added_at').where
+            ? buildPeriodForMonth(requestedMonth, 'added_at').where
             : period.where.replaceAll('created_at', 'added_at');
         const vocabWhereParams = isMonth
-            ? buildPeriodForMonth(monthKey, 'added_at').params
+            ? buildPeriodForMonth(requestedMonth, 'added_at').params
             : [];
 
         const [vocabularyRows] = await db.query(
@@ -225,7 +225,7 @@ function parseDateKey(dateKey: string): Date {
     return new Date(year, month - 1, day);
 }
 
-async function getOnlineTrends(db: any, monthKey: string) {
+async function getOnlineTrends(db: any, requestedMonth: string) {
     const trends = {} as Record<PeriodKey, ChartPoint[]>;
     const [currentDateRows] = await db.query(`SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS current_day`);
     const currentDayKey = String((currentDateRows as any[])[0]?.current_day || new Date().toISOString().slice(0, 10));
@@ -272,8 +272,8 @@ async function getOnlineTrends(db: any, monthKey: string) {
 
     trends.today = Array.from(byUser.values()).sort((a, b) => b.words - a.words || b.minutes - a.minutes || b.utterances - a.utterances);
 
-    const monthClause = buildPeriodForMonth(monthKey, 'created_at');
-    const monthVocabClause = buildPeriodForMonth(monthKey, 'added_at');
+    const monthClause = buildPeriodForMonth(requestedMonth, 'created_at');
+    const monthVocabClause = buildPeriodForMonth(requestedMonth, 'added_at');
     const [monthUsageRows] = await db.query(
         `
         SELECT
@@ -485,8 +485,8 @@ export async function GET(req: NextRequest) {
         await initOnlineUsageTableWithRequest(req);
 
         const url = new URL(req.url);
-        const requestedMonth = url.searchParams.get('month');
-        const monthKey = parseMonthKey(requestedMonth || '') ? (requestedMonth as string) : getCurrentMonthKey();
+        const monthParam = url.searchParams.get('month');
+        const requestedMonth = parseMonthKey(monthParam || '') ? (monthParam as string) : getCurrentMonthKey();
 
         const start = performance.now();
         await db.query('SELECT 1');
@@ -544,8 +544,8 @@ export async function GET(req: NextRequest) {
         const performanceStats = perfRows[0] || {};
 
         const [onlineUsage, trends, providerBreakdown] = await Promise.all([
-            getOnlineUsageByPeriod(db, monthKey),
-            getOnlineTrends(db, monthKey),
+            getOnlineUsageByPeriod(db, requestedMonth),
+            getOnlineTrends(db, requestedMonth),
             getProviderBreakdown(db),
         ]);
 

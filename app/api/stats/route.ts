@@ -19,12 +19,57 @@ type ChartPoint = {
     vocabularyEntries: number;
 };
 
-const PERIODS: Array<{ key: PeriodKey; label: string; where: string }> = [
-    { key: 'today', label: 'Heute', where: 'created_at >= CURDATE()' },
-    { key: 'month', label: 'Dieser Monat', where: "created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')" },
-    { key: 'year', label: 'Dieses Jahr', where: 'created_at >= MAKEDATE(YEAR(CURDATE()), 1)' },
-    { key: 'allTime', label: 'Gesamt', where: '1=1' },
+const PERIODS: Array<{ key: PeriodKey; label: string; where: string; whereDateColumn: 'created_at' | 'added_at' }> = [
+    { key: 'today', label: 'Heute', where: 'created_at >= CURDATE()', whereDateColumn: 'created_at' },
+    { key: 'month', label: 'Dieser Monat', where: "created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')", whereDateColumn: 'created_at' },
+    { key: 'year', label: 'Dieses Jahr', where: 'created_at >= MAKEDATE(YEAR(CURDATE()), 1)', whereDateColumn: 'created_at' },
+    { key: 'allTime', label: 'Gesamt', where: '1=1', whereDateColumn: 'created_at' },
 ];
+
+const MONTH_LABEL = new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' });
+
+function pad2(value: number): string {
+    return String(value).padStart(2, '0');
+}
+
+function formatMonthKey(date: Date): string {
+    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+}
+
+function parseMonthKey(value: string): Date | null {
+    const match = /^(\d{4})-(\d{2})$/.exec(value);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return null;
+    return new Date(year, month - 1, 1);
+}
+
+function getCurrentMonthKey(): string {
+    return formatMonthKey(new Date());
+}
+
+function buildMonthPeriodClause(start: Date, end: Date, dateColumn: 'created_at' | 'added_at') {
+    const startStr = `${formatMonthKey(start)}-01`;
+    const endStr = `${formatMonthKey(end)}-${pad2(new Date(end.getFullYear(), end.getMonth() + 1, 0).getDate())}`;
+    return {
+        where: `${dateColumn} BETWEEN ? AND ?`,
+        params: [`${startStr} 00:00:00`, `${endStr} 23:59:59`],
+    };
+}
+
+function buildPeriodForMonth(monthKey: string, dateColumn: 'created_at' | 'added_at') {
+    const requested = parseMonthKey(monthKey);
+    const start = requested ?? new Date();
+    const monthDate = new Date(start.getFullYear(), start.getMonth(), 1);
+    const end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+    return {
+        label: MONTH_LABEL.format(monthDate),
+        monthDate,
+        monthEnd: end,
+        ...buildMonthPeriodClause(monthDate, monthDate, dateColumn),
+    };
+}
 
 function toNumber(value: unknown): number {
     const parsed = Number(value ?? 0);
@@ -53,13 +98,18 @@ function emptyOnlineSummary(label: string) {
     };
 }
 
-async function getOnlineUsageByPeriod(db: any) {
+async function getOnlineUsageByPeriod(db: any, monthKey: string) {
     const summaries = {} as Record<PeriodKey, ReturnType<typeof emptyOnlineSummary>>;
 
     for (const period of PERIODS) {
-        const summary = emptyOnlineSummary(period.label);
+        const isMonth = period.key === 'month';
+        const monthClause = isMonth ? buildPeriodForMonth(monthKey, period.whereDateColumn) : null;
+        const whereClause = isMonth ? monthClause!.where : period.where;
+        const whereParams = isMonth ? monthClause!.params : [];
+        const summary = emptyOnlineSummary(isMonth ? monthClause!.label : period.label);
 
-            const [usageRows] = await db.query(`
+        const [usageRows] = await db.query(
+            `
             SELECT
                 username,
                 SUM(utterance_count) AS utterances,
@@ -67,16 +117,28 @@ async function getOnlineUsageByPeriod(db: any) {
                 SUM(audio_duration_seconds) / 60 AS minutes,
                 SUM(manual_corrections) AS manual_corrections
             FROM online_usage_events
-            WHERE ${period.where}
+            WHERE ${whereClause}
             GROUP BY username
-        `);
+        `,
+            whereParams
+        );
 
-            const [vocabularyRows] = await db.query(`
+        const vocabWhereClause = isMonth
+            ? buildPeriodForMonth(monthKey, 'added_at').where
+            : period.where.replaceAll('created_at', 'added_at');
+        const vocabWhereParams = isMonth
+            ? buildPeriodForMonth(monthKey, 'added_at').params
+            : [];
+
+        const [vocabularyRows] = await db.query(
+            `
             SELECT username, COUNT(*) AS vocabulary_entries
             FROM dictionary_entries
-            WHERE ${period.where.replaceAll('created_at', 'added_at')}
+            WHERE ${vocabWhereClause}
             GROUP BY username
-        `);
+        `,
+            vocabWhereParams
+        );
 
         const rowsByUser = new Map<string, any>();
         for (const row of usageRows as any[]) {
@@ -167,7 +229,7 @@ function parseDateKey(dateKey: string): Date {
     return new Date(year, month - 1, day);
 }
 
-async function getOnlineTrends(db: any) {
+async function getOnlineTrends(db: any, monthKey: string) {
     const trends = {} as Record<PeriodKey, ChartPoint[]>;
     const [currentDateRows] = await db.query(`SELECT DATE_FORMAT(CURDATE(), '%Y-%m-%d') AS current_day`);
     const currentDayKey = String((currentDateRows as any[])[0]?.current_day || new Date().toISOString().slice(0, 10));
@@ -214,7 +276,10 @@ async function getOnlineTrends(db: any) {
 
     trends.today = Array.from(byUser.values()).sort((a, b) => b.words - a.words || b.minutes - a.minutes || b.utterances - a.utterances);
 
-    const [monthUsageRows] = await db.query(`
+    const monthClause = buildPeriodForMonth(monthKey, 'created_at');
+    const monthVocabClause = buildPeriodForMonth(monthKey, 'added_at');
+    const [monthUsageRows] = await db.query(
+        `
         SELECT
             DATE_FORMAT(created_at, '%Y-%m-%d') AS bucket,
             SUM(word_count) AS words,
@@ -222,26 +287,36 @@ async function getOnlineTrends(db: any) {
             SUM(utterance_count) AS utterances,
             SUM(manual_corrections) AS manual_corrections
         FROM online_usage_events
-        WHERE created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+        WHERE ${monthClause.where}
         GROUP BY DATE(created_at)
         ORDER BY bucket ASC
-    `);
+    `,
+        monthClause.params
+    );
 
-    const [monthVocabularyRows] = await db.query(`
+    const [monthVocabularyRows] = await db.query(
+        `
         SELECT DATE_FORMAT(added_at, '%Y-%m-%d') AS bucket, COUNT(*) AS vocabulary_entries
         FROM dictionary_entries
-        WHERE added_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+        WHERE ${monthVocabClause.where}
         GROUP BY DATE(added_at)
         ORDER BY bucket ASC
-    `);
+    `,
+        monthVocabClause.params
+    );
 
     const byMonthDay = new Map<string, ChartPoint>();
+    const monthDate = monthClause.monthDate;
+    const monthEnd = monthClause.monthEnd;
+    const isCurrentMonth =
+        monthDate.getFullYear() === currentDate.getFullYear() &&
+        monthDate.getMonth() === currentDate.getMonth();
+    const lastDay = isCurrentMonth ? currentDate.getDate() : monthEnd.getDate();
     const currentYear = currentDate.getFullYear();
     const currentMonth = currentDate.getMonth();
-    const daysInMonth = currentDate.getDate();
 
-    for (let day = 1; day <= daysInMonth; day++) {
-        const date = new Date(currentYear, currentMonth, day);
+    for (let day = 1; day <= lastDay; day++) {
+        const date = new Date(monthDate.getFullYear(), monthDate.getMonth(), day);
         const key = dayKey(date);
         byMonthDay.set(key, createChartPoint(key, dayLabel(date), dayTitle(date)));
     }
@@ -413,6 +488,10 @@ export async function GET(req: NextRequest) {
         const db = await getPoolForRequest(req);
         await initOnlineUsageTableWithRequest(req);
 
+        const url = new URL(req.url);
+        const requestedMonth = url.searchParams.get('month');
+        const monthKey = parseMonthKey(requestedMonth || '') ? (requestedMonth as string) : getCurrentMonthKey();
+
         const start = performance.now();
         await db.query('SELECT 1');
         const dbLatency = Math.round(performance.now() - start);
@@ -469,8 +548,8 @@ export async function GET(req: NextRequest) {
         const performanceStats = perfRows[0] || {};
 
         const [onlineUsage, trends, providerBreakdown] = await Promise.all([
-            getOnlineUsageByPeriod(db),
-            getOnlineTrends(db),
+            getOnlineUsageByPeriod(db, monthKey),
+            getOnlineTrends(db, monthKey),
             getProviderBreakdown(db),
         ]);
 

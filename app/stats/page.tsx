@@ -60,6 +60,33 @@ const PERIOD_OPTIONS: Array<{ key: PeriodKey; label: string }> = [
   { key: 'allTime', label: 'Gesamt' },
 ];
 
+const MONTH_NAV = new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' });
+
+function pad2Client(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function currentMonthKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad2Client(now.getMonth() + 1)}`;
+}
+
+function shiftMonthKey(monthKey: string, offset: number): string {
+  const [year, month] = monthKey.split('-').map((part) => Number(part));
+  const date = new Date(year, (month || 1) - 1 + offset, 1);
+  return `${date.getFullYear()}-${pad2Client(date.getMonth() + 1)}`;
+}
+
+function formatMonthLabel(monthKey: string): string {
+  const [year, month] = monthKey.split('-').map((part) => Number(part));
+  if (!year || !month) return monthKey;
+  return MONTH_NAV.format(new Date(year, month - 1, 1));
+}
+
+function isFutureMonth(monthKey: string): boolean {
+  return monthKey.localeCompare(currentMonthKey()) > 0;
+}
+
 function formatNumber(value: number): string {
   return Math.round(value || 0).toLocaleString('de-DE');
 }
@@ -87,9 +114,9 @@ function StatCard({ label, value, hint, color }: { label: string; value: string;
   );
 }
 
-function getPeriodCaption(period: PeriodKey): string {
+function getPeriodCaption(period: PeriodKey, monthLabel?: string): string {
   if (period === 'today') return 'Heute nach Nutzer';
-  if (period === 'month') return 'Aktueller Monat nach Tag';
+  if (period === 'month') return `${monthLabel ?? 'Aktueller Monat'} nach Tag`;
   return 'Monatlich kumuliert';
 }
 
@@ -99,7 +126,7 @@ function getBarWidth(period: PeriodKey): string {
   return 'minmax(72px, 72px)';
 }
 
-function BarChart({ data, metric, label, period }: { data: TrendPoint[]; metric: keyof Pick<TrendPoint, 'words' | 'minutes' | 'utterances' | 'manualCorrections' | 'vocabularyEntries'>; label: string; period: PeriodKey }) {
+function BarChart({ data, metric, label, period, caption }: { data: TrendPoint[]; metric: keyof Pick<TrendPoint, 'words' | 'minutes' | 'utterances' | 'manualCorrections' | 'vocabularyEntries'>; label: string; period: PeriodKey; caption?: string }) {
   const values = data.map((point) => Number(point[metric] || 0));
   const max = Math.max(1, ...values);
   const barWidth = getBarWidth(period);
@@ -108,7 +135,7 @@ function BarChart({ data, metric, label, period }: { data: TrendPoint[]; metric:
     <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
       <div className="mb-4 flex items-center justify-between">
         <h3 className="font-semibold text-gray-900 dark:text-white">{label}</h3>
-        <span className="text-xs text-gray-500">{getPeriodCaption(period)}</span>
+        <span className="text-xs text-gray-500">{caption ?? getPeriodCaption(period)}</span>
       </div>
       <div className="overflow-x-auto pb-2">
         <div
@@ -146,12 +173,14 @@ export default function StatsPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [period, setPeriod] = useState<PeriodKey>('today');
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => currentMonthKey());
 
-  const fetchStats = async () => {
+  const fetchStats = async (monthKey: string) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchWithDbToken('/api/stats', { cache: 'no-store' });
+      const params = new URLSearchParams({ month: monthKey });
+      const res = await fetchWithDbToken(`/api/stats?${params.toString()}`, { cache: 'no-store' });
       if (!res.ok) throw new Error('Statistiken konnten nicht geladen werden');
       setStats(await res.json());
       setLastUpdated(new Date());
@@ -163,16 +192,26 @@ export default function StatsPage() {
   };
 
   useEffect(() => {
-    fetchStats();
-    const interval = setInterval(fetchStats, 30000);
+    fetchStats(selectedMonth);
+    const interval = setInterval(() => fetchStats(selectedMonth), 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedMonth]);
+
+  const goToPrevMonth = () => setSelectedMonth((current) => shiftMonthKey(current, -1));
+  const goToNextMonth = () => {
+    setSelectedMonth((current) => {
+      const next = shiftMonthKey(current, 1);
+      return isFutureMonth(next) ? current : next;
+    });
+  };
+  const isNextMonthDisabled = isFutureMonth(shiftMonthKey(selectedMonth, 1));
 
   const activePeriod = stats?.online.periods[period];
   const activeTrend = stats?.online.trends[period] ?? [];
   const topUsers = useMemo(() => activePeriod?.users.slice(0, 12) ?? [], [activePeriod]);
   const maxUserWords = Math.max(1, ...topUsers.map((user) => user.words));
   const memoryPercent = stats ? Math.round((stats.system.memory.process_usage_mb / stats.system.memory.total_mb) * 100) : 0;
+  const monthCaption = period === 'month' ? getPeriodCaption('month', formatMonthLabel(selectedMonth)) : undefined;
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-2 sm:p-4">
@@ -186,7 +225,7 @@ export default function StatsPage() {
           <p className="mt-2 text-xs text-blue-200">Aktualisiert: {lastUpdated ? lastUpdated.toLocaleTimeString('de-DE') : 'nie'}</p>
         </div>
         <button
-          onClick={fetchStats}
+          onClick={() => fetchStats(selectedMonth)}
           disabled={loading}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-blue-700 shadow-sm transition hover:bg-blue-50 disabled:opacity-60"
         >
@@ -197,7 +236,7 @@ export default function StatsPage() {
 
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">{error}</div>}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {PERIOD_OPTIONS.map((option) => (
           <button
             key={option.key}
@@ -207,6 +246,48 @@ export default function StatsPage() {
             {option.label}
           </button>
         ))}
+
+        {period === 'month' && (
+          <div className="ml-auto inline-flex items-center gap-2 rounded-full bg-white px-2 py-1 text-sm text-gray-700 ring-1 ring-gray-200 shadow-sm dark:bg-zinc-900 dark:text-gray-200 dark:ring-zinc-800">
+            <button
+              type="button"
+              onClick={goToPrevMonth}
+              className="rounded-full p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-zinc-800 dark:hover:text-white"
+              aria-label="Vorheriger Monat"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path fillRule="evenodd" d="M12.79 5.23a.75.75 0 0 1 0 1.06L9.06 10l3.73 3.71a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
+              </svg>
+            </button>
+            <label className="inline-flex items-center gap-2">
+              <span className="text-xs uppercase tracking-wide text-gray-500">Monat</span>
+              <input
+                type="month"
+                value={selectedMonth}
+                max={currentMonthKey()}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  if (!next) return;
+                  if (isFutureMonth(next)) return;
+                  setSelectedMonth(next);
+                }}
+                className="rounded-md border border-gray-200 bg-white px-2 py-1 text-sm font-medium text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={goToNextMonth}
+              disabled={isNextMonthDisabled}
+              className="rounded-full p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-400 dark:hover:bg-zinc-800 dark:hover:text-white"
+              aria-label="Nächster Monat"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 0 1 0-1.06L10.94 10 7.21 6.29a.75.75 0 1 1 1.06-1.06l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0Z" clipRule="evenodd" />
+              </svg>
+            </button>
+            <span className="ml-1 hidden text-sm font-semibold capitalize sm:inline">{formatMonthLabel(selectedMonth)}</span>
+          </div>
+        )}
       </div>
 
       {activePeriod ? (
@@ -221,9 +302,9 @@ export default function StatsPage() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-            <BarChart data={activeTrend} metric="words" label={period === 'today' ? 'Wörter nach Nutzer' : period === 'month' ? 'Wörter pro Tag' : 'Wörter pro Monat'} period={period} />
-            <BarChart data={activeTrend} metric="minutes" label={period === 'today' ? 'Diktat-Minuten nach Nutzer' : period === 'month' ? 'Diktat-Minuten pro Tag' : 'Diktat-Minuten pro Monat'} period={period} />
-            <BarChart data={activeTrend} metric="manualCorrections" label={period === 'today' ? 'Korrekturen nach Nutzer' : period === 'month' ? 'Korrekturen pro Tag' : 'Korrekturen pro Monat'} period={period} />
+            <BarChart data={activeTrend} metric="words" label={period === 'today' ? 'Wörter nach Nutzer' : period === 'month' ? 'Wörter pro Tag' : 'Wörter pro Monat'} period={period} caption={monthCaption} />
+            <BarChart data={activeTrend} metric="minutes" label={period === 'today' ? 'Diktat-Minuten nach Nutzer' : period === 'month' ? 'Diktat-Minuten pro Tag' : 'Diktat-Minuten pro Monat'} period={period} caption={monthCaption} />
+            <BarChart data={activeTrend} metric="manualCorrections" label={period === 'today' ? 'Korrekturen nach Nutzer' : period === 'month' ? 'Korrekturen pro Tag' : 'Korrekturen pro Monat'} period={period} caption={monthCaption} />
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.5fr_1fr]">

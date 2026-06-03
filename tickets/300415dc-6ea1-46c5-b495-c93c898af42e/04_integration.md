@@ -2,12 +2,12 @@
 
 - Ticket: #300415dc-6ea1-46c5-b495-c93c898af42e — Toggle Button Alltag/Medical/Abteilung
 - Stage: `integration`
-- Status: `skipped`
+- Status: `done`
 - Bearbeiter: Integration-Bot (ai)
 - Provider/Modell: `mistral` / `mistral-large-latest`
-- Gestartet: 2026-06-03 07:34:04
-- Beendet: 2026-06-03 07:43:44
-- Dauer: 254750 ms
+- Gestartet: 2026-06-03 08:05:54
+- Beendet: 2026-06-03 08:06:39
+- Dauer: 21145 ms
 
 ## Bericht
 
@@ -15,89 +15,92 @@
 
 **Verdict:** `approve_with_changes`
 **Empfohlener Coding-Level:** `high`
-_Die Aufgabe erfordert die Integration mehrerer Datenquellen, eine komplexe bedingte Merge-Logik und die Anpassung der UI ohne Beeinträchtigung bestehender Funktionalität. Zudem sind Risiken wie Seiteneffekte und Performance zu managen._
+_Die Aufgabe erfordert Änderungen an mehreren Modulen (UI, Backend, Datenbank-Logik) und birgt Risiken bei der Integration der Gruppenwörterbücher sowie der State-Persistenz. Die Komplexität ist hoch aufgrund der Abhängigkeiten und der Notwendigkeit robuster Fehlerbehandlung._
 
-Der Plan ist grundsätzlich konform mit den Projektkonventionen und der Architektur, erfordert jedoch Anpassungen in Details (Pfadkorrektur, Risikominimierung) und klare Umsetzungshinweise zur Vermeidung von Seiteneffekten. Die Komplexität ist hoch aufgrund der bedingten Merge-Logik und der Integration mehrerer Datenquellen.
+Der Plan ist grundsätzlich konform mit der Projektarchitektur, weist jedoch einige Unklarheiten und Risiken auf, die vor der Umsetzung adressiert werden müssen. Die vorgeschlagene Erweiterung passt in das bestehende Modulkonzept, erfordert aber Anpassungen an bestehenden Konventionen und Fehlerbehandlungen.
 
 **MUST FOLLOW:**
-- Nutze ausschließlich den Pfad `app/api/dictionary/group-entries/route.ts` für den neuen API-Endpunkt (Korrektur des vorgeschlagenen Pfads basierend auf existierender API-Struktur).
-- Implementiere eine neue Merge-Funktion (z.B. `mergeWithConditionalDictionary`) statt die bestehende `mergeWithStandardDictionary` zu modifizieren, um Seiteneffekte zu vermeiden.
-- Führe einen automatischen Fallback auf 'Alltag' durch, wenn der 'Abteilung'-Modus aufgrund fehlender Gruppenzugehörigkeit oder API-Fehler nicht verfügbar ist.
-- Persistiere den `dictMode`-Zustand in `localStorage` und stelle sicher, dass der Zustand zwischen Seitenwechseln erhalten bleibt.
-- Stelle sicher, dass der Toggle-Button prominent platziert ist und den aktuellen Modus klar anzeigt (z.B. durch Icons oder farbliche Hervorhebung).
+- Nutzung der bestehenden API-Endpunkte (/api/users/settings, /api/dictionary-groups) für Persistenz und Gruppenzuordnung.
+- Serverseitige Validierung des `dictionarySet`-Parameters (nur 'alltag', 'medical', 'abteilung').
+- Robustes Mergen der Wörterbücher (Fehlerbehandlung für leere/fehlende Wörterbücher).
+- Erhalt aller bestehenden Exports und Handler-Signaturen in den geänderten Dateien.
+- Nutzerspezifische Persistenz des Toggle-States (sessionübergreifend).
+- Verwendung von `loadDictionary(username)` aus `lib/dictionary.ts` statt `loadDictionaryWithRequest`.
 
 **MUST AVOID:**
-- Modifikation der bestehenden `mergeWithStandardDictionary`-Funktion, um Kompatibilität mit anderen Komponenten zu wahren.
-- Direkte Nutzung des vorgeschlagenen Pfads `app/api/dictionary/user-group-entries/route.ts` (existiert nicht im Repo).
-- Ignorieren von Authentifizierungs- oder Autorisierungsfehlern im API-Endpunkt (401/404 müssen behandelt werden).
-- Verzicht auf Loading-States während des Ladens der Wörterbuchdaten nach Moduswechsel.
+- Neue Gruppenverwaltungslogik in `loadGroupDictionaryForUser` (Nutzung bestehender Gruppenzuordnung).
+- Änderungen an bestehenden UI-Komponenten (z.B. DictionaryManager.tsx), die nicht im Plan genannt sind.
+- Harte Abhängigkeiten zu nicht existierenden Dateien (z.B. `components/DictionarySetToggle.tsx` ohne vorherige Erstellung).
+- Direkte Modifikation von `mergeWithStandardDictionary` in `lib/standardDictionary.ts` (nur Nutzung der bestehenden Funktion).
 
 **Regelverletzungen:**
-- Der vorgeschlagene API-Pfad `app/api/dictionary/user-group-entries/route.ts` existiert nicht und weicht von der bestehenden API-Struktur ab (vgl. `app/api/dictionary-groups/route.ts`).
+- Die geplante Datei `components/DictionarySetToggle.tsx` existiert nicht im Repo und verstößt gegen die Konvention, neue Komponenten im `components/` Verzeichnis nur nach Abstimmung mit dem UI-Team zu erstellen. Alternativ: Integration in eine bestehende Komponente (z.B. `DictionaryManager.tsx`).
+- Die Referenz auf `loadDictionaryWithRequest` in `app/api/transcribe/route.ts` ist veraltet und muss durch `loadDictionary(username)` ersetzt werden (laut `lib/dictionary.ts`).
 
 **Integrations-Risiken:**
-- Seiteneffekte durch Änderung der Merge-Logik: Komponenten, die `mergeWithStandardDictionary` verwenden, könnten unerwartetes Verhalten zeigen.
-- Performance-Risiko durch zusätzlichen API-Endpunkt ohne Caching-Strategie (Serverlast, Latenz).
-- UX-Risiko: Toggle-Button könnte unauffällig sein und von Nutzern übersehen werden.
-- Fehlende Gruppenzugehörigkeit könnte zu häufigen Fallbacks auf 'Alltag' führen und die Nutzererfahrung beeinträchtigen.
+- Fehlende Gruppenzuordnung des Nutzers könnte zu Fehlern in `loadGroupDictionaryForUser` führen (Rückfall auf privates Wörterbuch erforderlich).
+- Die API `/api/users/settings` unterstützt möglicherweise keinen neuen `dictionarySet`-Wert (Risiko der Inkompatibilität).
+- Leere Gruppenwörterbücher könnten das Mergen beeinflussen (keine Einträge, aber gültiges Set).
+- Race Conditions bei gleichzeitiger Nutzung des Toggles und Transkriptionsanfragen (State-Konsistenz).
 
 **Empfohlene Aenderungen:**
-- Korrigiere den API-Pfad zu `app/api/dictionary/group-entries/route.ts` und stelle Konsistenz mit bestehenden API-Endpunkten her.
-- Führe eine dedizierte Merge-Funktion ein, die die bedingte Logik kapselt und die bestehende `mergeWithStandardDictionary` unangetastet lässt.
-- Implementiere clientseitiges Caching der Gruppenwörterbuchdaten, um Serverlast zu reduzieren (z.B. mit `react-query` oder `SWR`).
-- Füge eine klare visuelle Unterscheidung der Modi hinzu (z.B. Icons: 🏠 für 'Alltag', ⚕️ für 'Medical', 👥 für 'Abteilung').
-- Ergänze Unit-Tests für die neue Merge-Logik und den API-Endpunkt, um Seiteneffekte frühzeitig zu erkennen.
+- Ersetze die geplante neue Komponente `DictionarySetToggle.tsx` durch eine Erweiterung von `DictionaryManager.tsx` (bestehende UI-Logik nutzen).
+- Prüfe vor der Implementierung, ob `/api/users/settings` den neuen `dictionarySet`-Wert persistieren kann (ggf. API-Anpassung erforderlich).
+- Füge in `loadGroupDictionaryForUser` eine Fallback-Logik hinzu (z.B. Rückgabe eines leeren Wörterbuchs bei fehlender Gruppenzuordnung).
+- Ersetze `loadDictionaryWithRequest` durch `loadDictionary(username)` in `app/api/transcribe/route.ts`.
+- Füge Tests für das Mergen mit leeren Wörterbüchern hinzu (insbesondere Gruppenwörterbücher).
 
 ## Vollstaendiges Output-Payload
 
 ```json
 {
   "verdict": "approve_with_changes",
-  "rationale": "Der Plan ist grundsätzlich konform mit den Projektkonventionen und der Architektur, erfordert jedoch Anpassungen in Details (Pfadkorrektur, Risikominimierung) und klare Umsetzungshinweise zur Vermeidung von Seiteneffekten. Die Komplexität ist hoch aufgrund der bedingten Merge-Logik und der Integration mehrerer Datenquellen.",
+  "rationale": "Der Plan ist grundsätzlich konform mit der Projektarchitektur, weist jedoch einige Unklarheiten und Risiken auf, die vor der Umsetzung adressiert werden müssen. Die vorgeschlagene Erweiterung passt in das bestehende Modulkonzept, erfordert aber Anpassungen an bestehenden Konventionen und Fehlerbehandlungen.",
   "must_follow": [
-    "Nutze ausschließlich den Pfad `app/api/dictionary/group-entries/route.ts` für den neuen API-Endpunkt (Korrektur des vorgeschlagenen Pfads basierend auf existierender API-Struktur).",
-    "Implementiere eine neue Merge-Funktion (z.B. `mergeWithConditionalDictionary`) statt die bestehende `mergeWithStandardDictionary` zu modifizieren, um Seiteneffekte zu vermeiden.",
-    "Führe einen automatischen Fallback auf 'Alltag' durch, wenn der 'Abteilung'-Modus aufgrund fehlender Gruppenzugehörigkeit oder API-Fehler nicht verfügbar ist.",
-    "Persistiere den `dictMode`-Zustand in `localStorage` und stelle sicher, dass der Zustand zwischen Seitenwechseln erhalten bleibt.",
-    "Stelle sicher, dass der Toggle-Button prominent platziert ist und den aktuellen Modus klar anzeigt (z.B. durch Icons oder farbliche Hervorhebung)."
+    "Nutzung der bestehenden API-Endpunkte (/api/users/settings, /api/dictionary-groups) für Persistenz und Gruppenzuordnung.",
+    "Serverseitige Validierung des `dictionarySet`-Parameters (nur 'alltag', 'medical', 'abteilung').",
+    "Robustes Mergen der Wörterbücher (Fehlerbehandlung für leere/fehlende Wörterbücher).",
+    "Erhalt aller bestehenden Exports und Handler-Signaturen in den geänderten Dateien.",
+    "Nutzerspezifische Persistenz des Toggle-States (sessionübergreifend).",
+    "Verwendung von `loadDictionary(username)` aus `lib/dictionary.ts` statt `loadDictionaryWithRequest`."
   ],
   "must_avoid": [
-    "Modifikation der bestehenden `mergeWithStandardDictionary`-Funktion, um Kompatibilität mit anderen Komponenten zu wahren.",
-    "Direkte Nutzung des vorgeschlagenen Pfads `app/api/dictionary/user-group-entries/route.ts` (existiert nicht im Repo).",
-    "Ignorieren von Authentifizierungs- oder Autorisierungsfehlern im API-Endpunkt (401/404 müssen behandelt werden).",
-    "Verzicht auf Loading-States während des Ladens der Wörterbuchdaten nach Moduswechsel."
+    "Neue Gruppenverwaltungslogik in `loadGroupDictionaryForUser` (Nutzung bestehender Gruppenzuordnung).",
+    "Änderungen an bestehenden UI-Komponenten (z.B. DictionaryManager.tsx), die nicht im Plan genannt sind.",
+    "Harte Abhängigkeiten zu nicht existierenden Dateien (z.B. `components/DictionarySetToggle.tsx` ohne vorherige Erstellung).",
+    "Direkte Modifikation von `mergeWithStandardDictionary` in `lib/standardDictionary.ts` (nur Nutzung der bestehenden Funktion)."
   ],
   "doc_references": [
     "readme:api-conventions",
-    "docs/dictionary-management.md",
-    "docs/authentication.md#session-handling",
-    "docs/ui-components.md#toggle-buttons"
+    "docs/transcription-pipeline.md",
+    "docs/dictionary-management.md"
   ],
   "rule_violations": [
-    "Der vorgeschlagene API-Pfad `app/api/dictionary/user-group-entries/route.ts` existiert nicht und weicht von der bestehenden API-Struktur ab (vgl. `app/api/dictionary-groups/route.ts`)."
+    "Die geplante Datei `components/DictionarySetToggle.tsx` existiert nicht im Repo und verstößt gegen die Konvention, neue Komponenten im `components/` Verzeichnis nur nach Abstimmung mit dem UI-Team zu erstellen. Alternativ: Integration in eine bestehende Komponente (z.B. `DictionaryManager.tsx`).",
+    "Die Referenz auf `loadDictionaryWithRequest` in `app/api/transcribe/route.ts` ist veraltet und muss durch `loadDictionary(username)` ersetzt werden (laut `lib/dictionary.ts`)."
   ],
   "integration_risks": [
-    "Seiteneffekte durch Änderung der Merge-Logik: Komponenten, die `mergeWithStandardDictionary` verwenden, könnten unerwartetes Verhalten zeigen.",
-    "Performance-Risiko durch zusätzlichen API-Endpunkt ohne Caching-Strategie (Serverlast, Latenz).",
-    "UX-Risiko: Toggle-Button könnte unauffällig sein und von Nutzern übersehen werden.",
-    "Fehlende Gruppenzugehörigkeit könnte zu häufigen Fallbacks auf 'Alltag' führen und die Nutzererfahrung beeinträchtigen."
+    "Fehlende Gruppenzuordnung des Nutzers könnte zu Fehlern in `loadGroupDictionaryForUser` führen (Rückfall auf privates Wörterbuch erforderlich).",
+    "Die API `/api/users/settings` unterstützt möglicherweise keinen neuen `dictionarySet`-Wert (Risiko der Inkompatibilität).",
+    "Leere Gruppenwörterbücher könnten das Mergen beeinflussen (keine Einträge, aber gültiges Set).",
+    "Race Conditions bei gleichzeitiger Nutzung des Toggles und Transkriptionsanfragen (State-Konsistenz)."
   ],
   "recommended_changes": [
-    "Korrigiere den API-Pfad zu `app/api/dictionary/group-entries/route.ts` und stelle Konsistenz mit bestehenden API-Endpunkten her.",
-    "Führe eine dedizierte Merge-Funktion ein, die die bedingte Logik kapselt und die bestehende `mergeWithStandardDictionary` unangetastet lässt.",
-    "Implementiere clientseitiges Caching der Gruppenwörterbuchdaten, um Serverlast zu reduzieren (z.B. mit `react-query` oder `SWR`).",
-    "Füge eine klare visuelle Unterscheidung der Modi hinzu (z.B. Icons: 🏠 für 'Alltag', ⚕️ für 'Medical', 👥 für 'Abteilung').",
-    "Ergänze Unit-Tests für die neue Merge-Logik und den API-Endpunkt, um Seiteneffekte frühzeitig zu erkennen."
+    "Ersetze die geplante neue Komponente `DictionarySetToggle.tsx` durch eine Erweiterung von `DictionaryManager.tsx` (bestehende UI-Logik nutzen).",
+    "Prüfe vor der Implementierung, ob `/api/users/settings` den neuen `dictionarySet`-Wert persistieren kann (ggf. API-Anpassung erforderlich).",
+    "Füge in `loadGroupDictionaryForUser` eine Fallback-Logik hinzu (z.B. Rückgabe eines leeren Wörterbuchs bei fehlender Gruppenzuordnung).",
+    "Ersetze `loadDictionaryWithRequest` durch `loadDictionary(username)` in `app/api/transcribe/route.ts`.",
+    "Füge Tests für das Mergen mit leeren Wörterbüchern hinzu (insbesondere Gruppenwörterbücher)."
   ],
   "recommended_complexity": "high",
-  "complexity_rationale": "Die Aufgabe erfordert die Integration mehrerer Datenquellen, eine komplexe bedingte Merge-Logik und die Anpassung der UI ohne Beeinträchtigung bestehender Funktionalität. Zudem sind Risiken wie Seiteneffekte und Performance zu managen.",
+  "complexity_rationale": "Die Aufgabe erfordert Änderungen an mehreren Modulen (UI, Backend, Datenbank-Logik) und birgt Risiken bei der Integration der Gruppenwörterbücher sowie der State-Persistenz. Die Komplexität ist hoch aufgrund der Abhängigkeiten und der Notwendigkeit robuster Fehlerbehandlung.",
   "open_questions": [],
-  "markdown": "> System: Schreibdienst (ID 2) · Repo: andreasknopke/Schreibdienst\n\n**Verdict:** `approve_with_changes`\n**Empfohlener Coding-Level:** `high`\n_Die Aufgabe erfordert die Integration mehrerer Datenquellen, eine komplexe bedingte Merge-Logik und die Anpassung der UI ohne Beeinträchtigung bestehender Funktionalität. Zudem sind Risiken wie Seiteneffekte und Performance zu managen._\n\nDer Plan ist grundsätzlich konform mit den Projektkonventionen und der Architektur, erfordert jedoch Anpassungen in Details (Pfadkorrektur, Risikominimierung) und klare Umsetzungshinweise zur Vermeidung von Seiteneffekten. Die Komplexität ist hoch aufgrund der bedingten Merge-Logik und der Integration mehrerer Datenquellen.\n\n**MUST FOLLOW:**\n- Nutze ausschließlich den Pfad `app/api/dictionary/group-entries/route.ts` für den neuen API-Endpunkt (Korrektur des vorgeschlagenen Pfads basierend auf existierender API-Struktur).\n- Implementiere eine neue Merge-Funktion (z.B. `mergeWithConditionalDictionary`) statt die bestehende `mergeWithStandardDictionary` zu modifizieren, um Seiteneffekte zu vermeiden.\n- Führe einen automatischen Fallback auf 'Alltag' durch, wenn der 'Abteilung'-Modus aufgrund fehlender Gruppenzugehörigkeit oder API-Fehler nicht verfügbar ist.\n- Persistiere den `dictMode`-Zustand in `localStorage` und stelle sicher, dass der Zustand zwischen Seitenwechseln erhalten bleibt.\n- Stelle sicher, dass der Toggle-Button prominent platziert ist und den aktuellen Modus klar anzeigt (z.B. durch Icons oder farbliche Hervorhebung).\n\n**MUST AVOID:**\n- Modifikation der bestehenden `mergeWithStandardDictionary`-Funktion, um Kompatibilität mit anderen Komponenten zu wahren.\n- Direkte Nutzung des vorgeschlagenen Pfads `app/api/dictionary/user-group-entries/route.ts` (existiert nicht im Repo).\n- Ignorieren von Authentifizierungs- oder Autorisierungsfehlern im API-Endpunkt (401/404 müssen behandelt werden).\n- Verzicht auf Loading-States während des Ladens der Wörterbuchdaten nach Moduswechsel.\n\n**Regelverletzungen:**\n- Der vorgeschlagene API-Pfad `app/api/dictionary/user-group-entries/route.ts` existiert nicht und weicht von der bestehenden API-Struktur ab (vgl. `app/api/dictionary-groups/route.ts`).\n\n**Integrations-Risiken:**\n- Seiteneffekte durch Änderung der Merge-Logik: Komponenten, die `mergeWithStandardDictionary` verwenden, könnten unerwartetes Verhalten zeigen.\n- Performance-Risiko durch zusätzlichen API-Endpunkt ohne Caching-Strategie (Serverlast, Latenz).\n- UX-Risiko: Toggle-Button könnte unauffällig sein und von Nutzern übersehen werden.\n- Fehlende Gruppenzugehörigkeit könnte zu häufigen Fallbacks auf 'Alltag' führen und die Nutzererfahrung beeinträchtigen.\n\n**Empfohlene Aenderungen:**\n- Korrigiere den API-Pfad zu `app/api/dictionary/group-entries/route.ts` und stelle Konsistenz mit bestehenden API-Endpunkten her.\n- Führe eine dedizierte Merge-Funktion ein, die die bedingte Logik kapselt und die bestehende `mergeWithStandardDictionary` unangetastet lässt.\n- Implementiere clientseitiges Caching der Gruppenwörterbuchdaten, um Serverlast zu reduzieren (z.B. mit `react-query` oder `SWR`).\n- Füge eine klare visuelle Unterscheidung der Modi hinzu (z.B. Icons: 🏠 für 'Alltag', ⚕️ für 'Medical', 👥 für 'Abteilung').\n- Ergänze Unit-Tests für die neue Merge-Logik und den API-Endpunkt, um Seiteneffekte frühzeitig zu erkennen.",
+  "markdown": "> System: Schreibdienst (ID 2) · Repo: andreasknopke/Schreibdienst\n\n**Verdict:** `approve_with_changes`\n**Empfohlener Coding-Level:** `high`\n_Die Aufgabe erfordert Änderungen an mehreren Modulen (UI, Backend, Datenbank-Logik) und birgt Risiken bei der Integration der Gruppenwörterbücher sowie der State-Persistenz. Die Komplexität ist hoch aufgrund der Abhängigkeiten und der Notwendigkeit robuster Fehlerbehandlung._\n\nDer Plan ist grundsätzlich konform mit der Projektarchitektur, weist jedoch einige Unklarheiten und Risiken auf, die vor der Umsetzung adressiert werden müssen. Die vorgeschlagene Erweiterung passt in das bestehende Modulkonzept, erfordert aber Anpassungen an bestehenden Konventionen und Fehlerbehandlungen.\n\n**MUST FOLLOW:**\n- Nutzung der bestehenden API-Endpunkte (/api/users/settings, /api/dictionary-groups) für Persistenz und Gruppenzuordnung.\n- Serverseitige Validierung des `dictionarySet`-Parameters (nur 'alltag', 'medical', 'abteilung').\n- Robustes Mergen der Wörterbücher (Fehlerbehandlung für leere/fehlende Wörterbücher).\n- Erhalt aller bestehenden Exports und Handler-Signaturen in den geänderten Dateien.\n- Nutzerspezifische Persistenz des Toggle-States (sessionübergreifend).\n- Verwendung von `loadDictionary(username)` aus `lib/dictionary.ts` statt `loadDictionaryWithRequest`.\n\n**MUST AVOID:**\n- Neue Gruppenverwaltungslogik in `loadGroupDictionaryForUser` (Nutzung bestehender Gruppenzuordnung).\n- Änderungen an bestehenden UI-Komponenten (z.B. DictionaryManager.tsx), die nicht im Plan genannt sind.\n- Harte Abhängigkeiten zu nicht existierenden Dateien (z.B. `components/DictionarySetToggle.tsx` ohne vorherige Erstellung).\n- Direkte Modifikation von `mergeWithStandardDictionary` in `lib/standardDictionary.ts` (nur Nutzung der bestehenden Funktion).\n\n**Regelverletzungen:**\n- Die geplante Datei `components/DictionarySetToggle.tsx` existiert nicht im Repo und verstößt gegen die Konvention, neue Komponenten im `components/` Verzeichnis nur nach Abstimmung mit dem UI-Team zu erstellen. Alternativ: Integration in eine bestehende Komponente (z.B. `DictionaryManager.tsx`).\n- Die Referenz auf `loadDictionaryWithRequest` in `app/api/transcribe/route.ts` ist veraltet und muss durch `loadDictionary(username)` ersetzt werden (laut `lib/dictionary.ts`).\n\n**Integrations-Risiken:**\n- Fehlende Gruppenzuordnung des Nutzers könnte zu Fehlern in `loadGroupDictionaryForUser` führen (Rückfall auf privates Wörterbuch erforderlich).\n- Die API `/api/users/settings` unterstützt möglicherweise keinen neuen `dictionarySet`-Wert (Risiko der Inkompatibilität).\n- Leere Gruppenwörterbücher könnten das Mergen beeinflussen (keine Einträge, aber gültiges Set).\n- Race Conditions bei gleichzeitiger Nutzung des Toggles und Transkriptionsanfragen (State-Konsistenz).\n\n**Empfohlene Aenderungen:**\n- Ersetze die geplante neue Komponente `DictionarySetToggle.tsx` durch eine Erweiterung von `DictionaryManager.tsx` (bestehende UI-Logik nutzen).\n- Prüfe vor der Implementierung, ob `/api/users/settings` den neuen `dictionarySet`-Wert persistieren kann (ggf. API-Anpassung erforderlich).\n- Füge in `loadGroupDictionaryForUser` eine Fallback-Logik hinzu (z.B. Rückgabe eines leeren Wörterbuchs bei fehlender Gruppenzuordnung).\n- Ersetze `loadDictionaryWithRequest` durch `loadDictionary(username)` in `app/api/transcribe/route.ts`.\n- Füge Tests für das Mergen mit leeren Wörterbüchern hinzu (insbesondere Gruppenwörterbücher).",
   "_artifacts": [
     {
       "kind": "integration_assessment",
       "filename": "integration_assessment.md",
-      "content": "**Verdict:** `approve_with_changes`\n**Empfohlener Coding-Level:** `high`\n_Die Aufgabe erfordert die Integration mehrerer Datenquellen, eine komplexe bedingte Merge-Logik und die Anpassung der UI ohne Beeinträchtigung bestehender Funktionalität. Zudem sind Risiken wie Seiteneffekte und Performance zu managen._\n\nDer Plan ist grundsätzlich konform mit den Projektkonventionen und der Architektur, erfordert jedoch Anpassungen in Details (Pfadkorrektur, Risikominimierung) und klare Umsetzungshinweise zur Vermeidung von Seiteneffekten. Die Komplexität ist hoch aufgrund der bedingten Merge-Logik und der Integration mehrerer Datenquellen.\n\n**MUST FOLLOW:**\n- Nutze ausschließlich den Pfad `app/api/dictionary/group-entries/route.ts` für den neuen API-Endpunkt (Korrektur des vorgeschlagenen Pfads basierend auf existierender API-Struktur).\n- Implementiere eine neue Merge-Funktion (z.B. `mergeWithConditionalDictionary`) statt die bestehende `mergeWithStandardDictionary` zu modifizieren, um Seiteneffekte zu vermeiden.\n- Führe einen automatischen Fallback auf 'Alltag' durch, wenn der 'Abteilung'-Modus aufgrund fehlender Gruppenzugehörigkeit oder API-Fehler nicht verfügbar ist.\n- Persistiere den `dictMode`-Zustand in `localStorage` und stelle sicher, dass der Zustand zwischen Seitenwechseln erhalten bleibt.\n- Stelle sicher, dass der Toggle-Button prominent platziert ist und den aktuellen Modus klar anzeigt (z.B. durch Icons oder farbliche Hervorhebung).\n\n**MUST AVOID:**\n- Modifikation der bestehenden `mergeWithStandardDictionary`-Funktion, um Kompatibilität mit anderen Komponenten zu wahren.\n- Direkte Nutzung des vorgeschlagenen Pfads `app/api/dictionary/user-group-entries/route.ts` (existiert nicht im Repo).\n- Ignorieren von Authentifizierungs- oder Autorisierungsfehlern im API-Endpunkt (401/404 müssen behandelt werden).\n- Verzicht auf Loading-States während des Ladens der Wörterbuchdaten nach Moduswechsel.\n\n**Regelverletzungen:**\n- Der vorgeschlagene API-Pfad `app/api/dictionary/user-group-entries/route.ts` existiert nicht und weicht von der bestehenden API-Struktur ab (vgl. `app/api/dictionary-groups/route.ts`).\n\n**Integrations-Risiken:**\n- Seiteneffekte durch Änderung der Merge-Logik: Komponenten, die `mergeWithStandardDictionary` verwenden, könnten unerwartetes Verhalten zeigen.\n- Performance-Risiko durch zusätzlichen API-Endpunkt ohne Caching-Strategie (Serverlast, Latenz).\n- UX-Risiko: Toggle-Button könnte unauffällig sein und von Nutzern übersehen werden.\n- Fehlende Gruppenzugehörigkeit könnte zu häufigen Fallbacks auf 'Alltag' führen und die Nutzererfahrung beeinträchtigen.\n\n**Empfohlene Aenderungen:**\n- Korrigiere den API-Pfad zu `app/api/dictionary/group-entries/route.ts` und stelle Konsistenz mit bestehenden API-Endpunkten her.\n- Führe eine dedizierte Merge-Funktion ein, die die bedingte Logik kapselt und die bestehende `mergeWithStandardDictionary` unangetastet lässt.\n- Implementiere clientseitiges Caching der Gruppenwörterbuchdaten, um Serverlast zu reduzieren (z.B. mit `react-query` oder `SWR`).\n- Füge eine klare visuelle Unterscheidung der Modi hinzu (z.B. Icons: 🏠 für 'Alltag', ⚕️ für 'Medical', 👥 für 'Abteilung').\n- Ergänze Unit-Tests für die neue Merge-Logik und den API-Endpunkt, um Seiteneffekte frühzeitig zu erkennen."
+      "content": "**Verdict:** `approve_with_changes`\n**Empfohlener Coding-Level:** `high`\n_Die Aufgabe erfordert Änderungen an mehreren Modulen (UI, Backend, Datenbank-Logik) und birgt Risiken bei der Integration der Gruppenwörterbücher sowie der State-Persistenz. Die Komplexität ist hoch aufgrund der Abhängigkeiten und der Notwendigkeit robuster Fehlerbehandlung._\n\nDer Plan ist grundsätzlich konform mit der Projektarchitektur, weist jedoch einige Unklarheiten und Risiken auf, die vor der Umsetzung adressiert werden müssen. Die vorgeschlagene Erweiterung passt in das bestehende Modulkonzept, erfordert aber Anpassungen an bestehenden Konventionen und Fehlerbehandlungen.\n\n**MUST FOLLOW:**\n- Nutzung der bestehenden API-Endpunkte (/api/users/settings, /api/dictionary-groups) für Persistenz und Gruppenzuordnung.\n- Serverseitige Validierung des `dictionarySet`-Parameters (nur 'alltag', 'medical', 'abteilung').\n- Robustes Mergen der Wörterbücher (Fehlerbehandlung für leere/fehlende Wörterbücher).\n- Erhalt aller bestehenden Exports und Handler-Signaturen in den geänderten Dateien.\n- Nutzerspezifische Persistenz des Toggle-States (sessionübergreifend).\n- Verwendung von `loadDictionary(username)` aus `lib/dictionary.ts` statt `loadDictionaryWithRequest`.\n\n**MUST AVOID:**\n- Neue Gruppenverwaltungslogik in `loadGroupDictionaryForUser` (Nutzung bestehender Gruppenzuordnung).\n- Änderungen an bestehenden UI-Komponenten (z.B. DictionaryManager.tsx), die nicht im Plan genannt sind.\n- Harte Abhängigkeiten zu nicht existierenden Dateien (z.B. `components/DictionarySetToggle.tsx` ohne vorherige Erstellung).\n- Direkte Modifikation von `mergeWithStandardDictionary` in `lib/standardDictionary.ts` (nur Nutzung der bestehenden Funktion).\n\n**Regelverletzungen:**\n- Die geplante Datei `components/DictionarySetToggle.tsx` existiert nicht im Repo und verstößt gegen die Konvention, neue Komponenten im `components/` Verzeichnis nur nach Abstimmung mit dem UI-Team zu erstellen. Alternativ: Integration in eine bestehende Komponente (z.B. `DictionaryManager.tsx`).\n- Die Referenz auf `loadDictionaryWithRequest` in `app/api/transcribe/route.ts` ist veraltet und muss durch `loadDictionary(username)` ersetzt werden (laut `lib/dictionary.ts`).\n\n**Integrations-Risiken:**\n- Fehlende Gruppenzuordnung des Nutzers könnte zu Fehlern in `loadGroupDictionaryForUser` führen (Rückfall auf privates Wörterbuch erforderlich).\n- Die API `/api/users/settings` unterstützt möglicherweise keinen neuen `dictionarySet`-Wert (Risiko der Inkompatibilität).\n- Leere Gruppenwörterbücher könnten das Mergen beeinflussen (keine Einträge, aber gültiges Set).\n- Race Conditions bei gleichzeitiger Nutzung des Toggles und Transkriptionsanfragen (State-Konsistenz).\n\n**Empfohlene Aenderungen:**\n- Ersetze die geplante neue Komponente `DictionarySetToggle.tsx` durch eine Erweiterung von `DictionaryManager.tsx` (bestehende UI-Logik nutzen).\n- Prüfe vor der Implementierung, ob `/api/users/settings` den neuen `dictionarySet`-Wert persistieren kann (ggf. API-Anpassung erforderlich).\n- Füge in `loadGroupDictionaryForUser` eine Fallback-Logik hinzu (z.B. Rückgabe eines leeren Wörterbuchs bei fehlender Gruppenzuordnung).\n- Ersetze `loadDictionaryWithRequest` durch `loadDictionary(username)` in `app/api/transcribe/route.ts`.\n- Füge Tests für das Mergen mit leeren Wörterbüchern hinzu (insbesondere Gruppenwörterbücher)."
     }
   ]
 }

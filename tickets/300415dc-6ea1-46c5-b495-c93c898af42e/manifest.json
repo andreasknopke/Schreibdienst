@@ -1,0 +1,120 @@
+{
+  "ticket_id": "300415dc-6ea1-46c5-b495-c93c898af42e",
+  "title": "Toggle Button Alltag/Medical/Abteilung",
+  "type": "feature",
+  "urgency": "normal",
+  "system": {
+    "id": 2,
+    "name": "Schreibdienst",
+    "repo": "andreasknopke/Schreibdienst"
+  },
+  "run": {
+    "id": 183,
+    "started_at": "2026-06-03 07:26:58",
+    "current_stage": "planning",
+    "recommended_executor": null
+  },
+  "steps": [
+    {
+      "id": 1042,
+      "stage": "triage",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 5,
+      "staff_name": "Triage-Bot",
+      "provider": "openai_local",
+      "model": "gemma-4",
+      "duration_ms": 2777
+    },
+    {
+      "id": 1043,
+      "stage": "security",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 7,
+      "staff_name": "Security-Bot",
+      "provider": "openai_local",
+      "model": "gemma-4",
+      "duration_ms": 7677
+    },
+    {
+      "id": 1044,
+      "stage": "planning",
+      "status": "skipped",
+      "executor_kind": "ai",
+      "staff_id": 6,
+      "staff_name": "Architect-Bot",
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "duration_ms": 301
+    },
+    {
+      "id": 1048,
+      "stage": "planning",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 6,
+      "staff_name": "Architect-Bot",
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "duration_ms": 312
+    },
+    {
+      "id": 1045,
+      "stage": "integration",
+      "status": "skipped",
+      "executor_kind": "ai",
+      "staff_id": 8,
+      "staff_name": "Integration-Bot",
+      "provider": "mistral",
+      "model": "mistral-large-latest",
+      "duration_ms": 254750
+    },
+    {
+      "id": 1049,
+      "stage": "integration",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 8,
+      "staff_name": "Integration-Bot",
+      "provider": "mistral",
+      "model": "mistral-large-latest",
+      "duration_ms": 21145
+    },
+    {
+      "id": 1046,
+      "stage": "approval",
+      "status": "skipped",
+      "executor_kind": "human",
+      "staff_id": 1,
+      "staff_name": "Christian",
+      "provider": null,
+      "model": null,
+      "duration_ms": null
+    },
+    {
+      "id": 1050,
+      "stage": "approval",
+      "status": "waiting_human",
+      "executor_kind": "human",
+      "staff_id": 2,
+      "staff_name": "Andreas",
+      "provider": null,
+      "model": null,
+      "duration_ms": null
+    },
+    {
+      "id": 1047,
+      "stage": "coding",
+      "status": "skipped",
+      "executor_kind": "ai",
+      "staff_id": 14,
+      "staff_name": "Coding-Bot Opus",
+      "provider": "anthropic",
+      "model": "claude-opus-4-7",
+      "duration_ms": 33439
+    }
+  ],
+  "exported_at": "2026-06-03T08:14:19.213Z",
+  "dispatch_note": null
+}

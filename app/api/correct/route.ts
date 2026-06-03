@@ -996,10 +996,9 @@ export async function POST(req: NextRequest) {
     const preprocessedBefund = preprocess(befund);
     const preprocessedMethodik = preprocess(methodik);
 
-    // Standard- und Group-Einträge, die das LLM als Hinweis bekommen soll
-    // (privateEntries werden bereits deterministisch angewendet, das LLM
-    // bekommt sie dennoch als zusätzlichen phonetischen Hinweis)
-    const dictionaryPromptEntries = activeEntries;
+    // (dictionaryPromptEntries is no longer used — entries are applied
+    // deterministically in preprocess() and not sent to the LLM, to avoid
+    // blowing up the context window when three dictionaries are merged.)
     
     // Load runtime config to get custom prompt addition (using request context for dynamic DB)
     const runtimeConfig = await getRuntimeConfigWithRequest(req);
@@ -1009,23 +1008,13 @@ export async function POST(req: NextRequest) {
       : '';
     console.log(`[Correct] Runtime config loaded: llmProvider=${runtimeConfig.llmProvider}, promptAddition=${promptAddition ? promptAddition.substring(0, 50) + '...' : 'none'}`);
     
-    // Build dictionary prompt section for LLM hints (words to correct if similar found)
-    let dictionaryPromptSection = '';
-    if (dictionaryPromptEntries.length > 0 && dictionarySet === 'medical') {
-      const dictionaryLines = dictionaryPromptEntries.map((e: any) =>
-        `  "${e.wrong}" → "${e.correct}"${e._source ? `  (${e._source})` : ''}`
-      ).join('\n');
-      dictionaryPromptSection = `
-
-BENUTZERWÖRTERBUCH - Bekannte Korrekturen:
-Die folgenden Wörter werden häufig falsch transkribiert. Wenn du im Text ein Wort findest,
-das einem dieser falschen Wörter entspricht oder sehr ähnlich klingt, korrigiere es zum richtigen Begriff,
-sofern es im medizinischen Kontext Sinn ergibt:
-${dictionaryLines}`;
-      console.log(`[Correct] Dictionary added to LLM prompt: ${dictionaryPromptEntries.length} entries (private+group+standard)`);
-    } else {
-      console.log(`[Correct] Dictionary NOT added to LLM prompt (dictionarySet=${dictionarySet} or no entries)`);
-    }
+    // The dictionary entries are already applied deterministically in preprocess()
+    // (preprocessTranscriptionDetailed). We deliberately do NOT inject the full
+    // dictionary into the LLM prompt: with three sources merged, the prompt can
+    // easily exceed the model's context window. The LLM is reserved for
+    // linguistic-style corrections on top of the deterministic fixes.
+    const dictionaryPromptSection = '';
+    console.log(`[Correct] Dictionary prompt section: empty (entries are applied deterministically in preprocess, not sent to LLM to avoid context overflow)`);
     
     // Build patient name section for LLM to correct phonetically similar names
     let patientNamePromptSection = '';

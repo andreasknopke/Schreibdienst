@@ -269,6 +269,17 @@ export async function getDictionaryGroupMembersWithRequest(request: NextRequest,
   }));
 }
 
+export async function getUserGroupIds(request: NextRequest, username: string): Promise<number[]> {
+  await ensureGroupDictionaryTables(request);
+  const db = await getPoolForRequest(request);
+  const [rows] = await db.execute<any[]>(
+    'SELECT group_id FROM dictionary_group_members WHERE username = ? ORDER BY group_id ASC',
+    [username]
+  );
+
+  return rows.map((row) => Number(row.group_id)).filter((groupId) => Number.isFinite(groupId));
+}
+
 export async function setDictionaryGroupMembersWithRequest(
   request: NextRequest,
   groupId: number,

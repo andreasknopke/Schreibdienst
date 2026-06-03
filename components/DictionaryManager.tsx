@@ -6,8 +6,6 @@ interface DictionaryEntry {
   wrong: string;
   correct: string;
   addedAt: string;
-  useInPrompt?: boolean;  // Wort wird im Whisper initial_prompt verwendet
-  matchStem?: boolean;    // Wortstamm-Matching aktivieren
 }
 
 interface DictionaryManagerProps {
@@ -32,8 +30,7 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
   // Form state
   const [wrong, setWrong] = useState(initialWrong);
   const [correct, setCorrect] = useState('');
-  const [useInPrompt, setUseInPrompt] = useState(false);
-  const [matchStem, setMatchStem] = useState(false);
+  const [addToGroup, setAddToGroup] = useState(false);
   const [adding, setAdding] = useState(false);
 
   const fetchEntries = async () => {
@@ -73,7 +70,7 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
           'Authorization': getAuthHeader(),
           ...getDbTokenHeader()
         },
-        body: JSON.stringify({ wrong, correct, useInPrompt, matchStem })
+        body: JSON.stringify({ wrong, correct, addToGroup })
       });
 
       const data = await response.json();
@@ -97,8 +94,7 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
         setSuccess(`"${wrong}" → "${correct}" hinzugefügt`);
         setWrong('');
         setCorrect('');
-        setUseInPrompt(false);
-        setMatchStem(false);
+        setAddToGroup(false);
         await fetchEntries();
         notifyDictionaryChanged();
       } else {
@@ -109,45 +105,6 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
       setError('Verbindungsfehler');
     } finally {
       setAdding(false);
-    }
-  };
-
-  // Update entry options (useInPrompt, matchStem)
-  const handleUpdateOptions = async (wrongWord: string, newUseInPrompt: boolean, newMatchStem: boolean) => {
-    setError('');
-    setSuccess('');
-
-    try {
-      const response = await fetch('/api/dictionary', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': getAuthHeader(),
-          ...getDbTokenHeader()
-        },
-        body: JSON.stringify({ wrong: wrongWord, useInPrompt: newUseInPrompt, matchStem: newMatchStem })
-      });
-
-      const data = await response.json();
-
-      if (response.status === 401) {
-        setError('Sitzung abgelaufen - bitte erneut anmelden');
-        return;
-      }
-
-      if (data.success) {
-        // Update local state
-        setEntries(prev => prev.map(e => 
-          e.wrong === wrongWord 
-            ? { ...e, useInPrompt: newUseInPrompt, matchStem: newMatchStem }
-            : e
-        ));
-        notifyDictionaryChanged();
-      } else {
-        setError(data.error || 'Fehler beim Aktualisieren');
-      }
-    } catch {
-      setError('Verbindungsfehler');
     }
   };
 
@@ -235,29 +192,17 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
             />
           </div>
         </div>
-        
-        {/* Options */}
-        <div className="flex flex-wrap gap-4 text-xs">
-          <label className="flex items-center gap-2 cursor-pointer" title="Wort wird an Whisper übergeben um die Erkennung zu verbessern">
-            <input
-              type="checkbox"
-              checked={useInPrompt}
-              onChange={(e) => setUseInPrompt(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <span className="text-gray-600 dark:text-gray-400">🎤 Im Whisper-Prompt</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer" title="Korrigiert auch zusammengesetzte Wörter (z.B. Schole→Chole korrigiert auch Scholezystitis→Cholezystitis)">
-            <input
-              type="checkbox"
-              checked={matchStem}
-              onChange={(e) => setMatchStem(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <span className="text-gray-600 dark:text-gray-400">🌿 Wortstamm-Match</span>
-          </label>
-        </div>
-        
+
+        <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={addToGroup}
+            onChange={(e) => setAddToGroup(e.target.checked)}
+            className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span>ins Abteilungswörterbuch übernehmen</span>
+        </label>
+
         <div className="flex justify-end">
           <button type="submit" className="btn btn-primary text-sm" disabled={adding}>
             {adding ? 'Füge hinzu...' : 'Hinzufügen'}
@@ -287,23 +232,8 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
                   <span className="text-gray-400 flex-shrink-0">→</span>
                   <span className="text-green-600 dark:text-green-400 font-medium truncate">{entry.correct}</span>
                 </div>
-                
-                {/* Option toggles */}
+
                 <div className="flex items-center gap-1 flex-shrink-0">
-                  <button
-                    onClick={() => handleUpdateOptions(entry.wrong, !entry.useInPrompt, entry.matchStem ?? false)}
-                    className={`p-1 rounded transition-colors ${entry.useInPrompt ? 'text-blue-600 bg-blue-100 dark:bg-blue-900/30' : 'text-gray-400 hover:text-blue-600'}`}
-                    title={entry.useInPrompt ? 'Im Whisper-Prompt (aktiv)' : 'Im Whisper-Prompt (inaktiv)'}
-                  >
-                    🎤
-                  </button>
-                  <button
-                    onClick={() => handleUpdateOptions(entry.wrong, entry.useInPrompt ?? false, !entry.matchStem)}
-                    className={`p-1 rounded transition-colors ${entry.matchStem ? 'text-green-600 bg-green-100 dark:bg-green-900/30' : 'text-gray-400 hover:text-green-600'}`}
-                    title={entry.matchStem ? 'Wortstamm-Match (aktiv)' : 'Wortstamm-Match (inaktiv)'}
-                  >
-                    🌿
-                  </button>
                   <button
                     onClick={() => handleDelete(entry.wrong)}
                     className="text-gray-400 hover:text-red-600 p-1"
@@ -320,10 +250,6 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
           </div>
         )}
       </div>
-
-      <p className="text-xs text-gray-500">
-        🎤 = Wort wird an Whisper übergeben | 🌿 = Korrigiert auch zusammengesetzte Wörter
-      </p>
     </div>
   );
 }

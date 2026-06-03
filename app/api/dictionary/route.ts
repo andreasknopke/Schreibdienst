@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { addEntryWithRequest, removeEntryWithRequest, getEntriesWithRequest, updateEntryOptionsWithRequest, loadDictionaryWithRequest } from '@/lib/dictionaryDb';
+import { getUserGroupIds, upsertDictionaryGroupEntryWithRequest } from '@/lib/groupDictionaryDb';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
 
 interface AuthResult {
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { wrong, correct, username: targetUsername, useInPrompt = false, matchStem = false } = body;
+    const { wrong, correct, username: targetUsername, useInPrompt = false, matchStem = false, addToGroup = false } = body;
     
     if (!wrong || !correct) {
       return NextResponse.json({ success: false, error: 'Beide Felder müssen ausgefüllt sein' }, { status: 400 });
@@ -79,7 +80,49 @@ export async function POST(request: NextRequest) {
     const result = await addEntryWithRequest(request, username, wrong, correct, useInPrompt, matchStem);
     
     if (result.success) {
-      return NextResponse.json({ success: true, message: 'Eintrag hinzugefügt' });
+      let response = NextResponse.json({ success: true, message: 'Eintrag hinzugefügt' });
+
+      if (addToGroup) {
+        try {
+          const groupIds = await getUserGroupIds(request, username);
+          let groupInsertFailed = false;
+
+          for (const groupId of groupIds) {
+            const groupResult = await upsertDictionaryGroupEntryWithRequest(
+              request,
+              groupId,
+              wrong,
+              correct,
+              useInPrompt,
+              matchStem,
+              auth.username
+            );
+
+            if (!groupResult.success) {
+              groupInsertFailed = true;
+              console.error('[Dictionary POST] Group insert failed:', {
+                username,
+                groupId,
+                wrong,
+                error: groupResult.error,
+              });
+            }
+          }
+
+          if (groupInsertFailed) {
+            response.headers.set('X-Warning', 'GroupInsertFailed');
+          }
+        } catch (error) {
+          console.error('[Dictionary POST] Group insert lookup failed:', {
+            username,
+            wrong,
+            error,
+          });
+          response.headers.set('X-Warning', 'GroupInsertFailed');
+        }
+      }
+
+      return response;
     }
     
     return NextResponse.json({ success: false, error: result.error }, { status: 400 });

@@ -40,13 +40,13 @@ export async function GET(request: NextRequest) {
     
     if (!settings) {
       // Return defaults for root user or if not found
-      return NextResponse.json({ autoCorrect: true });
+      return NextResponse.json({ autoCorrect: true, dictionarySet: 'alltag' });
     }
     
     return NextResponse.json(settings);
   } catch (error) {
     console.error('[Settings GET] Error:', error);
-    return NextResponse.json({ error: 'Fehler beim Laden der Einstellungen', autoCorrect: true }, { status: 500 });
+    return NextResponse.json({ error: 'Fehler beim Laden der Einstellungen', autoCorrect: true, dictionarySet: 'alltag' }, { status: 500 });
   }
 }
 
@@ -60,17 +60,41 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { autoCorrect } = body;
+    const { autoCorrect, dictionarySet } = body as {
+      autoCorrect?: unknown;
+      dictionarySet?: unknown;
+    };
+    const hasAutoCorrect = autoCorrect !== undefined;
+    const hasDictionarySet = dictionarySet !== undefined;
+    const normalizedDictionarySet =
+      dictionarySet === 'alltag' || dictionarySet === 'medical' || dictionarySet === 'abteilung'
+        ? dictionarySet
+        : undefined;
     
     // Validate input
-    if (typeof autoCorrect !== 'boolean') {
+    if (!hasAutoCorrect && !hasDictionarySet) {
+      return NextResponse.json({ success: false, error: 'Keine Einstellung angegeben' }, { status: 400 });
+    }
+
+    if (hasAutoCorrect && typeof autoCorrect !== 'boolean') {
       return NextResponse.json({ success: false, error: 'Ungültige Einstellung' }, { status: 400 });
     }
 
-    const result = await updateUserSettingsWithRequest(request, auth.username, { autoCorrect });
+    if (hasDictionarySet && !normalizedDictionarySet) {
+      return NextResponse.json({ success: false, error: 'Ungültiges dictionarySet' }, { status: 400 });
+    }
+
+    const result = await updateUserSettingsWithRequest(request, auth.username, {
+      autoCorrect: hasAutoCorrect ? (autoCorrect as boolean) : undefined,
+      dictionarySet: normalizedDictionarySet,
+    });
     
     if (result.success) {
-      return NextResponse.json({ success: true, autoCorrect });
+      return NextResponse.json({
+        success: true,
+        ...(hasAutoCorrect ? { autoCorrect } : {}),
+        ...(hasDictionarySet ? { dictionarySet: normalizedDictionarySet } : {}),
+      });
     }
     
     return NextResponse.json({ success: false, error: result.error }, { status: 400 });

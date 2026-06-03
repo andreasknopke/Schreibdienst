@@ -224,6 +224,7 @@ export async function initDatabase(): Promise<void> {
       is_admin BOOLEAN DEFAULT FALSE,
       can_view_all_dictations BOOLEAN DEFAULT FALSE,
       auto_correct BOOLEAN DEFAULT TRUE,
+      dictionary_set ENUM('alltag', 'medical', 'abteilung') DEFAULT 'alltag',
       default_mode ENUM('befund', 'arztbrief') DEFAULT 'befund',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_by VARCHAR(255)
@@ -243,6 +244,7 @@ export async function initDatabase(): Promise<void> {
   const userMigrations = [
     { column: 'can_view_all_dictations', sql: 'ADD COLUMN can_view_all_dictations BOOLEAN DEFAULT FALSE' },
     { column: 'auto_correct', sql: 'ADD COLUMN auto_correct BOOLEAN DEFAULT TRUE' },
+    { column: 'dictionary_set', sql: "ADD COLUMN dictionary_set ENUM('alltag', 'medical', 'abteilung') DEFAULT 'alltag'" },
     { column: 'default_mode', sql: "ADD COLUMN default_mode ENUM('befund', 'arztbrief') DEFAULT 'befund'" },
   ];
   
@@ -299,6 +301,7 @@ export async function initDatabaseWithRequest(request: NextRequest): Promise<voi
       is_admin BOOLEAN DEFAULT FALSE,
       can_view_all_dictations BOOLEAN DEFAULT FALSE,
       auto_correct BOOLEAN DEFAULT TRUE,
+      dictionary_set ENUM('alltag', 'medical', 'abteilung') DEFAULT 'alltag',
       default_mode ENUM('befund', 'arztbrief') DEFAULT 'befund',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_by VARCHAR(255)
@@ -318,6 +321,7 @@ export async function initDatabaseWithRequest(request: NextRequest): Promise<voi
   const userMigrations = [
     { column: 'can_view_all_dictations', sql: 'ADD COLUMN can_view_all_dictations BOOLEAN DEFAULT FALSE' },
     { column: 'auto_correct', sql: 'ADD COLUMN auto_correct BOOLEAN DEFAULT TRUE' },
+    { column: 'dictionary_set', sql: "ADD COLUMN dictionary_set ENUM('alltag', 'medical', 'abteilung') DEFAULT 'alltag'" },
     { column: 'default_mode', sql: "ADD COLUMN default_mode ENUM('befund', 'arztbrief') DEFAULT 'befund'" },
   ];
   

@@ -354,6 +354,31 @@ export async function getEntriesForUserGroupsWithRequest(request: NextRequest, u
   return entries;
 }
 
+export async function loadGroupDictionaryForUser(
+  request: NextRequest,
+  username: string
+): Promise<{ entries: DictionaryEntry[] }> {
+  try {
+    const entries = await getEntriesForUserGroupsWithRequest(request, username);
+    return {
+      entries: entries.map((entry) => ({
+        wrong: entry.wrong,
+        correct: entry.correct,
+        addedAt: entry.addedAt,
+        useInPrompt: entry.useInPrompt,
+        matchStem: entry.matchStem,
+        phoneticMinSimilarity: entry.phoneticMinSimilarity,
+        scope: 'group',
+        groupId: entry.groupId,
+        groupName: entry.groupName,
+      })),
+    };
+  } catch (error) {
+    console.error('[GroupDictionary] loadGroupDictionaryForUser error:', error);
+    return { entries: [] };
+  }
+}
+
 export async function getPromptInsertsForUserGroupsWithRequest(request: NextRequest, username: string): Promise<GroupPromptInsert[]> {
   await ensureGroupDictionaryTables(request);
   const db = await getPoolForRequest(request);

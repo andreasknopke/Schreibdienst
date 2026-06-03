@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRuntimeConfigWithRequest, getEffectiveOnlineService } from '@/lib/configDb';
-import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
+import { getEntriesWithRequest, type DictionaryEntry } from '@/lib/dictionaryDb';
 import { normalizeAudioForWhisper } from '@/lib/audioCompression';
 import { countWords, logOnlineUsageEventWithRequest } from '@/lib/onlineUsageDb';
+import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
+import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
+import { loadGroupDictionaryForUser } from '@/lib/groupDictionaryDb';
 
 export const runtime = 'nodejs';
 
 const WAV_HEADER_BYTES = 44;
 const WAV_BYTES_PER_SECOND = 16000 * 2;
+type DictionarySet = 'alltag' | 'medical' | 'abteilung';
 
 function estimateAudioDurationSeconds(file: Blob, filename: string, explicitDuration?: string | null): number {
   const parsedDuration = Number(explicitDuration || 0);
@@ -198,6 +202,16 @@ function getUniqueCorrectWords(dictionary: { entries: DictionaryEntry[] }): stri
   
   // Verbinde mit Komma für den initial_prompt
   return Array.from(uniqueWords).join(', ');
+}
+
+function toPromptDictionaryEntries(entries: Array<{ wrong: string; correct: string; addedAt?: string }>): DictionaryEntry[] {
+  const now = new Date().toISOString();
+  return entries.map((entry) => ({
+    wrong: entry.wrong,
+    correct: entry.correct,
+    addedAt: entry.addedAt || now,
+    useInPrompt: true,
+  }));
 }
 
 // Transkriptions-Provider auswählen
@@ -745,7 +759,17 @@ export async function POST(request: NextRequest) {
     const speedModeParam = form.get('speed_mode') as string | null;
     const promptContext = form.get('prompt_context') as string | null;
     const audioDurationParam = form.get('audio_duration_seconds') as string | null;
+    const dictionarySetRaw = (form.get('dictionarySet') || form.get('dictionary_set')) as string | null;
     const shouldLogStats = form.get('stats_event') !== 'false';
+    const dictionarySet: DictionarySet = dictionarySetRaw == null
+      ? 'alltag'
+      : (dictionarySetRaw === 'alltag' || dictionarySetRaw === 'medical' || dictionarySetRaw === 'abteilung'
+        ? dictionarySetRaw
+        : 'alltag');
+
+    if (dictionarySetRaw && dictionarySetRaw !== 'alltag' && dictionarySetRaw !== 'medical' && dictionarySetRaw !== 'abteilung') {
+      return NextResponse.json({ error: 'Invalid dictionarySet' }, { status: 400 });
+    }
     
     if (!file || !(file instanceof Blob)) {
       console.error('[Error] Invalid file:', file);
@@ -757,31 +781,59 @@ export async function POST(request: NextRequest) {
     const audioDurationSeconds = estimateAudioDurationSeconds(file, filename, audioDurationParam);
     console.log(`[Input] File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type || 'unknown'}, User: ${username || 'unknown'}, Speed: ${speedModeParam || 'default'}`);
 
-    // Lade Wörterbuch für initial_prompt bei WhisperX
-    // Begrenzt auf MAX_PROMPT_WORDS wichtigste Begriffe um Halluzinationen zu vermeiden
+    // Lade Wörterbuch abhängig vom gewählten Dictionary-Set für initial_prompt.
+    // Begrenzt auf MAX_PROMPT_WORDS wichtigste Begriffe um Halluzinationen zu vermeiden.
     const MAX_PROMPT_WORDS = 30;
     let initialPrompt: string | undefined;
     if (username && provider !== 'elevenlabs') {
       try {
-        const dictionary = await loadDictionaryWithRequest(request, username);
-        const allWords = getUniqueCorrectWords(dictionary);
+        const privateDictionaryEntries = await getEntriesWithRequest(request, username);
+        let activeEntries: Array<{ wrong: string; correct: string; addedAt?: string }> = [];
+
+        if (dictionarySet === 'medical') {
+          const standardDictionaryEntries = await getStandardDictEntries(request);
+          activeEntries = mergeWithStandardDictionary(privateDictionaryEntries, standardDictionaryEntries)
+            .map((entry) => ({
+              wrong: entry.wrong,
+              correct: entry.correct,
+              addedAt: 'addedAt' in entry ? entry.addedAt : undefined,
+            }));
+        } else if (dictionarySet === 'abteilung') {
+          const groupDictionary = await loadGroupDictionaryForUser(request, username);
+          const unique = new Map<string, { wrong: string; correct: string; addedAt?: string }>();
+          for (const entry of privateDictionaryEntries) {
+            unique.set(entry.wrong.toLowerCase(), {
+              wrong: entry.wrong,
+              correct: entry.correct,
+              addedAt: entry.addedAt,
+            });
+          }
+          for (const entry of groupDictionary.entries) {
+            const key = entry.wrong.toLowerCase();
+            if (!unique.has(key)) {
+              unique.set(key, {
+                wrong: entry.wrong,
+                correct: entry.correct,
+                addedAt: entry.addedAt,
+              });
+            }
+          }
+          activeEntries = Array.from(unique.values());
+        }
+
+        const allWords = getUniqueCorrectWords({ entries: toPromptDictionaryEntries(activeEntries) });
         if (allWords) {
           // Begrenze auf die ersten MAX_PROMPT_WORDS Begriffe
           const wordList = allWords.split(', ');
           const limitedWords = wordList.slice(0, MAX_PROMPT_WORDS);
           initialPrompt = limitedWords.join(', ');
-          console.log(`[Dictionary] Using ${limitedWords.length}/${wordList.length} words for initial_prompt (max ${MAX_PROMPT_WORDS})`);
+          console.log(`[Dictionary] Set=${dictionarySet} using ${limitedWords.length}/${wordList.length} words for initial_prompt (max ${MAX_PROMPT_WORDS})`);
+        } else {
+          console.log(`[Dictionary] Set=${dictionarySet} loaded no prompt terms`);
         }
       } catch (err) {
         console.warn('[Dictionary] Failed to load dictionary:', err);
       }
-    }
-    
-    // Fallback: Medizinische Basis-Begriffe wenn kein Wörterbuch
-    if (!initialPrompt) {
-      // Häufige medizinische Begriffe die Whisper sonst falsch schreibt
-      initialPrompt = "Liquorräume, Mittellinie, Mittellinienverschiebung, parenchymatös, Hirnparenchym, periventrikulär, supratentoriell, infratentoriell, Basalganglien, Thalamus, Kleinhirn, Hirnstamm, Ventrikel, Sulci, Gyri, Marklager";
-      console.log(`[Dictionary] Using default medical terms (${initialPrompt.split(', ').length} words)`);
     }
 
     // Prompt-Kontext aus VAD-Client anhängen (letzte Sätze für Konsistenz)

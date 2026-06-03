@@ -78,6 +78,7 @@ interface RuntimeConfig {
 }
 
 type TextInsertionTarget = 'transcript' | BefundField;
+type DictionarySet = 'alltag' | 'medical' | 'abteilung';
 
 interface CaretSelection {
   start: number;
@@ -172,6 +173,59 @@ const EMPTY_FIELD_TEXTS: Record<TextInsertionTarget, string> = {
   befund: '',
   beurteilung: '',
 };
+
+const DICTATION_CHEAT_SHEET_SECTIONS: Array<{ title: string; commands: string[] }> = [
+  {
+    title: 'Satzzeichen',
+    commands: [
+      'Punkt, Komma, Doppelpunkt, Fragezeichen, Ausrufezeichen',
+      'Anfuehrungszeichen auf/zu',
+      'Klammer auf/zu',
+    ],
+  },
+  {
+    title: 'Struktur',
+    commands: [
+      'Neuer Absatz, Naechster Absatz, Absatz',
+      'Neue Zeile, Naechste Zeile',
+      'In Klammern',
+    ],
+  },
+  {
+    title: 'Loeschen',
+    commands: [
+      'Wort streichen, Streiche Wort',
+      'Loesche das letzte Wort',
+      'Loesche den letzten Satz',
+      'Loesche den letzten Absatz',
+    ],
+  },
+  {
+    title: 'Aufzaehlung',
+    commands: [
+      'Aufzaehlung beginnen/starten',
+      'Punkt eins / Punkt zwei / Punkt 1 ...',
+      'Naechster Punkt, Weiterer Punkt',
+      'Aufzaehlung beenden',
+    ],
+  },
+  {
+    title: 'Feldwechsel (Befund-Modus)',
+    commands: [
+      'Methodik: oder Methodik Doppelpunkt',
+      'Befund: oder Befund Doppelpunkt',
+      'Beurteilung: oder Zusammenfassung:',
+    ],
+  },
+  {
+    title: 'Formatierung',
+    commands: [
+      'Fett, Kursiv, Unterstrichen',
+      'Auswahlfett, Auswahlkursiv, Auswahlunterstrichen',
+      'Fett beginnen/ende, Kursiv beginnen/ende',
+    ],
+  },
+];
 
 function getDefaultSelection(text: string): CaretSelection {
   return {
@@ -672,6 +726,8 @@ function getTextareaCaretOverlay(
 
 export default function HomePage() {
   const { username, autoCorrect, defaultMode, getAuthHeader, getDbTokenHeader } = useAuth();
+  const [dictionarySet, setDictionarySet] = useState<DictionarySet>('alltag');
+  const [dictionarySetSaving, setDictionarySetSaving] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [correcting, setCorrecting] = useState(false);
@@ -838,6 +894,7 @@ export default function HomePage() {
   
   // Diff-Ansicht: Zeigt Unterschiede zwischen formatiertem Original und KI-korrigiertem Text
   const [showDiffView, setShowDiffView] = useState(false);
+  const [showCheatSheetPanel, setShowCheatSheetPanel] = useState(false);
   const previousFieldTextsRef = useRef<Record<TextInsertionTarget, string>>(EMPTY_FIELD_TEXTS);
 
   // Custom Actions Manager
@@ -1588,6 +1645,78 @@ export default function HomePage() {
     }
   }, [defaultMode]);
 
+  // Wörterbuch-Set beim Start laden (nutzerspezifisch, sessionübergreifend)
+  useEffect(() => {
+    if (!username) {
+      setDictionarySet('alltag');
+      return;
+    }
+
+    let cancelled = false;
+    const loadDictionarySet = async () => {
+      try {
+        const response = await fetch('/api/users/settings', {
+          headers: {
+            Authorization: getAuthHeader(),
+            ...getDbTokenHeader(),
+          },
+        });
+
+        if (!response.ok) return;
+        const data = await response.json();
+        if (cancelled) return;
+
+        const nextSet = data?.dictionarySet;
+        if (nextSet === 'alltag' || nextSet === 'medical' || nextSet === 'abteilung') {
+          setDictionarySet(nextSet);
+        } else {
+          setDictionarySet('alltag');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('[DictionarySet] Could not load user setting:', error);
+        }
+      }
+    };
+
+    loadDictionarySet();
+    return () => {
+      cancelled = true;
+    };
+  }, [username, getAuthHeader, getDbTokenHeader]);
+
+  const persistDictionarySet = useCallback(async (nextSet: DictionarySet) => {
+    if (!username || nextSet === dictionarySet || dictionarySetSaving) {
+      return;
+    }
+
+    const previous = dictionarySet;
+    setDictionarySet(nextSet);
+    setDictionarySetSaving(true);
+    try {
+      const response = await fetch('/api/users/settings', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: getAuthHeader(),
+          ...getDbTokenHeader(),
+        },
+        body: JSON.stringify({ dictionarySet: nextSet }),
+      });
+
+      if (!response.ok) {
+        setDictionarySet(previous);
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error || 'Wörterbuch-Modus konnte nicht gespeichert werden');
+      }
+    } catch (error: any) {
+      console.error('[DictionarySet] Persist error:', error);
+      setError(error?.message || 'Wörterbuch-Modus konnte nicht gespeichert werden');
+    } finally {
+      setDictionarySetSaving(false);
+    }
+  }, [username, dictionarySet, dictionarySetSaving, getAuthHeader, getDbTokenHeader, setError]);
+
   // Runtime Config laden (für Fast Whisper WebSocket URL)
   useEffect(() => {
     const loadConfig = async () => {
@@ -1776,6 +1905,7 @@ export default function HomePage() {
       if (username) {
         fd.append('username', username);
       }
+      fd.append('dictionarySet', dictionarySet);
       // Online-Diktat: Turbo-Modus (kein Alignment, schnellere Antwort)
       fd.append('speed_mode', 'turbo');
       fd.append('stats_event', isLive ? 'false' : 'true');
@@ -1802,7 +1932,7 @@ export default function HomePage() {
       }
       return '';
     }
-  }, [username]);
+  }, [username, dictionarySet]);
 
   // Kombiniert existierenden Text mit neuem Transkript
   const combineTexts = useCallback((existing: string, newText: string): string => {
@@ -1829,6 +1959,7 @@ export default function HomePage() {
         const fd = new FormData();
         fd.append('file', wavBlob, 'utterance.wav');
         if (username) fd.append('username', username);
+        fd.append('dictionarySet', dictionarySet);
         fd.append('speed_mode', 'turbo');
         if (promptContext) fd.append('prompt_context', promptContext);
         const res = await fetchWithDbToken('/api/transcribe', {
@@ -1852,7 +1983,7 @@ export default function HomePage() {
       }
     }
     throw lastError || new Error('Transkription nach mehreren Versuchen fehlgeschlagen');
-  }, [username]);
+  }, [username, dictionarySet]);
 
   const estimateWavDurationSeconds = useCallback((blob: Blob): number => {
     const wavHeaderBytes = 44;
@@ -4361,11 +4492,34 @@ export default function HomePage() {
                   <path d="M21 17H3" />
                 </svg>
               </button>
-              {liveInjectStatus && (
-                <span className="text-[11px] text-gray-500 dark:text-gray-400 max-w-64 truncate" title={liveInjectStatus}>
-                  {liveInjectStatus}
-                </span>
-              )}
+            </div>
+            <div className="flex flex-col gap-1 items-center justify-center">
+              <div className="inline-flex rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <button
+                  className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${dictionarySet === 'alltag' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+                  onClick={() => void persistDictionarySet('alltag')}
+                  disabled={dictionarySetSaving}
+                  title="Alltag: kein Wörterbuch"
+                >
+                  Alltag
+                </button>
+                <button
+                  className={`px-2.5 py-1.5 text-xs font-medium border-l border-gray-200 dark:border-gray-700 transition-colors ${dictionarySet === 'medical' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+                  onClick={() => void persistDictionarySet('medical')}
+                  disabled={dictionarySetSaving}
+                  title="Medical: Standard + persönliches Wörterbuch"
+                >
+                  Medical
+                </button>
+                <button
+                  className={`px-2.5 py-1.5 text-xs font-medium border-l border-gray-200 dark:border-gray-700 transition-colors ${dictionarySet === 'abteilung' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+                  onClick={() => void persistDictionarySet('abteilung')}
+                  disabled={dictionarySetSaving}
+                  title="Abteilung: Abteilungs- + persönliches Wörterbuch"
+                >
+                  Abteilung
+                </button>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -4473,6 +4627,12 @@ export default function HomePage() {
           </div>
         </div>
       </div>
+
+      {liveInjectStatus && (
+        <div className="px-1 text-xs text-gray-600 dark:text-gray-300 break-words">
+          {liveInjectStatus}
+        </div>
+      )}
 
       {/* SSL-Zertifikat Warnung für Fast Whisper */}
       {sslCertWarning?.show && (
@@ -4940,6 +5100,48 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      {/* Seitliches Cheat-Sheet: klappt nach rechts aus, ohne die Seitenhoehe zu vergroessern */}
+      <div className="fixed right-0 top-1/2 z-40 hidden -translate-y-1/2 md:flex items-start">
+        <aside
+          className={`w-80 max-w-[80vw] max-h-[calc(100vh-9rem)] overflow-y-auto rounded-l-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
+            showCheatSheetPanel
+              ? 'mr-2 translate-x-0 opacity-100'
+              : 'mr-0 translate-x-full opacity-0 pointer-events-none'
+          }`}
+          aria-hidden={!showCheatSheetPanel}
+        >
+          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sprachbefehle Cheat-Sheet</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Live-Diktat Kurzhilfe</p>
+          </div>
+          <div className="px-4 py-3 space-y-3">
+            {DICTATION_CHEAT_SHEET_SECTIONS.map((section) => (
+              <div key={section.title}>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-1">{section.title}</h4>
+                <ul className="space-y-1">
+                  {section.commands.map((command) => (
+                    <li key={command} className="text-xs text-gray-600 dark:text-gray-300 leading-snug">
+                      • {command}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </aside>
+
+        <button
+          className="h-16 w-10 rounded-l-xl border border-r-0 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+          onClick={() => setShowCheatSheetPanel((current) => !current)}
+          title={showCheatSheetPanel ? 'Cheat-Sheet schliessen' : 'Cheat-Sheet oeffnen'}
+          aria-label={showCheatSheetPanel ? 'Cheat-Sheet schliessen' : 'Cheat-Sheet oeffnen'}
+          aria-expanded={showCheatSheetPanel}
+        >
+          <span className="block text-[11px] leading-tight">Hilfe</span>
+          <span className="block text-base leading-none mt-0.5">{showCheatSheetPanel ? '›' : '‹'}</span>
+        </button>
+      </div>
 
       {/* Custom Actions Manager Modal */}
       {showCustomActionsManager && (

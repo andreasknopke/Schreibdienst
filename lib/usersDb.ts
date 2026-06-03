@@ -8,6 +8,7 @@ export interface User {
   is_admin: boolean;
   can_view_all_dictations: boolean;
   auto_correct: boolean;
+  dictionary_set?: 'alltag' | 'medical' | 'abteilung';
   default_mode: 'befund' | 'arztbrief';
   created_at: Date;
   created_by: string;
@@ -288,25 +289,45 @@ export async function authenticateUserWithRequest(
 export async function getUserSettingsWithRequest(
   request: NextRequest,
   username: string
-): Promise<{ autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief' } | null> {
+): Promise<{ autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief'; dictionarySet: 'alltag' | 'medical' | 'abteilung' } | null> {
   // Root user always has autoCorrect enabled
   if (username.toLowerCase() === 'root') {
-    return { autoCorrect: true, defaultMode: 'befund' };
+    return { autoCorrect: true, defaultMode: 'befund', dictionarySet: 'alltag' };
   }
 
   try {
     const db = await getPoolForRequest(request);
-    const [rows] = await db.execute<any[]>(
-      'SELECT auto_correct, default_mode FROM users WHERE username = ?',
-      [username]
-    );
+    let rows: any[] = [];
+    try {
+      const [result] = await db.execute<any[]>(
+        'SELECT auto_correct, default_mode, dictionary_set FROM users WHERE username = ?',
+        [username]
+      );
+      rows = result;
+    } catch (error: any) {
+      if (error?.code !== 'ER_BAD_FIELD_ERROR') {
+        throw error;
+      }
+
+      // Fallback für Datenbanken ohne dictionary_set-Spalte.
+      const [result] = await db.execute<any[]>(
+        'SELECT auto_correct, default_mode FROM users WHERE username = ?',
+        [username]
+      );
+      rows = result;
+    }
     
     if (rows.length === 0) {
       return null;
     }
     
     const user = rows[0];
-    return { autoCorrect: user.auto_correct !== false, defaultMode: user.default_mode || 'befund' };
+    const dictionarySet = user.dictionary_set;
+    return {
+      autoCorrect: user.auto_correct !== false,
+      defaultMode: user.default_mode || 'befund',
+      dictionarySet: dictionarySet === 'medical' || dictionarySet === 'abteilung' ? dictionarySet : 'alltag',
+    };
   } catch (error) {
     console.error('[Users] Get settings error:', error);
     return null;
@@ -317,7 +338,7 @@ export async function getUserSettingsWithRequest(
 export async function updateUserSettingsWithRequest(
   request: NextRequest,
   username: string,
-  settings: { autoCorrect?: boolean }
+  settings: { autoCorrect?: boolean; dictionarySet?: 'alltag' | 'medical' | 'abteilung' }
 ): Promise<{ success: boolean; error?: string }> {
   if (username.toLowerCase() === 'root') {
     return { success: false, error: 'Root-Benutzer-Einstellungen können nicht geändert werden' };
@@ -330,6 +351,11 @@ export async function updateUserSettingsWithRequest(
     if (settings.autoCorrect !== undefined) {
       updates.push('auto_correct = ?');
       params.push(settings.autoCorrect);
+    }
+
+    if (settings.dictionarySet !== undefined) {
+      updates.push('dictionary_set = ?');
+      params.push(settings.dictionarySet);
     }
     
     if (updates.length === 0) {

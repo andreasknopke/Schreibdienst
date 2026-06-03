@@ -224,27 +224,27 @@ export async function initDatabase(): Promise<void> {
       is_admin BOOLEAN DEFAULT FALSE,
       can_view_all_dictations BOOLEAN DEFAULT FALSE,
       auto_correct BOOLEAN DEFAULT TRUE,
-      dictionary_set ENUM('alltag', 'medical', 'abteilung') DEFAULT 'alltag',
+      dictionary_set ENUM('alltag', 'medical') DEFAULT 'medical',
       default_mode ENUM('befund', 'arztbrief') DEFAULT 'befund',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_by VARCHAR(255)
     )
   `);
-  
+
   // Fast migration: Check columns via INFORMATION_SCHEMA instead of try/catch ALTER
   const [existingCols] = await db.execute(`
-    SELECT COLUMN_NAME 
-    FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_SCHEMA = DATABASE() 
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
     AND TABLE_NAME = 'users'
   `) as any;
-  
+
   const existingColumns = new Set((existingCols || []).map((row: any) => row.COLUMN_NAME.toLowerCase()));
-  
+
   const userMigrations = [
     { column: 'can_view_all_dictations', sql: 'ADD COLUMN can_view_all_dictations BOOLEAN DEFAULT FALSE' },
     { column: 'auto_correct', sql: 'ADD COLUMN auto_correct BOOLEAN DEFAULT TRUE' },
-    { column: 'dictionary_set', sql: "ADD COLUMN dictionary_set ENUM('alltag', 'medical', 'abteilung') DEFAULT 'alltag'" },
+    { column: 'dictionary_set', sql: "ADD COLUMN dictionary_set ENUM('alltag', 'medical') DEFAULT 'medical'" },
     { column: 'default_mode', sql: "ADD COLUMN default_mode ENUM('befund', 'arztbrief') DEFAULT 'befund'" },
   ];
   
@@ -301,27 +301,27 @@ export async function initDatabaseWithRequest(request: NextRequest): Promise<voi
       is_admin BOOLEAN DEFAULT FALSE,
       can_view_all_dictations BOOLEAN DEFAULT FALSE,
       auto_correct BOOLEAN DEFAULT TRUE,
-      dictionary_set ENUM('alltag', 'medical', 'abteilung') DEFAULT 'alltag',
+      dictionary_set ENUM('alltag', 'medical') DEFAULT 'medical',
       default_mode ENUM('befund', 'arztbrief') DEFAULT 'befund',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       created_by VARCHAR(255)
     )
   `);
-  
+
   // Fast migration: Check columns via INFORMATION_SCHEMA instead of try/catch ALTER
   const [existingCols] = await db.execute(`
-    SELECT COLUMN_NAME 
-    FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_SCHEMA = DATABASE() 
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
     AND TABLE_NAME = 'users'
   `) as any;
-  
+
   const existingColumns = new Set((existingCols || []).map((row: any) => row.COLUMN_NAME.toLowerCase()));
-  
+
   const userMigrations = [
     { column: 'can_view_all_dictations', sql: 'ADD COLUMN can_view_all_dictations BOOLEAN DEFAULT FALSE' },
     { column: 'auto_correct', sql: 'ADD COLUMN auto_correct BOOLEAN DEFAULT TRUE' },
-    { column: 'dictionary_set', sql: "ADD COLUMN dictionary_set ENUM('alltag', 'medical', 'abteilung') DEFAULT 'alltag'" },
+    { column: 'dictionary_set', sql: "ADD COLUMN dictionary_set ENUM('alltag', 'medical') DEFAULT 'medical'" },
     { column: 'default_mode', sql: "ADD COLUMN default_mode ENUM('befund', 'arztbrief') DEFAULT 'befund'" },
   ];
   

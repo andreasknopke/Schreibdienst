@@ -37,16 +37,16 @@ export async function GET(request: NextRequest) {
     }
 
     const settings = await getUserSettingsWithRequest(request, auth.username);
-    
+
     if (!settings) {
       // Return defaults for root user or if not found
-      return NextResponse.json({ autoCorrect: true, dictionarySet: 'alltag' });
+      return NextResponse.json({ autoCorrect: true, dictionarySet: 'medical' });
     }
-    
+
     return NextResponse.json(settings);
   } catch (error) {
     console.error('[Settings GET] Error:', error);
-    return NextResponse.json({ error: 'Fehler beim Laden der Einstellungen', autoCorrect: true, dictionarySet: 'alltag' }, { status: 500 });
+    return NextResponse.json({ error: 'Fehler beim Laden der Einstellungen', autoCorrect: true, dictionarySet: 'medical' }, { status: 500 });
   }
 }
 
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const auth = await authenticateRequest(request);
-    
+
     if (!auth.valid || !auth.username) {
       return NextResponse.json({ error: 'Nicht authentifiziert' }, { status: 401 });
     }
@@ -67,7 +67,7 @@ export async function PATCH(request: NextRequest) {
     const hasAutoCorrect = autoCorrect !== undefined;
     const hasDictionarySet = dictionarySet !== undefined;
     const normalizedDictionarySet =
-      dictionarySet === 'alltag' || dictionarySet === 'medical' || dictionarySet === 'abteilung'
+      dictionarySet === 'alltag' || dictionarySet === 'medical'
         ? dictionarySet
         : undefined;
     

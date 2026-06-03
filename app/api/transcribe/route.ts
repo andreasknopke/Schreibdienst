@@ -11,7 +11,7 @@ export const runtime = 'nodejs';
 
 const WAV_HEADER_BYTES = 44;
 const WAV_BYTES_PER_SECOND = 16000 * 2;
-type DictionarySet = 'alltag' | 'medical' | 'abteilung';
+type DictionarySet = 'alltag' | 'medical';
 
 function estimateAudioDurationSeconds(file: Blob, filename: string, explicitDuration?: string | null): number {
   const parsedDuration = Number(explicitDuration || 0);
@@ -762,12 +762,12 @@ export async function POST(request: NextRequest) {
     const dictionarySetRaw = (form.get('dictionarySet') || form.get('dictionary_set')) as string | null;
     const shouldLogStats = form.get('stats_event') !== 'false';
     const dictionarySet: DictionarySet = dictionarySetRaw == null
-      ? 'alltag'
-      : (dictionarySetRaw === 'alltag' || dictionarySetRaw === 'medical' || dictionarySetRaw === 'abteilung'
+      ? 'medical'
+      : (dictionarySetRaw === 'alltag' || dictionarySetRaw === 'medical'
         ? dictionarySetRaw
-        : 'alltag');
+        : 'medical');
 
-    if (dictionarySetRaw && dictionarySetRaw !== 'alltag' && dictionarySetRaw !== 'medical' && dictionarySetRaw !== 'abteilung') {
+    if (dictionarySetRaw && dictionarySetRaw !== 'alltag' && dictionarySetRaw !== 'medical') {
       return NextResponse.json({ error: 'Invalid dictionarySet' }, { status: 400 });
     }
     
@@ -783,29 +783,33 @@ export async function POST(request: NextRequest) {
 
     // Lade Wörterbuch abhängig vom gewählten Dictionary-Set für initial_prompt.
     // Begrenzt auf MAX_PROMPT_WORDS wichtigste Begriffe um Halluzinationen zu vermeiden.
+    // Modus "medical": alle phonetischen Wörterbücher (Standard, Abteilung, persönlich) sind aktiv.
+    // Modus "alltag": keine Wörterbücher.
     const MAX_PROMPT_WORDS = 30;
     let initialPrompt: string | undefined;
     if (username && provider !== 'elevenlabs') {
       try {
-        const privateDictionaryEntries = await getEntriesWithRequest(request, username);
         let activeEntries: Array<{ wrong: string; correct: string; addedAt?: string }> = [];
 
         if (dictionarySet === 'medical') {
+          // Medical: alle drei Quellen zusammenführen
+          const privateDictionaryEntries = await getEntriesWithRequest(request, username);
           const standardDictionaryEntries = await getStandardDictEntries(request);
-          activeEntries = mergeWithStandardDictionary(privateDictionaryEntries, standardDictionaryEntries)
-            .map((entry) => ({
-              wrong: entry.wrong,
-              correct: entry.correct,
-              addedAt: 'addedAt' in entry ? entry.addedAt : undefined,
-            }));
-        } else if (dictionarySet === 'abteilung') {
           const groupDictionary = await loadGroupDictionaryForUser(request, username);
+
+          // Erst Standard + Privat mergen (das beachtet die Override-Semantik)
+          const mergedWithStandard = mergeWithStandardDictionary(
+            privateDictionaryEntries,
+            standardDictionaryEntries
+          );
+
+          // Dann die Abteilungs-Einträge zufügen (privat hat Vorrang)
           const unique = new Map<string, { wrong: string; correct: string; addedAt?: string }>();
-          for (const entry of privateDictionaryEntries) {
+          for (const entry of mergedWithStandard) {
             unique.set(entry.wrong.toLowerCase(), {
               wrong: entry.wrong,
               correct: entry.correct,
-              addedAt: entry.addedAt,
+              addedAt: 'addedAt' in entry ? entry.addedAt : undefined,
             });
           }
           for (const entry of groupDictionary.entries) {
@@ -819,6 +823,14 @@ export async function POST(request: NextRequest) {
             }
           }
           activeEntries = Array.from(unique.values());
+
+          console.log(
+            `[Dictionary] Set=medical loaded: standard=${standardDictionaryEntries.length}, ` +
+            `group=${groupDictionary.entries.length}, private=${privateDictionaryEntries.length}, ` +
+            `merged=${activeEntries.length} unique entries`
+          );
+        } else {
+          console.log(`[Dictionary] Set=alltag: no dictionary entries used for initial_prompt`);
         }
 
         const allWords = getUniqueCorrectWords({ entries: toPromptDictionaryEntries(activeEntries) });

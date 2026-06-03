@@ -8,7 +8,7 @@ export interface User {
   is_admin: boolean;
   can_view_all_dictations: boolean;
   auto_correct: boolean;
-  dictionary_set?: 'alltag' | 'medical' | 'abteilung';
+  dictionary_set?: 'alltag' | 'medical';
   default_mode: 'befund' | 'arztbrief';
   created_at: Date;
   created_by: string;
@@ -289,10 +289,10 @@ export async function authenticateUserWithRequest(
 export async function getUserSettingsWithRequest(
   request: NextRequest,
   username: string
-): Promise<{ autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief'; dictionarySet: 'alltag' | 'medical' | 'abteilung' } | null> {
+): Promise<{ autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief'; dictionarySet: 'alltag' | 'medical' } | null> {
   // Root user always has autoCorrect enabled
   if (username.toLowerCase() === 'root') {
-    return { autoCorrect: true, defaultMode: 'befund', dictionarySet: 'alltag' };
+    return { autoCorrect: true, defaultMode: 'befund', dictionarySet: 'medical' };
   }
 
   try {
@@ -316,17 +316,17 @@ export async function getUserSettingsWithRequest(
       );
       rows = result;
     }
-    
+
     if (rows.length === 0) {
       return null;
     }
-    
+
     const user = rows[0];
     const dictionarySet = user.dictionary_set;
     return {
       autoCorrect: user.auto_correct !== false,
       defaultMode: user.default_mode || 'befund',
-      dictionarySet: dictionarySet === 'medical' || dictionarySet === 'abteilung' ? dictionarySet : 'alltag',
+      dictionarySet: dictionarySet === 'alltag' || dictionarySet === 'medical' ? dictionarySet : 'medical',
     };
   } catch (error) {
     console.error('[Users] Get settings error:', error);
@@ -338,7 +338,7 @@ export async function getUserSettingsWithRequest(
 export async function updateUserSettingsWithRequest(
   request: NextRequest,
   username: string,
-  settings: { autoCorrect?: boolean; dictionarySet?: 'alltag' | 'medical' | 'abteilung' }
+  settings: { autoCorrect?: boolean; dictionarySet?: 'alltag' | 'medical' }
 ): Promise<{ success: boolean; error?: string }> {
   if (username.toLowerCase() === 'root') {
     return { success: false, error: 'Root-Benutzer-Einstellungen können nicht geändert werden' };

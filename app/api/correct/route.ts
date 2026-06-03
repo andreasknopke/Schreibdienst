@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { loadDictionaryWithRequest } from '@/lib/dictionaryDb';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
-import { formatGroupPromptInsertSection, getPromptInsertsForUserGroupsWithRequest } from '@/lib/groupDictionaryDb';
+import { formatGroupPromptInsertSection, getPromptInsertsForUserGroupsWithRequest, loadGroupDictionaryForUser } from '@/lib/groupDictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
-import { preprocessTranscription, removeMarkdownFormatting } from '@/lib/textFormatting';
+import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
 
 export const runtime = 'nodejs';
+
+type DictionarySet = 'alltag' | 'medical';
 
 // LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
 const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);
@@ -388,6 +390,106 @@ interface LLMConfig {
   useApiMode?: boolean;
 }
 
+/**
+ * Protokolliert detailliert, was das LLM am Text geändert hat.
+ * Wird nach jeder LLM-Korrektur aufgerufen, um den Vergleich Input → Output sichtbar zu machen.
+ */
+function logLLMCorrections(label: string, inputText: string, outputText: string, dictionarySet: DictionarySet): void {
+  console.log(`[LLM][${label}] input=${inputText.length} chars, output=${outputText.length} chars, dictionarySet=${dictionarySet}`);
+  if (inputText === outputText) {
+    console.log(`[LLM][${label}] Output ist IDENTISCH zum Input — das LLM hat NICHTS korrigiert.`);
+    return;
+  }
+  // Word-level Diff via LCS, einfach gehalten: wir drucken gleiche und geänderte Segmente.
+  // Hier reicht ein einfacher Word-basierter Ansatz (Myers diff ist overkill).
+  const a = inputText.split(/(\s+)/);
+  const b = outputText.split(/(\s+)/);
+  // Finde zusammenhängende gleiche/unterschiedliche Bereiche
+  let i = 0;
+  let j = 0;
+  const operations: Array<{ type: 'eq' | 'del' | 'ins'; text: string }> = [];
+  const matchPrefixLen = (a: string[], b: string[], startA: number, startB: number): number => {
+    let k = 0;
+    while (startA + k < a.length && startB + k < b.length && a[startA + k] === b[startB + k]) k++;
+    return k;
+  };
+  // Sehr einfache Heuristik: gleiches Präfix, dann den ersten Unterschied finden
+  // Für volle Korrektheit bräuchte man Myers, aber für Diagnose-Zwecke reicht das hier.
+  const commonPrefix = matchPrefixLen(a, b, 0, 0);
+  if (commonPrefix > 0) operations.push({ type: 'eq', text: a.slice(0, commonPrefix).join('') });
+  i = commonPrefix;
+  j = commonPrefix;
+
+  // Finde zusammenhängenden unterschiedlichen Bereich (bis max 200 Token, dann abbrechen)
+  const maxLookahead = 400;
+  let bestIAhead = 0;
+  let bestJAhead = 0;
+  let bestMatch = 0;
+  // Suche nach LCS innerhalb eines Fensters
+  for (let di = 0; di < maxLookahead && i + di < a.length; di++) {
+    for (let dj = 0; dj < maxLookahead && j + dj < b.length; dj++) {
+      let k = 0;
+      while (
+        i + di + k < a.length &&
+        j + dj + k < b.length &&
+        a[i + di + k] === b[j + dj + k] &&
+        k < 20
+      ) k++;
+      if (k > bestMatch) {
+        bestMatch = k;
+        bestIAhead = di;
+        bestJAhead = dj;
+      }
+    }
+  }
+
+  if (bestMatch === 0) {
+    // nichts gemeinsames im Fenster — nur del/ins bis zum Ende
+    operations.push({ type: 'del', text: a.slice(i).join('') });
+    operations.push({ type: 'ins', text: b.slice(j).join('') });
+    i = a.length;
+    j = b.length;
+  } else {
+    // Vom Ende des gemeinsamen Präfixes bis zum Beginn des Match-Fensters ist "del/ins"
+    if (bestIAhead > 0) operations.push({ type: 'del', text: a.slice(i, i + bestIAhead).join('') });
+    if (bestJAhead > 0) operations.push({ type: 'ins', text: b.slice(j, j + bestJAhead).join('') });
+    i += bestIAhead;
+    j += bestJAhead;
+    // Dann folgt ein gleicher Block
+    operations.push({ type: 'eq', text: a.slice(i, i + bestMatch).join('') });
+    i += bestMatch;
+    j += bestMatch;
+    // Rest: rekursiv
+    if (i < a.length || j < b.length) {
+      operations.push({ type: 'del', text: a.slice(i).join('') });
+      operations.push({ type: 'ins', text: b.slice(j).join('') });
+    }
+  }
+
+  // Konsolidieren: gleiche Typen zusammenführen
+  const consolidated: typeof operations = [];
+  for (const op of operations) {
+    const last = consolidated[consolidated.length - 1];
+    if (last && last.type === op.type) {
+      last.text += op.text;
+    } else {
+      consolidated.push({ ...op });
+    }
+  }
+
+  // Drucken
+  for (const op of consolidated) {
+    if (op.type === 'eq') {
+      const preview = op.text.length > 80 ? op.text.substring(0, 80) + '…' : op.text;
+      console.log(`[LLM][${label}]   = ${JSON.stringify(preview)}`);
+    } else if (op.type === 'del') {
+      console.log(`[LLM][${label}]   - ${JSON.stringify(op.text)}`);
+    } else if (op.type === 'ins') {
+      console.log(`[LLM][${label}]   + ${JSON.stringify(op.text)}`);
+    }
+  }
+}
+
 async function callLLM(
   config: LLMConfig,
   messages: { role: string; content: string }[],
@@ -749,8 +851,8 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { text, previousCorrectedText, befundFields, suggestBeurteilung, methodik, befund, username, patientName } = body as { 
-      text?: string; 
+    const { text, previousCorrectedText, befundFields, suggestBeurteilung, methodik, befund, username, patientName, dictionarySet: dictionarySetRaw } = body as {
+      text?: string;
       previousCorrectedText?: string;
       befundFields?: BefundFields;
       suggestBeurteilung?: boolean;
@@ -758,29 +860,146 @@ export async function POST(req: NextRequest) {
       befund?: string;
       username?: string;
       patientName?: string;
+      dictionarySet?: string;
     };
-    
-    // Load dictionary for this user (using request context for dynamic DB support)
-    console.log(`[Correct] Loading dictionary for user: ${username || 'anonymous'}${patientName ? `, patient: ${patientName}` : ''}`);
-    const dictionary = username ? await loadDictionaryWithRequest(req, username) : { entries: [] };
-    const dictionaryEntries = dictionary.entries;
-    console.log(`[Correct] Dictionary loaded: ${dictionaryEntries.length} entries`);
-    
-    // Load standard dictionary from DB
-    const standardEntries = await getStandardDictEntries(req);
-    console.log(`[Correct] Standard dictionary loaded: ${standardEntries.length} entries`);
-    
+
+    const dictionarySet: DictionarySet =
+      dictionarySetRaw === 'alltag' || dictionarySetRaw === 'medical'
+        ? dictionarySetRaw
+        : 'medical';
+
+    // ====== DICTIONARY LOADING + LOGGING ======
+    console.log(`\n========== [Correct] START ==========`);
+    console.log(`[Correct] User: ${username || 'anonymous'}${patientName ? `, patient: ${patientName}` : ''}`);
+    console.log(`[Correct] dictionarySet=${dictionarySet} (raw=${dictionarySetRaw ?? '<none>'})`);
+    console.log(`[Correct] Mode: ${befundFields ? 'befund-fields' : suggestBeurteilung ? 'suggest-beurteilung' : 'standard-text'}`);
+
+    // Wir laden zunächst alle Quellen, dann entscheiden wir anhand von dictionarySet,
+    // welche Einträge tatsächlich an die Vorverarbeitung und das LLM weitergegeben werden.
+    let privateEntries: any[] = [];
+    let standardEntries: any[] = [];
+    let groupEntries: any[] = [];
+
+    if (dictionarySet === 'medical' && username) {
+      const [privateDict, stdEntries, groupDict] = await Promise.all([
+        loadDictionaryWithRequest(req, username).catch((e) => {
+          console.warn('[Correct] loadDictionaryWithRequest failed:', e?.message || e);
+          return { entries: [] };
+        }),
+        getStandardDictEntries(req).catch((e) => {
+          console.warn('[Correct] getStandardDictEntries failed:', e?.message || e);
+          return [];
+        }),
+        loadGroupDictionaryForUser(req, username).catch((e) => {
+          console.warn('[Correct] loadGroupDictionaryForUser failed:', e?.message || e);
+          return { entries: [] };
+        }),
+      ]);
+      privateEntries = privateDict.entries;
+      standardEntries = stdEntries;
+      groupEntries = groupDict.entries;
+    } else if (dictionarySet === 'alltag' && username) {
+      // Trotzdem laden, um die Anzahl im Log zu zeigen – aber nicht anwenden.
+      const [privateDict, stdEntries, groupDict] = await Promise.all([
+        loadDictionaryWithRequest(req, username).catch(() => ({ entries: [] })),
+        getStandardDictEntries(req).catch(() => []),
+        loadGroupDictionaryForUser(req, username).catch(() => ({ entries: [] })),
+      ]);
+      privateEntries = privateDict.entries;
+      standardEntries = stdEntries;
+      groupEntries = groupDict.entries;
+    } else if (username) {
+      // Fallback: kein dictionarySet, aber User vorhanden — wie 'medical' behandeln
+      const [privateDict, stdEntries, groupDict] = await Promise.all([
+        loadDictionaryWithRequest(req, username).catch(() => ({ entries: [] })),
+        getStandardDictEntries(req).catch(() => []),
+        loadGroupDictionaryForUser(req, username).catch(() => ({ entries: [] })),
+      ]);
+      privateEntries = privateDict.entries;
+      standardEntries = stdEntries;
+      groupEntries = groupDict.entries;
+    }
+
+    console.log(
+      `[Correct] Dictionaries loaded: private=${privateEntries.length}, ` +
+      `standard=${standardEntries.length}, group=${groupEntries.length}`
+    );
+
+    // Aktiv-Liste: welche Einträge werden tatsächlich angewendet?
+    let activeEntries: any[] = [];
+    if (dictionarySet === 'medical') {
+      // Reihenfolge der Priorität (höchste zuerst, gewinnt bei Duplikaten):
+      // private > group > standard
+      const uniqueByKey = new Map<string, any>();
+      for (const entry of standardEntries) {
+        const key = String(entry.wrong).toLowerCase();
+        uniqueByKey.set(key, { ...entry, _source: 'standard' });
+      }
+      for (const entry of groupEntries) {
+        const key = String(entry.wrong).toLowerCase();
+        if (!uniqueByKey.has(key)) {
+          uniqueByKey.set(key, { ...entry, _source: 'group' });
+        }
+      }
+      for (const entry of privateEntries) {
+        const key = String(entry.wrong).toLowerCase();
+        uniqueByKey.set(key, { ...entry, _source: 'private' });
+      }
+      activeEntries = Array.from(uniqueByKey.values());
+      console.log(
+        `[Correct] Active entries (medical): ${activeEntries.length} unique ` +
+        `(private wins over group wins over standard)`
+      );
+    } else {
+      console.log(`[Correct] Active entries (alltag): 0 — alle Wörterbücher sind aus`);
+    }
+
+    // Aufteilen in private+group (für LLM-Prompt) und alle (für deterministische Vorverarbeitung)
+    const dictionaryEntries = activeEntries; // wird in der Vorverarbeitung verwendet
+
     // Preprocess text: apply formatting control words AND dictionary corrections BEFORE LLM
     // This handles "neuer Absatz", "neue Zeile", "Klammer auf/zu", etc. programmatically
     // AND applies user dictionary corrections deterministically (saves tokens & more reliable)
-    const preprocessedText = text ? preprocessTranscription(text, dictionaryEntries, standardEntries) : undefined;
+    const preprocess = (raw: string | undefined): string | undefined => {
+      if (!raw) return raw;
+      if (dictionarySet !== 'medical') return raw;
+      const before = raw;
+      const detailed = preprocessTranscriptionDetailed(raw, activeEntries, [], { targetUsername: username });
+      if (detailed.operations.length > 0) {
+        console.log(
+          `[Correct] Preprocess applied ${detailed.operations.length} dictionary ` +
+          `correction(s) on ${raw.length} chars:`
+        );
+        for (const op of detailed.operations.slice(0, 25)) {
+          console.log(`  [Dict] "${op.dictionaryWrong}" → "${op.dictionaryCorrect}"  (${op.source ?? 'unknown'})`);
+        }
+        if (detailed.operations.length > 25) {
+          console.log(`  [Dict] … and ${detailed.operations.length - 25} more`);
+        }
+        console.log(
+          `[Correct] Preprocess diff (first 240 chars): ` +
+          JSON.stringify(before.substring(0, 240)) + ' → ' +
+          JSON.stringify(detailed.text.substring(0, 240))
+        );
+      } else {
+        console.log(`[Correct] Preprocess: 0 deterministic dictionary corrections (text unchanged)`);
+      }
+      return detailed.text;
+    };
+
+    const preprocessedText = preprocess(text);
     const preprocessedBefundFields = befundFields ? {
-      methodik: befundFields.methodik ? preprocessTranscription(befundFields.methodik, dictionaryEntries, standardEntries) : befundFields.methodik,
-      befund: befundFields.befund ? preprocessTranscription(befundFields.befund, dictionaryEntries, standardEntries) : befundFields.befund,
-      beurteilung: befundFields.beurteilung ? preprocessTranscription(befundFields.beurteilung, dictionaryEntries, standardEntries) : befundFields.beurteilung,
+      methodik: preprocess(befundFields.methodik),
+      befund: preprocess(befundFields.befund),
+      beurteilung: preprocess(befundFields.beurteilung),
     } : undefined;
-    const preprocessedBefund = befund ? preprocessTranscription(befund, dictionaryEntries, standardEntries) : undefined;
-    const preprocessedMethodik = methodik ? preprocessTranscription(methodik, dictionaryEntries, standardEntries) : undefined;
+    const preprocessedBefund = preprocess(befund);
+    const preprocessedMethodik = preprocess(methodik);
+
+    // Standard- und Group-Einträge, die das LLM als Hinweis bekommen soll
+    // (privateEntries werden bereits deterministisch angewendet, das LLM
+    // bekommt sie dennoch als zusätzlichen phonetischen Hinweis)
+    const dictionaryPromptEntries = activeEntries;
     
     // Load runtime config to get custom prompt addition (using request context for dynamic DB)
     const runtimeConfig = await getRuntimeConfigWithRequest(req);
@@ -792,18 +1011,20 @@ export async function POST(req: NextRequest) {
     
     // Build dictionary prompt section for LLM hints (words to correct if similar found)
     let dictionaryPromptSection = '';
-    if (dictionaryEntries.length > 0) {
-      const dictionaryLines = dictionaryEntries.map(e => 
-        `  "${e.wrong}" → "${e.correct}"`
+    if (dictionaryPromptEntries.length > 0 && dictionarySet === 'medical') {
+      const dictionaryLines = dictionaryPromptEntries.map((e: any) =>
+        `  "${e.wrong}" → "${e.correct}"${e._source ? `  (${e._source})` : ''}`
       ).join('\n');
       dictionaryPromptSection = `
 
 BENUTZERWÖRTERBUCH - Bekannte Korrekturen:
-Die folgenden Wörter werden häufig falsch transkribiert. Wenn du im Text ein Wort findest, 
+Die folgenden Wörter werden häufig falsch transkribiert. Wenn du im Text ein Wort findest,
 das einem dieser falschen Wörter entspricht oder sehr ähnlich klingt, korrigiere es zum richtigen Begriff,
 sofern es im medizinischen Kontext Sinn ergibt:
 ${dictionaryLines}`;
-      console.log(`[Correct] Dictionary added to LLM prompt: ${dictionaryEntries.length} entries`);
+      console.log(`[Correct] Dictionary added to LLM prompt: ${dictionaryPromptEntries.length} entries (private+group+standard)`);
+    } else {
+      console.log(`[Correct] Dictionary NOT added to LLM prompt (dictionarySet=${dictionarySet} or no entries)`);
     }
     
     // Build patient name section for LLM to correct phonetically similar names
@@ -847,7 +1068,7 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
         : `Erstelle eine Beurteilung basierend auf folgendem Befund:\n\n<<<BEFUND_DATEN>>>${preprocessedBefund}<<<ENDE_DATEN>>>`;
 
       try {
-        const result = await callLLM(llmConfig, 
+        const result = await callLLM(llmConfig,
           [
             { role: 'system', content: BEURTEILUNG_SUGGEST_PROMPT },
             { role: 'user', content: userMessage }
@@ -858,6 +1079,7 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
         const suggestedBeurteilung = result.content;
         const duration = ((Date.now() - startTime) / 1000).toFixed(2);
         const tokens = result.tokens ? `${result.tokens.input}/${result.tokens.output}` : 'unknown';
+        logLLMCorrections('SuggestBeurteilung', befund || '', suggestedBeurteilung, dictionarySet);
         console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}, Output: ${suggestedBeurteilung.length} chars`);
         console.log('=== LLM Correction Complete ===\n');
 
@@ -908,12 +1130,12 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
           // Helper to correct a single field with chunking
           const correctFieldChunked = async (fieldName: string, fieldText: string): Promise<string> => {
             if (!fieldText?.trim()) return fieldText || '';
-            
+
             const chunks = splitTextIntoChunks(fieldText, LM_STUDIO_MAX_SENTENCES);
-            
+
             if (chunks.length === 1) {
               // Single chunk - process directly
-              const result = await callLLM(llmConfig, 
+              const result = await callLLM(llmConfig,
                 [
                   { role: 'system', content: enhancedSystemPrompt },
                   { role: 'user', content: `Korrigiere den folgenden diktierten Text (${fieldName}):\n<<<DIKTAT_START>>>${fieldText}<<<DIKTAT_ENDE>>>` }
@@ -925,34 +1147,35 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
               if (cleaned === null || !cleaned.trim()) {
                 cleaned = fieldText;
               }
+              logLLMCorrections(`Befund/${fieldName}`, fieldText, cleaned, dictionarySet);
               return cleaned;
             }
-            
+
             // Multiple chunks
             console.log(`[${fieldName}] Processing ${chunks.length} chunks`);
             const correctedChunks: string[] = [];
-            
+
             for (let i = 0; i < chunks.length; i++) {
               const chunk = chunks[i];
               console.log(`[${fieldName} Chunk ${i + 1}/${chunks.length}] ${chunk.length} chars`);
-              
-              const result = await callLLM(llmConfig, 
+
+              const result = await callLLM(llmConfig,
                 [
                   { role: 'system', content: enhancedSystemPrompt },
                   { role: 'user', content: `Korrigiere den folgenden diktierten Text:\n<<<DIKTAT_START>>>${chunk}<<<DIKTAT_ENDE>>>` }
                 ],
                 { temperature: 0.3, maxTokens: 1000 }
               );
-              
+
               // Use robust cleanup function
               let correctedChunk = cleanLLMOutput(result.content || chunk, chunk);
               if (correctedChunk === null || !correctedChunk.trim()) {
                 correctedChunk = chunk;
               }
-              
+              logLLMCorrections(`Befund/${fieldName}/Chunk${i + 1}`, chunk, correctedChunk, dictionarySet);
               correctedChunks.push(correctedChunk);
             }
-            
+
             return correctedChunks.join(' ').replace(/\s+/g, ' ').trim();
           };
           
@@ -1021,7 +1244,7 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
         const dynamicMaxTokens = Math.min(16000, Math.max(4000, Math.ceil(estimatedInputTokens * 1.5)));
         console.log(`[LLM] Dynamic maxTokens for befund: ${dynamicMaxTokens} (estimated input: ${estimatedInputTokens} tokens, total chars: ${totalInputChars})`);
 
-        const result = await callLLM(llmConfig, 
+        const result = await callLLM(llmConfig,
           [
             { role: 'system', content: enhancedBefundPrompt },
             { role: 'user', content: userMessage }
@@ -1030,16 +1253,20 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
         );
 
         const responseText = result.content || '{}';
-        
+
         try {
           const rawFields = JSON.parse(responseText) as BefundFields;
-          
+
           // Clean each field from LLM meta-comments
           const correctedFields: BefundFields = {
             methodik: cleanLLMOutput(rawFields.methodik || '', befundFields.methodik) || rawFields.methodik || '',
             befund: cleanLLMOutput(rawFields.befund || '', befundFields.befund) || rawFields.befund || '',
             beurteilung: cleanLLMOutput(rawFields.beurteilung || '', befundFields.beurteilung) || rawFields.beurteilung || ''
           };
+
+          if (hasMethodik) logLLMCorrections('Befund/Methodik', preprocessedBefundFields?.methodik || '', correctedFields.methodik, dictionarySet);
+          if (hasBefund) logLLMCorrections('Befund/Befund', preprocessedBefundFields?.befund || '', correctedFields.befund, dictionarySet);
+          if (hasBeurteilung) logLLMCorrections('Befund/Beurteilung', preprocessedBefundFields?.beurteilung || '', correctedFields.beurteilung, dictionarySet);
           
           const duration = ((Date.now() - startTime) / 1000).toFixed(2);
           const tokens = result.tokens ? `${result.tokens.input}/${result.tokens.output}` : 'unknown';
@@ -1124,23 +1351,23 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
             
             const chunkMessage = `<<<DIKTAT_START>>>${chunk}<<<DIKTAT_ENDE>>>`;
             
-            const chunkResult = await callLLM(llmConfig, 
+            const chunkResult = await callLLM(llmConfig,
               [
                 { role: 'system', content: chunkSystemPrompt },
                 { role: 'user', content: chunkMessage }
               ],
               { temperature: 0.3, maxTokens: 1000 }
             );
-            
+
             // Use robust cleanup function
             let correctedChunk = cleanLLMOutput(chunkResult.content || chunk, chunk);
-            
+
             // If cleanup returned null (LLM malfunction) or empty string, use original chunk
             if (correctedChunk === null || !correctedChunk.trim()) {
               console.log(`[Chunk ${i + 1}] Warning: LLM malfunction or empty result, using original`);
               correctedChunk = chunk;
             }
-            
+            logLLMCorrections(`Standard/Chunk${i + 1}`, chunk, correctedChunk, dictionarySet);
             correctedChunks.push(correctedChunk);
             
             if (chunkResult.tokens) {
@@ -1195,21 +1422,21 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
           const chunkEstimatedTokens = Math.ceil(chunk.length / 4);
           const chunkMaxTokens = Math.min(16000, Math.max(2000, Math.ceil(chunkEstimatedTokens * 1.5)));
           
-          const chunkResult = await callLLM(llmConfig, 
+          const chunkResult = await callLLM(llmConfig,
             [
               { role: 'system', content: cloudChunkSystemPrompt },
               { role: 'user', content: chunkMessage }
             ],
             { temperature: 0.3, maxTokens: chunkMaxTokens }
           );
-          
+
           let correctedChunk = cleanLLMOutput(chunkResult.content || chunk, chunk);
-          
+
           if (correctedChunk === null || !correctedChunk.trim()) {
             console.log(`[Cloud Chunk ${i + 1}] Warning: Empty result, using original`);
             correctedChunk = chunk;
           }
-          
+          logLLMCorrections(`Standard/CloudChunk${i + 1}`, chunk, correctedChunk, dictionarySet);
           correctedChunks.push(correctedChunk);
           
           if (chunkResult.tokens) {
@@ -1259,13 +1486,14 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
 
       // Use robust cleanup function
       let correctedText = cleanLLMOutput(result.content || preprocessedText);
-      
+
       // If cleanup returned null (LLM malfunction), use original preprocessed text
       if (correctedText === null) {
         console.log(`[Warning] LLM malfunction detected, returning original text without correction`);
         correctedText = preprocessedText;
       }
-      
+      logLLMCorrections('Standard/Single', preprocessedText, correctedText, dictionarySet);
+
       // Warn if output is significantly shorter than input (potential truncation)
       const inputLength = preprocessedText.length;
       const outputLength = correctedText.length;
@@ -1274,10 +1502,10 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
         console.warn(`[WARNING] Output significantly shorter than input! Input: ${inputLength} chars, Output: ${outputLength} chars (${(lengthRatio * 100).toFixed(1)}%). Possible truncation detected.`);
         console.warn(`[WARNING] Check if maxTokens (${dynamicMaxTokens}) was sufficient. Output tokens used: ${result.tokens?.output || 'unknown'}`);
       }
-      
+
       // Berechne Änderungsscore für Ampelsystem (compare with original text, not preprocessed)
       const changeScore = calculateChangeScore(text || '', correctedText);
-      
+
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
       const tokens = result.tokens ? `${result.tokens.input}/${result.tokens.output}` : 'unknown';
       console.log(`[Success] Duration: ${duration}s, Tokens (in/out): ${tokens}, Output: ${correctedText.length} chars, Change: ${changeScore}%`);

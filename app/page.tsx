@@ -78,7 +78,7 @@ interface RuntimeConfig {
 }
 
 type TextInsertionTarget = 'transcript' | BefundField;
-type DictionarySet = 'alltag' | 'medical' | 'abteilung';
+type DictionarySet = 'alltag' | 'medical';
 
 interface CaretSelection {
   start: number;
@@ -726,7 +726,7 @@ function getTextareaCaretOverlay(
 
 export default function HomePage() {
   const { username, autoCorrect, defaultMode, getAuthHeader, getDbTokenHeader } = useAuth();
-  const [dictionarySet, setDictionarySet] = useState<DictionarySet>('alltag');
+  const [dictionarySet, setDictionarySet] = useState<DictionarySet>('medical');
   const [dictionarySetSaving, setDictionarySetSaving] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -1648,7 +1648,7 @@ export default function HomePage() {
   // Wörterbuch-Set beim Start laden (nutzerspezifisch, sessionübergreifend)
   useEffect(() => {
     if (!username) {
-      setDictionarySet('alltag');
+      setDictionarySet('medical');
       return;
     }
 
@@ -1667,10 +1667,10 @@ export default function HomePage() {
         if (cancelled) return;
 
         const nextSet = data?.dictionarySet;
-        if (nextSet === 'alltag' || nextSet === 'medical' || nextSet === 'abteilung') {
+        if (nextSet === 'alltag' || nextSet === 'medical') {
           setDictionarySet(nextSet);
         } else {
-          setDictionarySet('alltag');
+          setDictionarySet('medical');
         }
       } catch (error) {
         if (!cancelled) {
@@ -4003,21 +4003,25 @@ export default function HomePage() {
     setBusy(true);
     setError(null);
     setCorrecting(true);
+    console.log(`[Korrigieren] handleFormatBefund START, dictionarySet=${dictionarySet}, mode=${mode}`);
     try {
       const res = await fetchWithDbToken('/api/correct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           befundFields: {
             methodik: methodik,
             befund: transcript,
             beurteilung: beurteilung
           },
-          username
+          username,
+          dictionarySet
         }),
       });
+      console.log(`[Korrigieren] handleFormatBefund response: ok=${res.ok} status=${res.status}`);
       if (res.ok) {
         const data = await res.json();
+        console.log(`[Korrigieren] handleFormatBefund data:`, data);
         if (data.befundFields) {
           setMethodik(data.befundFields.methodik || methodik);
           setTranscript(data.befundFields.befund || transcript);
@@ -4028,45 +4032,60 @@ export default function HomePage() {
           setChangeScore(data.changeScore ?? null);
           setCanRevert(true);
           setPendingCorrection(false);
+          console.log(`[Korrigieren] Befund-Felder aktualisiert, changeScore=${data.changeScore}`);
+        } else {
+          console.warn(`[Korrigieren] Response ok, aber keine befundFields in der Antwort`);
         }
       } else {
+        const errText = await res.text().catch(() => '');
+        console.error(`[Korrigieren] Server-Fehler: ${res.status} ${res.statusText}`, errText);
         throw new Error('Korrektur fehlgeschlagen');
       }
     } catch (err: any) {
+      console.error(`[Korrigieren] Fehler:`, err);
       setError(err.message || 'Fehler bei der Korrektur');
     } finally {
       setCorrecting(false);
       setBusy(false);
+      console.log(`[Korrigieren] handleFormatBefund END`);
     }
   }
 
   // Manuelle Korrektur für Arztbrief-Modus
   async function handleManualCorrect() {
     if (!transcript.trim()) return;
-    
+
     setBusy(true);
     setError(null);
     setCorrecting(true);
+    console.log(`[Korrigieren] handleManualCorrect START, dictionarySet=${dictionarySet}, transcript=${transcript.length} chars`);
     try {
       const res = await fetchWithDbToken('/api/correct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: transcript, username }),
+        body: JSON.stringify({ text: transcript, username, dictionarySet }),
       });
+      console.log(`[Korrigieren] handleManualCorrect response: ok=${res.ok} status=${res.status}`);
       if (res.ok) {
         const data = await res.json();
+        console.log(`[Korrigieren] handleManualCorrect data:`, data);
         setTranscript(data.correctedText || transcript);
         setChangeScore(data.changeScore ?? null);
         setCanRevert(true);
         setPendingCorrection(false);
+        console.log(`[Korrigieren] Transcript aktualisiert, changeScore=${data.changeScore}`);
       } else {
+        const errText = await res.text().catch(() => '');
+        console.error(`[Korrigieren] Server-Fehler: ${res.status} ${res.statusText}`, errText);
         throw new Error('Korrektur fehlgeschlagen');
       }
     } catch (err: any) {
+      console.error(`[Korrigieren] Fehler:`, err);
       setError(err.message || 'Fehler bei der Korrektur');
     } finally {
       setCorrecting(false);
       setBusy(false);
+      console.log(`[Korrigieren] handleManualCorrect END`);
     }
   }
 
@@ -4494,32 +4513,30 @@ export default function HomePage() {
               </button>
             </div>
             <div className="flex flex-col gap-1 items-center justify-center">
-              <div className="inline-flex rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <button
-                  className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${dictionarySet === 'alltag' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
-                  onClick={() => void persistDictionarySet('alltag')}
-                  disabled={dictionarySetSaving}
-                  title="Alltag: kein Wörterbuch"
-                >
-                  Alltag
-                </button>
-                <button
-                  className={`px-2.5 py-1.5 text-xs font-medium border-l border-gray-200 dark:border-gray-700 transition-colors ${dictionarySet === 'medical' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
-                  onClick={() => void persistDictionarySet('medical')}
-                  disabled={dictionarySetSaving}
-                  title="Medical: Standard + persönliches Wörterbuch"
-                >
-                  Medical
-                </button>
-                <button
-                  className={`px-2.5 py-1.5 text-xs font-medium border-l border-gray-200 dark:border-gray-700 transition-colors ${dictionarySet === 'abteilung' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
-                  onClick={() => void persistDictionarySet('abteilung')}
-                  disabled={dictionarySetSaving}
-                  title="Abteilung: Abteilungs- + persönliches Wörterbuch"
-                >
-                  Abteilung
-                </button>
-              </div>
+              <button
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                  dictionarySet === 'medical'
+                    ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+                onClick={() => void persistDictionarySet(dictionarySet === 'medical' ? 'alltag' : 'medical')}
+                disabled={dictionarySetSaving}
+                title={
+                  dictionarySet === 'medical'
+                    ? 'Medical-Modus: alle phonetischen Wörterbücher (Standard, Abteilung, persönlich) sind aktiv. Klicken zum Umschalten auf Alltag.'
+                    : 'Alltag-Modus: alle Wörterbücher sind aus. Klicken zum Umschalten auf Medical.'
+                }
+                aria-pressed={dictionarySet === 'medical'}
+                aria-label={dictionarySet === 'medical' ? 'Wörterbuch-Modus: Medical (an)' : 'Wörterbuch-Modus: Alltag (aus)'}
+              >
+                <span
+                  className={`inline-block w-2 h-2 rounded-full ${
+                    dictionarySet === 'medical' ? 'bg-white' : 'bg-gray-400'
+                  }`}
+                  aria-hidden="true"
+                />
+                {dictionarySet === 'medical' ? 'Medical' : 'Alltag'}
+              </button>
             </div>
           </div>
           <div className="flex items-center gap-2">

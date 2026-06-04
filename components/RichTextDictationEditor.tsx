@@ -110,6 +110,20 @@ function insertPlainText(text: string) {
   selection.addRange(range);
 }
 
+function getFormatsForSelection(formats: RichTextFormatRange[], start: number, end: number): RichTextFormatRange[] {
+  return formats
+    .filter((range) => range.end > start && range.start < end)
+    .map((range) => ({
+      ...range,
+      start: Math.max(range.start, start) - start,
+      end: Math.min(range.end, end) - start,
+    }));
+}
+
+function buildClipboardHtml(html: string): string {
+  return `<!doctype html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`;
+}
+
 export default function RichTextDictationEditor({
   editorRef,
   value,
@@ -173,6 +187,20 @@ export default function RichTextDictationEditor({
           const pastedText = event.clipboardData.getData('text/plain');
           insertPlainText(pastedText);
           onChange(getEditorText(event.currentTarget), event.currentTarget);
+        }}
+        onCopy={(event) => {
+          const resolvedSelection = resolveSelection(event.currentTarget);
+          if (!resolvedSelection || resolvedSelection.start === resolvedSelection.end) return;
+
+          const start = Math.min(resolvedSelection.start, resolvedSelection.end);
+          const end = Math.max(resolvedSelection.start, resolvedSelection.end);
+          const selectedText = value.slice(start, end).normalize('NFC');
+          const selectedFormats = getFormatsForSelection(formats, start, end);
+          const selectedHtml = buildRichTextHtml(selectedText, selectedFormats).normalize('NFC');
+
+          event.preventDefault();
+          event.clipboardData.setData('text/plain', selectedText);
+          event.clipboardData.setData('text/html', buildClipboardHtml(selectedHtml));
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter') {

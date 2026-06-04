@@ -38,18 +38,31 @@ function logHotkeyEvent(action: string, source: HotkeyTriggerSource, details?: R
 
 // Hilfsfunktion zum Kopieren in die Zwischenablage
 async function copyToClipboard(text: string): Promise<void> {
-  await navigator.clipboard.writeText(text);
+  const normalizedText = text.normalize('NFC');
+
+  if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+    const item = new ClipboardItem({
+      'text/plain': new Blob([normalizedText], { type: 'text/plain;charset=utf-8' }),
+    });
+    await navigator.clipboard.write([item]);
+    return;
+  }
+
+  await navigator.clipboard.writeText(normalizedText);
 }
 
 async function copyRichTextToClipboard(text: string, html: string): Promise<void> {
+  const normalizedText = text.normalize('NFC');
+  const htmlDocument = `<!doctype html><html><head><meta charset="utf-8"></head><body>${html.normalize('NFC')}</body></html>`;
+
   if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
-    await copyToClipboard(text);
+    await navigator.clipboard.writeText(normalizedText);
     return;
   }
 
   const item = new ClipboardItem({
-    'text/plain': new Blob([text], { type: 'text/plain' }),
-    'text/html': new Blob([html], { type: 'text/html' }),
+    'text/plain': new Blob([normalizedText], { type: 'text/plain;charset=utf-8' }),
+    'text/html': new Blob([htmlDocument], { type: 'text/html;charset=utf-8' }),
   });
   await navigator.clipboard.write([item]);
 }
@@ -4403,12 +4416,15 @@ export default function HomePage() {
     const target = e.target as HTMLElement;
     
     // Prüfe ob das Ziel oder ein Elternelement ein interaktives Element ist
-    const interactiveSelectors = 'button, a, input, textarea, select, [role="button"], [tabindex]:not([tabindex="-1"])';
+    const interactiveSelectors = 'button, a, input, textarea, select, [contenteditable="true"], [role="button"], [role="textbox"], [tabindex]:not([tabindex="-1"])';
     const isInteractive = target.closest(interactiveSelectors);
     
     // Prüfe ob ein Textfeld fokussiert ist (blinkender Cursor)
     const activeElement = document.activeElement;
-    const isEditing = activeElement?.tagName === 'TEXTAREA' || activeElement?.tagName === 'INPUT';
+    const isEditing = activeElement?.tagName === 'TEXTAREA'
+      || activeElement?.tagName === 'INPUT'
+      || activeElement?.getAttribute('contenteditable') === 'true'
+      || activeElement?.getAttribute('role') === 'textbox';
     
     // Nur wenn nicht interaktiv und nicht am Editieren
     if (!isInteractive && !isEditing) {

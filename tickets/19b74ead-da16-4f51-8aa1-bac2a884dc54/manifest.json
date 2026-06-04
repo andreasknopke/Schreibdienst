@@ -1,0 +1,87 @@
+{
+  "ticket_id": "19b74ead-da16-4f51-8aa1-bac2a884dc54",
+  "title": "ü, ä,ö werden komisch in Meona übertragen",
+  "type": "bug",
+  "urgency": "normal",
+  "system": {
+    "id": 2,
+    "name": "Schreibdienst",
+    "repo": "andreasknopke/Schreibdienst"
+  },
+  "run": {
+    "id": 192,
+    "started_at": "2026-06-04 08:25:52",
+    "current_stage": "planning",
+    "recommended_executor": null
+  },
+  "steps": [
+    {
+      "id": 1088,
+      "stage": "triage",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 5,
+      "staff_name": "Triage-Bot",
+      "provider": "openai_local",
+      "model": "gemma-4",
+      "duration_ms": 3095
+    },
+    {
+      "id": 1089,
+      "stage": "security",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 7,
+      "staff_name": "Security-Bot",
+      "provider": "openai_local",
+      "model": "gemma-4",
+      "duration_ms": 11585
+    },
+    {
+      "id": 1090,
+      "stage": "approval",
+      "status": "done",
+      "executor_kind": "human",
+      "staff_id": 4,
+      "staff_name": "Michael",
+      "provider": null,
+      "model": null,
+      "duration_ms": null
+    },
+    {
+      "id": 1098,
+      "stage": "planning",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 6,
+      "staff_name": "Architect-Bot",
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "duration_ms": 325
+    },
+    {
+      "id": 1101,
+      "stage": "integration",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 8,
+      "staff_name": "Integration-Bot",
+      "provider": "mistral",
+      "model": "mistral-large-latest",
+      "duration_ms": 14901
+    },
+    {
+      "id": 1102,
+      "stage": "approval",
+      "status": "waiting_human",
+      "executor_kind": "human",
+      "staff_id": 1,
+      "staff_name": "Christian",
+      "provider": null,
+      "model": null,
+      "duration_ms": null
+    }
+  ],
+  "exported_at": "2026-06-04T13:14:05.759Z",
+  "dispatch_note": null
+}

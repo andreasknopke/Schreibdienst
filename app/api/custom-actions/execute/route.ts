@@ -53,7 +53,7 @@ async function callLLM(
   }
   
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    'Content-Type': 'application/json; charset=utf-8',
   };
   
   if (config.provider === 'openai' || config.provider === 'mistral') {

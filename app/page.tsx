@@ -5137,7 +5137,7 @@ export default function HomePage() {
       )}
 
       {/* Seitliche Panels: Hilfe */}
-      <div className="fixed right-0 top-1/2 z-40 hidden -translate-y-1/2 md:flex items-start">
+      <div className="fixed right-0 top-[18vh] z-40 hidden md:flex items-start">
         <aside
           className={`w-80 max-w-[80vw] max-h-[calc(100vh-9rem)] overflow-y-auto rounded-l-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
             showCheatSheetPanel
@@ -5179,13 +5179,18 @@ export default function HomePage() {
       </div>
 
       {/* Seitliches Panel: Updates direkt unter Hilfe */}
-      <div className="fixed right-0 top-[calc(50%+4.75rem)] z-40 hidden md:flex items-start">
+      <div className="fixed right-0 top-[calc(18vh+4.25rem)] z-40 hidden md:flex items-start">
         <aside
-          className={`w-80 max-w-[80vw] max-h-[calc(100vh-9rem)] overflow-y-auto rounded-l-xl border border-blue-200 dark:border-blue-900/60 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
+          className={`overflow-y-auto rounded-l-xl border border-blue-200 dark:border-blue-900/60 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
             showUpdatePanel
               ? 'mr-2 translate-x-0 opacity-100'
               : 'mr-0 translate-x-full opacity-0 pointer-events-none'
           }`}
+          style={{
+            width: 'min(42rem, calc(100vw - 4.5rem))',
+            maxWidth: 'calc(100vw - 4.5rem)',
+            maxHeight: 'calc(82vh - 6.25rem)',
+          }}
           aria-hidden={!showUpdatePanel}
         >
           <div className="px-4 py-3 border-b border-blue-200 dark:border-blue-900/60">

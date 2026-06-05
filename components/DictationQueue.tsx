@@ -1885,9 +1885,11 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                   
                   {/* Text Content - using same EditableTextWithMitlesen as normal user view */}
                   <EditableTextWithMitlesen
+                    key={selectedDictation.id}
                     text={editedTexts.corrected_text}
                     originalText={formattedRawText}
                     savedText={savedText}
+                    dictionaryTargetUsername={selectedDictation.username}
                     originalSegments={parsedSegments}
                     audioCurrentTime={audioCurrentTime}
                     audioRef={audioRef}
@@ -2443,9 +2445,11 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                     <div className="flex gap-2">
                       <div className="flex-1">
                         <EditableTextWithMitlesen
+                          key={selectedDictation.id}
                           text={editedTexts.corrected_text}
                           originalText={formattedRawText}
                           savedText={savedText}
+                          dictionaryTargetUsername={selectedDictation.username}
                           originalSegments={parsedSegments}
                           audioCurrentTime={audioCurrentTime}
                           audioRef={audioRef}

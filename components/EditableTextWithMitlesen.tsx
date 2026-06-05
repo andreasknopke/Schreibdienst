@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { diffWordsWithSpace } from 'diff';
 import { buildAnchorTimestampTable, type AnchorOriginalWord, type AnchorCorrectedWord } from '../lib/anchorMatching';
+import ManualCorrectionSuggestion from './ManualCorrectionSuggestion';
 
 // Word with timestamp for highlighting
 interface TimestampedWord {
@@ -68,6 +69,12 @@ interface EditableTextWithMitlesenProps {
   showMitlesen?: boolean;
   className?: string;
   disabled?: boolean;
+  dictionaryTargetUsername?: string;
+}
+
+interface ManualWordChange {
+  originalWord: string;
+  newWord: string;
 }
 
 /**
@@ -169,6 +176,40 @@ function parseWords(text: string): ParsedWord[] {
   }
   
   return words;
+}
+
+function extractSuggestionTokens(text: string): string[] {
+  return text.match(/[A-Za-zÄÖÜäöüß0-9]+(?:[-'][A-Za-zÄÖÜäöüß0-9]+)*/g) || [];
+}
+
+function extractLastManualWordChange(previousText: string, nextText: string): ManualWordChange | null {
+  if (!previousText || !nextText || previousText === nextText) return null;
+
+  const parts = diffWordsWithSpace(previousText, nextText);
+  let lastRemovedWord: string | null = null;
+  let lastAddedWord: string | null = null;
+
+  for (const part of parts) {
+    const tokens = extractSuggestionTokens(part.value || '');
+    if (tokens.length === 0) continue;
+
+    if (part.removed) {
+      lastRemovedWord = tokens[tokens.length - 1];
+      continue;
+    }
+
+    if (part.added) {
+      lastAddedWord = tokens[tokens.length - 1];
+    }
+  }
+
+  if (!lastRemovedWord || !lastAddedWord) return null;
+  if (lastRemovedWord.toLowerCase() === lastAddedWord.toLowerCase()) return null;
+
+  return {
+    originalWord: lastRemovedWord,
+    newWord: lastAddedWord,
+  };
 }
 
 /**
@@ -287,6 +328,7 @@ export default function EditableTextWithMitlesen({
   showMitlesen = false,
   className = '',
   disabled = false,
+  dictionaryTargetUsername,
 }: EditableTextWithMitlesenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editableRef = useRef<HTMLDivElement>(null);
@@ -296,6 +338,7 @@ export default function EditableTextWithMitlesen({
   // Dedicated edit mode state
   const [isManualEditMode, setIsManualEditMode] = useState(false);
   const [editModeText, setEditModeText] = useState('');
+  const [lastManualChange, setLastManualChange] = useState<ManualWordChange | null>(null);
   
   // Sync with prop changes (only when not in manual edit mode)
   useEffect(() => {
@@ -306,6 +349,7 @@ export default function EditableTextWithMitlesen({
   
   // Enter manual edit mode
   const handleStartEdit = useCallback(() => {
+    setLastManualChange(null);
     setEditModeText(localText);
     setIsManualEditMode(true);
     // Focus textarea after render
@@ -322,11 +366,19 @@ export default function EditableTextWithMitlesen({
   
   // Apply manual edit - save changes and exit edit mode
   const handleApplyEdit = useCallback(() => {
+    const detectedChange = extractLastManualWordChange(localText, editModeText);
     setLocalText(editModeText);
     onChange(editModeText);
     setIsManualEditMode(false);
     setEditModeText('');
-  }, [editModeText, onChange]);
+    setLastManualChange(detectedChange);
+  }, [editModeText, localText, onChange]);
+
+  useEffect(() => {
+    if (savedText === localText) {
+      setLastManualChange(null);
+    }
+  }, [savedText, localText]);
   
   // Build STABLE timestamp table based on the saved/initial text (not localText)
   // This ensures timestamps don't jump around during manual editing
@@ -769,6 +821,15 @@ export default function EditableTextWithMitlesen({
         >
           {localText}
         </div>
+        {lastManualChange && !disabled && (
+          <ManualCorrectionSuggestion
+            originalWord={lastManualChange.originalWord}
+            newWord={lastManualChange.newWord}
+            targetUsername={dictionaryTargetUsername}
+            onConfirm={() => setLastManualChange(null)}
+            onCancel={() => setLastManualChange(null)}
+          />
+        )}
       </div>
     );
   }
@@ -821,6 +882,15 @@ export default function EditableTextWithMitlesen({
       >
         {renderContent()}
       </div>
+      {lastManualChange && !disabled && (
+        <ManualCorrectionSuggestion
+          originalWord={lastManualChange.originalWord}
+          newWord={lastManualChange.newWord}
+          targetUsername={dictionaryTargetUsername}
+          onConfirm={() => setLastManualChange(null)}
+          onCancel={() => setLastManualChange(null)}
+        />
+      )}
     </div>
   );
 }

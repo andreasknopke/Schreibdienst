@@ -5136,78 +5136,77 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Seitliche Panels: Updates und Hilfe */}
-      <div className="fixed right-0 top-1/2 z-40 hidden -translate-y-1/2 md:flex flex-col items-end gap-3">
-        <div className="flex items-start">
-          <aside
-            className={`w-80 max-w-[80vw] max-h-[calc(100vh-9rem)] overflow-y-auto rounded-l-xl border border-blue-200 dark:border-blue-900/60 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
-              showUpdatePanel
-                ? 'mr-2 translate-x-0 opacity-100'
-                : 'mr-0 translate-x-full opacity-0 pointer-events-none'
-            }`}
-            aria-hidden={!showUpdatePanel}
-          >
-            <div className="px-4 py-3 border-b border-blue-200 dark:border-blue-900/60">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Updates</h3>
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Versionshinweise und neue Versionen</p>
-            </div>
-            <div className="px-4 py-3">
-              <UpdatePanel />
-            </div>
-          </aside>
+      {/* Seitliche Panels: Hilfe */}
+      <div className="fixed right-0 top-1/2 z-40 hidden -translate-y-1/2 md:flex items-start">
+        <aside
+          className={`w-80 max-w-[80vw] max-h-[calc(100vh-9rem)] overflow-y-auto rounded-l-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
+            showCheatSheetPanel
+              ? 'mr-2 translate-x-0 opacity-100'
+              : 'mr-0 translate-x-full opacity-0 pointer-events-none'
+          }`}
+          aria-hidden={!showCheatSheetPanel}
+        >
+          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sprachbefehle Cheat-Sheet</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Live-Diktat Kurzhilfe</p>
+          </div>
+          <div className="px-4 py-3 space-y-3">
+            {DICTATION_CHEAT_SHEET_SECTIONS.map((section) => (
+              <div key={section.title}>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-1">{section.title}</h4>
+                <ul className="space-y-1">
+                  {section.commands.map((command) => (
+                    <li key={command} className="text-xs text-gray-600 dark:text-gray-300 leading-snug">
+                      • {command}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </aside>
 
-          <button
-            className="h-16 w-10 rounded-l-xl border border-r-0 border-blue-200 dark:border-blue-900/60 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-gray-700"
-            onClick={() => setShowUpdatePanel((current) => !current)}
-            title={showUpdatePanel ? 'Updates schliessen' : 'Updates oeffnen'}
-            aria-label={showUpdatePanel ? 'Updates schliessen' : 'Updates oeffnen'}
-            aria-expanded={showUpdatePanel}
-          >
-            <span className="block text-[11px] leading-tight">Update</span>
-            <span className="block text-base leading-none mt-0.5">{showUpdatePanel ? '›' : '‹'}</span>
-          </button>
-        </div>
+        <button
+          className="h-16 w-10 rounded-l-xl border border-r-0 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+          onClick={() => setShowCheatSheetPanel((current) => !current)}
+          title={showCheatSheetPanel ? 'Cheat-Sheet schliessen' : 'Cheat-Sheet oeffnen'}
+          aria-label={showCheatSheetPanel ? 'Cheat-Sheet schliessen' : 'Cheat-Sheet oeffnen'}
+          aria-expanded={showCheatSheetPanel}
+        >
+          <span className="block text-[11px] leading-tight">Hilfe</span>
+          <span className="block text-base leading-none mt-0.5">{showCheatSheetPanel ? '›' : '‹'}</span>
+        </button>
+      </div>
 
-        <div className="flex items-start">
-          <aside
-            className={`w-80 max-w-[80vw] max-h-[calc(100vh-9rem)] overflow-y-auto rounded-l-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
-              showCheatSheetPanel
-                ? 'mr-2 translate-x-0 opacity-100'
-                : 'mr-0 translate-x-full opacity-0 pointer-events-none'
-            }`}
-            aria-hidden={!showCheatSheetPanel}
-          >
-            <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sprachbefehle Cheat-Sheet</h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Live-Diktat Kurzhilfe</p>
-            </div>
-            <div className="px-4 py-3 space-y-3">
-              {DICTATION_CHEAT_SHEET_SECTIONS.map((section) => (
-                <div key={section.title}>
-                  <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-1">{section.title}</h4>
-                  <ul className="space-y-1">
-                    {section.commands.map((command) => (
-                      <li key={command} className="text-xs text-gray-600 dark:text-gray-300 leading-snug">
-                        • {command}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </aside>
+      {/* Seitliches Panel: Updates direkt unter Hilfe */}
+      <div className="fixed right-0 top-[calc(50%+4.75rem)] z-40 hidden md:flex items-start">
+        <aside
+          className={`w-80 max-w-[80vw] max-h-[calc(100vh-9rem)] overflow-y-auto rounded-l-xl border border-blue-200 dark:border-blue-900/60 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
+            showUpdatePanel
+              ? 'mr-2 translate-x-0 opacity-100'
+              : 'mr-0 translate-x-full opacity-0 pointer-events-none'
+          }`}
+          aria-hidden={!showUpdatePanel}
+        >
+          <div className="px-4 py-3 border-b border-blue-200 dark:border-blue-900/60">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Updates</h3>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Versionshinweise und neue Versionen</p>
+          </div>
+          <div className="px-4 py-3">
+            <UpdatePanel />
+          </div>
+        </aside>
 
-          <button
-            className="h-16 w-10 rounded-l-xl border border-r-0 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-            onClick={() => setShowCheatSheetPanel((current) => !current)}
-            title={showCheatSheetPanel ? 'Cheat-Sheet schliessen' : 'Cheat-Sheet oeffnen'}
-            aria-label={showCheatSheetPanel ? 'Cheat-Sheet schliessen' : 'Cheat-Sheet oeffnen'}
-            aria-expanded={showCheatSheetPanel}
-          >
-            <span className="block text-[11px] leading-tight">Hilfe</span>
-            <span className="block text-base leading-none mt-0.5">{showCheatSheetPanel ? '›' : '‹'}</span>
-          </button>
-        </div>
+        <button
+          className="h-16 w-10 rounded-l-xl border border-r-0 border-blue-200 dark:border-blue-900/60 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-gray-700"
+          onClick={() => setShowUpdatePanel((current) => !current)}
+          title={showUpdatePanel ? 'Updates schliessen' : 'Updates oeffnen'}
+          aria-label={showUpdatePanel ? 'Updates schliessen' : 'Updates oeffnen'}
+          aria-expanded={showUpdatePanel}
+        >
+          <span className="block text-[11px] leading-tight">Update</span>
+          <span className="block text-base leading-none mt-0.5">{showUpdatePanel ? '›' : '‹'}</span>
+        </button>
       </div>
 
       {/* Custom Actions Manager Modal */}

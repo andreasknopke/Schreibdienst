@@ -194,6 +194,9 @@ function isAcronymLikeTerm(term: string): boolean {
     return false;
   }
 
+  // Title-case (Satzanfang) wie "Das", "Der", "Ist" sind keine Akronyme
+  if (/^[A-Z][a-z]+$/.test(asciiLetters)) return false;
+
   const uppercaseCount = (term.match(/[A-Z]/g) ?? []).length;
   const lowercaseCount = (term.match(/[a-z]/g) ?? []).length;
 

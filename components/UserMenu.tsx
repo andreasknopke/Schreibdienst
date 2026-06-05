@@ -10,6 +10,7 @@ import HelpPanel from './HelpPanel';
 import StandardDictionaryManager from './StandardDictionaryManager';
 import GroupDictionaryManager from './GroupDictionaryManager';
 import BugReportForm from './BugReportForm';
+import { APP_VERSION } from '@/lib/version';
 import {
   connectGrundigSonicMic,
   getHidMediaControlStatus,
@@ -300,6 +301,9 @@ export default function UserMenu() {
         <span className="text-xs text-gray-500 hidden sm:inline">
           {username}
           {isAdmin && <span className="ml-1 text-blue-600">(Admin)</span>}
+        </span>
+        <span className="hidden text-xs text-gray-400 sm:inline" title="Installierte Version">
+          v{APP_VERSION}
         </span>
         {mounted && hidSupported && !hidConnected && (
           <button

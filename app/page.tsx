@@ -14,6 +14,7 @@ import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
 import RichTextDictationEditor, { getRichTextSelection } from '@/components/RichTextDictationEditor';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
+import UpdatePanel from '@/components/UpdatePanel';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
@@ -5070,6 +5071,8 @@ export default function HomePage() {
             
             {/* Warnbanner bei signifikanten Änderungen */}
             <ChangeWarningBanner score={changeScore} />
+
+            <UpdatePanel />
             
             {/* Diff View für Arztbrief */}
             {showDiffView && preCorrectionState && !isReverted && preCorrectionState.transcript && (

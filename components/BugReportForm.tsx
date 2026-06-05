@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from './AuthProvider';
+import { APP_VERSION } from '@/lib/version';
 
 type TicketType = 'bug' | 'feature';
 type SubmitStatus = 'form' | 'success' | 'error';
@@ -159,7 +160,7 @@ export default function BugReportForm({ open, onClose }: BugReportFormProps) {
         language: navigator.language,
         screen: `${window.screen?.width || 0}x${window.screen?.height || 0}`,
         timestamp: new Date().toISOString(),
-        appVersion: process.env.NEXT_PUBLIC_APP_VERSION || '0.1.0',
+        appVersion: APP_VERSION,
         reporterEmail: trimmedContactEmail || undefined,
         reporterName: username || undefined,
         userName: username || undefined,

@@ -687,7 +687,15 @@ function findAcronymPhoneticMatch(
   const wordCore = extractLetterCore(word);
   if (wordCore.length < 3) return null;
 
+  // Kurze Akronyme (2–3 Buchstaben) werden als Einzelbuchstaben gesprochen
+  // (D-A-S, C-R-P). Liefert die STT ein kurzes Wort ohne Akronym-Charakter
+  // ("das", "der", "ist" …), darf kein Treffer erfolgen.
+  // Längere Akronyme (FLAIR, STIR, DAS28-CRP) werden phonetisch gesprochen
+  // und bleiben ungefiltert.
+  if (wordCore.length <= 3 && !isAcronymLikeTerm(word)) return null;
+
   const alphaParts = splitIntoAlphaParts(word);
+  const isShortInput = wordCore.length <= 3;
 
   let bestMatch: PhoneticMatchResult | null = null;
 
@@ -695,6 +703,7 @@ function findAcronymPhoneticMatch(
     if (!entry.isAcronymLike) continue;
 
     const entryCore = entry.wrongNorm;
+    const isShortEntry = entryCore.length <= 3;
 
     // 1. Buchstabenkern-Levenshtein (Patch 1): direkter Vergleich ohne Phonetik
     const coreDist = levenshtein(wordCore, entryCore);
@@ -702,6 +711,9 @@ function findAcronymPhoneticMatch(
     const coreSimilarity = 1 - coreDist / maxCoreLen;
 
     const minSim = getSimilarityThreshold(entry, false, wordCore.length);
+
+    // Kurze Einträge (≤3 Buchstaben) nur per exaktem Kern-Vergleich matchen
+    if (isShortEntry && wordCore !== entryCore) continue;
 
     if (coreSimilarity >= minSim) {
       const confidence = 0.5 + coreSimilarity * 0.5;
@@ -716,16 +728,16 @@ function findAcronymPhoneticMatch(
       }
     }
 
-    // Nur bei nicht-triviellem Overlap weitermachen (≥ 40 %)
-    if (coreSimilarity < 0.4) continue;
+    // Substring/Part-Matching nur für längere Eingaben UND Einträge
+    // (sonst Kollision mit deutschen Stoppwörtern wie "das" in "dascrp")
+    if (isShortInput || isShortEntry || coreSimilarity < 0.4) continue;
 
-    // 2. Substring-Prüfung (Patch 1): kürzerer Kern im längeren enthalten?
-    // z.B. "crp" in "asdascrp" → Hinweis auf verwandte Terme
+    // 2. Substring-Prüfung (Patch 1): kürzerer Kern (≥4 Buchst.) im längeren enthalten?
+    // z.B. "stir" in "stirn" → Hinweis auf verwandte Terme
     const shorter = wordCore.length <= entryCore.length ? wordCore : entryCore;
     const longer = wordCore.length > entryCore.length ? wordCore : entryCore;
-    if (shorter.length >= 2 && longer.includes(shorter)) {
+    if (shorter.length >= 4 && longer.includes(shorter)) {
       const substringRatio = shorter.length / longer.length;
-      // Je grösser der Overlap, desto höher das Vertrauen
       const confidence = 0.55 + substringRatio * 0.25;
       if (!bestMatch || confidence > bestMatch.confidence) {
         bestMatch = {
@@ -743,7 +755,6 @@ function findAcronymPhoneticMatch(
       if (part.length < 2) continue;
       const partLower = part.toLowerCase();
       if (partLower === entryCore) {
-        // Exakter Part-Match → hohes Vertrauen
         const confidence = 0.65;
         if (!bestMatch || confidence > bestMatch.confidence) {
           bestMatch = {
@@ -756,7 +767,6 @@ function findAcronymPhoneticMatch(
         }
         break;
       }
-      // Teilweise Übereinstimmung via Levenshtein
       const partDist = levenshtein(partLower, entryCore);
       const maxPartLen = Math.max(partLower.length, entryCore.length, 1);
       const partSimilarity = 1 - partDist / maxPartLen;

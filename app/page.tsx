@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, useCallback, type SetStateAction } from 'react';
+import { diffWordsWithSpace } from 'diff';
 import { Tabs } from '@/components/Tabs';
 import { exportDocx } from '@/lib/formatMedical';
 import Spinner from '@/components/Spinner';
@@ -12,6 +13,7 @@ import { buildRichTextHtml, normalizeRichTextRanges, remapRichTextRanges, type R
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
+import ManualCorrectionSuggestion from '@/components/ManualCorrectionSuggestion';
 import RichTextDictationEditor, { getRichTextSelection } from '@/components/RichTextDictationEditor';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
 import UpdatePanel from '@/components/UpdatePanel';
@@ -108,6 +110,11 @@ interface CaretOverlayPosition {
   visible: boolean;
 }
 
+interface ManualWordChange {
+  originalWord: string;
+  newWord: string;
+}
+
 interface TextInsertionResult {
   text: string;
   selection: CaretSelection;
@@ -188,6 +195,47 @@ const EMPTY_FIELD_TEXTS: Record<TextInsertionTarget, string> = {
   befund: '',
   beurteilung: '',
 };
+
+const EMPTY_MANUAL_WORD_CHANGES: Record<TextInsertionTarget, ManualWordChange | null> = {
+  transcript: null,
+  methodik: null,
+  befund: null,
+  beurteilung: null,
+};
+
+function extractSuggestionTokens(text: string): string[] {
+  return text.match(/[A-Za-zÄÖÜäöüß0-9]+(?:[-'][A-Za-zÄÖÜäöüß0-9]+)*/g) || [];
+}
+
+function extractLastManualWordChange(previousText: string, nextText: string): ManualWordChange | null {
+  if (!previousText || !nextText || previousText === nextText) return null;
+
+  const parts = diffWordsWithSpace(previousText, nextText);
+  let lastRemovedWord: string | null = null;
+  let lastAddedWord: string | null = null;
+
+  for (const part of parts) {
+    const tokens = extractSuggestionTokens(part.value || '');
+    if (tokens.length === 0) continue;
+
+    if (part.removed) {
+      lastRemovedWord = tokens[tokens.length - 1];
+      continue;
+    }
+
+    if (part.added) {
+      lastAddedWord = tokens[tokens.length - 1];
+    }
+  }
+
+  if (!lastRemovedWord || !lastAddedWord) return null;
+  if (lastRemovedWord.toLowerCase() === lastAddedWord.toLowerCase()) return null;
+
+  return {
+    originalWord: lastRemovedWord,
+    newWord: lastAddedWord,
+  };
+}
 
 const DICTATION_CHEAT_SHEET_SECTIONS: Array<{ title: string; commands: string[] }> = [
   {
@@ -912,6 +960,7 @@ export default function HomePage() {
   const [showCheatSheetPanel, setShowCheatSheetPanel] = useState(false);
   const [showUpdatePanel, setShowUpdatePanel] = useState(false);
   const previousFieldTextsRef = useRef<Record<TextInsertionTarget, string>>(EMPTY_FIELD_TEXTS);
+  const [manualCorrectionSuggestions, setManualCorrectionSuggestions] = useState<Record<TextInsertionTarget, ManualWordChange | null>>(EMPTY_MANUAL_WORD_CHANGES);
 
   // Custom Actions Manager
   const [showCustomActionsManager, setShowCustomActionsManager] = useState(false);
@@ -1918,11 +1967,17 @@ export default function HomePage() {
     setter: (nextValue: string) => void,
     textarea: HTMLTextAreaElement | HTMLDivElement
   ) => {
+    const previousValue = getFieldTextValue(field);
+    const detectedChange = extractLastManualWordChange(previousValue, value);
     setter(value);
+    setManualCorrectionSuggestions((current) => ({
+      ...current,
+      [field]: detectedChange,
+    }));
     setPendingCorrection(true);
     syncTextSelection(field, textarea);
     logManualCorrection(field);
-  }, [logManualCorrection, syncTextSelection]);
+  }, [getFieldTextValue, logManualCorrection, syncTextSelection]);
 
   const transcribeChunk = useCallback(async (blob: Blob, isLive: boolean = false, audioDurationSeconds?: number): Promise<string> => {
     try {
@@ -4834,6 +4889,15 @@ export default function HomePage() {
                     />
                   )}
                 </div>
+                {manualCorrectionSuggestions.methodik && (
+                  <ManualCorrectionSuggestion
+                    originalWord={manualCorrectionSuggestions.methodik.originalWord}
+                    newWord={manualCorrectionSuggestions.methodik.newWord}
+                    targetUsername={username || undefined}
+                    onConfirm={() => setManualCorrectionSuggestions((current) => ({ ...current, methodik: null }))}
+                    onCancel={() => setManualCorrectionSuggestions((current) => ({ ...current, methodik: null }))}
+                  />
+                )}
               </div>
             </div>
             {/* Action Buttons für Methodik */}
@@ -4912,6 +4976,15 @@ export default function HomePage() {
                     />
                   )}
                 </div>
+                {manualCorrectionSuggestions.befund && (
+                  <ManualCorrectionSuggestion
+                    originalWord={manualCorrectionSuggestions.befund.originalWord}
+                    newWord={manualCorrectionSuggestions.befund.newWord}
+                    targetUsername={username || undefined}
+                    onConfirm={() => setManualCorrectionSuggestions((current) => ({ ...current, befund: null }))}
+                    onCancel={() => setManualCorrectionSuggestions((current) => ({ ...current, befund: null }))}
+                  />
+                )}
                 {/* VAD Tentative Text: Zeigt an, dass gerade gesprochen wird */}
                 {recording && vad.isListening && tentativeText && (
                   <div className="px-2 py-1 text-sm italic text-gray-400 dark:text-gray-500 border-l-2 border-green-400 bg-green-50/50 dark:bg-green-900/20 rounded-r">
@@ -5006,6 +5079,15 @@ export default function HomePage() {
                     />
                   )}
                 </div>
+                {manualCorrectionSuggestions.beurteilung && (
+                  <ManualCorrectionSuggestion
+                    originalWord={manualCorrectionSuggestions.beurteilung.originalWord}
+                    newWord={manualCorrectionSuggestions.beurteilung.newWord}
+                    targetUsername={username || undefined}
+                    onConfirm={() => setManualCorrectionSuggestions((current) => ({ ...current, beurteilung: null }))}
+                    onCancel={() => setManualCorrectionSuggestions((current) => ({ ...current, beurteilung: null }))}
+                  />
+                )}
                 <button 
                   className="btn btn-primary w-full text-sm py-2" 
                   onClick={handleSuggestBeurteilung} 
@@ -5100,6 +5182,15 @@ export default function HomePage() {
                     />
                   )}
                 </div>
+                {manualCorrectionSuggestions.transcript && (
+                  <ManualCorrectionSuggestion
+                    originalWord={manualCorrectionSuggestions.transcript.originalWord}
+                    newWord={manualCorrectionSuggestions.transcript.newWord}
+                    targetUsername={username || undefined}
+                    onConfirm={() => setManualCorrectionSuggestions((current) => ({ ...current, transcript: null }))}
+                    onCancel={() => setManualCorrectionSuggestions((current) => ({ ...current, transcript: null }))}
+                  />
+                )}
                 {/* VAD Tentative Text: Zeigt an, dass gerade gesprochen wird */}
                 {recording && vad.isListening && tentativeText && (
                   <div className="px-2 py-1 text-sm italic text-gray-400 dark:text-gray-500 border-l-2 border-green-400 bg-green-50/50 dark:bg-green-900/20 rounded-r mt-1">

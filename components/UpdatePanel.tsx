@@ -211,20 +211,6 @@ export default function UpdatePanel({
             </div>
           )}
 
-          <ReleaseBlock
-            title="Installierte Version"
-            release={currentRelease}
-            emptyMessage="Fuer die installierte Version wurde noch keine GitHub-Release-Notiz gefunden."
-          />
-
-          {showLatestRelease && (
-            <ReleaseBlock
-              title="Neue verfuegbare Version"
-              release={latestRelease}
-              emptyMessage="Fuer die neueste Version liegt noch keine Zusammenfassung vor."
-            />
-          )}
-
           {recentReleases.length > 0 && (
             <div className="rounded-lg border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/60">
               <div className="flex items-start justify-between gap-3">
@@ -267,12 +253,28 @@ export default function UpdatePanel({
 
               <div className="mt-3">
                 <ReleaseBlock
-                  title="Ausgewaehltes Update"
+                  title="Versionshinweise"
                   release={selectedRecentRelease}
                   emptyMessage="Fuer dieses Update liegen keine Versionshinweise vor."
                 />
               </div>
             </div>
+          )}
+
+          {showLatestRelease && latestRelease && latestRelease.version !== selectedRecentRelease?.version && (
+            <ReleaseBlock
+              title="Neue verfuegbare Version"
+              release={latestRelease}
+              emptyMessage="Fuer die neueste Version liegt noch keine Zusammenfassung vor."
+            />
+          )}
+
+          {currentRelease && currentRelease.version !== selectedRecentRelease?.version && (
+            <ReleaseBlock
+              title="Installierte Version"
+              release={currentRelease}
+              emptyMessage="Fuer die installierte Version wurde noch keine GitHub-Release-Notiz gefunden."
+            />
           )}
 
           {data?.status === 'release-info-unavailable' && data.error && (

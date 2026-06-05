@@ -180,6 +180,17 @@ export function extractLetterCore(s: string): string {
 }
 
 /**
+ * Extrahiert den alphanumerischen Kern (a-z0-9) eines Wortes.
+ * Behält Ziffern bei – anders als normalizeForComparison / extractLetterCore.
+ * "DAS28-CRP" → "das28crp", "CRP" → "crp"
+ */
+function extractAlphanumericCore(s: string): string {
+  return s.toLowerCase()
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+/**
  * Teilt ein Wort in alpha-Teile an Zahlen und Nicht-Buchstaben.
  * "DAS28-CRP" → ["DAS", "CRP"], "CRP" → ["CRP"], "ASDAS-CRP" → ["ASDAS", "CRP"]
  * (Patch 3: Zahlen als Trennzeichen)
@@ -687,7 +698,8 @@ function findAcronymPhoneticMatch(
 ): PhoneticMatchResult | null {
   if (!word) return null;
 
-  const wordCore = extractLetterCore(word);
+  // Alphanumerischer Kern (mit Ziffern), damit "DAS28" ≠ "DAS" ≠ "das"
+  const wordCore = extractAlphanumericCore(word);
   if (wordCore.length < 3) return null;
 
   // Kurze Akronyme (2–3 Buchstaben) werden als Einzelbuchstaben gesprochen
@@ -705,7 +717,9 @@ function findAcronymPhoneticMatch(
   for (const entry of index.allEntries) {
     if (!entry.isAcronymLike) continue;
 
-    const entryCore = entry.wrongNorm;
+    // Ziffern-erhaltender Kern aus dem Original-Eintrag (nicht wrongNorm,
+    // das Ziffern entfernt – "DAS28" würde sonst zu "das" verstümmelt)
+    const entryCore = extractAlphanumericCore(entry.wrong);
     const isShortEntry = entryCore.length <= 3;
 
     // 1. Buchstabenkern-Levenshtein (Patch 1): direkter Vergleich ohne Phonetik

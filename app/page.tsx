@@ -3346,16 +3346,6 @@ export default function HomePage() {
             },
           };
           
-          // Context Bias aus Wörterbuch (Einträge mit useInPrompt=true)
-          const promptWords = dictionaryEntries
-            .filter(e => e.useInPrompt && e.correct)
-            .map(e => e.correct);
-          
-          if (promptWords.length > 0) {
-            sessionConfig.session.context_bias = promptWords;
-            console.log('[Voxtral] Sending context_bias with', promptWords.length, 'words');
-          }
-          
           ws.send(JSON.stringify(sessionConfig));
           
           try {

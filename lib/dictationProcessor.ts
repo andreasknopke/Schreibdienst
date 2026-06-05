@@ -374,11 +374,7 @@ async function transcribeWithProvider(
       result = await transcribeWithElevenLabs(audioBlob);
       break;
     case 'mistral':
-      // Wörterbuch-Begriffe als context_bias an Mistral übergeben
-      const contextBiasWords = initialPrompt
-        ? initialPrompt.split(',').map(w => w.trim()).filter(Boolean)
-        : [];
-      result = await transcribeWithMistral(audioBlob, contextBiasWords);
+      result = await transcribeWithMistral(audioBlob);
       break;
     case 'voxtral_local':
       result = await transcribeWithVoxtralLocal(audioBlob);
@@ -827,12 +823,9 @@ async function transcribeAudio(
   }
   
   if (provider === 'mistral') {
-    const biasWords = initialPrompt
-      ? initialPrompt.split(',').map(w => w.trim()).filter(Boolean)
-      : [];
-    return transcribeWithMistral(audioBlob, biasWords);
+    return transcribeWithMistral(audioBlob);
   }
-  
+
   if (provider === 'voxtral_local') {
     console.log('[Worker] Using Voxtral Local (vLLM) for transcription');
     return transcribeWithVoxtralLocal(audioBlob);
@@ -867,10 +860,7 @@ async function transcribeAudio(
     // Fallback auf Mistral wenn WhisperX fehlschlägt (Mistral unterstützt Timestamps)
     if (process.env.MISTRAL_API_KEY) {
       console.log('[Worker] Falling back to Mistral...');
-      const biasWords = initialPrompt
-        ? initialPrompt.split(',').map(w => w.trim()).filter(Boolean)
-        : [];
-      return transcribeWithMistral(audioBlob, biasWords);
+      return transcribeWithMistral(audioBlob);
     }
     throw error;
   }
@@ -1257,7 +1247,7 @@ async function transcribeWithElevenLabs(file: Blob): Promise<{ text: string; seg
  * API-Dokumentation: https://docs.mistral.ai/capabilities/audio/
  * Blog: https://mistral.ai/news/voxtral-transcribe-2
  */
-async function transcribeWithMistral(file: Blob, contextBiasWords?: string[]): Promise<{ text: string; segments?: any[] }> {
+async function transcribeWithMistral(file: Blob): Promise<{ text: string; segments?: any[] }> {
   const apiKey = process.env.MISTRAL_API_KEY;
   if (!apiKey) throw new Error('MISTRAL_API_KEY not configured');
   
@@ -1292,15 +1282,6 @@ async function transcribeWithMistral(file: Blob, contextBiasWords?: string[]): P
   formData.append('language', 'de');
   formData.append('timestamp_granularities[]', 'segment');
 
-  // context_bias: Medizinische Fachbegriffe aus dem Wörterbuch zum Boosten
-  if (contextBiasWords && contextBiasWords.length > 0) {
-    const limitedBias = contextBiasWords.slice(0, 50);
-    for (const word of limitedBias) {
-      formData.append('context_bias[]', word);
-    }
-    console.log(`[Worker Mistral] Using context_bias with ${limitedBias.length} medical terms`);
-  }
-  
   const res = await fetch('https://api.mistral.ai/v1/audio/transcriptions', {
     method: 'POST',
     headers: {

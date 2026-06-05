@@ -573,11 +573,10 @@ async function transcribeWithElevenLabs(file: Blob, filename: string) {
  *   voxtral-mini-2602    – Pinned-Version mit Diarize-Support
  *
  * Neue v2-Features:
- *   context_bias  – Wortliste zum Boosten von Fachbegriffen (Wörterbuch!)
  *   diarize       – Sprechererkennung
  *   stream        – SSE-Streaming
  */
-async function transcribeWithMistral(file: Blob, filename: string, contextBiasWords?: string[]) {
+async function transcribeWithMistral(file: Blob, filename: string) {
   const apiKey = process.env.MISTRAL_API_KEY;
   if (!apiKey) {
     throw new Error('MISTRAL_API_KEY not configured');
@@ -616,17 +615,6 @@ async function transcribeWithMistral(file: Blob, filename: string, contextBiasWo
   formData.append('language', 'de');
   // Segment-Timestamps für Mitlesen-Feature
   formData.append('timestamp_granularities[]', 'segment');
-
-  // context_bias: Medizinische Fachbegriffe aus dem Wörterbuch zum Boosten
-  // Verbessert die Erkennung von Fachvokabular signifikant
-  if (contextBiasWords && contextBiasWords.length > 0) {
-    // Limitiere auf max 50 Begriffe um Request-Größe zu begrenzen
-    const limitedBias = contextBiasWords.slice(0, 50);
-    for (const word of limitedBias) {
-      formData.append('context_bias[]', word);
-    }
-    console.log(`[Mistral] Using context_bias with ${limitedBias.length} medical terms`);
-  }
 
   const res = await fetch('https://api.mistral.ai/v1/audio/transcriptions', {
     method: 'POST',
@@ -874,11 +862,7 @@ export async function POST(request: NextRequest) {
       result = await transcribeWithElevenLabs(file, filename);
     } else if (provider === 'mistral') {
       console.log('Using Mistral AI Voxtral as primary provider');
-      // Wörterbuch-Begriffe als context_bias an Mistral übergeben
-      const contextBiasWords = initialPrompt
-        ? initialPrompt.split(',').map(w => w.trim()).filter(Boolean)
-        : [];
-      result = await transcribeWithMistral(file, filename, contextBiasWords);
+      result = await transcribeWithMistral(file, filename);
     } else if (provider === 'voxtral_local') {
       console.log('Using Voxtral Local (vLLM) as primary provider');
       // Wörterbuch als Vokabular-Priming, Prompt-Kontext separat

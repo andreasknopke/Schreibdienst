@@ -4413,28 +4413,6 @@ export default function HomePage() {
   // Ref für den Mikrofon-Button
   const recordButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Rechtsklick-Handler: Löst "Neu" aus (alle Felder löschen) - nur auf nicht-interaktiven Elementen
-  const handleContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLElement;
-    
-    // Prüfe ob das Ziel oder ein Elternelement ein interaktives Element ist
-    const interactiveSelectors = 'button, a, input, textarea, select, [contenteditable="true"], [role="button"], [role="textbox"], [tabindex]:not([tabindex="-1"])';
-    const isInteractive = target.closest(interactiveSelectors);
-    
-    // Prüfe ob ein Textfeld fokussiert ist (blinkender Cursor)
-    const activeElement = document.activeElement;
-    const isEditing = activeElement?.tagName === 'TEXTAREA'
-      || activeElement?.tagName === 'INPUT'
-      || activeElement?.getAttribute('contenteditable') === 'true'
-      || activeElement?.getAttribute('role') === 'textbox';
-    
-    // Nur wenn nicht interaktiv und nicht am Editieren
-    if (!isInteractive && !isEditing) {
-      e.preventDefault(); // Verhindere das Standard-Kontextmenü
-      handleReset();
-    }
-  }, [handleReset]);
-
   // Kompakter Aufnahme-Button für Header-Bereich
   const RecordButton = (
     <div className="flex items-center gap-3">
@@ -4496,7 +4474,7 @@ export default function HomePage() {
   );
 
   return (
-    <div className="space-y-3 min-h-[calc(100vh-120px)]" onContextMenu={handleContextMenu}>
+    <div className="space-y-3 min-h-[calc(100vh-120px)]">
       {/* Kompakte Steuerleiste */}
       <div className="card">
         <div className="card-body py-3 flex items-center justify-between gap-3 flex-wrap">
@@ -5137,11 +5115,11 @@ export default function HomePage() {
       )}
 
       {/* Seitliche Panels: Hilfe */}
-      <div className="fixed right-0 top-[18vh] z-40 hidden md:flex items-start">
+      <div className="pointer-events-none fixed right-0 top-[18vh] z-40 hidden md:flex items-start">
         <aside
           className={`w-80 max-w-[80vw] max-h-[calc(100vh-9rem)] overflow-y-auto rounded-l-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
             showCheatSheetPanel
-              ? 'mr-2 translate-x-0 opacity-100'
+              ? 'mr-2 translate-x-0 opacity-100 pointer-events-auto'
               : 'mr-0 translate-x-full opacity-0 pointer-events-none'
           }`}
           aria-hidden={!showCheatSheetPanel}
@@ -5167,7 +5145,7 @@ export default function HomePage() {
         </aside>
 
         <button
-          className="h-16 w-10 rounded-l-xl border border-r-0 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+          className="pointer-events-auto h-16 w-10 rounded-l-xl border border-r-0 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
           onClick={() => setShowCheatSheetPanel((current) => !current)}
           title={showCheatSheetPanel ? 'Cheat-Sheet schliessen' : 'Cheat-Sheet oeffnen'}
           aria-label={showCheatSheetPanel ? 'Cheat-Sheet schliessen' : 'Cheat-Sheet oeffnen'}
@@ -5179,11 +5157,11 @@ export default function HomePage() {
       </div>
 
       {/* Seitliches Panel: Updates direkt unter Hilfe */}
-      <div className="fixed right-0 top-[calc(18vh+4.25rem)] z-40 hidden md:flex items-start">
+      <div className="pointer-events-none fixed right-0 top-[calc(18vh+4.25rem)] z-40 hidden md:flex items-start">
         <aside
           className={`overflow-y-auto rounded-l-xl border border-blue-200 dark:border-blue-900/60 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
             showUpdatePanel
-              ? 'mr-2 translate-x-0 opacity-100'
+              ? 'mr-2 translate-x-0 opacity-100 pointer-events-auto'
               : 'mr-0 translate-x-full opacity-0 pointer-events-none'
           }`}
           style={{
@@ -5203,7 +5181,7 @@ export default function HomePage() {
         </aside>
 
         <button
-          className="h-16 w-10 rounded-l-xl border border-r-0 border-blue-200 dark:border-blue-900/60 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-gray-700"
+          className="pointer-events-auto h-16 w-10 rounded-l-xl border border-r-0 border-blue-200 dark:border-blue-900/60 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-gray-700"
           onClick={() => setShowUpdatePanel((current) => !current)}
           title={showUpdatePanel ? 'Updates schliessen' : 'Updates oeffnen'}
           aria-label={showUpdatePanel ? 'Updates schliessen' : 'Updates oeffnen'}

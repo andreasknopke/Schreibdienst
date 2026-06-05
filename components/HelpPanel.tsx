@@ -153,7 +153,7 @@ export default function HelpPanel() {
             </div>
             <div className="flex items-center gap-3">
               <span className="font-medium text-gray-500 w-24">Rechtsklick</span>
-              <span>Alle Felder zurücksetzen (Neu)</span>
+              <span>Oeffnet das normale Kontextmenue, ohne Text zurueckzusetzen</span>
             </div>
             <div className="flex items-center gap-3">
               <span className="font-medium text-gray-500 w-24">Textfeld-Klick</span>

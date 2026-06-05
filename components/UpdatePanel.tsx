@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { APP_VERSION, type ReleaseSummary, type VersionInfoResponse } from '@/lib/version';
 
 const LAST_SEEN_VERSION_KEY = 'schreibdienst:last-seen-version';
+const LAST_SEEN_UPDATE_RELEASE_KEY = 'schreibdienst:last-seen-update-release';
 
 function formatReleaseDate(value: string | null): string | null {
   if (!value) {
@@ -102,11 +103,16 @@ function ReleaseBlock({
   );
 }
 
-export default function UpdatePanel() {
+export default function UpdatePanel({
+  onRequestOpen,
+}: {
+  onRequestOpen?: () => void;
+}) {
   const [data, setData] = useState<VersionInfoResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
   const [hasSeenCurrentVersion, setHasSeenCurrentVersion] = useState(true);
+  const [selectedRecentReleaseVersion, setSelectedRecentReleaseVersion] = useState<string | null>(null);
 
   useEffect(() => {
     let isCancelled = false;
@@ -124,8 +130,22 @@ export default function UpdatePanel() {
         }
 
         setData(payload);
-        if (payload.status === 'update-available' || !hasSeen) {
+        setSelectedRecentReleaseVersion((current) => current ?? payload.recentReleases[0]?.version ?? null);
+        const lastSeenUpdateRelease = typeof window !== 'undefined'
+          ? window.localStorage.getItem(LAST_SEEN_UPDATE_RELEASE_KEY)
+          : null;
+        const hasSeenLatestAvailableRelease = payload.latestRelease?.version
+          ? lastSeenUpdateRelease === payload.latestRelease.version
+          : true;
+        const shouldAutoOpenForNewUpdate = payload.status === 'update-available' && !hasSeenLatestAvailableRelease;
+
+        if (shouldAutoOpenForNewUpdate || !hasSeen) {
           setIsExpanded(true);
+        }
+
+        if (shouldAutoOpenForNewUpdate && payload.latestRelease?.version) {
+          window.localStorage.setItem(LAST_SEEN_UPDATE_RELEASE_KEY, payload.latestRelease.version);
+          onRequestOpen?.();
         }
 
         if (payload.currentVersion) {
@@ -148,12 +168,17 @@ export default function UpdatePanel() {
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [onRequestOpen]);
 
   const summary = buildSummary(data, hasSeenCurrentVersion);
   const currentRelease = data?.currentRelease || null;
   const latestRelease = data?.latestRelease || null;
+  const recentReleases = data?.recentReleases || [];
   const showLatestRelease = data?.status === 'update-available' && latestRelease;
+  const selectedRecentRelease = recentReleases.find((release) => release.version === selectedRecentReleaseVersion) || recentReleases[0] || null;
+  const releasesUrl = data
+    ? `https://github.com/${data.repoOwner}/${data.repoName}/releases`
+    : null;
 
   return (
     <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50/70 dark:border-blue-900/60 dark:bg-blue-950/20">
@@ -198,6 +223,56 @@ export default function UpdatePanel() {
               release={latestRelease}
               emptyMessage="Fuer die neueste Version liegt noch keine Zusammenfassung vor."
             />
+          )}
+
+          {recentReleases.length > 0 && (
+            <div className="rounded-lg border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/60">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Letzte 3 Updates</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Waehlen Sie eine Version aus, um die Versionshinweise zu sehen.</p>
+                </div>
+                {releasesUrl && (
+                  <a
+                    href={releasesUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    Weitere auf GitHub
+                  </a>
+                )}
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {recentReleases.map((release) => {
+                  const isActive = release.version === selectedRecentRelease?.version;
+                  return (
+                    <button
+                      key={release.version}
+                      type="button"
+                      onClick={() => setSelectedRecentReleaseVersion(release.version)}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                        isActive
+                          ? 'border-blue-300 bg-blue-100 text-blue-900 dark:border-blue-700 dark:bg-blue-900/60 dark:text-blue-100'
+                          : 'border-gray-300 bg-white text-gray-700 hover:border-blue-200 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-950/40 dark:text-gray-200 dark:hover:border-blue-700 dark:hover:text-blue-300'
+                      }`}
+                      aria-pressed={isActive}
+                    >
+                      v{release.version}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-3">
+                <ReleaseBlock
+                  title="Ausgewaehltes Update"
+                  release={selectedRecentRelease}
+                  emptyMessage="Fuer dieses Update liegen keine Versionshinweise vor."
+                />
+              </div>
+            </div>
           )}
 
           {data?.status === 'release-info-unavailable' && data.error && (

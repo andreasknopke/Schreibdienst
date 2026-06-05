@@ -5329,7 +5329,7 @@ export default function HomePage() {
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Versionshinweise und neue Versionen</p>
           </div>
           <div className="px-4 py-3">
-            <UpdatePanel />
+            <UpdatePanel onRequestOpen={() => setShowUpdatePanel(true)} />
           </div>
         </aside>
 

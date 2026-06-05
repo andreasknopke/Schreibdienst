@@ -18,6 +18,7 @@ export interface VersionInfoResponse {
   currentVersion: string;
   currentRelease: ReleaseSummary | null;
   latestRelease: ReleaseSummary | null;
+  recentReleases: ReleaseSummary[];
   status: VersionStatus;
   repoOwner: string;
   repoName: string;

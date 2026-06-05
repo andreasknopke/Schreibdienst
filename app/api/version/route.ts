@@ -62,6 +62,22 @@ async function fetchGitHubRelease(url: string): Promise<GitHubReleaseResponse | 
   return response.json() as Promise<GitHubReleaseResponse>;
 }
 
+async function fetchRecentReleases(limit: number): Promise<ReleaseSummary[]> {
+  const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=${limit}`, {
+    headers: buildGitHubHeaders(),
+    next: { revalidate: 300 },
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub releases request failed with status ${response.status}`);
+  }
+
+  const payload = await response.json() as GitHubReleaseResponse[];
+  return payload
+    .map((release) => mapReleasePayload(release))
+    .filter((release): release is ReleaseSummary => Boolean(release));
+}
+
 async function fetchCurrentRelease(currentVersion: string): Promise<ReleaseSummary | null> {
   const candidateTags = Array.from(new Set([`v${currentVersion}`, currentVersion]));
 
@@ -79,9 +95,12 @@ export async function GET() {
   const checkedAt = new Date().toISOString();
 
   try {
-    const latestPayload = await fetchGitHubRelease(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`);
+    const [latestPayload, currentRelease, recentReleases] = await Promise.all([
+      fetchGitHubRelease(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`),
+      fetchCurrentRelease(APP_VERSION),
+      fetchRecentReleases(3),
+    ]);
     const latestRelease = mapReleasePayload(latestPayload);
-    const currentRelease = await fetchCurrentRelease(APP_VERSION);
     const status = latestRelease && compareVersions(latestRelease.version, APP_VERSION) > 0
       ? 'update-available'
       : latestRelease
@@ -92,6 +111,7 @@ export async function GET() {
       currentVersion: APP_VERSION,
       currentRelease,
       latestRelease,
+      recentReleases,
       status,
       repoOwner: GITHUB_OWNER,
       repoName: GITHUB_REPO,
@@ -105,6 +125,7 @@ export async function GET() {
       currentVersion: APP_VERSION,
       currentRelease: null,
       latestRelease: null,
+      recentReleases: [],
       status: 'release-info-unavailable',
       repoOwner: GITHUB_OWNER,
       repoName: GITHUB_REPO,

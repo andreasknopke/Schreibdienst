@@ -1244,7 +1244,8 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
         const responseText = result.content || '{}';
 
         try {
-          const rawFields = JSON.parse(responseText) as BefundFields;
+          const cleaned = responseText.replace(/^```(?:json)?\s*|\s*```$/gi, '').trim();
+          const rawFields = JSON.parse(cleaned) as BefundFields;
 
           // Clean each field from LLM meta-comments
           const correctedFields: BefundFields = {

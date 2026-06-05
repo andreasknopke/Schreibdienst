@@ -5071,8 +5071,6 @@ export default function HomePage() {
             
             {/* Warnbanner bei signifikanten Änderungen */}
             <ChangeWarningBanner score={changeScore} />
-
-            <UpdatePanel />
             
             {/* Diff View für Arztbrief */}
             {showDiffView && preCorrectionState && !isReverted && preCorrectionState.transcript && (
@@ -5136,6 +5134,8 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      <UpdatePanel />
 
       {/* Seitliches Cheat-Sheet: klappt nach rechts aus, ohne die Seitenhoehe zu vergroessern */}
       <div className="fixed right-0 top-1/2 z-40 hidden -translate-y-1/2 md:flex items-start">

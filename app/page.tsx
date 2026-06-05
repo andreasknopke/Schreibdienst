@@ -207,6 +207,15 @@ function extractSuggestionTokens(text: string): string[] {
   return text.match(/[A-Za-zÄÖÜäöüß0-9]+(?:[-'][A-Za-zÄÖÜäöüß0-9]+)*/g) || [];
 }
 
+// Die Felder "befund" und "transcript" teilen sich denselben State (transcript).
+type TextStateKey = 'transcript' | 'methodik' | 'beurteilung';
+
+function fieldToStateKey(field: TextInsertionTarget): TextStateKey {
+  if (field === 'methodik') return 'methodik';
+  if (field === 'beurteilung') return 'beurteilung';
+  return 'transcript';
+}
+
 function extractLastManualWordChange(previousText: string, nextText: string): ManualWordChange | null {
   if (!previousText || !nextText || previousText === nextText) return null;
 
@@ -802,6 +811,13 @@ export default function HomePage() {
   const transcriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const recordingStartedAtRef = useRef<number | null>(null);
   const manualCorrectionTimersRef = useRef<Partial<Record<TextInsertionTarget, ReturnType<typeof setTimeout>>>>({});
+  // Baseline des zuletzt MASCHINELL erzeugten Texts (Transkription/LLM/Template) pro State.
+  // Manuelle Korrekturen werden gegen diese Baseline gediffed, nicht gegen den letzten Tastendruck.
+  const machineBaselineRef = useRef<Record<TextStateKey, string>>({ transcript: '', methodik: '', beurteilung: '' });
+  // Markiert, dass die nächste State-Änderung von einer manuellen Eingabe stammt (damit die Baseline NICHT überschrieben wird).
+  const pendingManualStateRef = useRef<Record<TextStateKey, boolean>>({ transcript: false, methodik: false, beurteilung: false });
+  // Debounce-Timer pro Feld für die Wörterbuch-Vorschlagserkennung (feuert erst nach Tipp-Pause).
+  const manualSuggestDebounceRef = useRef<Partial<Record<TextInsertionTarget, ReturnType<typeof setTimeout>>>>({});
   
   // LEGACY / DEPRECATED: Historischer Fast-Whisper-WebSocket-Pfad.
   // Neue Online-Diktatlogik nicht hier ergänzen, sondern im aktuellen Chunk-/Nicht-WebSocket-Pfad.
@@ -1967,17 +1983,53 @@ export default function HomePage() {
     setter: (nextValue: string) => void,
     textarea: HTMLTextAreaElement | HTMLDivElement
   ) => {
-    const previousValue = getFieldTextValue(field);
-    const detectedChange = extractLastManualWordChange(previousValue, value);
+    const stateKey = fieldToStateKey(field);
+    // Diese Änderung kommt vom Benutzer -> Baseline NICHT überschreiben.
+    pendingManualStateRef.current[stateKey] = true;
     setter(value);
-    setManualCorrectionSuggestions((current) => ({
-      ...current,
-      [field]: detectedChange,
-    }));
     setPendingCorrection(true);
     syncTextSelection(field, textarea);
     logManualCorrection(field);
-  }, [getFieldTextValue, logManualCorrection, syncTextSelection]);
+
+    // Wörterbuch-Vorschlag erst nach kurzer Tipp-Pause ermitteln und immer gegen
+    // den zuletzt maschinell erzeugten Text (Baseline) diffen. So wird auch dann
+    // das ursprünglich falsch transkribierte Wort erkannt, wenn der Benutzer es
+    // Buchstabe für Buchstabe korrigiert.
+    const existingDebounce = manualSuggestDebounceRef.current[field];
+    if (existingDebounce) clearTimeout(existingDebounce);
+    manualSuggestDebounceRef.current[field] = setTimeout(() => {
+      const baseline = machineBaselineRef.current[stateKey];
+      const detectedChange = extractLastManualWordChange(baseline, value);
+      setManualCorrectionSuggestions((current) => ({
+        ...current,
+        [field]: detectedChange,
+      }));
+      delete manualSuggestDebounceRef.current[field];
+    }, 900);
+  }, [logManualCorrection, syncTextSelection]);
+
+  // Hält die Baseline (zuletzt maschinell erzeugter Text) pro State aktuell.
+  // Stammt die Änderung vom Benutzer (pendingManualStateRef), bleibt die Baseline
+  // erhalten; andernfalls (Transkription/LLM/Template/Reset) wird sie übernommen.
+  useEffect(() => {
+    const states: Record<TextStateKey, string> = { transcript, methodik, beurteilung };
+    (Object.keys(states) as TextStateKey[]).forEach((key) => {
+      if (pendingManualStateRef.current[key]) {
+        pendingManualStateRef.current[key] = false;
+        return;
+      }
+      machineBaselineRef.current[key] = states[key];
+    });
+  }, [transcript, methodik, beurteilung]);
+
+  // Bestätigen/Verwerfen eines Vorschlags: Baseline auf den aktuellen Feldwert
+  // setzen, damit die bereits erledigte Korrektur nicht erneut vorgeschlagen wird.
+  const acknowledgeManualCorrection = useCallback((field: TextInsertionTarget) => {
+    const stateKey = fieldToStateKey(field);
+    machineBaselineRef.current[stateKey] = getFieldTextValue(field);
+    setManualCorrectionSuggestions((current) => ({ ...current, [field]: null }));
+  }, [getFieldTextValue]);
+
 
   const transcribeChunk = useCallback(async (blob: Blob, isLive: boolean = false, audioDurationSeconds?: number): Promise<string> => {
     try {
@@ -2488,6 +2540,9 @@ export default function HomePage() {
       Object.values(manualCorrectionTimersRef.current).forEach((timer) => {
         if (timer) clearTimeout(timer);
       });
+      Object.values(manualSuggestDebounceRef.current).forEach((timer) => {
+        if (timer) clearTimeout(timer);
+      });
     };
   }, []);
 
@@ -2495,6 +2550,12 @@ export default function HomePage() {
   const handleReset = useCallback(() => {
     vadSessionIdRef.current += 1;
     liveInjectSentTextRef.current = '';
+    // Offene Wörterbuch-Vorschläge und deren Debounce-Timer verwerfen.
+    Object.values(manualSuggestDebounceRef.current).forEach((timer) => {
+      if (timer) clearTimeout(timer);
+    });
+    manualSuggestDebounceRef.current = {};
+    setManualCorrectionSuggestions(EMPTY_MANUAL_WORD_CHANGES);
     setTranscript('');
     setMethodik('');
     setBeurteilung('');
@@ -4894,8 +4955,8 @@ export default function HomePage() {
                     originalWord={manualCorrectionSuggestions.methodik.originalWord}
                     newWord={manualCorrectionSuggestions.methodik.newWord}
                     targetUsername={username || undefined}
-                    onConfirm={() => setManualCorrectionSuggestions((current) => ({ ...current, methodik: null }))}
-                    onCancel={() => setManualCorrectionSuggestions((current) => ({ ...current, methodik: null }))}
+                    onConfirm={() => acknowledgeManualCorrection('methodik')}
+                    onCancel={() => acknowledgeManualCorrection('methodik')}
                   />
                 )}
               </div>
@@ -4981,8 +5042,8 @@ export default function HomePage() {
                     originalWord={manualCorrectionSuggestions.befund.originalWord}
                     newWord={manualCorrectionSuggestions.befund.newWord}
                     targetUsername={username || undefined}
-                    onConfirm={() => setManualCorrectionSuggestions((current) => ({ ...current, befund: null }))}
-                    onCancel={() => setManualCorrectionSuggestions((current) => ({ ...current, befund: null }))}
+                    onConfirm={() => acknowledgeManualCorrection('befund')}
+                    onCancel={() => acknowledgeManualCorrection('befund')}
                   />
                 )}
                 {/* VAD Tentative Text: Zeigt an, dass gerade gesprochen wird */}
@@ -5084,8 +5145,8 @@ export default function HomePage() {
                     originalWord={manualCorrectionSuggestions.beurteilung.originalWord}
                     newWord={manualCorrectionSuggestions.beurteilung.newWord}
                     targetUsername={username || undefined}
-                    onConfirm={() => setManualCorrectionSuggestions((current) => ({ ...current, beurteilung: null }))}
-                    onCancel={() => setManualCorrectionSuggestions((current) => ({ ...current, beurteilung: null }))}
+                    onConfirm={() => acknowledgeManualCorrection('beurteilung')}
+                    onCancel={() => acknowledgeManualCorrection('beurteilung')}
                   />
                 )}
                 <button 
@@ -5187,8 +5248,8 @@ export default function HomePage() {
                     originalWord={manualCorrectionSuggestions.transcript.originalWord}
                     newWord={manualCorrectionSuggestions.transcript.newWord}
                     targetUsername={username || undefined}
-                    onConfirm={() => setManualCorrectionSuggestions((current) => ({ ...current, transcript: null }))}
-                    onCancel={() => setManualCorrectionSuggestions((current) => ({ ...current, transcript: null }))}
+                    onConfirm={() => acknowledgeManualCorrection('transcript')}
+                    onCancel={() => acknowledgeManualCorrection('transcript')}
                   />
                 )}
                 {/* VAD Tentative Text: Zeigt an, dass gerade gesprochen wird */}

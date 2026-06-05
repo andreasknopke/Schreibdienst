@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addEntryWithRequest, removeEntryWithRequest, getEntriesWithRequest, updateEntryOptionsWithRequest, loadDictionaryWithRequest } from '@/lib/dictionaryDb';
+import { addEntryWithRequest, removeEntryWithRequest, getEntriesWithRequest, updateEntryOptionsWithRequest, loadDictionaryWithRequest, increaseEntryPhoneticMinSimilarityWithRequest } from '@/lib/dictionaryDb';
+import { removeDictionaryGroupEntryWithRequest, increaseDictionaryGroupEntryPhoneticMinSimilarityWithRequest } from '@/lib/groupDictionaryDb';
+import { removeStandardDictEntry, increaseStandardDictPhoneticMinSimilarity } from '@/lib/standardDictionaryDb';
 import { getUserGroupIds, upsertDictionaryGroupEntryWithRequest } from '@/lib/groupDictionaryDb';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
 
@@ -136,31 +138,78 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const auth = await getAuthenticatedUser(request);
-    
+
     if (!auth) {
       return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
     }
 
     const body = await request.json();
-    const { wrong, username: targetUsername, useInPrompt, matchStem } = body;
-    
+    const { wrong, username: targetUsername, useInPrompt, matchStem, weakenPhonetic, scope, groupId } = body;
+
     if (!wrong) {
       return NextResponse.json({ success: false, error: 'Kein Wort angegeben' }, { status: 400 });
     }
-    
+
+    // Phonetic-Matching für diesen Eintrag abschwächen (Schwelle heraufsetzen)
+    if (weakenPhonetic) {
+      const entryScope: 'standard' | 'private' | 'group' =
+        scope === 'standard' || scope === 'group' ? scope : 'private';
+      const username = (auth.canViewAllDictations && targetUsername && entryScope === 'private')
+        ? targetUsername : auth.username;
+
+      if (entryScope === 'standard') {
+        const result = await increaseStandardDictPhoneticMinSimilarity(request, wrong);
+        if (!result.success) {
+          return NextResponse.json({ success: false, error: result.error || 'Abschwächen fehlgeschlagen' }, { status: 400 });
+        }
+        return NextResponse.json({
+          success: true,
+          message: `Standard-Eintrag "${wrong}" abgeschwächt`,
+          oldValue: result.oldValue,
+          newValue: result.newValue,
+        });
+      }
+      if (entryScope === 'group') {
+        if (!Number.isInteger(groupId) || groupId <= 0) {
+          return NextResponse.json({ success: false, error: 'groupId ist für Gruppen-Einträge erforderlich' }, { status: 400 });
+        }
+        const result = await increaseDictionaryGroupEntryPhoneticMinSimilarityWithRequest(request, groupId, wrong);
+        if (!result.success) {
+          return NextResponse.json({ success: false, error: result.error || 'Abschwächen fehlgeschlagen' }, { status: 400 });
+        }
+        return NextResponse.json({
+          success: true,
+          message: `Gruppen-Eintrag "${wrong}" abgeschwächt`,
+          oldValue: result.oldValue,
+          newValue: result.newValue,
+        });
+      }
+
+      const result = await increaseEntryPhoneticMinSimilarityWithRequest(request, username, wrong);
+      if (!result.success) {
+        return NextResponse.json({ success: false, error: result.error || 'Abschwächen fehlgeschlagen' }, { status: 400 });
+      }
+      return NextResponse.json({
+        success: true,
+        message: `Benutzer-Eintrag "${wrong}" für ${username} abgeschwächt`,
+        oldValue: result.oldValue,
+        newValue: result.newValue,
+      });
+    }
+
     if (useInPrompt === undefined && matchStem === undefined) {
       return NextResponse.json({ success: false, error: 'Keine Änderungen angegeben' }, { status: 400 });
     }
-    
+
     // Secretariat users can update other users' dictionaries
     const username = (auth.canViewAllDictations && targetUsername) ? targetUsername : auth.username;
-    
+
     const result = await updateEntryOptionsWithRequest(request, username, wrong, useInPrompt ?? false, matchStem ?? false);
-    
+
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Eintrag aktualisiert' });
     }
-    
+
     return NextResponse.json({ success: false, error: result.error }, { status: 400 });
   } catch (error) {
     console.error('Dictionary PATCH error:', error);
@@ -172,27 +221,54 @@ export async function PATCH(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const auth = await getAuthenticatedUser(request);
-    
+
     if (!auth) {
       return NextResponse.json({ success: false, error: 'Nicht authentifiziert - bitte erneut anmelden' }, { status: 401 });
     }
 
     const body = await request.json();
-    const { wrong, username: targetUsername } = body;
-    
+    const { wrong, username: targetUsername, scope, groupId } = body;
+
     if (!wrong) {
       return NextResponse.json({ success: false, error: 'Kein Wort zum Löschen angegeben' }, { status: 400 });
     }
-    
-    // Secretariat users can delete from other users' dictionaries
+
+    const entryScope: 'standard' | 'private' | 'group' =
+      scope === 'standard' || scope === 'group' ? scope : 'private';
+
+    // Standard-Wörterbuch: nur root darf löschen
+    if (entryScope === 'standard') {
+      if (auth.username.toLowerCase() !== 'root') {
+        return NextResponse.json({ success: false, error: 'Nur root darf Standard-Einträge löschen' }, { status: 403 });
+      }
+      const result = await removeStandardDictEntry(request, wrong);
+      if (!result.success) {
+        return NextResponse.json({ success: false, error: result.error || 'Löschen fehlgeschlagen' }, { status: 400 });
+      }
+      return NextResponse.json({ success: true, message: `Standard-Eintrag "${wrong}" gelöscht` });
+    }
+
+    // Gruppen-Wörterbuch: Mitgliedschaft wird in der DB-Schicht geprüft
+    if (entryScope === 'group') {
+      if (!Number.isInteger(groupId) || groupId <= 0) {
+        return NextResponse.json({ success: false, error: 'groupId ist für Gruppen-Einträge erforderlich' }, { status: 400 });
+      }
+      const result = await removeDictionaryGroupEntryWithRequest(request, groupId, wrong);
+      if (!result.success) {
+        return NextResponse.json({ success: false, error: result.error || 'Löschen fehlgeschlagen' }, { status: 400 });
+      }
+      return NextResponse.json({ success: true, message: `Gruppen-Eintrag "${wrong}" gelöscht` });
+    }
+
+    // Privat-Eintrag: Secretariat darf alle Benutzer bearbeiten
     const username = (auth.canViewAllDictations && targetUsername) ? targetUsername : auth.username;
-    
+
     const result = await removeEntryWithRequest(request, username, wrong);
-    
+
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Eintrag gelöscht' });
     }
-    
+
     return NextResponse.json({ success: false, error: result.error }, { status: 400 });
   } catch (error) {
     console.error('Dictionary DELETE error:', error);

@@ -8,12 +8,13 @@ import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
 import { applyDeleteCommands, applyFormattingControlWords, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, preprocessTranscription, type OnlineUtteranceApplicationDebugStep } from '@/lib/textFormatting';
-import { buildPhoneticIndex, applyPhoneticCorrections, colognePhonetic, levenshtein } from '@/lib/phoneticMatch';
+import { buildPhoneticIndex, applyPhoneticCorrections, applyPhoneticCorrectionsDetailed, colognePhonetic, levenshtein, type PhoneticReplacementOperation } from '@/lib/phoneticMatch';
 import { buildRichTextHtml, normalizeRichTextRanges, remapRichTextRanges, type RichTextFormatRange } from '@/lib/richTextFormatting';
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
 import ManualCorrectionSuggestion from '@/components/ManualCorrectionSuggestion';
+import WordActionPopup, { type WordCorrectionInfo } from '@/components/WordActionPopup';
 import RichTextDictationEditor, { getRichTextSelection } from '@/components/RichTextDictationEditor';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
 import UpdatePanel from '@/components/UpdatePanel';
@@ -201,6 +202,13 @@ const EMPTY_MANUAL_WORD_CHANGES: Record<TextInsertionTarget, ManualWordChange | 
   methodik: null,
   befund: null,
   beurteilung: null,
+};
+
+const EMPTY_WORD_CORRECTIONS: Record<TextInsertionTarget, WordCorrectionInfo[]> = {
+  transcript: [],
+  methodik: [],
+  befund: [],
+  beurteilung: [],
 };
 
 function extractSuggestionTokens(text: string): string[] {
@@ -978,6 +986,16 @@ export default function HomePage() {
   const previousFieldTextsRef = useRef<Record<TextInsertionTarget, string>>(EMPTY_FIELD_TEXTS);
   const [manualCorrectionSuggestions, setManualCorrectionSuggestions] = useState<Record<TextInsertionTarget, ManualWordChange | null>>(EMPTY_MANUAL_WORD_CHANGES);
 
+  // Tracking der phonetischen Korrekturen pro Feld, damit das Doppelklick-Popup
+  // entscheiden kann, ob das angeklickte Wort durch ein Matching ersetzt wurde.
+  const [fieldCorrections, setFieldCorrections] = useState<Record<TextInsertionTarget, WordCorrectionInfo[]>>(EMPTY_WORD_CORRECTIONS);
+  const [wordPopup, setWordPopup] = useState<{
+    word: string;
+    position: { x: number; y: number };
+    correction: WordCorrectionInfo | null;
+    field: TextInsertionTarget;
+  } | null>(null);
+
   // Custom Actions Manager
   const [showCustomActionsManager, setShowCustomActionsManager] = useState(false);
 
@@ -1645,20 +1663,31 @@ export default function HomePage() {
   // Pass 1: Exaktes Matching, Pass 2: Phonetisches Matching (Kölner Phonetik)
   const phoneticIndexRef = useRef<ReturnType<typeof buildPhoneticIndex> | null>(null);
   
-  // Gemergte Einträge (User + Standard-Wörterbuch)
-  const mergedEntriesRef = useRef<{ wrong: string; correct: string }[]>([]);
-  
+  // Gemergte Einträge (User + Standard-Wörterbuch) – inkl. Quellinformation
+  // (User vs. Standard) für die Doppelklick-Popup-Logik.
+  const mergedEntriesRef = useRef<{ wrong: string; correct: string; source: 'standard' | 'private' | 'group' }[]>([]);
+
   // Phonetischen Index neu aufbauen wenn sich Wörterbuch ändert
   useEffect(() => {
-    const merged = mergeWithStandardDictionary(dictionaryEntries, standardDictEntries.length > 0 ? standardDictEntries : undefined);
-    mergedEntriesRef.current = merged;
+    const userCount = dictionaryEntries.length;
+    const merged = mergeWithStandardDictionary(
+      dictionaryEntries,
+      standardDictEntries.length > 0 ? standardDictEntries : undefined
+    );
+    // Quelle pro Eintrag ableiten: User-Einträge stehen vorne, Standard hinten
+    const tagged = merged.map((entry, idx) => ({
+      wrong: entry.wrong,
+      correct: entry.correct,
+      source: (idx < userCount ? 'private' : 'standard') as 'standard' | 'private' | 'group',
+    }));
+    mergedEntriesRef.current = tagged;
     phoneticIndexRef.current = buildPhoneticIndex(merged);
-    console.log('[Phonetic] Index built with', merged.length, 'entries (', dictionaryEntries.length, 'user +', merged.length - dictionaryEntries.length, 'standard)');
+    console.log('[Phonetic] Index built with', tagged.length, 'entries (', dictionaryEntries.length, 'user +', tagged.length - dictionaryEntries.length, 'standard)');
   }, [dictionaryEntries, standardDictEntries]);
 
   const applyDictionaryToText = useCallback((text: string): string => {
     if (!text || mergedEntriesRef.current.length === 0) return text;
-    
+
     // Pass 1: Exaktes Wort-Matching (User + Standard)
     let result = text;
     for (const entry of mergedEntriesRef.current) {
@@ -1668,14 +1697,95 @@ export default function HomePage() {
       const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escaped}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
       result = result.replace(regex, entry.correct);
     }
-    
+
     // Pass 2: Phonetisches Matching für verbleibende unerkannte Wörter
     if (phoneticIndexRef.current) {
       result = applyPhoneticCorrections(result, phoneticIndexRef.current);
     }
-    
+
     return result;
   }, [dictionaryEntries]);
+
+  const applyDictionaryToTextWithCorrections = useCallback((text: string): { text: string; corrections: WordCorrectionInfo[] } => {
+    if (!text || mergedEntriesRef.current.length === 0) return { text, corrections: [] };
+
+    // Pass 1: Exaktes Wort-Matching (User + Standard) – als Operationen mitschneiden
+    let result = text;
+    const exactCorrections: WordCorrectionInfo[] = [];
+    for (const entry of mergedEntriesRef.current) {
+      const escaped = entry.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escaped}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
+      result = result.replace(regex, (matched) => {
+        if (matched !== entry.correct) {
+          exactCorrections.push({
+            originalWord: matched,
+            correctedWord: entry.correct,
+            dictionaryWrong: entry.wrong,
+            dictionaryCorrect: entry.correct,
+            source: entry.source,
+            matchType: 'exact',
+          });
+        }
+        return entry.correct;
+      });
+    }
+
+    // Pass 2: Phonetisches Matching – Operationen mitführen
+    if (!phoneticIndexRef.current) {
+      return { text: result, corrections: exactCorrections };
+    }
+    const phoneticResult = applyPhoneticCorrectionsDetailed(result, phoneticIndexRef.current);
+    const phoneticCorrections: WordCorrectionInfo[] = phoneticResult.operations
+      .filter((op) => op.replacementText !== op.originalText)
+      .map((op) => ({
+        originalWord: op.originalText,
+        correctedWord: op.replacementText,
+        dictionaryWrong: op.dictionaryWrong,
+        dictionaryCorrect: op.dictionaryCorrect,
+        source: op.source,
+        matchType: 'phonetic',
+        confidence: op.confidence,
+        targetUsername: op.targetUsername,
+        groupId: op.groupId,
+      }));
+    return { text: phoneticResult.text, corrections: [...exactCorrections, ...phoneticCorrections] };
+  }, [dictionaryEntries]);
+
+  // Setzt den Text eines Feldes UND leitet die Wörterbuch-/Phonetik-Korrekturen
+  // aus dem neuen Text ab. So kann das Doppelklick-Popup beurteilen, ob ein
+  // angeklicktes Wort aus einem Matching stammt.
+  const setFieldTextWithCorrections = useCallback((field: TextInsertionTarget, value: string) => {
+    const { corrections } = applyDictionaryToTextWithCorrections(value);
+    setFieldCorrections((prev) => ({ ...prev, [field]: corrections }));
+    switch (field) {
+      case 'methodik':
+        setMethodik(value);
+        break;
+      case 'beurteilung':
+        setBeurteilung(value);
+        break;
+      case 'befund':
+      case 'transcript':
+      default:
+        setTranscript(value);
+        break;
+    }
+  }, [applyDictionaryToTextWithCorrections]);
+
+  // Leitet bei jeder Text- und Wörterbuchänderung die Korrekturen neu ab.
+  // Bewusst über einen Effect, damit `setFieldText` (das an den Editor ge-
+  // bunden ist) nicht bei jedem Render neue Referenzen bekommt.
+  useEffect(() => {
+    const methodikResult = applyDictionaryToTextWithCorrections(methodik);
+    const beurteilungResult = applyDictionaryToTextWithCorrections(beurteilung);
+    const transcriptResult = applyDictionaryToTextWithCorrections(transcript);
+    setFieldCorrections({
+      methodik: methodikResult.corrections,
+      beurteilung: beurteilungResult.corrections,
+      befund: transcriptResult.corrections,
+      transcript: transcriptResult.corrections,
+    });
+  }, [methodik, beurteilung, transcript, dictionaryEntries, applyDictionaryToTextWithCorrections]);
 
   const prepareLiveInjectDelta = useCallback((text: string): string => {
     return normalizeChunkLeadingWhitespace(applyDictionaryToText(applyFormattingControlWords(text)));
@@ -2029,6 +2139,33 @@ export default function HomePage() {
     machineBaselineRef.current[stateKey] = getFieldTextValue(field);
     setManualCorrectionSuggestions((current) => ({ ...current, [field]: null }));
   }, [getFieldTextValue]);
+
+  // Doppelklick auf ein Wort: Popup mit passenden Aktionen öffnen.
+  // Für Wörter, die durch das Wörterbuch-/Phonetik-Matching ersetzt wurden,
+  // wird die Quelle der Korrektur angezeigt; sonst nur „In Wörterbuch aufnehmen".
+  const handleWordDoubleClick = useCallback((
+    field: TextInsertionTarget,
+    info: { word: string; clientX: number; clientY: number }
+  ) => {
+    const { word, clientX, clientY } = info;
+    const corrections = fieldCorrections[field] ?? [];
+    // Exakte Wort-Übereinstimmung (case-insensitiv) und nicht self-mapping
+    const matched = corrections.find(
+      (c) => c.correctedWord.localeCompare(word, undefined, { sensitivity: 'accent' }) === 0
+        && c.originalWord.localeCompare(c.correctedWord, undefined, { sensitivity: 'accent' }) !== 0
+    ) ?? null;
+    setWordPopup({ word, position: { x: clientX, y: clientY }, correction: matched, field });
+  }, [fieldCorrections]);
+
+  const closeWordPopup = useCallback(() => {
+    setWordPopup(null);
+  }, []);
+
+  // Korrekturen für ein Feld leeren (z.B. nach Löschen / Schwächen),
+  // damit der Dialog nicht erneut auf dem gleichen Wort erscheint.
+  const invalidateFieldCorrections = useCallback((field: TextInsertionTarget) => {
+    setFieldCorrections((prev) => ({ ...prev, [field]: [] }));
+  }, []);
 
 
   const transcribeChunk = useCallback(async (blob: Blob, isLive: boolean = false, audioDurationSeconds?: number): Promise<string> => {
@@ -4926,6 +5063,7 @@ export default function HomePage() {
                     onFocus={(editor) => { setActiveField('methodik'); setFocusedTextField('methodik'); syncTextSelection('methodik', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'methodik' ? null : current)}
                     onSelectionChange={(editor) => syncTextSelection('methodik', editor)}
+                    onWordDoubleClick={(info) => handleWordDoubleClick('methodik', info)}
                     placeholder="Methodik..."
                     readOnly={isProcessing}
                   />
@@ -5013,6 +5151,7 @@ export default function HomePage() {
                     onFocus={(editor) => { setActiveField('befund'); setFocusedTextField('befund'); syncTextSelection('befund', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'befund' ? null : current)}
                     onSelectionChange={(editor) => syncTextSelection('befund', editor)}
+                    onWordDoubleClick={(info) => handleWordDoubleClick('befund', info)}
                     placeholder="Befund..."
                     readOnly={isProcessing}
                   />
@@ -5116,6 +5255,7 @@ export default function HomePage() {
                     onFocus={(editor) => { setActiveField('beurteilung'); setFocusedTextField('beurteilung'); syncTextSelection('beurteilung', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'beurteilung' ? null : current)}
                     onSelectionChange={(editor) => syncTextSelection('beurteilung', editor)}
+                    onWordDoubleClick={(info) => handleWordDoubleClick('beurteilung', info)}
                     placeholder="Zusammenfassung..."
                     readOnly={isProcessing}
                   />
@@ -5219,6 +5359,7 @@ export default function HomePage() {
                     onFocus={(editor) => { setFocusedTextField('transcript'); syncTextSelection('transcript', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'transcript' ? null : current)}
                     onSelectionChange={(editor) => syncTextSelection('transcript', editor)}
+                    onWordDoubleClick={(info) => handleWordDoubleClick('transcript', info)}
                     placeholder="Text erscheint hier..."
                     readOnly={isProcessing}
                   />
@@ -5348,6 +5489,22 @@ export default function HomePage() {
       {/* Custom Actions Manager Modal */}
       {showCustomActionsManager && (
         <CustomActionsManager onClose={() => setShowCustomActionsManager(false)} />
+      )}
+
+      {/* Popup für Doppelklick auf ein Wort */}
+      {wordPopup && (
+        <WordActionPopup
+          word={wordPopup.word}
+          position={wordPopup.position}
+          correction={wordPopup.correction}
+          targetUsername={wordPopup.correction?.targetUsername || username || undefined}
+          groupId={wordPopup.correction?.groupId}
+          onClose={() => {
+            const field = wordPopup.field;
+            closeWordPopup();
+            invalidateFieldCorrections(field);
+          }}
+        />
       )}
     </div>
   );

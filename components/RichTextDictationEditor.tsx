@@ -15,6 +15,7 @@ interface RichTextDictationEditorProps {
   onSelectionChange: (editor: HTMLDivElement) => void;
   onFocus?: (editor: HTMLDivElement) => void;
   onBlur?: () => void;
+  onWordDoubleClick?: (info: { word: string; start: number; end: number; clientX: number; clientY: number }, editor: HTMLDivElement) => void;
 }
 
 
@@ -136,6 +137,7 @@ export default function RichTextDictationEditor({
   onSelectionChange,
   onFocus,
   onBlur,
+  onWordDoubleClick,
 }: RichTextDictationEditorProps) {
   const html = useMemo(() => buildRichTextHtml(value, formats), [value, formats]);
   const formatSignature = useMemo(() => JSON.stringify(formats), [formats]);
@@ -182,6 +184,19 @@ export default function RichTextDictationEditor({
         onKeyUp={(event) => onSelectionChange(event.currentTarget)}
         onMouseUp={(event) => onSelectionChange(event.currentTarget)}
         onClick={(event) => onSelectionChange(event.currentTarget)}
+        onDoubleClick={(event) => {
+          if (!onWordDoubleClick) return;
+          const editor = event.currentTarget;
+          const sel = window.getSelection();
+          if (!sel || sel.rangeCount === 0) return;
+          const range = sel.getRangeAt(0);
+          if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) return;
+          const word = sel.toString().trim();
+          if (!word || /[\s]/.test(word)) return;
+          const start = getNodeOffset(editor, range.startContainer, range.startOffset);
+          const end = getNodeOffset(editor, range.endContainer, range.endOffset);
+          onWordDoubleClick({ word, start, end, clientX: event.clientX, clientY: event.clientY }, editor);
+        }}
         onPaste={(event) => {
           event.preventDefault();
           const pastedText = event.clipboardData.getData('text/plain');

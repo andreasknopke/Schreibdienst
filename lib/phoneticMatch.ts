@@ -171,6 +171,23 @@ function normalizedSimilarity(a: string, b: string): number {
   return 1 - (levenshtein(a, b) / maxLen);
 }
 
+/**
+ * Extrahiert den reinen Buchstabenkern (a-z) eines Wortes.
+ * Für Akronym-Vergleiche (Patch 1/3).
+ */
+export function extractLetterCore(s: string): string {
+  return s.toLowerCase().replace(/[^a-z]/g, '');
+}
+
+/**
+ * Teilt ein Wort in alpha-Teile an Zahlen und Nicht-Buchstaben.
+ * "DAS28-CRP" → ["DAS", "CRP"], "CRP" → ["CRP"], "ASDAS-CRP" → ["ASDAS", "CRP"]
+ * (Patch 3: Zahlen als Trennzeichen)
+ */
+export function splitIntoAlphaParts(s: string): string[] {
+  return s.split(/[^a-zA-Z]+/).filter(part => part.length > 0);
+}
+
 function isAcronymLikeTerm(term: string): boolean {
   const asciiLetters = term.replace(/[^A-Za-z]/g, '');
   if (asciiLetters.length < 2 || asciiLetters.length > 6) {
@@ -651,6 +668,117 @@ function generateCodeVariations(code: string): string[] {
 }
 
 /**
+ * Dediziertes Akronym-Matching als Ergänzung zur phonetischen Suche.
+ *
+ * Adressiert drei Probleme:
+ * 1. Kölner Phonetik ist für Initialwörter ungeeignet (CRP → 471 vs DASCRP → 2871)
+ *    → Buchstabenkern-Levenshtein statt Phonetik (Patch 1)
+ * 2. Kurze Akronyme (CRP, STIR) werden durch minWordLength=5 blockiert
+ *    → Separate Matching-Logik mit niedrigerer Schwelle (Patch 2)
+ * 3. Zahlen in Akronymen (DAS28-CRP) maskieren Teilakronyme
+ *    → Aufsplitten an Zahlen/Nicht-Buchstaben (Patch 3)
+ */
+function findAcronymPhoneticMatch(
+  word: string,
+  index: { allEntries: PhoneticDictEntry[] }
+): PhoneticMatchResult | null {
+  if (!word) return null;
+
+  const wordCore = extractLetterCore(word);
+  if (wordCore.length < 3) return null;
+
+  const alphaParts = splitIntoAlphaParts(word);
+
+  let bestMatch: PhoneticMatchResult | null = null;
+
+  for (const entry of index.allEntries) {
+    if (!entry.isAcronymLike) continue;
+
+    const entryCore = entry.wrongNorm;
+
+    // 1. Buchstabenkern-Levenshtein (Patch 1): direkter Vergleich ohne Phonetik
+    const coreDist = levenshtein(wordCore, entryCore);
+    const maxCoreLen = Math.max(wordCore.length, entryCore.length, 1);
+    const coreSimilarity = 1 - coreDist / maxCoreLen;
+
+    const minSim = getSimilarityThreshold(entry, false, wordCore.length);
+
+    if (coreSimilarity >= minSim) {
+      const confidence = 0.5 + coreSimilarity * 0.5;
+      if (!bestMatch || confidence > bestMatch.confidence) {
+        bestMatch = {
+          correct: entry.correct,
+          confidence,
+          similarity: coreSimilarity,
+          minSimilarity: minSim,
+          matchedEntry: entry,
+        };
+      }
+    }
+
+    // Nur bei nicht-triviellem Overlap weitermachen (≥ 40 %)
+    if (coreSimilarity < 0.4) continue;
+
+    // 2. Substring-Prüfung (Patch 1): kürzerer Kern im längeren enthalten?
+    // z.B. "crp" in "asdascrp" → Hinweis auf verwandte Terme
+    const shorter = wordCore.length <= entryCore.length ? wordCore : entryCore;
+    const longer = wordCore.length > entryCore.length ? wordCore : entryCore;
+    if (shorter.length >= 2 && longer.includes(shorter)) {
+      const substringRatio = shorter.length / longer.length;
+      // Je grösser der Overlap, desto höher das Vertrauen
+      const confidence = 0.55 + substringRatio * 0.25;
+      if (!bestMatch || confidence > bestMatch.confidence) {
+        bestMatch = {
+          correct: entry.correct,
+          confidence,
+          similarity: coreSimilarity,
+          minSimilarity: 0.4,
+          matchedEntry: entry,
+        };
+      }
+    }
+
+    // 3. Teilakronyme matchen (Patch 3): alpha-parts gegen entryCore
+    for (const part of alphaParts) {
+      if (part.length < 2) continue;
+      const partLower = part.toLowerCase();
+      if (partLower === entryCore) {
+        // Exakter Part-Match → hohes Vertrauen
+        const confidence = 0.65;
+        if (!bestMatch || confidence > bestMatch.confidence) {
+          bestMatch = {
+            correct: entry.correct,
+            confidence,
+            similarity: 1.0,
+            minSimilarity: 0.5,
+            matchedEntry: entry,
+          };
+        }
+        break;
+      }
+      // Teilweise Übereinstimmung via Levenshtein
+      const partDist = levenshtein(partLower, entryCore);
+      const maxPartLen = Math.max(partLower.length, entryCore.length, 1);
+      const partSimilarity = 1 - partDist / maxPartLen;
+      if (partSimilarity >= 0.75) {
+        const confidence = 0.55 + partSimilarity * 0.1;
+        if (!bestMatch || confidence > bestMatch.confidence) {
+          bestMatch = {
+            correct: entry.correct,
+            confidence,
+            similarity: partSimilarity,
+            minSimilarity: 0.5,
+            matchedEntry: entry,
+          };
+        }
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
+/**
  * Findet den besten phonetischen Match für ein Wort.
  * Gibt null zurück wenn kein ausreichend guter Match gefunden wird.
  *
@@ -667,7 +795,13 @@ export function findPhoneticMatch(
 ): PhoneticMatchResult | null {
   if (!word) return null;
   const wordNorm = normalizeForComparison(word);
-  if (wordNorm.length < minWordLength) return null;
+  // Patch 2: Kurze Akronyme (≥3 Buchstaben) durchlassen, wenn Einträge existieren
+  if (wordNorm.length < minWordLength) {
+    if (wordNorm.length >= 3 && index.allEntries.some(e => e.isAcronymLike)) {
+      return findAcronymPhoneticMatch(word, index);
+    }
+    return null;
+  }
 
   const wordPhonetic = colognePhonetic(word);
 
@@ -736,6 +870,11 @@ export function findPhoneticMatch(
         }
       }
     }
+  }
+
+  // Patch 1+3: Akronym-Matching als Fallback für Wörter, die phonetisch nicht matchen
+  if (!bestMatch) {
+    bestMatch = findAcronymPhoneticMatch(word, index);
   }
 
   return bestMatch;

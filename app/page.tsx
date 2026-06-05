@@ -19,6 +19,7 @@ import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio'
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
 import { injectToActiveWindow, isClipboardFallback } from '@/lib/injectClient';
+import { replaceAllInText } from '@/lib/replaceText';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
@@ -1847,7 +1848,7 @@ export default function HomePage() {
 
   useEffect(() => {
     const handleDictionaryChanged = (event: Event) => {
-      const customEvent = event as CustomEvent<{ scope?: string }>;
+      const customEvent = event as CustomEvent<{ scope?: string; wrong?: string; correct?: string }>;
       if (customEvent.detail?.scope === 'private') {
         fetchDictionary();
       }
@@ -1855,11 +1856,21 @@ export default function HomePage() {
       if (customEvent.detail?.scope === 'standard') {
         fetchStandardDictionary();
       }
+
+      const wrong = customEvent.detail?.wrong?.trim();
+      const correct = customEvent.detail?.correct?.trim();
+
+      if (!wrong || !correct) {
+        return;
+      }
+
+      const targetField = resolveFormattingTargetField();
+      setFieldText(targetField, (currentText) => replaceAllInText(currentText, wrong, correct));
     };
 
     window.addEventListener(DICTIONARY_CHANGED_EVENT, handleDictionaryChanged);
     return () => window.removeEventListener(DICTIONARY_CHANGED_EVENT, handleDictionaryChanged);
-  }, [fetchDictionary, fetchStandardDictionary]);
+  }, [fetchDictionary, fetchStandardDictionary, resolveFormattingTargetField, setFieldText]);
 
   // Event-Listener für Template-Aktualisierungen (wenn Templates im Modal geändert werden)
   useEffect(() => {

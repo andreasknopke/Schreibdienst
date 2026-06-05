@@ -14,9 +14,9 @@ interface DictionaryManagerProps {
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 
-function notifyDictionaryChanged() {
+function notifyDictionaryChanged(detail?: { scope?: string; wrong?: string; correct?: string }) {
   window.dispatchEvent(new CustomEvent(DICTIONARY_CHANGED_EVENT, {
-    detail: { scope: 'private' }
+    detail: { scope: 'private', ...detail }
   }));
 }
 
@@ -91,12 +91,12 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
       }
 
       if (data.success) {
+        notifyDictionaryChanged({ scope: 'private', wrong, correct });
         setSuccess(`"${wrong}" → "${correct}" hinzugefügt`);
         setWrong('');
         setCorrect('');
         setAddToGroup(false);
         await fetchEntries();
-        notifyDictionaryChanged();
       } else {
         setError(data.error || 'Fehler beim Hinzufügen');
       }

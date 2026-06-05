@@ -211,53 +211,55 @@ export default function UpdatePanel({
             </div>
           )}
 
-          {recentReleases.length > 0 && (
-            <div className="rounded-lg border border-gray-200 bg-white/80 p-3 dark:border-gray-700 dark:bg-gray-900/60">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Letzte 3 Updates</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Waehlen Sie eine Version aus, um die Versionshinweise zu sehen.</p>
-                </div>
-                {releasesUrl && (
-                  <a
-                    href={releasesUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                  >
-                    Weitere auf GitHub
-                  </a>
-                )}
-              </div>
+          {recentReleases
+            .filter((release) => release.version !== currentRelease?.version)
+            .map((release) => {
+              const isActive = release.version === selectedRecentRelease?.version;
+              return (
+                <button
+                  key={release.version}
+                  type="button"
+                  onClick={() => setSelectedRecentReleaseVersion(release.version)}
+                  className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                    isActive
+                      ? 'border-blue-300 bg-blue-50 text-blue-900 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-100'
+                      : 'border-gray-200 bg-white/80 text-gray-900 hover:border-blue-200 hover:bg-blue-50/60 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-100 dark:hover:border-blue-800 dark:hover:bg-blue-950/20'
+                  }`}
+                  aria-pressed={isActive}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">Version {release.version}</p>
+                      <p className={`text-sm ${isActive ? 'text-blue-700 dark:text-blue-200' : 'text-gray-500 dark:text-gray-400'}`}>
+                        Neue Features und Verbesserungen
+                      </p>
+                    </div>
+                    <span className={`text-base leading-none ${isActive ? 'text-blue-700 dark:text-blue-200' : 'text-gray-400 dark:text-gray-500'}`} aria-hidden="true">
+                      {isActive ? '▾' : '▸'}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
 
-              <div className="mt-3 flex flex-wrap gap-2">
-                {recentReleases.map((release) => {
-                  const isActive = release.version === selectedRecentRelease?.version;
-                  return (
-                    <button
-                      key={release.version}
-                      type="button"
-                      onClick={() => setSelectedRecentReleaseVersion(release.version)}
-                      className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                        isActive
-                          ? 'border-blue-300 bg-blue-100 text-blue-900 dark:border-blue-700 dark:bg-blue-900/60 dark:text-blue-100'
-                          : 'border-gray-300 bg-white text-gray-700 hover:border-blue-200 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-950/40 dark:text-gray-200 dark:hover:border-blue-700 dark:hover:text-blue-300'
-                      }`}
-                      aria-pressed={isActive}
-                    >
-                      v{release.version}
-                    </button>
-                  );
-                })}
-              </div>
+          {selectedRecentRelease && selectedRecentRelease.version !== currentRelease?.version && (
+            <ReleaseBlock
+              title={`Versionshinweise ${selectedRecentRelease.version}`}
+              release={selectedRecentRelease}
+              emptyMessage="Fuer dieses Update liegen keine Versionshinweise vor."
+            />
+          )}
 
-              <div className="mt-3">
-                <ReleaseBlock
-                  title="Versionshinweise"
-                  release={selectedRecentRelease}
-                  emptyMessage="Fuer dieses Update liegen keine Versionshinweise vor."
-                />
-              </div>
+          {releasesUrl && (
+            <div className="text-right">
+              <a
+                href={releasesUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                Weitere Releases auf GitHub
+              </a>
             </div>
           )}
 

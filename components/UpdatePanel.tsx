@@ -164,8 +164,10 @@ function ReleaseCard({
 }
 
 export default function UpdatePanel({
+  isOpen = true,
   onRequestOpen,
 }: {
+  isOpen?: boolean;
   onRequestOpen?: () => void;
 }) {
   const [data, setData] = useState<VersionInfoResponse | null>(null);
@@ -225,6 +227,12 @@ export default function UpdatePanel({
       isCancelled = true;
     };
   }, [onRequestOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSelectedRecentReleaseVersion(null);
+    }
+  }, [isOpen]);
 
   const currentRelease = data?.currentRelease || null;
   const recentReleases = data?.recentReleases || [];

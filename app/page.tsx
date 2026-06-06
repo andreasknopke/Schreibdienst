@@ -197,6 +197,15 @@ const EMPTY_FIELD_TEXTS: Record<TextInsertionTarget, string> = {
   beurteilung: '',
 };
 
+const TEXT_HISTORY_LIMIT = 100;
+
+interface TextHistorySnapshot {
+  transcript: string;
+  methodik: string;
+  beurteilung: string;
+  richTextFormats: Record<TextInsertionTarget, RichTextFormatRange[]>;
+}
+
 const EMPTY_MANUAL_WORD_CHANGES: Record<TextInsertionTarget, ManualWordChange | null> = {
   transcript: null,
   methodik: null,
@@ -222,6 +231,46 @@ function fieldToStateKey(field: TextInsertionTarget): TextStateKey {
   if (field === 'methodik') return 'methodik';
   if (field === 'beurteilung') return 'beurteilung';
   return 'transcript';
+}
+
+function cloneRichTextFormats(formats: Record<TextInsertionTarget, RichTextFormatRange[]>): Record<TextInsertionTarget, RichTextFormatRange[]> {
+  return {
+    transcript: [...formats.transcript],
+    methodik: [...formats.methodik],
+    befund: [...formats.befund],
+    beurteilung: [...formats.beurteilung],
+  };
+}
+
+function areRichTextFormatsEqual(
+  left: Record<TextInsertionTarget, RichTextFormatRange[]>,
+  right: Record<TextInsertionTarget, RichTextFormatRange[]>
+): boolean {
+  return (Object.keys(EMPTY_FIELD_TEXTS) as TextInsertionTarget[]).every((field) => {
+    const leftRanges = left[field] || [];
+    const rightRanges = right[field] || [];
+
+    if (leftRanges.length !== rightRanges.length) {
+      return false;
+    }
+
+    return leftRanges.every((range, index) => {
+      const other = rightRanges[index];
+      return other
+        && range.start === other.start
+        && range.end === other.end
+        && range.bold === other.bold
+        && range.italic === other.italic
+        && range.underline === other.underline;
+    });
+  });
+}
+
+function areTextHistorySnapshotsEqual(left: TextHistorySnapshot, right: TextHistorySnapshot): boolean {
+  return left.transcript === right.transcript
+    && left.methodik === right.methodik
+    && left.beurteilung === right.beurteilung
+    && areRichTextFormatsEqual(left.richTextFormats, right.richTextFormats);
 }
 
 function extractLastManualWordChange(previousText: string, nextText: string): ManualWordChange | null {
@@ -952,6 +1001,90 @@ export default function HomePage() {
   const existingBeurteilungRef = useRef<string>("");
   const lastMethodikRef = useRef<string>("");
   const lastBeurteilungRef = useRef<string>("");
+  const textHistoryPastRef = useRef<TextHistorySnapshot[]>([]);
+  const textHistoryFutureRef = useRef<TextHistorySnapshot[]>([]);
+  const currentTextHistorySnapshotRef = useRef<TextHistorySnapshot>({
+    transcript: '',
+    methodik: '',
+    beurteilung: '',
+    richTextFormats: cloneRichTextFormats(EMPTY_RICH_TEXT_FORMATS),
+  });
+  const restoringTextHistoryRef = useRef(false);
+  const [textHistoryAvailability, setTextHistoryAvailability] = useState({ canUndo: false, canRedo: false });
+
+  const updateTextHistoryAvailability = useCallback(() => {
+    setTextHistoryAvailability({
+      canUndo: textHistoryPastRef.current.length > 0,
+      canRedo: textHistoryFutureRef.current.length > 0,
+    });
+  }, []);
+
+  const applyTextHistorySnapshot = useCallback((snapshot: TextHistorySnapshot) => {
+    setTranscript(snapshot.transcript);
+    setMethodik(snapshot.methodik);
+    setBeurteilung(snapshot.beurteilung);
+    setRichTextFormats(cloneRichTextFormats(snapshot.richTextFormats));
+  }, []);
+
+  useEffect(() => {
+    const nextSnapshot: TextHistorySnapshot = {
+      transcript,
+      methodik,
+      beurteilung,
+      richTextFormats: cloneRichTextFormats(richTextFormats),
+    };
+    const currentSnapshot = currentTextHistorySnapshotRef.current;
+
+    if (areTextHistorySnapshotsEqual(currentSnapshot, nextSnapshot)) {
+      return;
+    }
+
+    if (restoringTextHistoryRef.current) {
+      currentTextHistorySnapshotRef.current = nextSnapshot;
+      restoringTextHistoryRef.current = false;
+      updateTextHistoryAvailability();
+      return;
+    }
+
+    textHistoryPastRef.current = [...textHistoryPastRef.current, currentSnapshot].slice(-TEXT_HISTORY_LIMIT);
+    textHistoryFutureRef.current = [];
+    currentTextHistorySnapshotRef.current = nextSnapshot;
+    updateTextHistoryAvailability();
+  }, [beurteilung, methodik, richTextFormats, transcript, updateTextHistoryAvailability]);
+
+  const handleUndoTextHistory = useCallback(() => {
+    if (isProcessing) {
+      return;
+    }
+
+    const previousSnapshot = textHistoryPastRef.current[textHistoryPastRef.current.length - 1];
+    if (!previousSnapshot) {
+      return;
+    }
+
+    textHistoryPastRef.current = textHistoryPastRef.current.slice(0, -1);
+    textHistoryFutureRef.current = [...textHistoryFutureRef.current, currentTextHistorySnapshotRef.current].slice(-TEXT_HISTORY_LIMIT);
+    restoringTextHistoryRef.current = true;
+    applyTextHistorySnapshot(previousSnapshot);
+    updateTextHistoryAvailability();
+  }, [applyTextHistorySnapshot, isProcessing, updateTextHistoryAvailability]);
+
+  const handleRedoTextHistory = useCallback(() => {
+    if (isProcessing) {
+      return;
+    }
+
+    const nextSnapshot = textHistoryFutureRef.current[textHistoryFutureRef.current.length - 1];
+    if (!nextSnapshot) {
+      return;
+    }
+
+    textHistoryFutureRef.current = textHistoryFutureRef.current.slice(0, -1);
+    textHistoryPastRef.current = [...textHistoryPastRef.current, currentTextHistorySnapshotRef.current].slice(-TEXT_HISTORY_LIMIT);
+    restoringTextHistoryRef.current = true;
+    applyTextHistorySnapshot(nextSnapshot);
+    updateTextHistoryAvailability();
+  }, [applyTextHistorySnapshot, isProcessing, updateTextHistoryAvailability]);
 
   // Revert-Funktion: Speichert den Text VOR der letzten Korrektur
   const [preCorrectionState, setPreCorrectionState] = useState<{
@@ -4666,6 +4799,10 @@ export default function HomePage() {
 
   // Ref für den Mikrofon-Button
   const recordButtonRef = useRef<HTMLButtonElement>(null);
+  const hasCorrectionText = mode === 'befund'
+    ? Boolean(methodik.trim() || transcript.trim() || beurteilung.trim())
+    : Boolean(transcript.trim());
+  const correctionButtonDisabled = correcting || busy || !hasCorrectionText;
 
   // Kompakter Aufnahme-Button für Header-Bereich
   const RecordButton = (
@@ -4790,12 +4927,40 @@ export default function HomePage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button 
-              className="btn btn-outline text-sm py-1.5 px-3" 
-              onClick={handleReset}
-              title="Alle Felder löschen (oder Rechtsklick)"
+            <button
+              className="btn btn-outline h-9 w-9 p-0"
+              onClick={handleUndoTextHistory}
+              title="Letzte Textänderung rückgängig machen"
+              aria-label="Letzte Textänderung rückgängig machen"
+              disabled={!textHistoryAvailability.canUndo || isProcessing}
             >
-              ✨ Neu
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 14 4 9l5-5" />
+                <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
+              </svg>
+            </button>
+            <button
+              className="btn btn-outline h-9 w-9 p-0"
+              onClick={handleRedoTextHistory}
+              title="Rückgängig gemachte Textänderung wiederherstellen"
+              aria-label="Rückgängig gemachte Textänderung wiederherstellen"
+              disabled={!textHistoryAvailability.canRedo || isProcessing}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m15 14 5-5-5-5" />
+                <path d="M20 9H10a6 6 0 0 0 0 12h3" />
+              </svg>
+            </button>
+            <button 
+              className="btn btn-outline h-9 w-9 p-0" 
+              onClick={handleReset}
+              title="Alle Felder löschen"
+              aria-label="Alle Felder löschen"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <path d="M14 2v6h6" />
+              </svg>
             </button>
             {canRevert && preCorrectionState && (
               <>
@@ -4841,17 +5006,14 @@ export default function HomePage() {
                 </label>
               </>
             )}
-            {/* Manueller Korrektur-Button wenn Änderungen vorliegen */}
-            {pendingCorrection && (
-              <button 
-                className="btn btn-primary text-sm py-1.5 px-3 animate-pulse" 
-                onClick={mode === 'befund' ? handleFormatBefund : handleManualCorrect}
-                title="KI-Korrektur durchführen"
-                disabled={correcting || busy || (mode === 'befund' ? !methodik.trim() && !transcript.trim() && !beurteilung.trim() : !transcript.trim())}
-              >
-                {correcting ? <Spinner size={14} /> : '🤖 Korrigieren'}
-              </button>
-            )}
+            <button 
+              className={`btn text-sm py-1.5 px-3 ${pendingCorrection && !correctionButtonDisabled ? 'btn-primary animate-pulse' : 'btn-outline'}`}
+              onClick={mode === 'befund' ? handleFormatBefund : handleManualCorrect}
+              title={hasCorrectionText ? 'KI-Korrektur durchführen' : 'Text eingeben, um die KI-Korrektur zu aktivieren'}
+              disabled={correctionButtonDisabled}
+            >
+              {correcting ? <Spinner size={14} /> : '🤖 Korrigieren'}
+            </button>
             
             {/* Textbaustein-Auswahl */}
             {availableTemplates.length > 0 && (
@@ -5470,7 +5632,7 @@ export default function HomePage() {
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Versionshinweise und neue Versionen</p>
           </div>
           <div className="px-4 py-3">
-            <UpdatePanel onRequestOpen={() => setShowUpdatePanel(true)} />
+            <UpdatePanel isOpen={showUpdatePanel} onRequestOpen={() => setShowUpdatePanel(true)} />
           </div>
         </aside>
 

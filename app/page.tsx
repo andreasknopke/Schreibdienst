@@ -12,6 +12,7 @@ import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
+import HelpPanel from '@/components/HelpPanel';
 import UpdatePanel from '@/components/UpdatePanel';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
@@ -501,6 +502,7 @@ export default function HomePage() {
   
   // Diff-Ansicht: Zeigt Unterschiede zwischen formatiertem Original und KI-korrigiertem Text
   const [showDiffView, setShowDiffView] = useState(false);
+  const [showHelpPanel, setShowHelpPanel] = useState(false);
   const [showUpdatePanel, setShowUpdatePanel] = useState(false);
 
   // Custom Actions Manager
@@ -4199,6 +4201,37 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      {/* Seitliches Panel: Hilfe */}
+      <div className="pointer-events-none fixed right-0 top-[calc(18vh+4.25rem)] z-40 hidden md:flex items-start">
+        <aside
+          className={`w-80 max-w-[80vw] max-h-[calc(100vh-9rem)] overflow-y-auto rounded-l-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
+            showHelpPanel
+              ? 'mr-2 translate-x-0 opacity-100 pointer-events-auto'
+              : 'mr-0 translate-x-full opacity-0 pointer-events-none'
+          }`}
+          aria-hidden={!showHelpPanel}
+        >
+          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Hilfe</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Sprachbefehle, Hotkeys und Bedienung</p>
+          </div>
+          <div className="px-4 py-3">
+            <HelpPanel />
+          </div>
+        </aside>
+
+        <button
+          className="pointer-events-auto h-16 w-10 rounded-l-xl border border-r-0 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+          onClick={() => setShowHelpPanel((current) => !current)}
+          title={showHelpPanel ? 'Hilfe schliessen' : 'Hilfe oeffnen'}
+          aria-label={showHelpPanel ? 'Hilfe schliessen' : 'Hilfe oeffnen'}
+          aria-expanded={showHelpPanel}
+        >
+          <span className="block text-[11px] leading-tight">Hilfe</span>
+          <span className="block text-base leading-none mt-0.5">{showHelpPanel ? '║' : '╣'}</span>
+        </button>
+      </div>
 
       {/* Seitliches Panel: Updates */}
       <div className="pointer-events-none fixed right-0 top-[18vh] z-40 hidden md:flex items-start">

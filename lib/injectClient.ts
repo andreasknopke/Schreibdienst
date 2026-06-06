@@ -15,11 +15,20 @@ export interface InjectResult {
   error?: string;
 }
 
-const WS_URL = 'ws://127.0.0.1:58765';
+const WS_URL = 'ws://localhost:58765';
 const RESPONSE_TIMEOUT_MS = 1500;
 
 let g_ws: WebSocket | null = null;
 let g_wsReady: Promise<WebSocket> | null = null;
+let g_wsUnavailable = false;
+
+function isSecureContext(): boolean {
+  try {
+    return typeof window !== 'undefined' && window.location.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 function createRequestId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -38,26 +47,36 @@ function getWs(): Promise<WebSocket> {
     return Promise.resolve(g_ws);
   }
 
+  // If we have a stale connection, clean it up
+  if (g_ws) {
+    try { g_ws.close(); } catch (_) {}
+    g_ws = null;
+  }
+
   if (g_wsReady) {
     return g_wsReady;
   }
 
   g_wsReady = new Promise<WebSocket>((resolve, reject) => {
+    console.info('[Injector] Verbinde mit WebSocket', { url: WS_URL });
     const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
+      console.info('[Injector] WebSocket verbunden');
       g_ws = ws;
       g_wsReady = null;
       resolve(ws);
     };
 
-    ws.onerror = () => {
+    ws.onerror = (ev) => {
+      console.warn('[Injector] WebSocket Fehler', { url: WS_URL, readyState: ws.readyState });
       g_ws = null;
       g_wsReady = null;
       reject(new Error('Schreibdienst-Injector nicht erreichbar (WebSocket)'));
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
+      console.info('[Injector] WebSocket geschlossen', { code: ev.code, reason: ev.reason, wasClean: ev.wasClean });
       g_ws = null;
       g_wsReady = null;
     };

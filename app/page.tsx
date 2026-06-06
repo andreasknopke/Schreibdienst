@@ -12,6 +12,7 @@ import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
+import UpdatePanel from '@/components/UpdatePanel';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
@@ -67,6 +68,22 @@ interface CaretOverlayPosition {
 interface TextInsertionResult {
   text: string;
   selection: CaretSelection;
+}
+
+interface TextHistorySnapshot {
+  transcript: string;
+  methodik: string;
+  beurteilung: string;
+}
+
+const TEXT_HISTORY_LIMIT = 50;
+
+function areTextHistorySnapshotsEqual(a: TextHistorySnapshot, b: TextHistorySnapshot): boolean {
+  return (
+    a.transcript === b.transcript
+    && a.methodik === b.methodik
+    && a.beurteilung === b.beurteilung
+  );
 }
 
 function getDefaultSelection(text: string): CaretSelection {
@@ -374,6 +391,87 @@ export default function HomePage() {
   const existingBeurteilungRef = useRef<string>("");
   const lastMethodikRef = useRef<string>("");
   const lastBeurteilungRef = useRef<string>("");
+  const textHistoryPastRef = useRef<TextHistorySnapshot[]>([]);
+  const textHistoryFutureRef = useRef<TextHistorySnapshot[]>([]);
+  const currentTextHistorySnapshotRef = useRef<TextHistorySnapshot>({
+    transcript: '',
+    methodik: '',
+    beurteilung: '',
+  });
+  const restoringTextHistoryRef = useRef(false);
+  const [textHistoryAvailability, setTextHistoryAvailability] = useState({ canUndo: false, canRedo: false });
+
+  const updateTextHistoryAvailability = useCallback(() => {
+    setTextHistoryAvailability({
+      canUndo: textHistoryPastRef.current.length > 0,
+      canRedo: textHistoryFutureRef.current.length > 0,
+    });
+  }, []);
+
+  const applyTextHistorySnapshot = useCallback((snapshot: TextHistorySnapshot) => {
+    setTranscript(snapshot.transcript);
+    setMethodik(snapshot.methodik);
+    setBeurteilung(snapshot.beurteilung);
+  }, []);
+
+  useEffect(() => {
+    const nextSnapshot: TextHistorySnapshot = {
+      transcript,
+      methodik,
+      beurteilung,
+    };
+    const currentSnapshot = currentTextHistorySnapshotRef.current;
+
+    if (areTextHistorySnapshotsEqual(currentSnapshot, nextSnapshot)) {
+      return;
+    }
+
+    if (restoringTextHistoryRef.current) {
+      currentTextHistorySnapshotRef.current = nextSnapshot;
+      restoringTextHistoryRef.current = false;
+      updateTextHistoryAvailability();
+      return;
+    }
+
+    textHistoryPastRef.current = [...textHistoryPastRef.current, currentSnapshot].slice(-TEXT_HISTORY_LIMIT);
+    textHistoryFutureRef.current = [];
+    currentTextHistorySnapshotRef.current = nextSnapshot;
+    updateTextHistoryAvailability();
+  }, [beurteilung, methodik, transcript, updateTextHistoryAvailability]);
+
+  const handleUndoTextHistory = useCallback(() => {
+    if (isProcessing) {
+      return;
+    }
+
+    const previousSnapshot = textHistoryPastRef.current[textHistoryPastRef.current.length - 1];
+    if (!previousSnapshot) {
+      return;
+    }
+
+    textHistoryPastRef.current = textHistoryPastRef.current.slice(0, -1);
+    textHistoryFutureRef.current = [...textHistoryFutureRef.current, currentTextHistorySnapshotRef.current].slice(-TEXT_HISTORY_LIMIT);
+    restoringTextHistoryRef.current = true;
+    applyTextHistorySnapshot(previousSnapshot);
+    updateTextHistoryAvailability();
+  }, [applyTextHistorySnapshot, isProcessing, updateTextHistoryAvailability]);
+
+  const handleRedoTextHistory = useCallback(() => {
+    if (isProcessing) {
+      return;
+    }
+
+    const nextSnapshot = textHistoryFutureRef.current[textHistoryFutureRef.current.length - 1];
+    if (!nextSnapshot) {
+      return;
+    }
+
+    textHistoryFutureRef.current = textHistoryFutureRef.current.slice(0, -1);
+    textHistoryPastRef.current = [...textHistoryPastRef.current, currentTextHistorySnapshotRef.current].slice(-TEXT_HISTORY_LIMIT);
+    restoringTextHistoryRef.current = true;
+    applyTextHistorySnapshot(nextSnapshot);
+    updateTextHistoryAvailability();
+  }, [applyTextHistorySnapshot, isProcessing, updateTextHistoryAvailability]);
 
   // Revert-Funktion: Speichert den Text VOR der letzten Korrektur
   const [preCorrectionState, setPreCorrectionState] = useState<{
@@ -403,6 +501,7 @@ export default function HomePage() {
   
   // Diff-Ansicht: Zeigt Unterschiede zwischen formatiertem Original und KI-korrigiertem Text
   const [showDiffView, setShowDiffView] = useState(false);
+  const [showUpdatePanel, setShowUpdatePanel] = useState(false);
 
   // Custom Actions Manager
   const [showCustomActionsManager, setShowCustomActionsManager] = useState(false);
@@ -1506,6 +1605,16 @@ export default function HomePage() {
 
   // Funktion zum Zurücksetzen aller Felder (New-Button) - hier oben für Hotkey-Unterstützung
   const handleReset = useCallback(() => {
+    textHistoryPastRef.current = [];
+    textHistoryFutureRef.current = [];
+    currentTextHistorySnapshotRef.current = {
+      transcript: '',
+      methodik: '',
+      beurteilung: '',
+    };
+    restoringTextHistoryRef.current = true;
+    setTextHistoryAvailability({ canUndo: false, canRedo: false });
+
     vadSessionIdRef.current += 1;
     setTranscript('');
     setMethodik('');
@@ -3497,6 +3606,22 @@ export default function HomePage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              className="btn btn-outline text-sm py-1.5 px-3"
+              onClick={handleUndoTextHistory}
+              disabled={!textHistoryAvailability.canUndo || isProcessing}
+              title="Letzte Textänderung rückgängig"
+            >
+              ↶ Zurück
+            </button>
+            <button
+              className="btn btn-outline text-sm py-1.5 px-3"
+              onClick={handleRedoTextHistory}
+              disabled={!textHistoryAvailability.canRedo || isProcessing}
+              title="Rückgängig gemachte Änderung wiederherstellen"
+            >
+              ↷ Vor
+            </button>
             <button 
               className="btn btn-outline text-sm py-1.5 px-3" 
               onClick={handleReset}
@@ -4074,6 +4199,42 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      {/* Seitliches Panel: Updates */}
+      <div className="pointer-events-none fixed right-0 top-[18vh] z-40 hidden md:flex items-start">
+        <aside
+          className={`overflow-y-auto rounded-l-xl border border-blue-200 dark:border-blue-900/60 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
+            showUpdatePanel
+              ? 'mr-2 translate-x-0 opacity-100 pointer-events-auto'
+              : 'mr-0 translate-x-full opacity-0 pointer-events-none'
+          }`}
+          style={{
+            width: 'min(42rem, calc(100vw - 4.5rem))',
+            maxWidth: 'calc(100vw - 4.5rem)',
+            maxHeight: '82vh',
+          }}
+          aria-hidden={!showUpdatePanel}
+        >
+          <div className="px-4 py-3 border-b border-blue-200 dark:border-blue-900/60">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Updates</h3>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Versionshinweise und neue Versionen</p>
+          </div>
+          <div className="px-4 py-3">
+            <UpdatePanel isOpen={showUpdatePanel} onRequestOpen={() => setShowUpdatePanel(true)} />
+          </div>
+        </aside>
+
+        <button
+          className="pointer-events-auto h-16 w-10 rounded-l-xl border border-r-0 border-blue-200 dark:border-blue-900/60 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-gray-700"
+          onClick={() => setShowUpdatePanel((current) => !current)}
+          title={showUpdatePanel ? 'Updates schliessen' : 'Updates oeffnen'}
+          aria-label={showUpdatePanel ? 'Updates schliessen' : 'Updates oeffnen'}
+          aria-expanded={showUpdatePanel}
+        >
+          <span className="block text-[11px] leading-tight">Update</span>
+          <span className="block text-base leading-none mt-0.5">{showUpdatePanel ? '║' : '╣'}</span>
+        </button>
+      </div>
 
       {/* Custom Actions Manager Modal */}
       {showCustomActionsManager && (

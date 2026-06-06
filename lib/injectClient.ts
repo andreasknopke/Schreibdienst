@@ -15,6 +15,11 @@ export interface InjectResult {
   error?: string;
 }
 
+export interface InjectorAvailabilityResult {
+  ok: boolean;
+  error?: string;
+}
+
 const WS_URL = 'ws://localhost:58765';
 const RESPONSE_TIMEOUT_MS = 1500;
 
@@ -168,6 +173,20 @@ export async function injectToActiveWindow({
 
 export function isClipboardFallback(result: InjectResult): boolean {
   return result.ok && result.fallback === 'clipboard';
+}
+
+export async function checkInjectorAvailability(): Promise<InjectorAvailabilityResult> {
+  if (typeof window === 'undefined') {
+    return { ok: false, error: 'Nur im Browser verfügbar' };
+  }
+
+  try {
+    await getWs();
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Schreibdienst-Injector nicht erreichbar';
+    return { ok: false, error: message };
+  }
 }
 
 // ─── Hotkey registration via WebSocket ─────────────────────────

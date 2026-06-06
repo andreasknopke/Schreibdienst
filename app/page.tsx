@@ -17,7 +17,7 @@ import UpdatePanel from '@/components/UpdatePanel';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
-import { injectToActiveWindow, registerGlobalHotkeys } from '@/lib/injectClient';
+import { checkInjectorAvailability, injectToActiveWindow, registerGlobalHotkeys } from '@/lib/injectClient';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
@@ -363,6 +363,9 @@ export default function HomePage() {
   const liveInjectEnabledRef = useRef(false);
   const liveInjectQueueRef = useRef<Promise<void>>(Promise.resolve());
   const lastLiveInjectEndedWithPunctuationRef = useRef<boolean>(false);
+  const [injectorCheckInProgress, setInjectorCheckInProgress] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Status tracking for UI indicators
   // Show banner during entire recording session, not just during active processing
@@ -580,6 +583,52 @@ export default function HomePage() {
     liveInjectEnabledRef.current = liveInjectEnabled;
     setLiveInjectStatus(liveInjectEnabled ? 'Bereit – Ziel-App fokussieren oder zuletzt verwendete App nutzen' : null);
   }, [liveInjectEnabled]);
+
+  const showToast = useCallback((message: string) => {
+    setToastMessage(message);
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
+      setToastMessage(null);
+      toastTimerRef.current = null;
+    }, 3500);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleToggleLiveInject = useCallback(async () => {
+    if (liveInjectEnabled) {
+      setLiveInjectEnabled(false);
+      setLiveInjectStatus(null);
+      return;
+    }
+
+    if (injectorCheckInProgress) {
+      return;
+    }
+
+    setInjectorCheckInProgress(true);
+    try {
+      const availability = await checkInjectorAvailability();
+      if (!availability.ok) {
+        setLiveInjectEnabled(false);
+        setLiveInjectStatus(null);
+        showToast('Injector nicht installiert oder nicht gestartet.');
+        return;
+      }
+
+      setLiveInjectEnabled(true);
+    } finally {
+      setInjectorCheckInProgress(false);
+    }
+  }, [injectorCheckInProgress, liveInjectEnabled, showToast]);
 
   const queueLiveInject = useCallback((text: string) => {
     let normalizedText = normalizeChunkLeadingWhitespace(text);
@@ -3584,7 +3633,9 @@ export default function HomePage() {
             <div className="flex flex-col gap-1">
               <button
                 className={`btn h-9 w-9 p-0 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
-                onClick={() => setLiveInjectEnabled((enabled) => !enabled)}
+                onClick={() => {
+                  void handleToggleLiveInject();
+                }}
                 title={liveInjectEnabled
                   ? 'Live-Übertragung an Ziel-App ist aktiv'
                   : 'Live-Übertragung an Ziel-App aktivieren'}
@@ -3592,6 +3643,7 @@ export default function HomePage() {
                   ? 'Live-Übertragung an Ziel-App deaktivieren'
                   : 'Live-Übertragung an Ziel-App aktivieren'}
                 aria-pressed={liveInjectEnabled}
+                disabled={injectorCheckInProgress}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M17 3l4 4-4 4" />
@@ -3818,6 +3870,14 @@ export default function HomePage() {
       )}
 
       {error && <div className="alert alert-error text-sm">{error}</div>}
+
+      {toastMessage && (
+        <div className="fixed bottom-4 right-4 z-[70] pointer-events-none">
+          <div className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white shadow-xl">
+            {toastMessage}
+          </div>
+        </div>
+      )}
 
       {/* Processing Status Indicator */}
       {isProcessing && (

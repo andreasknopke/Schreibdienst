@@ -818,28 +818,30 @@ bool sendPasteShortcut() {
 }
 
 PasteOutcome pasteClipboardText(const std::wstring& text) {
+    printf("[INJECT] pasteClipboardText START text=\"%ls\" (len=%zu)\n",
+           text.substr(0, 80).c_str(), text.size());
+    fflush(stdout);
+
     const ClipboardSnapshot snapshot = readClipboardText();
     if (!writeClipboardText(text)) {
+        printf("[INJECT] pasteClipboardText FAILED: writeClipboardText failed\n");
+        fflush(stdout);
         return PasteOutcome::Failed;
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_READY_DELAY_MS));
     const bool pasted = sendPasteShortcut();
+    printf("[INJECT] pasteClipboardText sendPasteShortcut result=%d\n", pasted);
+    fflush(stdout);
+
     std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_RESTORE_DELAY_MS));
 
-    // Detect clipboard block: if our text is still on the clipboard after paste,
-    // the target application blocked Ctrl+V or preventDefault()'d it.
-    const ClipboardSnapshot afterPaste = readClipboardText();
-    const bool clipboardStillIntact = afterPaste.hasText && afterPaste.text == text;
-
     restoreClipboardText(snapshot);
+    printf("[INJECT] pasteClipboardText DONE\n");
+    fflush(stdout);
 
     if (!pasted) {
         return PasteOutcome::Failed;
-    }
-
-    if (clipboardStillIntact) {
-        return PasteOutcome::ClipboardBlocked;
     }
 
     return PasteOutcome::Success;
@@ -908,7 +910,23 @@ std::string handleRequest(const std::string& message) {
         return makeResponse(false, "No text to inject", "");
     }
 
+    // Convert text to narrow string for logging (truncate at 80 chars)
+    std::string narrowText;
+    const size_t logLen = std::min(request.payload.text.size(), (size_t)80);
+    narrowText.resize(logLen, '?');
+    std::wcstombs(&narrowText[0], request.payload.text.c_str(), logLen);
+
+    printf("[INJECT] handleRequest mode=%ls restorePrev=%d delayMs=%u text=\"%s\" (len=%zu)\n",
+           request.payload.mode.c_str(),
+           request.payload.restorePreviousWindow,
+           request.payload.delayMs,
+           narrowText.c_str(),
+           request.payload.text.size());
+    fflush(stdout);
+
     if (request.payload.restorePreviousWindow && !activatePreviousWindow(request.payload.delayMs)) {
+        printf("[INJECT] handleRequest FAILED: Alt-Tab failed\n");
+        fflush(stdout);
         return makeResponse(false, "Alt-Tab focus handover failed", "");
     }
 
@@ -920,22 +938,13 @@ std::string handleRequest(const std::string& message) {
         const PasteOutcome outcome = pasteClipboardText(request.payload.text);
 
         if (outcome == PasteOutcome::Success) {
+            printf("[INJECT] handleRequest SUCCESS (clipboard)\n");
+            fflush(stdout);
             return makeResponse(true, "", "clipboard");
         }
 
-        if (outcome == PasteOutcome::ClipboardBlocked) {
-            // Clipboard paste was blocked by target – fall back to SendInput Unicode
-            if (request.payload.delayMs > 0) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(request.payload.delayMs));
-            }
-
-            if (sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
-                return makeResponse(true, "", "sendinput");
-            }
-
-            return makeResponse(false, "SendInput Unicode fallback failed after clipboard was blocked", "");
-        }
-
+        printf("[INJECT] handleRequest FAILED: clipboard paste failed\n");
+        fflush(stdout);
         return makeResponse(false, "Clipboard write or paste failed", "");
     }
 
@@ -944,19 +953,31 @@ std::string handleRequest(const std::string& message) {
     }
 
     if (sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
+        printf("[INJECT] handleRequest SUCCESS (sendinput)\n");
+        fflush(stdout);
         return makeResponse(true, "", "sendinput");
     }
 
+    printf("[INJECT] handleRequest FAILED: SendInput failed\n");
+    fflush(stdout);
     return makeResponse(false, "SendInput failed", "");
 }
 
 // ─── WebSocket client handler ───────────────────────────────────
 
 void handleClient(SOCKET client) {
+    printf("[WS] handleClient NEW connection\n");
+    fflush(stdout);
+
     if (!wsHandshake(client)) {
+        printf("[WS] handleClient handshake FAILED\n");
+        fflush(stdout);
         closesocket(client);
         return;
     }
+
+    printf("[WS] handleClient handshake OK\n");
+    fflush(stdout);
 
     // Add to client set for hotkey broadcasts
     {

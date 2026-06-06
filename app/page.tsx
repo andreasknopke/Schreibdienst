@@ -484,6 +484,8 @@ export default function HomePage() {
 
     if (!liveInjectEnabledRef.current || !normalizedText.trim()) return;
 
+    console.log(`[LiveInject] queueLiveInject CALL text="${normalizedText.substring(0, 80)}${normalizedText.length > 80 ? '…' : ''}" len=${normalizedText.length}`);
+
     liveInjectQueueRef.current = liveInjectQueueRef.current
       .catch(() => undefined)
       .then(async () => {

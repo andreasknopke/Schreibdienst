@@ -86,13 +86,16 @@ function getWs(): Promise<WebSocket> {
 }
 
 async function sendToHost(
-  request: Required<Pick<InjectRequest, 'text' | 'mode' | 'restorePreviousWindow' | 'delayMs' | 'charDelayMs'>>,
+  request: Required<Pick<InjectRequest, 'text' | 'mode' | 'restorePreviousWindow' | 'delayMs' | 'charDelayMs'>> & { requestId?: string },
   requestId: string,
 ): Promise<InjectResult> {
   const ws = await getWs();
 
+  console.log(`[Injector] sendToHost START id=${requestId} text="${request.text.substring(0, 60)}${request.text.length > 60 ? '…' : ''}" mode=${request.mode} restorePrev=${request.restorePreviousWindow}`);
+
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
+      console.warn(`[Injector] sendToHost TIMEOUT id=${requestId}`);
       resolve({ ok: false, error: 'Schreibdienst-Injector antwortet nicht' });
     }, RESPONSE_TIMEOUT_MS);
 
@@ -104,6 +107,7 @@ async function sendToHost(
 
         clearTimeout(timeout);
         ws.removeEventListener('message', handleMessage);
+        console.log(`[Injector] sendToHost RESPONSE id=${requestId} ok=${data.ok} method=${data.method ?? data.fallback ?? ''}`);
         resolve(data as InjectResult);
       } catch {
         // Not JSON — ignore
@@ -138,6 +142,7 @@ export async function injectToActiveWindow({
   }
 
   const requestId = createRequestId();
+  console.log(`[Injector] injectToActiveWindow CALL id=${requestId} text="${text.substring(0, 60)}${text.length > 60 ? '…' : ''}" mode=${mode} restorePrev=${restorePreviousWindow} fallback=${fallbackToClipboard}`);
 
   try {
     const hostResult = await sendToHost({
@@ -148,6 +153,8 @@ export async function injectToActiveWindow({
       charDelayMs,
     }, requestId);
 
+    console.log(`[Injector] injectToActiveWindow RESULT id=${requestId} ok=${hostResult.ok} fallback=${hostResult.fallback ?? ''} error=${hostResult.error ?? ''}`);
+
     if (hostResult.ok || !fallbackToClipboard) {
       return hostResult;
     }
@@ -155,6 +162,7 @@ export async function injectToActiveWindow({
     // WebSocket not available — fall through to clipboard fallback
   }
 
+  console.warn(`[Injector] injectToActiveWindow FALLBACK clipboard id=${requestId}`);
   return copyToClipboard(text);
 }
 

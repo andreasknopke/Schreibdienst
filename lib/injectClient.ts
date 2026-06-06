@@ -1,5 +1,4 @@
 export type InjectMode = 'sendinput' | 'uia' | 'clipboard';
-export type InjectPostKey = 'F4';
 
 export interface InjectRequest {
   text: string;
@@ -7,7 +6,6 @@ export interface InjectRequest {
   restorePreviousWindow?: boolean;
   delayMs?: number;
   charDelayMs?: number;
-  postKey?: InjectPostKey;
   fallbackToClipboard?: boolean;
 }
 
@@ -17,18 +15,11 @@ export interface InjectResult {
   error?: string;
 }
 
-const MESSAGE_SOURCE = 'schreibdienst-pwa';
-const RESPONSE_SOURCE = 'schreibdienst-extension';
+const WS_URL = 'ws://127.0.0.1:58765';
 const RESPONSE_TIMEOUT_MS = 1500;
 
-function logInjectorEvent(message: string, details?: Record<string, unknown>) {
-  if (details) {
-    console.info(`[Injector] ${message}`, details);
-    return;
-  }
-
-  console.info(`[Injector] ${message}`);
-}
+let g_ws: WebSocket | null = null;
+let g_wsReady: Promise<WebSocket> | null = null;
 
 function createRequestId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -38,61 +29,76 @@ function createRequestId(): string {
 }
 
 async function copyToClipboard(text: string): Promise<InjectResult> {
-  logInjectorEvent('Clipboard-Fallback wird verwendet', { textLength: text.length });
   await navigator.clipboard.writeText(text);
   return { ok: true, fallback: 'clipboard' };
 }
 
-function sendToExtension(
-  request: Required<Pick<InjectRequest, 'text' | 'mode' | 'restorePreviousWindow' | 'delayMs' | 'charDelayMs'>> & Pick<InjectRequest, 'postKey'>,
+function getWs(): Promise<WebSocket> {
+  if (g_ws && g_ws.readyState === WebSocket.OPEN) {
+    return Promise.resolve(g_ws);
+  }
+
+  if (g_wsReady) {
+    return g_wsReady;
+  }
+
+  g_wsReady = new Promise<WebSocket>((resolve, reject) => {
+    const ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+      g_ws = ws;
+      g_wsReady = null;
+      resolve(ws);
+    };
+
+    ws.onerror = () => {
+      g_ws = null;
+      g_wsReady = null;
+      reject(new Error('Schreibdienst-Injector nicht erreichbar (WebSocket)'));
+    };
+
+    ws.onclose = () => {
+      g_ws = null;
+      g_wsReady = null;
+    };
+  });
+
+  return g_wsReady;
+}
+
+async function sendToHost(
+  request: Required<Pick<InjectRequest, 'text' | 'mode' | 'restorePreviousWindow' | 'delayMs' | 'charDelayMs'>>,
   requestId: string,
 ): Promise<InjectResult> {
+  const ws = await getWs();
+
   return new Promise((resolve) => {
-    if (typeof window === 'undefined') {
-      resolve({ ok: false, error: 'Browserfenster nicht verfügbar' });
-      return;
-    }
-
-    logInjectorEvent('Sende Anfrage an Extension', {
-      requestId,
-      mode: request.mode,
-      restorePreviousWindow: request.restorePreviousWindow,
-      delayMs: request.delayMs,
-      charDelayMs: request.charDelayMs,
-      postKey: request.postKey ?? null,
-      textLength: request.text.length,
-    });
-
-    const timeout = window.setTimeout(() => {
-      window.removeEventListener('message', handleResponse);
-      logInjectorEvent('Extension-Timeout', { requestId, timeoutMs: RESPONSE_TIMEOUT_MS });
-      resolve({ ok: false, error: 'Schreibdienst-Injector nicht erreichbar' });
+    const timeout = setTimeout(() => {
+      resolve({ ok: false, error: 'Schreibdienst-Injector antwortet nicht' });
     }, RESPONSE_TIMEOUT_MS);
 
-    function handleResponse(event: MessageEvent) {
-      if (event.source !== window) return;
-      const data = event.data;
-      if (!data || data.source !== RESPONSE_SOURCE || data.requestId !== requestId) return;
+    function handleMessage(event: MessageEvent) {
+      try {
+        const data = JSON.parse(event.data);
+        // Only handle inject responses, not hotkey events
+        if (data.type === 'hotkey-event') return;
 
-      window.clearTimeout(timeout);
-      window.removeEventListener('message', handleResponse);
-      const result = data.result ?? { ok: false, error: 'Ungültige Injector-Antwort' };
-      logInjectorEvent('Antwort von Extension erhalten', {
-        requestId,
-        ok: result.ok,
-        fallback: result.fallback ?? null,
-        error: result.error ?? null,
-      });
-      resolve(result);
+        clearTimeout(timeout);
+        ws.removeEventListener('message', handleMessage);
+        resolve(data as InjectResult);
+      } catch {
+        // Not JSON — ignore
+      }
     }
 
-    window.addEventListener('message', handleResponse);
-    window.postMessage({
-      source: MESSAGE_SOURCE,
+    ws.addEventListener('message', handleMessage);
+
+    const payload = {
       type: 'inject-text',
-      requestId,
       payload: request,
-    }, window.location.origin);
+    };
+
+    ws.send(JSON.stringify(payload));
   });
 }
 
@@ -102,7 +108,6 @@ export async function injectToActiveWindow({
   restorePreviousWindow = true,
   delayMs = 120,
   charDelayMs = 2,
-  postKey,
   fallbackToClipboard = true,
 }: InjectRequest): Promise<InjectResult> {
   if (!text.trim()) {
@@ -115,44 +120,61 @@ export async function injectToActiveWindow({
 
   const requestId = createRequestId();
 
-  logInjectorEvent('Starte Inject-Vorgang', {
-    requestId,
-    mode,
-    restorePreviousWindow,
-    delayMs,
-    charDelayMs,
-    postKey: postKey ?? null,
-    fallbackToClipboard,
-    textLength: text.length,
-  });
+  try {
+    const hostResult = await sendToHost({
+      text,
+      mode,
+      restorePreviousWindow,
+      delayMs,
+      charDelayMs,
+    }, requestId);
 
-  const extensionResult = await sendToExtension({
-    text,
-    mode,
-    restorePreviousWindow,
-    delayMs,
-    charDelayMs,
-    postKey,
-  }, requestId);
-
-  if (extensionResult.ok || !fallbackToClipboard) {
-    logInjectorEvent('Inject-Vorgang abgeschlossen', {
-      requestId,
-      ok: extensionResult.ok,
-      fallback: extensionResult.fallback ?? null,
-      error: extensionResult.error ?? null,
-      via: 'extension',
-    });
-    return extensionResult;
+    if (hostResult.ok || !fallbackToClipboard) {
+      return hostResult;
+    }
+  } catch (_error) {
+    // WebSocket not available — fall through to clipboard fallback
   }
 
-  logInjectorEvent('Falle auf Clipboard zurück', {
-    requestId,
-    extensionError: extensionResult.error ?? null,
-  });
   return copyToClipboard(text);
 }
 
 export function isClipboardFallback(result: InjectResult): boolean {
   return result.ok && result.fallback === 'clipboard';
+}
+
+// ─── Hotkey registration via WebSocket ─────────────────────────
+
+type HotkeyCallback = (action: string, key: string) => void;
+
+let g_hotkeyInitPromise: Promise<void> | null = null;
+let g_hotkeyCallback: HotkeyCallback | null = null;
+
+export async function registerGlobalHotkeys(callback: HotkeyCallback): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+
+  g_hotkeyCallback = callback;
+
+  if (g_hotkeyInitPromise) return g_hotkeyInitPromise.then(() => true);
+
+  g_hotkeyInitPromise = (async () => {
+    const ws = await getWs();
+
+    ws.addEventListener('message', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'hotkey-event' && data.event) {
+          g_hotkeyCallback?.(data.event.action, data.event.key);
+        }
+      } catch {
+        // Not JSON — ignore
+      }
+    });
+
+    // Request hotkey listener start
+    ws.send(JSON.stringify({ type: 'listen-hotkeys' }));
+  })();
+
+  await g_hotkeyInitPromise;
+  return true;
 }

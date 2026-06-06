@@ -1,5 +1,8 @@
+#define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 
 #include <algorithm>
 #include <atomic>
@@ -7,13 +10,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <future>
-#include <iomanip>
-#include <fcntl.h>
-#include <fstream>
-#include <io.h>
 #include <mutex>
 #include <optional>
-#include <sstream>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -23,11 +22,135 @@ namespace {
 
 constexpr std::uint32_t CLIPBOARD_READY_DELAY_MS = 15;
 constexpr std::uint32_t CLIPBOARD_RESTORE_DELAY_MS = 30;
+constexpr uint16_t WS_PORT = 58765;
+constexpr char WS_MAGIC_GUID[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+// ─── SHA1 (RFC 3174) ────────────────────────────────────────────
+
+struct Sha1Context {
+    uint32_t state[5];
+    uint64_t count;
+    uint8_t buffer[64];
+};
+
+void sha1Init(Sha1Context* ctx) {
+    ctx->state[0] = 0x67452301;
+    ctx->state[1] = 0xEFCDAB89;
+    ctx->state[2] = 0x98BADCFE;
+    ctx->state[3] = 0x10325476;
+    ctx->state[4] = 0xC3D2E1F0;
+    ctx->count = 0;
+}
+
+static uint32_t sha1Rotl(uint32_t v, int n) {
+    return (v << n) | (v >> (32 - n));
+}
+
+static void sha1ProcessBlock(uint32_t state[5], const uint8_t block[64]) {
+    uint32_t w[80];
+    for (int i = 0; i < 16; ++i)
+        w[i] = ((uint32_t)block[i*4] << 24) | ((uint32_t)block[i*4+1] << 16)
+             | ((uint32_t)block[i*4+2] <<  8) |  (uint32_t)block[i*4+3];
+    for (int i = 16; i < 80; ++i) {
+        uint32_t t = w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16];
+        w[i] = sha1Rotl(t, 1);
+    }
+
+    uint32_t a = state[0], b = state[1], c = state[2], d = state[3], e = state[4];
+
+    for (int i = 0; i < 80; ++i) {
+        uint32_t f, k;
+        if (i < 20)      { f = (b & c) | (~b & d);            k = 0x5A827999; }
+        else if (i < 40) { f = b ^ c ^ d;                     k = 0x6ED9EBA1; }
+        else if (i < 60) { f = (b & c) | (b & d) | (c & d);   k = 0x8F1BBCDC; }
+        else             { f = b ^ c ^ d;                     k = 0xCA62C1D6; }
+
+        uint32_t temp = sha1Rotl(a, 5) + f + e + k + w[i];
+        e = d; d = c; c = sha1Rotl(b, 30); b = a; a = temp;
+    }
+
+    state[0] += a; state[1] += b; state[2] += c; state[3] += d; state[4] += e;
+}
+
+void sha1Update(Sha1Context* ctx, const uint8_t* data, size_t len) {
+    size_t bufferIdx = (size_t)(ctx->count % 64);
+    ctx->count += (uint64_t)len;
+
+    size_t gap = 64 - bufferIdx;
+    size_t offset = 0;
+
+    if (len >= gap) {
+        memcpy(ctx->buffer + bufferIdx, data, gap);
+        sha1ProcessBlock(ctx->state, ctx->buffer);
+        offset = gap;
+        while (offset + 63 < len) {
+            sha1ProcessBlock(ctx->state, data + offset);
+            offset += 64;
+        }
+        bufferIdx = 0;
+    }
+
+    memcpy(ctx->buffer + bufferIdx, data + offset, len - offset);
+}
+
+void sha1Final(Sha1Context* ctx, uint8_t digest[20]) {
+    uint8_t bits[8];
+    uint64_t totalBits = ctx->count * 8;
+    for (int i = 0; i < 8; ++i)
+        bits[i] = (uint8_t)(totalBits >> (56 - i * 8));
+
+    size_t bufferIdx = (size_t)(ctx->count % 64);
+    ctx->buffer[bufferIdx++] = 0x80;
+
+    if (bufferIdx > 56) {
+        memset(ctx->buffer + bufferIdx, 0, 64 - bufferIdx);
+        sha1ProcessBlock(ctx->state, ctx->buffer);
+        bufferIdx = 0;
+    }
+
+    memset(ctx->buffer + bufferIdx, 0, 56 - bufferIdx);
+    memcpy(ctx->buffer + 56, bits, 8);
+    sha1ProcessBlock(ctx->state, ctx->buffer);
+
+    for (int i = 0; i < 20; ++i)
+        digest[i] = (uint8_t)(ctx->state[i >> 2] >> (24 - (i & 3) * 8));
+}
+
+std::string sha1(const std::string& input) {
+    Sha1Context ctx;
+    sha1Init(&ctx);
+    sha1Update(&ctx, reinterpret_cast<const uint8_t*>(input.data()), input.size());
+    uint8_t digest[20];
+    sha1Final(&ctx, digest);
+    return std::string(reinterpret_cast<char*>(digest), 20);
+}
+
+// ─── Base64 ─────────────────────────────────────────────────────
+
+std::string base64Encode(const std::string& input) {
+    static const char kChars[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((input.size() + 2) / 3) * 4);
+
+    for (size_t i = 0; i < input.size(); i += 3) {
+        uint32_t n = (static_cast<uint8_t>(input[i]) << 16);
+        if (i + 1 < input.size()) n |= (static_cast<uint8_t>(input[i+1]) << 8);
+        if (i + 2 < input.size()) n |=  static_cast<uint8_t>(input[i+2]);
+
+        out.push_back(kChars[(n >> 18) & 63]);
+        out.push_back(kChars[(n >> 12) & 63]);
+        out.push_back((i + 1 < input.size()) ? kChars[(n >> 6) & 63] : '=');
+        out.push_back((i + 2 < input.size()) ? kChars[ n       & 63] : '=');
+    }
+    return out;
+}
+
+// ─── Data structures ────────────────────────────────────────────
 
 struct InjectPayload {
     std::wstring text;
     std::wstring mode = L"sendinput";
-    std::wstring postKey;
     bool restorePreviousWindow = true;
     std::uint32_t delayMs = 120;
     std::uint32_t charDelayMs = 2;
@@ -51,90 +174,11 @@ struct HotkeyListener {
     DWORD threadId = 0;
 };
 
-std::mutex g_writeMutex;
+// ─── Global state ───────────────────────────────────────────────
 
-std::wstring getLogFilePath() {
-    wchar_t localAppData[MAX_PATH]{};
-    const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", localAppData, MAX_PATH);
-    if (length == 0 || length >= MAX_PATH) {
-        return L"schreibdienst-native-host.log";
-    }
-
-    const std::wstring baseDir = std::wstring(localAppData) + L"\\Schreibdienst";
-    const std::wstring injectorDir = baseDir + L"\\Injector";
-    const std::wstring logDir = injectorDir + L"\\logs";
-    CreateDirectoryW(baseDir.c_str(), nullptr);
-    CreateDirectoryW(injectorDir.c_str(), nullptr);
-    CreateDirectoryW(logDir.c_str(), nullptr);
-    return logDir + L"\\native-host.log";
-}
-
-std::string narrow(const std::wstring& value) {
-    if (value.empty()) {
-        return {};
-    }
-
-    const int utf8Length = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
-    if (utf8Length <= 0) {
-        return {};
-    }
-
-    std::string result(static_cast<std::size_t>(utf8Length), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), result.data(), utf8Length, nullptr, nullptr);
-    return result;
-}
-
-std::string formatWin32Error(DWORD errorCode) {
-    if (errorCode == 0) {
-        return "code=0";
-    }
-
-    LPSTR messageBuffer = nullptr;
-    const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
-    const DWORD length = FormatMessageA(flags, nullptr, errorCode, 0, reinterpret_cast<LPSTR>(&messageBuffer), 0, nullptr);
-
-    std::string message = length > 0 && messageBuffer != nullptr
-        ? std::string(messageBuffer, static_cast<std::size_t>(length))
-        : "unbekannter Win32-Fehler";
-
-    if (messageBuffer != nullptr) {
-        LocalFree(messageBuffer);
-    }
-
-    while (!message.empty() && (message.back() == '\r' || message.back() == '\n' || message.back() == ' ')) {
-        message.pop_back();
-    }
-
-    std::ostringstream output;
-    output << "code=" << errorCode << " (0x" << std::hex << std::uppercase << errorCode << std::dec << "): " << message;
-    return output.str();
-}
-
-void appendNativeLog(const std::string& message) {
-    static const std::wstring logFilePath = getLogFilePath();
-    std::ofstream file(logFilePath.c_str(), std::ios::app | std::ios::binary);
-    if (!file.is_open()) {
-        return;
-    }
-
-    SYSTEMTIME now{};
-    GetLocalTime(&now);
-    file << std::setfill('0')
-         << now.wYear << '-'
-         << std::setw(2) << now.wMonth << '-'
-         << std::setw(2) << now.wDay << ' '
-         << std::setw(2) << now.wHour << ':'
-         << std::setw(2) << now.wMinute << ':'
-         << std::setw(2) << now.wSecond << '.'
-         << std::setw(3) << now.wMilliseconds
-         << " [pid=" << GetCurrentProcessId() << "] "
-         << message
-         << "\n";
-}
-
-void logNativeEvent(const std::string& message) {
-    appendNativeLog(message);
-}
+std::mutex g_clientsMutex;
+std::set<SOCKET> g_wsClients;
+std::atomic<bool> g_serverRunning{false};
 
 constexpr HotkeyBinding HOTKEY_BINDINGS[] = {
     {1, VK_F9, "toggle-recording", "F9"},
@@ -142,6 +186,8 @@ constexpr HotkeyBinding HOTKEY_BINDINGS[] = {
     {3, VK_F11, "transfer-text", "F11"},
     {4, VK_ESCAPE, "cancel-recording", "Escape"},
 };
+
+// ─── UTF-8 / JSON helpers ───────────────────────────────────────
 
 void appendCodePoint(std::wstring& output, std::uint32_t codePoint) {
     if (codePoint <= 0xFFFF) {
@@ -330,7 +376,6 @@ NativeRequest parseRequest(const std::string& json) {
     request.type = getStringValue(json, "type");
     request.payload.text = getStringValue(json, "text");
     request.payload.mode = getStringValue(json, "mode", L"sendinput");
-    request.payload.postKey = getStringValue(json, "postKey");
     request.payload.restorePreviousWindow = getBoolValue(json, "restorePreviousWindow", true);
     request.payload.delayMs = getUIntValue(json, "delayMs", 120);
     request.payload.charDelayMs = getUIntValue(json, "charDelayMs", 2);
@@ -384,38 +429,7 @@ std::string makeHotkeyEventResponse(const HotkeyBinding& binding) {
         + "\"}}";
 }
 
-bool readExact(void* target, std::size_t size) {
-    return std::fread(target, 1, size, stdin) == size;
-}
-
-std::optional<std::string> readNativeMessage() {
-    std::uint32_t length = 0;
-    if (!readExact(&length, sizeof(length))) {
-        return std::nullopt;
-    }
-
-    if (length == 0 || length > 1024 * 1024) {
-        return std::nullopt;
-    }
-
-    std::string message(length, '\0');
-    if (!readExact(message.data(), length)) {
-        return std::nullopt;
-    }
-    return message;
-}
-
-bool writeNativeMessage(const std::string& message) {
-    const auto length = static_cast<std::uint32_t>(message.size());
-    return std::fwrite(&length, 1, sizeof(length), stdout) == sizeof(length)
-        && std::fwrite(message.data(), 1, message.size(), stdout) == message.size()
-        && std::fflush(stdout) == 0;
-}
-
-bool writeNativeMessageLocked(const std::string& message) {
-    const std::lock_guard<std::mutex> lock(g_writeMutex);
-    return writeNativeMessage(message);
-}
+// ─── Hotkey management ──────────────────────────────────────────
 
 const HotkeyBinding* findHotkeyBinding(WPARAM hotkeyId) {
     for (const auto& binding : HOTKEY_BINDINGS) {
@@ -430,9 +444,7 @@ const HotkeyBinding* findHotkeyBinding(WPARAM hotkeyId) {
 bool registerGlobalHotkeys(std::string& error) {
     for (const auto& binding : HOTKEY_BINDINGS) {
         if (!RegisterHotKey(nullptr, binding.id, MOD_NOREPEAT, binding.virtualKey)) {
-            const DWORD lastError = GetLastError();
-            error = std::string("RegisterHotKey fehlgeschlagen für ") + binding.key + " (" + formatWin32Error(lastError) + ")";
-            logNativeEvent(std::string("Hotkey-Registrierung fehlgeschlagen für ") + binding.key + ": " + formatWin32Error(lastError));
+            error = std::string("RegisterHotKey fehlgeschlagen für ") + binding.key;
             for (const auto& registered : HOTKEY_BINDINGS) {
                 if (registered.id == binding.id) {
                     break;
@@ -441,8 +453,6 @@ bool registerGlobalHotkeys(std::string& error) {
             }
             return false;
         }
-
-        logNativeEvent(std::string("Hotkey registriert: ") + binding.key);
     }
 
     return true;
@@ -454,9 +464,164 @@ void unregisterGlobalHotkeys() {
     }
 }
 
+// ─── WebSocket helpers ──────────────────────────────────────────
+
+bool sendExact(SOCKET s, const void* data, int len) {
+    int sent = 0;
+    while (sent < len) {
+        int n = ::send(s, static_cast<const char*>(data) + sent, len - sent, 0);
+        if (n <= 0) return false;
+        sent += n;
+    }
+    return true;
+}
+
+bool recvExact(SOCKET s, void* buf, int len) {
+    int received = 0;
+    while (received < len) {
+        int n = ::recv(s, static_cast<char*>(buf) + received, len - received, 0);
+        if (n <= 0) return false;
+        received += n;
+    }
+    return true;
+}
+
+std::string recvLine(SOCKET s) {
+    std::string line;
+    char c;
+    while (true) {
+        int n = ::recv(s, &c, 1, 0);
+        if (n <= 0) return "";
+        if (c == '\r') continue;
+        if (c == '\n') return line;
+        line.push_back(c);
+    }
+}
+
+bool sendWsFrame(SOCKET s, uint8_t opcode, const std::string& payload) {
+    std::vector<uint8_t> frame;
+    frame.push_back(0x80 | (opcode & 0x0F)); // FIN + opcode (server never masks)
+
+    size_t len = payload.size();
+    if (len <= 125) {
+        frame.push_back(static_cast<uint8_t>(len));
+    } else if (len <= 65535) {
+        frame.push_back(126);
+        frame.push_back(static_cast<uint8_t>(len >> 8));
+        frame.push_back(static_cast<uint8_t>(len));
+    } else {
+        frame.push_back(127);
+        for (int i = 7; i >= 0; --i)
+            frame.push_back(static_cast<uint8_t>(len >> (i * 8)));
+    }
+
+    frame.insert(frame.end(), payload.begin(), payload.end());
+    return sendExact(s, frame.data(), static_cast<int>(frame.size()));
+}
+
+struct WsFrame {
+    bool fin = true;
+    uint8_t opcode = 0;
+    std::string payload;
+};
+
+std::optional<WsFrame> recvWsFrame(SOCKET s) {
+    // Read first 2 bytes
+    uint8_t header[2];
+    if (!recvExact(s, header, 2)) return std::nullopt;
+
+    WsFrame frame;
+    frame.fin = (header[0] & 0x80) != 0;
+    frame.opcode = header[0] & 0x0F;
+    bool masked = (header[1] & 0x80) != 0;
+    uint64_t payloadLen = header[1] & 0x7F;
+
+    if (payloadLen == 126) {
+        uint8_t ext[2];
+        if (!recvExact(s, ext, 2)) return std::nullopt;
+        payloadLen = (static_cast<uint64_t>(ext[0]) << 8) | ext[1];
+    } else if (payloadLen == 127) {
+        uint8_t ext[8];
+        if (!recvExact(s, ext, 8)) return std::nullopt;
+        payloadLen = 0;
+        for (int i = 0; i < 8; ++i)
+            payloadLen = (payloadLen << 8) | ext[i];
+    }
+
+    if (payloadLen > 16 * 1024 * 1024) return std::nullopt; // 16 MB max
+
+    uint8_t maskKey[4] = {0, 0, 0, 0};
+    if (masked) {
+        if (!recvExact(s, maskKey, 4)) return std::nullopt;
+    }
+
+    std::string payload(static_cast<size_t>(payloadLen), '\0');
+    if (payloadLen > 0) {
+        if (!recvExact(s, payload.data(), static_cast<int>(payloadLen))) return std::nullopt;
+    }
+
+    if (masked) {
+        for (size_t i = 0; i < payload.size(); ++i)
+            payload[i] ^= maskKey[i % 4];
+    }
+
+    frame.payload = std::move(payload);
+    return frame;
+}
+
+bool wsHandshake(SOCKET s) {
+    // Read HTTP upgrade request
+    std::string key;
+    bool isGet = false;
+
+    std::string firstLine = recvLine(s);
+    if (firstLine.find("GET ") == 0) isGet = true;
+
+    while (true) {
+        std::string header = recvLine(s);
+        if (header.empty()) break; // end of headers
+
+        auto pos = header.find("Sec-WebSocket-Key: ");
+        if (pos == 0) {
+            key = header.substr(19);
+            // Trim trailing whitespace
+            while (!key.empty() && (key.back() == ' ' || key.back() == '\r'))
+                key.pop_back();
+        }
+    }
+
+    if (!isGet || key.empty()) return false;
+
+    std::string accept = base64Encode(sha1(key + WS_MAGIC_GUID));
+
+    std::string response =
+        "HTTP/1.1 101 Switching Protocols\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Accept: " + accept + "\r\n"
+        "\r\n";
+
+    return sendExact(s, response.data(), static_cast<int>(response.size()));
+}
+
+// ─── Broadcast to all connected WebSocket clients ───────────────
+
+void broadcastToClients(const std::string& message) {
+    std::lock_guard<std::mutex> lock(g_clientsMutex);
+    for (auto it = g_wsClients.begin(); it != g_wsClients.end(); ) {
+        if (!sendWsFrame(*it, 0x1, message)) {
+            closesocket(*it);
+            it = g_wsClients.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+// ─── Hotkey listener (broadcasts via WebSocket) ─────────────────
+
 bool startHotkeyListener(HotkeyListener& listener, std::string& error) {
     if (listener.thread.joinable()) {
-        logNativeEvent("Hotkey-Listener bereits aktiv");
         return true;
     }
 
@@ -465,7 +630,6 @@ bool startHotkeyListener(HotkeyListener& listener, std::string& error) {
 
     listener.thread = std::thread([&listener, readyPromise = std::move(readyPromise)]() mutable {
         listener.threadId = GetCurrentThreadId();
-        logNativeEvent("Hotkey-Listener-Thread gestartet");
 
         MSG queueMessage{};
         PeekMessage(&queueMessage, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
@@ -478,7 +642,6 @@ bool startHotkeyListener(HotkeyListener& listener, std::string& error) {
         }
 
         listener.running = true;
-        logNativeEvent("Hotkey-Listener bereit");
         readyPromise.set_value({true, ""});
 
         MSG message{};
@@ -492,38 +655,22 @@ bool startHotkeyListener(HotkeyListener& listener, std::string& error) {
                 continue;
             }
 
-            logNativeEvent(std::string("Hotkey-Ereignis empfangen: ") + binding->key + " -> " + binding->action);
-
-            if (!writeNativeMessageLocked(makeHotkeyEventResponse(*binding))) {
-                logNativeEvent("Schreiben des Hotkey-Ereignisses an Chrome fehlgeschlagen");
-                break;
-            }
-        }
-
-        const DWORD messageError = GetLastError();
-        if (messageError != 0) {
-            logNativeEvent(std::string("GetMessage beendet mit Fehler: ") + formatWin32Error(messageError));
-        } else {
-            logNativeEvent("Hotkey-Listener-Message-Loop beendet");
+            broadcastToClients(makeHotkeyEventResponse(*binding));
         }
 
         unregisterGlobalHotkeys();
         listener.running = false;
         listener.threadId = 0;
-        logNativeEvent("Hotkey-Listener-Thread beendet");
     });
 
     const auto [ok, startupError] = readyFuture.get();
     if (!ok) {
         error = startupError;
-        logNativeEvent(std::string("Hotkey-Listener-Start fehlgeschlagen: ") + startupError);
         if (listener.thread.joinable()) {
             listener.thread.join();
         }
         return false;
     }
-
-    logNativeEvent("Hotkey-Listener erfolgreich gestartet");
 
     return true;
 }
@@ -535,8 +682,6 @@ void stopHotkeyListener(HotkeyListener& listener) {
         return;
     }
 
-    logNativeEvent("Stoppe Hotkey-Listener");
-
     if (listener.threadId != 0) {
         PostThreadMessage(listener.threadId, WM_QUIT, 0, 0);
     }
@@ -545,6 +690,8 @@ void stopHotkeyListener(HotkeyListener& listener) {
     listener.running = false;
     listener.threadId = 0;
 }
+
+// ─── SendInput helpers ──────────────────────────────────────────
 
 bool sendInputs(const std::vector<INPUT>& inputs) {
     constexpr std::size_t chunkSize = 2048;
@@ -576,14 +723,17 @@ INPUT makeUnicodeInput(wchar_t unit, bool keyUp) {
     return input;
 }
 
+// ─── Clipboard helpers ──────────────────────────────────────────
+
+enum class PasteOutcome {
+    Success,
+    Failed,
+    ClipboardBlocked,
+};
+
 struct ClipboardSnapshot {
     bool hasText = false;
     std::wstring text;
-};
-
-struct InjectExecutionResult {
-    bool ok = false;
-    std::string error;
 };
 
 ClipboardSnapshot readClipboardText() {
@@ -657,19 +807,6 @@ bool restoreClipboardText(const ClipboardSnapshot& snapshot) {
     return writeClipboardText(snapshot.text);
 }
 
-bool clipboardMatchesText(const std::wstring& expected) {
-    const ClipboardSnapshot snapshot = readClipboardText();
-    return snapshot.hasText && snapshot.text == expected;
-}
-
-bool restoreClipboardTextIfUnchanged(const ClipboardSnapshot& originalSnapshot, const std::wstring& injectedText) {
-    if (!clipboardMatchesText(injectedText)) {
-        return false;
-    }
-
-    return restoreClipboardText(originalSnapshot);
-}
-
 bool sendPasteShortcut() {
     const std::vector<INPUT> inputs = {
         makeVirtualKeyInput(VK_CONTROL, false),
@@ -680,56 +817,32 @@ bool sendPasteShortcut() {
     return sendInputs(inputs);
 }
 
-bool sendVirtualKeyPress(WORD key) {
-    const std::vector<INPUT> inputs = {
-        makeVirtualKeyInput(key, false),
-        makeVirtualKeyInput(key, true),
-    };
-    return sendInputs(inputs);
-}
-
-bool sendPostKey(const std::wstring& postKey) {
-    if (postKey.empty()) {
-        return true;
-    }
-
-    if (postKey == L"F4") {
-        return sendVirtualKeyPress(VK_F4);
-    }
-
-    return false;
-}
-
-InjectExecutionResult pasteClipboardText(const std::wstring& text) {
+PasteOutcome pasteClipboardText(const std::wstring& text) {
     const ClipboardSnapshot snapshot = readClipboardText();
     if (!writeClipboardText(text)) {
-        return {false, "Clipboard write failed"};
-    }
-
-    if (!clipboardMatchesText(text)) {
-        restoreClipboardTextIfUnchanged(snapshot, text);
-        return {false, "Clipboard verification failed before paste"};
+        return PasteOutcome::Failed;
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_READY_DELAY_MS));
-
-    if (!clipboardMatchesText(text)) {
-        restoreClipboardTextIfUnchanged(snapshot, text);
-        return {false, "Clipboard changed before paste"};
-    }
-
     const bool pasted = sendPasteShortcut();
     std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_RESTORE_DELAY_MS));
 
-    if (!restoreClipboardTextIfUnchanged(snapshot, text) && clipboardMatchesText(text)) {
-        return {false, "Clipboard restore failed"};
-    }
+    // Detect clipboard block: if our text is still on the clipboard after paste,
+    // the target application blocked Ctrl+V or preventDefault()'d it.
+    const ClipboardSnapshot afterPaste = readClipboardText();
+    const bool clipboardStillIntact = afterPaste.hasText && afterPaste.text == text;
+
+    restoreClipboardText(snapshot);
 
     if (!pasted) {
-        return {false, "Paste shortcut failed"};
+        return PasteOutcome::Failed;
     }
 
-    return {true, ""};
+    if (clipboardStillIntact) {
+        return PasteOutcome::ClipboardBlocked;
+    }
+
+    return PasteOutcome::Success;
 }
 
 bool activatePreviousWindow(std::uint32_t delayMs) {
@@ -778,6 +891,8 @@ bool sendUnicodeText(const std::wstring& text, std::uint32_t charDelayMs) {
     return sendInputs(inputs);
 }
 
+// ─── Request handler ────────────────────────────────────────────
+
 std::string handleRequest(const std::string& message) {
     NativeRequest request;
     try {
@@ -801,80 +916,199 @@ std::string handleRequest(const std::string& message) {
         std::this_thread::sleep_for(std::chrono::milliseconds(request.payload.delayMs));
     }
 
-    const InjectExecutionResult injectResult = request.payload.mode == L"clipboard"
-        ? pasteClipboardText(request.payload.text)
-        : InjectExecutionResult{sendUnicodeText(request.payload.text, request.payload.charDelayMs), "SendInput failed"};
+    if (request.payload.mode == L"clipboard") {
+        const PasteOutcome outcome = pasteClipboardText(request.payload.text);
 
-    if (!injectResult.ok) {
-        return makeResponse(false, injectResult.error, "");
+        if (outcome == PasteOutcome::Success) {
+            return makeResponse(true, "", "clipboard");
+        }
+
+        if (outcome == PasteOutcome::ClipboardBlocked) {
+            // Clipboard paste was blocked by target – fall back to SendInput Unicode
+            if (request.payload.delayMs > 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(request.payload.delayMs));
+            }
+
+            if (sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
+                return makeResponse(true, "", "sendinput");
+            }
+
+            return makeResponse(false, "SendInput Unicode fallback failed after clipboard was blocked", "");
+        }
+
+        return makeResponse(false, "Clipboard write or paste failed", "");
     }
 
-    if (!sendPostKey(request.payload.postKey)) {
-        return makeResponse(false, "Post key failed", "");
+    if (request.payload.restorePreviousWindow && request.payload.delayMs > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(request.payload.delayMs));
     }
 
-    return makeResponse(
-        true,
-        "",
-        request.payload.mode == L"clipboard"
-            ? "clipboard"
-            : request.payload.mode == L"uia"
-                ? "sendinput-uia-fallback"
-                : "sendinput");
+    if (sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
+        return makeResponse(true, "", "sendinput");
+    }
+
+    return makeResponse(false, "SendInput failed", "");
+}
+
+// ─── WebSocket client handler ───────────────────────────────────
+
+void handleClient(SOCKET client) {
+    if (!wsHandshake(client)) {
+        closesocket(client);
+        return;
+    }
+
+    // Add to client set for hotkey broadcasts
+    {
+        std::lock_guard<std::mutex> lock(g_clientsMutex);
+        // Only keep the newest client to avoid stale connections
+        for (SOCKET old : g_wsClients) {
+            closesocket(old);
+        }
+        g_wsClients.clear();
+        g_wsClients.insert(client);
+    }
+
+    while (g_serverRunning) {
+        auto maybeFrame = recvWsFrame(client);
+        if (!maybeFrame) break;
+
+        uint8_t opcode = maybeFrame->opcode;
+
+        // Close frame
+        if (opcode == 0x8) break;
+
+        // Ping → Pong
+        if (opcode == 0x9) {
+            sendWsFrame(client, 0xA, maybeFrame->payload);
+            continue;
+        }
+
+        // Only handle text frames
+        if (opcode != 0x1) continue;
+
+        std::string& request = maybeFrame->payload;
+
+        // Check if it's a control message
+        NativeRequest nr;
+        try {
+            nr = parseRequest(request);
+        } catch (const std::exception&) {
+            sendWsFrame(client, 0x1, makeResponse(false, "Invalid request", ""));
+            continue;
+        }
+
+        if (nr.type == L"listen-hotkeys") {
+            // Hotkey listener is already started globally; just acknowledge
+            sendWsFrame(client, 0x1, makeTypedResponse("hotkey-listener-ready", true, ""));
+            continue;
+        }
+
+        if (nr.type == L"unlisten-hotkeys") {
+            sendWsFrame(client, 0x1, makeTypedResponse("hotkey-listener-stopped", true, ""));
+            continue;
+        }
+
+        // Handle inject request
+        std::string response = handleRequest(request);
+        sendWsFrame(client, 0x1, response);
+    }
+
+    // Remove from client set
+    {
+        std::lock_guard<std::mutex> lock(g_clientsMutex);
+        g_wsClients.erase(client);
+    }
+    closesocket(client);
+}
+
+// ─── WebSocket server thread ────────────────────────────────────
+
+void wsServerThread() {
+    SOCKET listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (listenSock == INVALID_SOCKET) return;
+
+    int opt = 1;
+    setsockopt(listenSock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(WS_PORT);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+
+    if (bind(listenSock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+        closesocket(listenSock);
+        return;
+    }
+
+    if (listen(listenSock, SOMAXCONN) != 0) {
+        closesocket(listenSock);
+        return;
+    }
+
+    g_serverRunning = true;
+
+    while (g_serverRunning) {
+        fd_set readSet;
+        FD_ZERO(&readSet);
+        FD_SET(listenSock, &readSet);
+        timeval tv{1, 0}; // 1-second timeout to check g_serverRunning
+
+        int sel = select(0, &readSet, nullptr, nullptr, &tv);
+        if (sel <= 0) continue;
+
+        SOCKET client = accept(listenSock, nullptr, nullptr);
+        if (client == INVALID_SOCKET) continue;
+
+        // Set TCP_NODELAY for low latency on localhost
+        int noDelay = 1;
+        setsockopt(client, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&noDelay), sizeof(noDelay));
+
+        std::thread(handleClient, client).detach();
+    }
+
+    closesocket(listenSock);
 }
 
 } // namespace
 
+// ══════════════════════════════════════════════════════════════════
+// main
+// ══════════════════════════════════════════════════════════════════
+
 int main() {
-    try {
-        logNativeEvent("Native Host gestartet");
-        _setmode(_fileno(stdin), _O_BINARY);
-        _setmode(_fileno(stdout), _O_BINARY);
-
-        HotkeyListener hotkeyListener;
-
-        while (const auto message = readNativeMessage()) {
-            NativeRequest request;
-            try {
-                request = parseRequest(*message);
-            } catch (const std::exception& error) {
-                logNativeEvent(std::string("Request konnte nicht geparst werden: ") + error.what());
-                if (!writeNativeMessageLocked(makeResponse(false, std::string("Invalid request: ") + error.what(), ""))) {
-                    stopHotkeyListener(hotkeyListener);
-                    return 1;
-                }
-                continue;
-            }
-
-            logNativeEvent(std::string("Request empfangen: ") + narrow(request.type));
-
-            if (request.type == L"listen-hotkeys") {
-                std::string error;
-                const bool started = startHotkeyListener(hotkeyListener, error);
-                if (!writeNativeMessageLocked(makeTypedResponse("hotkey-listener-ready", started, error))) {
-                    logNativeEvent("Konnte Hotkey-Startantwort nicht an Chrome schreiben");
-                    stopHotkeyListener(hotkeyListener);
-                    return 1;
-                }
-                continue;
-            }
-
-            if (!writeNativeMessageLocked(handleRequest(*message))) {
-                logNativeEvent("Konnte Response nicht an Chrome schreiben");
-                stopHotkeyListener(hotkeyListener);
-                return 1;
-            }
-        }
-
-        logNativeEvent("STDIN beendet, Native Host wird heruntergefahren");
-        stopHotkeyListener(hotkeyListener);
-
-        return 0;
-    } catch (const std::exception& error) {
-        logNativeEvent(std::string("Unbehandelte Ausnahme: ") + error.what());
-        return 1;
-    } catch (...) {
-        logNativeEvent("Unbekannte unbehandelte Ausnahme");
+    // Initialize Winsock
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         return 1;
     }
+
+    // Start global hotkey listener
+    HotkeyListener hotkeyListener;
+    std::string hotkeyError;
+    startHotkeyListener(hotkeyListener, hotkeyError);
+    // Hotkey error is non-fatal for server startup; the client will be
+    // notified via 'hotkey-listener-ready' when it sends 'listen-hotkeys'.
+
+    // Start WebSocket server on 127.0.0.1:58765
+    std::thread serverThread(wsServerThread);
+
+    // Wait for server thread (runs until process killed)
+    serverThread.join();
+
+    // Cleanup
+    g_serverRunning = false;
+    stopHotkeyListener(hotkeyListener);
+
+    // Close all remaining WebSocket clients
+    {
+        std::lock_guard<std::mutex> lock(g_clientsMutex);
+        for (SOCKET s : g_wsClients) {
+            closesocket(s);
+        }
+        g_wsClients.clear();
+    }
+
+    WSACleanup();
+    return 0;
 }

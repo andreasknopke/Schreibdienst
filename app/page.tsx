@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useRef, useState, useCallback, type SetStateAction } from 'react';
-import { diffWordsWithSpace } from 'diff';
 import { Tabs } from '@/components/Tabs';
 import { exportDocx } from '@/lib/formatMedical';
 import Spinner from '@/components/Spinner';
@@ -8,68 +7,23 @@ import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
 import { applyDeleteCommands, applyFormattingControlWords, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, preprocessTranscription, type OnlineUtteranceApplicationDebugStep } from '@/lib/textFormatting';
-import { buildPhoneticIndex, applyPhoneticCorrections, applyPhoneticCorrectionsDetailed, colognePhonetic, levenshtein, type PhoneticReplacementOperation } from '@/lib/phoneticMatch';
-import { buildRichTextHtml, normalizeRichTextRanges, remapRichTextRanges, type RichTextFormatRange } from '@/lib/richTextFormatting';
+import { buildPhoneticIndex, applyPhoneticCorrections } from '@/lib/phoneticMatch';
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
-import ManualCorrectionSuggestion from '@/components/ManualCorrectionSuggestion';
-import WordActionPopup, { type WordCorrectionInfo } from '@/components/WordActionPopup';
-import RichTextDictationEditor, { getRichTextSelection } from '@/components/RichTextDictationEditor';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
-import UpdatePanel from '@/components/UpdatePanel';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
-import { injectToActiveWindow, isClipboardFallback } from '@/lib/injectClient';
-import { replaceAllInText } from '@/lib/replaceText';
+import { injectToActiveWindow, registerGlobalHotkeys } from '@/lib/injectClient';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
-const PAGE_BRIDGE_SOURCE = 'schreibdienst-pwa';
-const EXTENSION_BRIDGE_SOURCE = 'schreibdienst-extension';
-
 type GlobalHotkeyAction = 'toggle-recording' | 'stop-recording' | 'transfer-text' | 'cancel-recording';
-type HotkeyTriggerSource = 'browser-keydown-fallback' | 'extension-global-hotkey' | 'hid-media-control';
-
-function logHotkeyEvent(action: string, source: HotkeyTriggerSource, details?: Record<string, unknown>) {
-  console.info('[Hotkeys] Aktion ausgelöst', {
-    action,
-    source,
-    timestamp: new Date().toISOString(),
-    ...(details ?? {}),
-  });
-}
 
 // Hilfsfunktion zum Kopieren in die Zwischenablage
 async function copyToClipboard(text: string): Promise<void> {
-  const normalizedText = text.normalize('NFC');
-
-  if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
-    const item = new ClipboardItem({
-      'text/plain': new Blob([normalizedText], { type: 'text/plain;charset=utf-8' }),
-    });
-    await navigator.clipboard.write([item]);
-    return;
-  }
-
-  await navigator.clipboard.writeText(normalizedText);
-}
-
-async function copyRichTextToClipboard(text: string, html: string): Promise<void> {
-  const normalizedText = text.normalize('NFC');
-  const htmlDocument = `<!doctype html><html><head><meta charset="utf-8"></head><body>${html.normalize('NFC')}</body></html>`;
-
-  if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
-    await navigator.clipboard.writeText(normalizedText);
-    return;
-  }
-
-  const item = new ClipboardItem({
-    'text/plain': new Blob([normalizedText], { type: 'text/plain;charset=utf-8' }),
-    'text/html': new Blob([htmlDocument], { type: 'text/html;charset=utf-8' }),
-  });
-  await navigator.clipboard.write([item]);
+  await navigator.clipboard.writeText(text);
 }
 
 // Intervall für kontinuierliche Transkription (in ms)
@@ -96,7 +50,6 @@ interface RuntimeConfig {
 }
 
 type TextInsertionTarget = 'transcript' | BefundField;
-type DictionarySet = 'alltag' | 'medical';
 
 interface CaretSelection {
   start: number;
@@ -111,250 +64,10 @@ interface CaretOverlayPosition {
   visible: boolean;
 }
 
-interface ManualWordChange {
-  originalWord: string;
-  newWord: string;
-}
-
 interface TextInsertionResult {
   text: string;
   selection: CaretSelection;
-  insertedLength: number;
-  insertedStart: number;
-  insertedEnd: number;
 }
-
-type LiveInjectPostKey = 'F4';
-type SelectionFormattingCommand = 'bold' | 'italic' | 'underline';
-type InlineFormattingState = Record<SelectionFormattingCommand, boolean>;
-
-interface InlineFormattingToggleCommand {
-  command: SelectionFormattingCommand;
-  enabled: boolean;
-}
-
-interface InlineFormattingParseResult {
-  text: string;
-  ranges: RichTextFormatRange[];
-  nextState: InlineFormattingState;
-  consumedCommand: boolean;
-}
-
-const INLINE_FORMAT_COMMAND_VARIANTS: Record<SelectionFormattingCommand, string[]> = {
-  bold: ['fett'],
-  italic: ['kursiv'],
-  underline: ['unterstrichen', 'unterstreichen'],
-};
-
-const INLINE_FORMAT_BEGIN_VARIANTS = ['beginn', 'beginnen', 'beginnt', 'anfang', 'start'];
-const INLINE_FORMAT_END_VARIANTS = ['ende', 'beenden', 'beendet', 'stop', 'stopp'];
-
-function getSelectionFormattingCommandLabel(command: SelectionFormattingCommand): string {
-  switch (command) {
-    case 'bold':
-      return 'fett';
-    case 'italic':
-      return 'kursiv';
-    case 'underline':
-      return 'unterstrichen';
-    default:
-      return command;
-  }
-}
-
-interface LiveInjectInstruction {
-  text: string;
-  postKey?: LiveInjectPostKey;
-}
-
-const TEMPLATE_TRIGGER_NORMALIZED = 'textbaustein';
-const TEMPLATE_TRIGGER_PHONETIC = colognePhonetic(TEMPLATE_TRIGGER_NORMALIZED);
-
-const EMPTY_RICH_TEXT_FORMATS: Record<TextInsertionTarget, RichTextFormatRange[]> = {
-  transcript: [],
-  methodik: [],
-  befund: [],
-  beurteilung: [],
-};
-
-const EMPTY_INLINE_FORMATTING_STATE: InlineFormattingState = {
-  bold: false,
-  italic: false,
-  underline: false,
-};
-
-const EMPTY_ACTIVE_INLINE_FORMATTING: Record<TextInsertionTarget, InlineFormattingState> = {
-  transcript: { ...EMPTY_INLINE_FORMATTING_STATE },
-  methodik: { ...EMPTY_INLINE_FORMATTING_STATE },
-  befund: { ...EMPTY_INLINE_FORMATTING_STATE },
-  beurteilung: { ...EMPTY_INLINE_FORMATTING_STATE },
-};
-
-const EMPTY_FIELD_TEXTS: Record<TextInsertionTarget, string> = {
-  transcript: '',
-  methodik: '',
-  befund: '',
-  beurteilung: '',
-};
-
-const TEXT_HISTORY_LIMIT = 100;
-
-interface TextHistorySnapshot {
-  transcript: string;
-  methodik: string;
-  beurteilung: string;
-  richTextFormats: Record<TextInsertionTarget, RichTextFormatRange[]>;
-}
-
-const EMPTY_MANUAL_WORD_CHANGES: Record<TextInsertionTarget, ManualWordChange | null> = {
-  transcript: null,
-  methodik: null,
-  befund: null,
-  beurteilung: null,
-};
-
-const EMPTY_WORD_CORRECTIONS: Record<TextInsertionTarget, WordCorrectionInfo[]> = {
-  transcript: [],
-  methodik: [],
-  befund: [],
-  beurteilung: [],
-};
-
-function extractSuggestionTokens(text: string): string[] {
-  return text.match(/[A-Za-zÄÖÜäöüß0-9]+(?:[-'][A-Za-zÄÖÜäöüß0-9]+)*/g) || [];
-}
-
-// Die Felder "befund" und "transcript" teilen sich denselben State (transcript).
-type TextStateKey = 'transcript' | 'methodik' | 'beurteilung';
-
-function fieldToStateKey(field: TextInsertionTarget): TextStateKey {
-  if (field === 'methodik') return 'methodik';
-  if (field === 'beurteilung') return 'beurteilung';
-  return 'transcript';
-}
-
-function cloneRichTextFormats(formats: Record<TextInsertionTarget, RichTextFormatRange[]>): Record<TextInsertionTarget, RichTextFormatRange[]> {
-  return {
-    transcript: [...formats.transcript],
-    methodik: [...formats.methodik],
-    befund: [...formats.befund],
-    beurteilung: [...formats.beurteilung],
-  };
-}
-
-function areRichTextFormatsEqual(
-  left: Record<TextInsertionTarget, RichTextFormatRange[]>,
-  right: Record<TextInsertionTarget, RichTextFormatRange[]>
-): boolean {
-  return (Object.keys(EMPTY_FIELD_TEXTS) as TextInsertionTarget[]).every((field) => {
-    const leftRanges = left[field] || [];
-    const rightRanges = right[field] || [];
-
-    if (leftRanges.length !== rightRanges.length) {
-      return false;
-    }
-
-    return leftRanges.every((range, index) => {
-      const other = rightRanges[index];
-      return other
-        && range.start === other.start
-        && range.end === other.end
-        && range.bold === other.bold
-        && range.italic === other.italic
-        && range.underline === other.underline;
-    });
-  });
-}
-
-function areTextHistorySnapshotsEqual(left: TextHistorySnapshot, right: TextHistorySnapshot): boolean {
-  return left.transcript === right.transcript
-    && left.methodik === right.methodik
-    && left.beurteilung === right.beurteilung
-    && areRichTextFormatsEqual(left.richTextFormats, right.richTextFormats);
-}
-
-function extractLastManualWordChange(previousText: string, nextText: string): ManualWordChange | null {
-  if (!previousText || !nextText || previousText === nextText) return null;
-
-  const parts = diffWordsWithSpace(previousText, nextText);
-  let lastRemovedWord: string | null = null;
-  let lastAddedWord: string | null = null;
-
-  for (const part of parts) {
-    const tokens = extractSuggestionTokens(part.value || '');
-    if (tokens.length === 0) continue;
-
-    if (part.removed) {
-      lastRemovedWord = tokens[tokens.length - 1];
-      continue;
-    }
-
-    if (part.added) {
-      lastAddedWord = tokens[tokens.length - 1];
-    }
-  }
-
-  if (!lastRemovedWord || !lastAddedWord) return null;
-  if (lastRemovedWord.toLowerCase() === lastAddedWord.toLowerCase()) return null;
-
-  return {
-    originalWord: lastRemovedWord,
-    newWord: lastAddedWord,
-  };
-}
-
-const DICTATION_CHEAT_SHEET_SECTIONS: Array<{ title: string; commands: string[] }> = [
-  {
-    title: 'Satzzeichen',
-    commands: [
-      'Punkt, Komma, Doppelpunkt, Fragezeichen, Ausrufezeichen',
-      'Anfuehrungszeichen auf/zu',
-      'Klammer auf/zu',
-    ],
-  },
-  {
-    title: 'Struktur',
-    commands: [
-      'Neuer Absatz, Naechster Absatz, Absatz',
-      'Neue Zeile, Naechste Zeile',
-      'In Klammern',
-    ],
-  },
-  {
-    title: 'Loeschen',
-    commands: [
-      'Wort streichen, Streiche Wort',
-      'Loesche das letzte Wort',
-      'Loesche den letzten Satz',
-      'Loesche den letzten Absatz',
-    ],
-  },
-  {
-    title: 'Aufzaehlung',
-    commands: [
-      'Aufzaehlung beginnen/starten',
-      'Punkt eins / Punkt zwei / Punkt 1 ...',
-      'Naechster Punkt, Weiterer Punkt',
-      'Aufzaehlung beenden',
-    ],
-  },
-  {
-    title: 'Feldwechsel (Befund-Modus)',
-    commands: [
-      'Methodik: oder Methodik Doppelpunkt',
-      'Befund: oder Befund Doppelpunkt',
-      'Beurteilung: oder Zusammenfassung:',
-    ],
-  },
-  {
-    title: 'Formatierung',
-    commands: [
-      'Fett, Kursiv, Unterstrichen',
-      'Auswahlfett, Auswahlkursiv, Auswahlunterstrichen',
-      'Fett beginnen/ende, Kursiv beginnen/ende',
-    ],
-  },
-];
 
 function getDefaultSelection(text: string): CaretSelection {
   return {
@@ -368,116 +81,13 @@ function normalizeChunkLeadingWhitespace(text: string): string {
   return text.replace(/^\s+/, '');
 }
 
-function sanitizeLiveInjectChunk(text: string): string {
-  return text
-    .replace(/^\s+/, '')
-    .replace(/([,:])\.(?=(\s|$))/g, '$1');
-}
-
-function joinLiveInjectChunk(previousText: string, incomingText: string): string {
-  const sanitizedIncoming = sanitizeLiveInjectChunk(incomingText);
-  if (!sanitizedIncoming.trim()) return '';
-
-  if (!previousText) {
-    return sanitizedIncoming;
-  }
-
-  const previousEndsWithSeparator = /[\s\n([{„"]$/.test(previousText);
-  const incomingStartsWithPunctuation = /^[,.;:!?)]/.test(sanitizedIncoming);
-  const needsSpace = !previousEndsWithSeparator && !incomingStartsWithPunctuation;
-
-  return `${needsSpace ? ' ' : ''}${sanitizedIncoming}`;
-}
-
-function sanitizeTemplateIdentifier(text: string): string {
-  return text.replace(/^[^\p{L}\p{N}_-]+|[^\p{L}\p{N}_-]+$/gu, '');
-}
-
-function normalizeSpokenCommand(text: string): string {
-  return text.toLowerCase()
-    .replace(/ä/g, 'ae')
-    .replace(/ö/g, 'oe')
-    .replace(/ü/g, 'ue')
-    .replace(/ß/g, 'ss')
-    .replace(/[^a-z0-9]+/g, '');
-}
-
-function tokenizeSpokenCommand(text: string): string[] {
-  return text.toLowerCase()
-    .replace(/ä/g, 'ae')
-    .replace(/ö/g, 'oe')
-    .replace(/ü/g, 'ue')
-    .replace(/ß/g, 'ss')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-}
-
-function similarityScore(a: string, b: string): number {
-  const maxLength = Math.max(a.length, b.length, 1);
-  return 1 - (levenshtein(a, b) / maxLength);
-}
-
-function matchesTemplateTrigger(candidate: string): boolean {
-  const normalizedCandidate = normalizeSpokenCommand(candidate);
-  if (!normalizedCandidate) {
-    return false;
-  }
-
-  if (normalizedCandidate === TEMPLATE_TRIGGER_NORMALIZED) {
-    return true;
-  }
-
-  const phoneticCandidate = colognePhonetic(normalizedCandidate);
-  if (!phoneticCandidate || !TEMPLATE_TRIGGER_PHONETIC) {
-    return false;
-  }
-
-  const lexicalSimilarity = similarityScore(normalizedCandidate, TEMPLATE_TRIGGER_NORMALIZED);
-  const phoneticSimilarity = similarityScore(phoneticCandidate, TEMPLATE_TRIGGER_PHONETIC);
-
-  return phoneticSimilarity >= 0.8 && lexicalSimilarity >= 0.58;
-}
-
-function resolveLiveInjectInstruction(text: string): LiveInjectInstruction {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  if (words.length < 2 || words.length > 3) {
-    return { text };
-  }
-
-  let identifierCandidate = '';
-
-  if (words.length === 2 && matchesTemplateTrigger(words[0])) {
-    identifierCandidate = words[1];
-  } else if (words.length === 3 && matchesTemplateTrigger(`${words[0]} ${words[1]}`)) {
-    identifierCandidate = words[2];
-  } else {
-    return { text };
-  }
-
-  const identifier = sanitizeTemplateIdentifier(identifierCandidate);
-  if (!identifier) {
-    return { text };
-  }
-
-  return {
-    text: identifier,
-    postKey: 'F4',
-  };
-}
-
 function insertTextAtSelection(existing: string, incomingText: string, selection?: CaretSelection | null): TextInsertionResult {
   const normalizedIncomingText = normalizeChunkLeadingWhitespace(incomingText);
 
   if (!normalizedIncomingText) {
-    const fallbackSelection = selection ?? getDefaultSelection(existing);
     return {
       text: existing,
-      selection: fallbackSelection,
-      insertedLength: 0,
-      insertedStart: Math.max(0, Math.min(fallbackSelection.start, existing.length)),
-      insertedEnd: Math.max(0, Math.min(fallbackSelection.end, existing.length)),
+      selection: selection ?? getDefaultSelection(existing),
     };
   }
 
@@ -489,7 +99,6 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
   const needsPrefixSeparator = before.length > 0 && !before.endsWith('\n') && !before.endsWith(' ');
   const prefix = needsPrefixSeparator ? ' ' : '';
   const inserted = `${before}${prefix}${normalizedIncomingText}`;
-  const insertedStart = before.length + prefix.length;
   const caretIndex = inserted.length;
 
   if (!after) {
@@ -500,9 +109,6 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
         end: caretIndex,
         direction: 'none',
       },
-      insertedLength: prefix.length + normalizedIncomingText.length,
-      insertedStart,
-      insertedEnd: insertedStart + normalizedIncomingText.length,
     };
   }
 
@@ -519,209 +125,7 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
       end: caretIndex,
       direction: 'none',
     },
-    insertedLength: prefix.length + normalizedIncomingText.length,
-    insertedStart,
-    insertedEnd: insertedStart + normalizedIncomingText.length,
   };
-}
-
-function detectInlineFormattingToggleCommand(text: string): InlineFormattingToggleCommand | null {
-  const normalized = normalizeSpokenCommand(text);
-  const tokens = tokenizeSpokenCommand(text);
-
-  if (tokens.length === 0 || tokens.length > 3) {
-    return null;
-  }
-
-  const matchesSpokenVariant = (candidate: string, variants: string[]) => {
-    if (!candidate) {
-      return false;
-    }
-
-    const normalizedCandidate = normalizeSpokenCommand(candidate);
-    if (!normalizedCandidate) {
-      return false;
-    }
-
-    return variants.some((variant) => {
-      const normalizedVariant = normalizeSpokenCommand(variant);
-      if (normalizedCandidate === normalizedVariant) {
-        return true;
-      }
-
-      const lexicalSimilarity = similarityScore(normalizedCandidate, normalizedVariant);
-      const phoneticCandidate = colognePhonetic(normalizedCandidate);
-      const phoneticVariant = colognePhonetic(normalizedVariant);
-      const phoneticSimilarity = phoneticCandidate && phoneticVariant
-        ? similarityScore(phoneticCandidate, phoneticVariant)
-        : 0;
-
-      return lexicalSimilarity >= 0.72 || phoneticSimilarity >= 0.75;
-    });
-  };
-
-  const inferCommandFromTokens = (): SelectionFormattingCommand | null => {
-    for (const [command, variants] of Object.entries(INLINE_FORMAT_COMMAND_VARIANTS) as Array<[SelectionFormattingCommand, string[]]>) {
-      if (tokens.some((token) => matchesSpokenVariant(token, variants))) {
-        return command;
-      }
-
-      if (variants.some((variant) => normalized.startsWith(normalizeSpokenCommand(variant)))) {
-        return command;
-      }
-    }
-
-    return null;
-  };
-
-  const command = inferCommandFromTokens();
-  if (!command) {
-    return null;
-  }
-
-  const isBegin = tokens.some((token) => matchesSpokenVariant(token, INLINE_FORMAT_BEGIN_VARIANTS))
-    || INLINE_FORMAT_BEGIN_VARIANTS.some((variant) => normalized.endsWith(normalizeSpokenCommand(variant)));
-  const isEnd = tokens.some((token) => matchesSpokenVariant(token, INLINE_FORMAT_END_VARIANTS))
-    || INLINE_FORMAT_END_VARIANTS.some((variant) => normalized.endsWith(normalizeSpokenCommand(variant)));
-
-  if (isBegin === isEnd) {
-    return null;
-  }
-
-  return {
-    command,
-    enabled: isBegin,
-  };
-}
-
-function cloneInlineFormattingState(state: InlineFormattingState): InlineFormattingState {
-  return {
-    bold: Boolean(state.bold),
-    italic: Boolean(state.italic),
-    underline: Boolean(state.underline),
-  };
-}
-
-function normalizeInlineFormattingSpacing(text: string): string {
-  return text
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/\s+([,.;:!?])/g, '$1')
-    .replace(/([,.;:!?])(?!\s|$)/g, '$1 ')
-    .trim();
-}
-
-function parseInlineFormattingText(text: string, initialState: InlineFormattingState): InlineFormattingParseResult {
-  const nextState = cloneInlineFormattingState(initialState);
-  const ranges: RichTextFormatRange[] = [];
-  const outputParts: string[] = [];
-  let outputLength = 0;
-  let consumedCommand = false;
-  let lastIndex = 0;
-
-  const tokenMatches = Array.from(text.matchAll(/[\p{L}]+(?:-[\p{L}]+)?[.,;:!?]*/gu)).map((match) => ({
-    index: match.index ?? 0,
-    end: (match.index ?? 0) + match[0].length,
-    raw: match[0],
-  }));
-
-  const appendChunk = (rawChunk: string) => {
-    if (!rawChunk) {
-      return;
-    }
-
-    const chunk = outputParts.length === 0
-      ? rawChunk.replace(/^\s+/, '')
-      : rawChunk;
-
-    if (!chunk) {
-      return;
-    }
-
-    const start = outputLength;
-    outputParts.push(chunk);
-    outputLength += chunk.length;
-
-    if (nextState.bold || nextState.italic || nextState.underline) {
-      ranges.push({
-        start,
-        end: outputLength,
-        bold: nextState.bold,
-        italic: nextState.italic,
-        underline: nextState.underline,
-      });
-    }
-  };
-
-  for (let tokenIndex = 0; tokenIndex < tokenMatches.length; tokenIndex += 1) {
-    const currentToken = tokenMatches[tokenIndex];
-    const nextToken = tokenMatches[tokenIndex + 1];
-
-    const twoTokenCandidate = nextToken
-      ? text.slice(currentToken.index, nextToken.end)
-      : null;
-    const twoTokenCommand = twoTokenCandidate ? detectInlineFormattingToggleCommand(twoTokenCandidate) : null;
-    const singleTokenCommand = detectInlineFormattingToggleCommand(currentToken.raw);
-    const matchedCommand = twoTokenCommand ?? singleTokenCommand;
-    const matchedEnd = twoTokenCommand ? nextToken?.end : (singleTokenCommand ? currentToken.end : null);
-
-    if (!matchedCommand || matchedEnd == null) {
-      continue;
-    }
-
-    appendChunk(text.slice(lastIndex, currentToken.index));
-    nextState[matchedCommand.command] = matchedCommand.enabled;
-    consumedCommand = true;
-    lastIndex = matchedEnd;
-
-    if (twoTokenCommand) {
-      tokenIndex += 1;
-    }
-  }
-
-  appendChunk(text.slice(lastIndex));
-
-  const rawOutputText = outputParts.join('');
-  const normalizedText = normalizeInlineFormattingSpacing(rawOutputText);
-  return {
-    text: normalizedText,
-    ranges: remapRichTextRanges(rawOutputText, normalizedText, ranges),
-    nextState,
-    consumedCommand,
-  };
-}
-
-function detectSelectionFormattingCommand(text: string): SelectionFormattingCommand | null {
-  const normalized = normalizeSpokenCommand(text);
-  const tokens = tokenizeSpokenCommand(text);
-
-  const hasSelectionToken = tokens.includes('auswahl') || tokens.includes('markierung');
-  const hasVerbToken = tokens.includes('mach')
-    || tokens.includes('mache')
-    || tokens.includes('formatiere')
-    || tokens.includes('formatieren');
-  const inferCommandFromTokens = (): SelectionFormattingCommand | null => {
-    if (tokens.includes('fett')) return 'bold';
-    if (tokens.includes('kursiv')) return 'italic';
-    if (tokens.includes('unterstrichen') || tokens.includes('unterstreichen')) return 'underline';
-    return null;
-  };
-
-  if (normalized === 'fett') return 'bold';
-  if (normalized === 'kursiv') return 'italic';
-  if (normalized === 'unterstrichen') return 'underline';
-  if (normalized === 'auswahlfett') return 'bold';
-  if (normalized === 'auswahlkursiv') return 'italic';
-  if (normalized === 'auswahlunterstrichen') return 'underline';
-
-  if (hasSelectionToken) {
-    return inferCommandFromTokens();
-  }
-
-  if (hasVerbToken && normalized.includes('auswahl')) {
-    return inferCommandFromTokens();
-  }
-
-  return null;
 }
 
 function getIncrementalTranscript(previousText: string, currentText: string): string {
@@ -793,18 +197,14 @@ function hiddenCaretOverlay(): CaretOverlayPosition {
 }
 
 function getTextareaCaretOverlay(
-  textarea: HTMLTextAreaElement | HTMLDivElement | null,
-  selection?: CaretSelection | null,
-  fallbackText?: string,
+  textarea: HTMLTextAreaElement | null,
+  selection?: CaretSelection | null
 ): CaretOverlayPosition {
   if (!textarea || !selection || selection.start !== selection.end) {
     return hiddenCaretOverlay();
   }
 
-  const textValue = textarea instanceof HTMLTextAreaElement
-    ? textarea.value
-    : (fallbackText ?? textarea.textContent ?? '');
-  const caretIndex = Math.max(0, Math.min(selection.end, textValue.length));
+  const caretIndex = Math.max(0, Math.min(selection.end, textarea.value.length));
   const style = window.getComputedStyle(textarea);
   const mirror = document.createElement('div');
 
@@ -830,8 +230,8 @@ function getTextareaCaretOverlay(
   mirror.style.textAlign = style.textAlign;
   mirror.style.tabSize = style.tabSize;
 
-  const beforeCaret = textValue.slice(0, caretIndex);
-  const afterCaret = textValue.slice(caretIndex) || ' ';
+  const beforeCaret = textarea.value.slice(0, caretIndex);
+  const afterCaret = textarea.value.slice(caretIndex) || ' ';
   mirror.textContent = beforeCaret;
 
   const marker = document.createElement('span');
@@ -855,8 +255,6 @@ function getTextareaCaretOverlay(
 
 export default function HomePage() {
   const { username, autoCorrect, defaultMode, getAuthHeader, getDbTokenHeader } = useAuth();
-  const [dictionarySet, setDictionarySet] = useState<DictionarySet>('medical');
-  const [dictionarySetSaving, setDictionarySetSaving] = useState(false);
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [correcting, setCorrecting] = useState(false);
@@ -868,24 +266,15 @@ export default function HomePage() {
   const transcriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const recordingStartedAtRef = useRef<number | null>(null);
   const manualCorrectionTimersRef = useRef<Partial<Record<TextInsertionTarget, ReturnType<typeof setTimeout>>>>({});
-  // Baseline des zuletzt MASCHINELL erzeugten Texts (Transkription/LLM/Template) pro State.
-  // Manuelle Korrekturen werden gegen diese Baseline gediffed, nicht gegen den letzten Tastendruck.
-  const machineBaselineRef = useRef<Record<TextStateKey, string>>({ transcript: '', methodik: '', beurteilung: '' });
-  // Markiert, dass die nächste State-Änderung von einer manuellen Eingabe stammt (damit die Baseline NICHT überschrieben wird).
-  const pendingManualStateRef = useRef<Record<TextStateKey, boolean>>({ transcript: false, methodik: false, beurteilung: false });
-  // Debounce-Timer pro Feld für die Wörterbuch-Vorschlagserkennung (feuert erst nach Tipp-Pause).
-  const manualSuggestDebounceRef = useRef<Partial<Record<TextInsertionTarget, ReturnType<typeof setTimeout>>>>({});
   
-  // LEGACY / DEPRECATED: Historischer Fast-Whisper-WebSocket-Pfad.
-  // Neue Online-Diktatlogik nicht hier ergänzen, sondern im aktuellen Chunk-/Nicht-WebSocket-Pfad.
+  // Fast Whisper WebSocket State
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
   const fastWhisperWsRef = useRef<WebSocket | null>(null);
   const fastWhisperAudioContextRef = useRef<AudioContext | null>(null);
   const fastWhisperProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const fastWhisperStreamRef = useRef<MediaStream | null>(null);
   
-  // LEGACY / DEPRECATED: Historischer Voxtral-Realtime-WebSocket-Pfad.
-  // Neue Online-Diktatlogik nicht hier ergänzen, sondern im aktuellen Chunk-/Nicht-WebSocket-Pfad.
+  // Voxtral Local Realtime WebSocket State (shared audio refs with FastWhisper)
   const voxtralWsRef = useRef<WebSocket | null>(null);
   const voxtralAudioContextRef = useRef<AudioContext | null>(null);
   const voxtralProcessorRef = useRef<ScriptProcessorNode | null>(null);
@@ -935,23 +324,13 @@ export default function HomePage() {
   const [vadFailedUtterances, setVadFailedUtterances] = useState<Array<{ seq: number; blob: Blob; error: string }>>([]);
   
   const [transcript, setTranscript] = useState("");
-  const methodikTextareaRef = useRef<HTMLDivElement | null>(null);
-  const befundTextareaRef = useRef<HTMLDivElement | null>(null);
-  const beurteilungTextareaRef = useRef<HTMLDivElement | null>(null);
-  const transcriptTextareaRef = useRef<HTMLDivElement | null>(null);
+  const methodikTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const befundTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const beurteilungTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const transcriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [textSelections, setTextSelections] = useState<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
   const textSelectionsRef = useRef<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
-  const lastRangeSelectionsRef = useRef<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
-  const pendingRichTextSyncRef = useRef<Partial<Record<TextInsertionTarget, string>>>({});
-  const [richTextFormats, setRichTextFormats] = useState<Record<TextInsertionTarget, RichTextFormatRange[]>>(EMPTY_RICH_TEXT_FORMATS);
   const [focusedTextField, setFocusedTextField] = useState<TextInsertionTarget | null>(null);
-  const lastSelectionTargetRef = useRef<TextInsertionTarget | null>(null);
-  const activeInlineFormattingRef = useRef<Record<TextInsertionTarget, InlineFormattingState>>({
-    transcript: { ...EMPTY_ACTIVE_INLINE_FORMATTING.transcript },
-    methodik: { ...EMPTY_ACTIVE_INLINE_FORMATTING.methodik },
-    befund: { ...EMPTY_ACTIVE_INLINE_FORMATTING.befund },
-    beurteilung: { ...EMPTY_ACTIVE_INLINE_FORMATTING.beurteilung },
-  });
   const [caretOverlays, setCaretOverlays] = useState<Record<TextInsertionTarget, CaretOverlayPosition>>({
     transcript: hiddenCaretOverlay(),
     methodik: hiddenCaretOverlay(),
@@ -963,15 +342,8 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [liveInjectEnabled, setLiveInjectEnabled] = useState(false);
   const [liveInjectStatus, setLiveInjectStatus] = useState<string | null>(null);
-  // Visuelle Statusanzeige des Live-Ziel-App-Buttons:
-  // 'connected' nach erfolgreichem Inject ohne Clipboard-Fallback, sonst 'disconnected'.
-  // Hinweis: Der Status flippt nicht zyklisch zurueck, solange keine neue Injection
-  // stattfindet (kein Health-Check verfuegbar). Bei Toggle-Off oder Inject-Fehler
-  // (der zugleich liveInjectEnabled auf false setzt) wird der Status zurueckgesetzt.
-  const [injectConnectionStatus, setInjectConnectionStatus] = useState<'connected' | 'disconnected'>('disconnected');
   const liveInjectEnabledRef = useRef(false);
   const liveInjectQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const liveInjectSentTextRef = useRef('');
   
   // Status tracking for UI indicators
   // Show banner during entire recording session, not just during active processing
@@ -1001,90 +373,6 @@ export default function HomePage() {
   const existingBeurteilungRef = useRef<string>("");
   const lastMethodikRef = useRef<string>("");
   const lastBeurteilungRef = useRef<string>("");
-  const textHistoryPastRef = useRef<TextHistorySnapshot[]>([]);
-  const textHistoryFutureRef = useRef<TextHistorySnapshot[]>([]);
-  const currentTextHistorySnapshotRef = useRef<TextHistorySnapshot>({
-    transcript: '',
-    methodik: '',
-    beurteilung: '',
-    richTextFormats: cloneRichTextFormats(EMPTY_RICH_TEXT_FORMATS),
-  });
-  const restoringTextHistoryRef = useRef(false);
-  const [textHistoryAvailability, setTextHistoryAvailability] = useState({ canUndo: false, canRedo: false });
-
-  const updateTextHistoryAvailability = useCallback(() => {
-    setTextHistoryAvailability({
-      canUndo: textHistoryPastRef.current.length > 0,
-      canRedo: textHistoryFutureRef.current.length > 0,
-    });
-  }, []);
-
-  const applyTextHistorySnapshot = useCallback((snapshot: TextHistorySnapshot) => {
-    setTranscript(snapshot.transcript);
-    setMethodik(snapshot.methodik);
-    setBeurteilung(snapshot.beurteilung);
-    setRichTextFormats(cloneRichTextFormats(snapshot.richTextFormats));
-  }, []);
-
-  useEffect(() => {
-    const nextSnapshot: TextHistorySnapshot = {
-      transcript,
-      methodik,
-      beurteilung,
-      richTextFormats: cloneRichTextFormats(richTextFormats),
-    };
-    const currentSnapshot = currentTextHistorySnapshotRef.current;
-
-    if (areTextHistorySnapshotsEqual(currentSnapshot, nextSnapshot)) {
-      return;
-    }
-
-    if (restoringTextHistoryRef.current) {
-      currentTextHistorySnapshotRef.current = nextSnapshot;
-      restoringTextHistoryRef.current = false;
-      updateTextHistoryAvailability();
-      return;
-    }
-
-    textHistoryPastRef.current = [...textHistoryPastRef.current, currentSnapshot].slice(-TEXT_HISTORY_LIMIT);
-    textHistoryFutureRef.current = [];
-    currentTextHistorySnapshotRef.current = nextSnapshot;
-    updateTextHistoryAvailability();
-  }, [beurteilung, methodik, richTextFormats, transcript, updateTextHistoryAvailability]);
-
-  const handleUndoTextHistory = useCallback(() => {
-    if (isProcessing) {
-      return;
-    }
-
-    const previousSnapshot = textHistoryPastRef.current[textHistoryPastRef.current.length - 1];
-    if (!previousSnapshot) {
-      return;
-    }
-
-    textHistoryPastRef.current = textHistoryPastRef.current.slice(0, -1);
-    textHistoryFutureRef.current = [...textHistoryFutureRef.current, currentTextHistorySnapshotRef.current].slice(-TEXT_HISTORY_LIMIT);
-    restoringTextHistoryRef.current = true;
-    applyTextHistorySnapshot(previousSnapshot);
-    updateTextHistoryAvailability();
-  }, [applyTextHistorySnapshot, isProcessing, updateTextHistoryAvailability]);
-
-  const handleRedoTextHistory = useCallback(() => {
-    if (isProcessing) {
-      return;
-    }
-
-    const nextSnapshot = textHistoryFutureRef.current[textHistoryFutureRef.current.length - 1];
-    if (!nextSnapshot) {
-      return;
-    }
-
-    textHistoryFutureRef.current = textHistoryFutureRef.current.slice(0, -1);
-    textHistoryPastRef.current = [...textHistoryPastRef.current, currentTextHistorySnapshotRef.current].slice(-TEXT_HISTORY_LIMIT);
-    restoringTextHistoryRef.current = true;
-    applyTextHistorySnapshot(nextSnapshot);
-    updateTextHistoryAvailability();
-  }, [applyTextHistorySnapshot, isProcessing, updateTextHistoryAvailability]);
 
   // Revert-Funktion: Speichert den Text VOR der letzten Korrektur
   const [preCorrectionState, setPreCorrectionState] = useState<{
@@ -1114,45 +402,21 @@ export default function HomePage() {
   
   // Diff-Ansicht: Zeigt Unterschiede zwischen formatiertem Original und KI-korrigiertem Text
   const [showDiffView, setShowDiffView] = useState(false);
-  const [showCheatSheetPanel, setShowCheatSheetPanel] = useState(false);
-  const [showUpdatePanel, setShowUpdatePanel] = useState(false);
-  const previousFieldTextsRef = useRef<Record<TextInsertionTarget, string>>(EMPTY_FIELD_TEXTS);
-  const [manualCorrectionSuggestions, setManualCorrectionSuggestions] = useState<Record<TextInsertionTarget, ManualWordChange | null>>(EMPTY_MANUAL_WORD_CHANGES);
-
-  // Tracking der phonetischen Korrekturen pro Feld, damit das Doppelklick-Popup
-  // entscheiden kann, ob das angeklickte Wort durch ein Matching ersetzt wurde.
-  const [fieldCorrections, setFieldCorrections] = useState<Record<TextInsertionTarget, WordCorrectionInfo[]>>(EMPTY_WORD_CORRECTIONS);
-  const [wordPopup, setWordPopup] = useState<{
-    word: string;
-    position: { x: number; y: number };
-    correction: WordCorrectionInfo | null;
-    field: TextInsertionTarget;
-  } | null>(null);
 
   // Custom Actions Manager
   const [showCustomActionsManager, setShowCustomActionsManager] = useState(false);
 
-  const syncTextSelection = useCallback((field: TextInsertionTarget, textarea: HTMLTextAreaElement | HTMLDivElement) => {
-    lastSelectionTargetRef.current = field;
-
-    const richSelection = textarea instanceof HTMLDivElement ? getRichTextSelection(textarea) : null;
-    const nextSelection: CaretSelection = richSelection ?? {
-      start: textarea instanceof HTMLTextAreaElement ? (textarea.selectionStart ?? 0) : 0,
-      end: textarea instanceof HTMLTextAreaElement ? (textarea.selectionEnd ?? 0) : 0,
-      direction: textarea instanceof HTMLTextAreaElement ? (textarea.selectionDirection ?? 'none') : 'none',
+  const syncTextSelection = useCallback((field: TextInsertionTarget, textarea: HTMLTextAreaElement) => {
+    const nextSelection: CaretSelection = {
+      start: textarea.selectionStart ?? 0,
+      end: textarea.selectionEnd ?? 0,
+      direction: textarea.selectionDirection ?? 'none',
     };
 
     textSelectionsRef.current = {
       ...textSelectionsRef.current,
       [field]: nextSelection,
     };
-
-    if (nextSelection.start !== nextSelection.end) {
-      lastRangeSelectionsRef.current = {
-        ...lastRangeSelectionsRef.current,
-        [field]: nextSelection,
-      };
-    }
 
     setTextSelections((prev) => {
       const current = prev[field];
@@ -1188,74 +452,6 @@ export default function HomePage() {
     return textSelectionsRef.current[field] ?? getDefaultSelection(currentText);
   }, []);
 
-  const resolveFormattingTargetField = useCallback((): TextInsertionTarget => {
-    return focusedTextField
-      ?? lastSelectionTargetRef.current
-      ?? (mode === 'befund'
-        ? (activeField === 'methodik' ? 'methodik' : activeField === 'beurteilung' ? 'beurteilung' : 'befund')
-        : 'transcript');
-  }, [focusedTextField, mode, activeField]);
-
-  const getFieldTextValue = useCallback((field: TextInsertionTarget) => {
-    switch (field) {
-      case 'methodik':
-        return methodik;
-      case 'beurteilung':
-        return beurteilung;
-      case 'befund':
-      case 'transcript':
-      default:
-        return transcript;
-    }
-  }, [methodik, transcript, beurteilung]);
-
-  const getEditorTextRef = useCallback((field: TextInsertionTarget) => {
-    switch (field) {
-      case 'methodik':
-        return methodikTextareaRef;
-      case 'beurteilung':
-        return beurteilungTextareaRef;
-      case 'befund':
-        return befundTextareaRef;
-      case 'transcript':
-      default:
-        return transcriptTextareaRef;
-    }
-  }, []);
-
-  const getEffectiveFieldTextLength = useCallback((field: TextInsertionTarget, selection?: CaretSelection | null) => {
-    const stateLength = getFieldTextValue(field).length;
-    const editor = getEditorTextRef(field).current;
-    const editorLength = editor?.textContent?.replace(/\u200B/g, '').length ?? 0;
-    const selectionLength = selection ? Math.max(selection.start, selection.end) : 0;
-    return Math.max(stateLength, editorLength, selectionLength);
-  }, [getEditorTextRef, getFieldTextValue]);
-
-  const updateRichTextFormats = useCallback((
-    field: TextInsertionTarget,
-    updater: (current: RichTextFormatRange[]) => RichTextFormatRange[],
-    textLengthOverride?: number
-  ) => {
-    setRichTextFormats((current) => ({
-      ...current,
-      [field]: normalizeRichTextRanges(
-        updater(current[field] ?? []),
-        textLengthOverride ?? getEffectiveFieldTextLength(field)
-      ),
-    }));
-  }, [getEffectiveFieldTextLength]);
-
-  const setActiveInlineFormatting = useCallback((field: TextInsertionTarget, command: SelectionFormattingCommand, enabled: boolean) => {
-    const current = activeInlineFormattingRef.current[field] ?? EMPTY_INLINE_FORMATTING_STATE;
-    activeInlineFormattingRef.current = {
-      ...activeInlineFormattingRef.current,
-      [field]: {
-        ...current,
-        [command]: enabled,
-      },
-    };
-  }, []);
-
   const setFieldText = useCallback((field: TextInsertionTarget, value: SetStateAction<string>) => {
     switch (field) {
       case 'methodik':
@@ -1272,257 +468,19 @@ export default function HomePage() {
     }
   }, []);
 
-  const applySelectionFormatting = useCallback((field: TextInsertionTarget, command: SelectionFormattingCommand) => {
-    const fieldText = getFieldTextValue(field);
-    const currentSelection = getStoredSelection(field, fieldText);
-    const selection = currentSelection.start !== currentSelection.end
-      ? currentSelection
-      : (lastRangeSelectionsRef.current[field] ?? currentSelection);
-    const commandLabel = getSelectionFormattingCommandLabel(command);
-    const effectiveTextLength = getEffectiveFieldTextLength(field, selection);
-
-    if (selection.start === selection.end) {
-      const message = `Formatierungsbefehl \"${commandLabel}\" erkannt, aber es gibt keine aktive oder zuletzt gespeicherte Markierung im Feld \"${field}\".`;
-      console.warn('[FormattingCommand] Nicht angewendet:', {
-        command,
-        commandLabel,
-        field,
-        selection,
-        textLength: fieldText.length,
-        effectiveTextLength,
-        reason: message,
-      });
-      setError('Bitte zuerst einen Textbereich markieren.');
-      return false;
-    }
-
-    updateRichTextFormats(field, (current) => {
-      const range: RichTextFormatRange = {
-        start: Math.min(selection.start, selection.end),
-        end: Math.max(selection.start, selection.end),
-        bold: command === 'bold',
-        italic: command === 'italic',
-        underline: command === 'underline',
-      };
-      return [...current, range];
-    }, effectiveTextLength);
-
-    console.info('[FormattingCommand] Erfolgreich angewendet:', {
-      command,
-      commandLabel,
-      field,
-      selection: {
-        start: Math.min(selection.start, selection.end),
-        end: Math.max(selection.start, selection.end),
-      },
-      textLength: fieldText.length,
-      effectiveTextLength,
-    });
-
-    setError(null);
-    return true;
-  }, [getFieldTextValue, getStoredSelection, getEffectiveFieldTextLength, updateRichTextFormats]);
-
-  const tryApplyInlineFormattingToggleCommand = useCallback((text: string) => {
-    const toggleCommand = detectInlineFormattingToggleCommand(text);
-    if (!toggleCommand) {
-      return false;
-    }
-
-    const commandLabel = getSelectionFormattingCommandLabel(toggleCommand.command);
-
-    if (liveInjectEnabledRef.current) {
-      console.warn('[FormattingCommand] Beginn/Ende erkannt, aber nicht ausgefuehrt:', {
-        rawText: text,
-        command: toggleCommand.command,
-        commandLabel,
-        enabled: toggleCommand.enabled,
-        reason: 'Live-Ziel-App-Modus ist aktiv. Persistente Inline-Formatierung ist nur fuer den Online-Editor vorgesehen.',
-      });
-      return false;
-    }
-
-    const targetField = resolveFormattingTargetField();
-    setActiveInlineFormatting(targetField, toggleCommand.command, toggleCommand.enabled);
-
-    console.info('[FormattingCommand] Beginn/Ende angewendet:', {
-      rawText: text,
-      command: toggleCommand.command,
-      commandLabel,
-      enabled: toggleCommand.enabled,
-      targetField,
-      activeFormats: activeInlineFormattingRef.current[targetField],
-    });
-
-    setError(null);
-    return true;
-  }, [resolveFormattingTargetField, setActiveInlineFormatting]);
-
-  const tryApplySelectionFormattingCommand = useCallback((text: string) => {
-    const command = detectSelectionFormattingCommand(text);
-    if (!command) {
-      return false;
-    }
-
-    const commandLabel = getSelectionFormattingCommandLabel(command);
-
-    if (liveInjectEnabledRef.current) {
-      console.warn('[FormattingCommand] Erkannt, aber nicht ausgefuehrt:', {
-        rawText: text,
-        command,
-        commandLabel,
-        reason: 'Live-Ziel-App-Modus ist aktiv. Auswahl-Formatierungsbefehle sind nur fuer den Online-Editor vorgesehen.',
-      });
-      return false;
-    }
-
-    const targetField = resolveFormattingTargetField();
-
-    console.info('[FormattingCommand] Erkannt:', {
-      rawText: text,
-      normalizedText: normalizeSpokenCommand(text),
-      command,
-      commandLabel,
-      targetField,
-      focusedTextField,
-      lastSelectionTarget: lastSelectionTargetRef.current,
-      activeField,
-      mode,
-    });
-
-    applySelectionFormatting(targetField, command);
-    return true;
-  }, [resolveFormattingTargetField, applySelectionFormatting]);
-
-  const combineTextForField = useCallback((
-    field: TextInsertionTarget,
-    existing: string,
-    newText: string,
-    options?: { applyActiveInlineFormatting?: boolean }
-  ) => {
-    const initialFormattingState = activeInlineFormattingRef.current[field] ?? EMPTY_INLINE_FORMATTING_STATE;
-    const parsedInlineFormatting = options?.applyActiveInlineFormatting
-      ? parseInlineFormattingText(newText, initialFormattingState)
-      : {
-          text: newText,
-          ranges: [] as RichTextFormatRange[],
-          nextState: cloneInlineFormattingState(initialFormattingState),
-          consumedCommand: false,
-        };
-
-    if (options?.applyActiveInlineFormatting && parsedInlineFormatting.consumedCommand) {
-      activeInlineFormattingRef.current = {
-        ...activeInlineFormattingRef.current,
-        [field]: parsedInlineFormatting.nextState,
-      };
-
-      console.info('[FormattingCommand] Inline-Befehle im Text verarbeitet:', {
-        field,
-        rawText: newText,
-        normalizedText: parsedInlineFormatting.text,
-        nextState: parsedInlineFormatting.nextState,
-      });
-    }
-
-    const selection = getStoredSelection(field, existing);
-    const result = insertTextAtSelection(existing, parsedInlineFormatting.text, selection);
+  const combineTextForField = useCallback((field: TextInsertionTarget, existing: string, newText: string) => {
+    const result = insertTextAtSelection(existing, newText, getStoredSelection(field, existing));
     setStoredSelection(field, result.selection);
-
-    const activeFormats = activeInlineFormattingRef.current[field] ?? EMPTY_INLINE_FORMATTING_STATE;
-    const hasActiveInlineFormatting = activeFormats.bold || activeFormats.italic || activeFormats.underline;
-
-    if (
-      options?.applyActiveInlineFormatting
-      && hasActiveInlineFormatting
-      && result.insertedEnd > result.insertedStart
-      && !parsedInlineFormatting.consumedCommand
-    ) {
-      pendingRichTextSyncRef.current = {
-        ...pendingRichTextSyncRef.current,
-        [field]: result.text,
-      };
-
-      updateRichTextFormats(field, (current) => ([
-        ...current,
-        {
-          start: result.insertedStart,
-          end: result.insertedEnd,
-          bold: activeFormats.bold,
-          italic: activeFormats.italic,
-          underline: activeFormats.underline,
-        },
-      ]), Math.max(result.text.length, result.insertedEnd));
-    }
-
-    if (options?.applyActiveInlineFormatting && parsedInlineFormatting.ranges.length > 0 && result.insertedEnd > result.insertedStart) {
-      pendingRichTextSyncRef.current = {
-        ...pendingRichTextSyncRef.current,
-        [field]: result.text,
-      };
-
-      updateRichTextFormats(field, (current) => ([
-        ...current,
-        ...parsedInlineFormatting.ranges.map((range) => ({
-          ...range,
-          start: result.insertedStart + range.start,
-          end: result.insertedStart + range.end,
-        })),
-      ]), Math.max(result.text.length, result.insertedEnd));
-    }
-
     return result.text;
-  }, [getStoredSelection, setStoredSelection, updateRichTextFormats]);
-
-  useEffect(() => {
-    const nextFieldTexts: Record<TextInsertionTarget, string> = {
-      transcript,
-      methodik,
-      befund: transcript,
-      beurteilung,
-    };
-
-    setRichTextFormats((current) => {
-      let didChange = false;
-      const nextFormats = { ...current };
-
-      (Object.keys(nextFieldTexts) as TextInsertionTarget[]).forEach((field) => {
-        const previousText = previousFieldTextsRef.current[field] ?? '';
-        const nextText = nextFieldTexts[field] ?? '';
-        if (previousText === nextText) {
-          if (pendingRichTextSyncRef.current[field] === nextText) {
-            delete pendingRichTextSyncRef.current[field];
-          }
-          previousFieldTextsRef.current[field] = nextText;
-          return;
-        }
-
-        if (pendingRichTextSyncRef.current[field] === nextText) {
-          delete pendingRichTextSyncRef.current[field];
-          previousFieldTextsRef.current[field] = nextText;
-          return;
-        }
-
-        nextFormats[field] = remapRichTextRanges(previousText, nextText, current[field] ?? []);
-        previousFieldTextsRef.current[field] = nextText;
-        didChange = true;
-      });
-
-      return didChange ? nextFormats : current;
-    });
-  }, [transcript, methodik, beurteilung]);
+  }, [getStoredSelection, setStoredSelection]);
 
   useEffect(() => {
     liveInjectEnabledRef.current = liveInjectEnabled;
-    if (!liveInjectEnabled) {
-      liveInjectSentTextRef.current = '';
-      setInjectConnectionStatus('disconnected');
-    }
     setLiveInjectStatus(liveInjectEnabled ? 'Bereit – Ziel-App fokussieren oder zuletzt verwendete App nutzen' : null);
   }, [liveInjectEnabled]);
 
   const queueLiveInject = useCallback((text: string) => {
-    const instruction = resolveLiveInjectInstruction(text);
-    const normalizedText = joinLiveInjectChunk(liveInjectSentTextRef.current, instruction.text);
+    const normalizedText = normalizeChunkLeadingWhitespace(text);
 
     if (!liveInjectEnabledRef.current || !normalizedText.trim()) return;
 
@@ -1538,25 +496,17 @@ export default function HomePage() {
           restorePreviousWindow: shouldRestorePreviousWindow,
           delayMs: shouldRestorePreviousWindow ? 80 : 0,
           charDelayMs: 0,
-          postKey: instruction.postKey,
           fallbackToClipboard: false,
         });
 
         if (!result.ok) {
           setLiveInjectEnabled(false);
-          setInjectConnectionStatus('disconnected');
           setLiveInjectStatus('Live-Übertragung fehlgeschlagen');
           setError(result.error || 'Live-Übertragung in die Ziel-App fehlgeschlagen');
           return;
         }
 
-        setInjectConnectionStatus(isClipboardFallback(result) ? 'disconnected' : 'connected');
-        liveInjectSentTextRef.current += normalizedText;
-        setLiveInjectStatus(
-          instruction.postKey === 'F4'
-            ? `Textbaustein-Kennung gesendet: ${normalizedText.trim()}`
-            : `Gesendet: ${normalizedText.trim().length} Zeichen`
-        );
+        setLiveInjectStatus(`Gesendet: ${normalizedText.trim().length} Zeichen`);
       });
   }, []);
 
@@ -1600,10 +550,7 @@ export default function HomePage() {
     }
 
     if (liveInjectEnabledRef.current) {
-      const previewText = incomingDelta && incomingDelta.trim()
-        ? resolveLiveInjectInstruction(incomingDelta).text
-        : fullText;
-      applyLiveChunkPreview(field, previewText);
+      applyLiveChunkPreview(field, incomingDelta && incomingDelta.trim() ? incomingDelta : fullText);
       return;
     }
 
@@ -1614,7 +561,7 @@ export default function HomePage() {
       // Neu transkribierter Text wird an der aktuellen Cursor-Position eingefuegt,
       // nie per Vollersetzung des Feldinhalts.
       if (incomingDelta && incomingDelta.trim()) {
-        return combineTextForField(field, currentText, incomingDelta, { applyActiveInlineFormatting: true });
+        return combineTextForField(field, currentText, incomingDelta);
       }
 
       // Kein textuelles Delta, aber `fullText` weicht vom aktuellen Feldinhalt ab
@@ -1623,7 +570,7 @@ export default function HomePage() {
       if (fullText && fullText !== currentText && fullText.startsWith(currentText)) {
         const extension = fullText.slice(currentText.length);
         if (extension) {
-          return combineTextForField(field, currentText, extension, { applyActiveInlineFormatting: true });
+          return combineTextForField(field, currentText, extension);
         }
       }
 
@@ -1645,10 +592,10 @@ export default function HomePage() {
     }
 
     setCaretOverlays({
-      transcript: getTextareaCaretOverlay(transcriptTextareaRef.current, getStoredSelection('transcript', transcript), transcript),
-      methodik: getTextareaCaretOverlay(methodikTextareaRef.current, getStoredSelection('methodik', methodik), methodik),
-      befund: getTextareaCaretOverlay(befundTextareaRef.current, getStoredSelection('befund', transcript), transcript),
-      beurteilung: getTextareaCaretOverlay(beurteilungTextareaRef.current, getStoredSelection('beurteilung', beurteilung), beurteilung),
+      transcript: getTextareaCaretOverlay(transcriptTextareaRef.current, getStoredSelection('transcript', transcript)),
+      methodik: getTextareaCaretOverlay(methodikTextareaRef.current, getStoredSelection('methodik', methodik)),
+      befund: getTextareaCaretOverlay(befundTextareaRef.current, getStoredSelection('befund', transcript)),
+      beurteilung: getTextareaCaretOverlay(beurteilungTextareaRef.current, getStoredSelection('beurteilung', beurteilung)),
     });
   }, [transcript, methodik, beurteilung, textSelections, showPersistentCaret, getStoredSelection]);
 
@@ -1796,31 +743,20 @@ export default function HomePage() {
   // Pass 1: Exaktes Matching, Pass 2: Phonetisches Matching (Kölner Phonetik)
   const phoneticIndexRef = useRef<ReturnType<typeof buildPhoneticIndex> | null>(null);
   
-  // Gemergte Einträge (User + Standard-Wörterbuch) – inkl. Quellinformation
-  // (User vs. Standard) für die Doppelklick-Popup-Logik.
-  const mergedEntriesRef = useRef<{ wrong: string; correct: string; source: 'standard' | 'private' | 'group' }[]>([]);
-
+  // Gemergte Einträge (User + Standard-Wörterbuch)
+  const mergedEntriesRef = useRef<{ wrong: string; correct: string }[]>([]);
+  
   // Phonetischen Index neu aufbauen wenn sich Wörterbuch ändert
   useEffect(() => {
-    const userCount = dictionaryEntries.length;
-    const merged = mergeWithStandardDictionary(
-      dictionaryEntries,
-      standardDictEntries.length > 0 ? standardDictEntries : undefined
-    );
-    // Quelle pro Eintrag ableiten: User-Einträge stehen vorne, Standard hinten
-    const tagged = merged.map((entry, idx) => ({
-      wrong: entry.wrong,
-      correct: entry.correct,
-      source: (idx < userCount ? 'private' : 'standard') as 'standard' | 'private' | 'group',
-    }));
-    mergedEntriesRef.current = tagged;
+    const merged = mergeWithStandardDictionary(dictionaryEntries, standardDictEntries.length > 0 ? standardDictEntries : undefined);
+    mergedEntriesRef.current = merged;
     phoneticIndexRef.current = buildPhoneticIndex(merged);
-    console.log('[Phonetic] Index built with', tagged.length, 'entries (', dictionaryEntries.length, 'user +', tagged.length - dictionaryEntries.length, 'standard)');
+    console.log('[Phonetic] Index built with', merged.length, 'entries (', dictionaryEntries.length, 'user +', merged.length - dictionaryEntries.length, 'standard)');
   }, [dictionaryEntries, standardDictEntries]);
 
   const applyDictionaryToText = useCallback((text: string): string => {
     if (!text || mergedEntriesRef.current.length === 0) return text;
-
+    
     // Pass 1: Exaktes Wort-Matching (User + Standard)
     let result = text;
     for (const entry of mergedEntriesRef.current) {
@@ -1830,95 +766,14 @@ export default function HomePage() {
       const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escaped}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
       result = result.replace(regex, entry.correct);
     }
-
+    
     // Pass 2: Phonetisches Matching für verbleibende unerkannte Wörter
     if (phoneticIndexRef.current) {
       result = applyPhoneticCorrections(result, phoneticIndexRef.current);
     }
-
+    
     return result;
   }, [dictionaryEntries]);
-
-  const applyDictionaryToTextWithCorrections = useCallback((text: string): { text: string; corrections: WordCorrectionInfo[] } => {
-    if (!text || mergedEntriesRef.current.length === 0) return { text, corrections: [] };
-
-    // Pass 1: Exaktes Wort-Matching (User + Standard) – als Operationen mitschneiden
-    let result = text;
-    const exactCorrections: WordCorrectionInfo[] = [];
-    for (const entry of mergedEntriesRef.current) {
-      const escaped = entry.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escaped}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
-      result = result.replace(regex, (matched) => {
-        if (matched !== entry.correct) {
-          exactCorrections.push({
-            originalWord: matched,
-            correctedWord: entry.correct,
-            dictionaryWrong: entry.wrong,
-            dictionaryCorrect: entry.correct,
-            source: entry.source,
-            matchType: 'exact',
-          });
-        }
-        return entry.correct;
-      });
-    }
-
-    // Pass 2: Phonetisches Matching – Operationen mitführen
-    if (!phoneticIndexRef.current) {
-      return { text: result, corrections: exactCorrections };
-    }
-    const phoneticResult = applyPhoneticCorrectionsDetailed(result, phoneticIndexRef.current);
-    const phoneticCorrections: WordCorrectionInfo[] = phoneticResult.operations
-      .filter((op) => op.replacementText !== op.originalText)
-      .map((op) => ({
-        originalWord: op.originalText,
-        correctedWord: op.replacementText,
-        dictionaryWrong: op.dictionaryWrong,
-        dictionaryCorrect: op.dictionaryCorrect,
-        source: op.source,
-        matchType: 'phonetic',
-        confidence: op.confidence,
-        targetUsername: op.targetUsername,
-        groupId: op.groupId,
-      }));
-    return { text: phoneticResult.text, corrections: [...exactCorrections, ...phoneticCorrections] };
-  }, [dictionaryEntries]);
-
-  // Setzt den Text eines Feldes UND leitet die Wörterbuch-/Phonetik-Korrekturen
-  // aus dem neuen Text ab. So kann das Doppelklick-Popup beurteilen, ob ein
-  // angeklicktes Wort aus einem Matching stammt.
-  const setFieldTextWithCorrections = useCallback((field: TextInsertionTarget, value: string) => {
-    const { corrections } = applyDictionaryToTextWithCorrections(value);
-    setFieldCorrections((prev) => ({ ...prev, [field]: corrections }));
-    switch (field) {
-      case 'methodik':
-        setMethodik(value);
-        break;
-      case 'beurteilung':
-        setBeurteilung(value);
-        break;
-      case 'befund':
-      case 'transcript':
-      default:
-        setTranscript(value);
-        break;
-    }
-  }, [applyDictionaryToTextWithCorrections]);
-
-  // Leitet bei jeder Text- und Wörterbuchänderung die Korrekturen neu ab.
-  // Bewusst über einen Effect, damit `setFieldText` (das an den Editor ge-
-  // bunden ist) nicht bei jedem Render neue Referenzen bekommt.
-  useEffect(() => {
-    const methodikResult = applyDictionaryToTextWithCorrections(methodik);
-    const beurteilungResult = applyDictionaryToTextWithCorrections(beurteilung);
-    const transcriptResult = applyDictionaryToTextWithCorrections(transcript);
-    setFieldCorrections({
-      methodik: methodikResult.corrections,
-      beurteilung: beurteilungResult.corrections,
-      befund: transcriptResult.corrections,
-      transcript: transcriptResult.corrections,
-    });
-  }, [methodik, beurteilung, transcript, dictionaryEntries, applyDictionaryToTextWithCorrections]);
 
   const prepareLiveInjectDelta = useCallback((text: string): string => {
     return normalizeChunkLeadingWhitespace(applyDictionaryToText(applyFormattingControlWords(text)));
@@ -1968,78 +823,6 @@ export default function HomePage() {
       setMode(defaultMode);
     }
   }, [defaultMode]);
-
-  // Wörterbuch-Set beim Start laden (nutzerspezifisch, sessionübergreifend)
-  useEffect(() => {
-    if (!username) {
-      setDictionarySet('medical');
-      return;
-    }
-
-    let cancelled = false;
-    const loadDictionarySet = async () => {
-      try {
-        const response = await fetch('/api/users/settings', {
-          headers: {
-            Authorization: getAuthHeader(),
-            ...getDbTokenHeader(),
-          },
-        });
-
-        if (!response.ok) return;
-        const data = await response.json();
-        if (cancelled) return;
-
-        const nextSet = data?.dictionarySet;
-        if (nextSet === 'alltag' || nextSet === 'medical') {
-          setDictionarySet(nextSet);
-        } else {
-          setDictionarySet('medical');
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.warn('[DictionarySet] Could not load user setting:', error);
-        }
-      }
-    };
-
-    loadDictionarySet();
-    return () => {
-      cancelled = true;
-    };
-  }, [username, getAuthHeader, getDbTokenHeader]);
-
-  const persistDictionarySet = useCallback(async (nextSet: DictionarySet) => {
-    if (!username || nextSet === dictionarySet || dictionarySetSaving) {
-      return;
-    }
-
-    const previous = dictionarySet;
-    setDictionarySet(nextSet);
-    setDictionarySetSaving(true);
-    try {
-      const response = await fetch('/api/users/settings', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: getAuthHeader(),
-          ...getDbTokenHeader(),
-        },
-        body: JSON.stringify({ dictionarySet: nextSet }),
-      });
-
-      if (!response.ok) {
-        setDictionarySet(previous);
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload?.error || 'Wörterbuch-Modus konnte nicht gespeichert werden');
-      }
-    } catch (error: any) {
-      console.error('[DictionarySet] Persist error:', error);
-      setError(error?.message || 'Wörterbuch-Modus konnte nicht gespeichert werden');
-    } finally {
-      setDictionarySetSaving(false);
-    }
-  }, [username, dictionarySet, dictionarySetSaving, getAuthHeader, getDbTokenHeader, setError]);
 
   // Runtime Config laden (für Fast Whisper WebSocket URL)
   useEffect(() => {
@@ -2156,7 +939,7 @@ export default function HomePage() {
 
   useEffect(() => {
     const handleDictionaryChanged = (event: Event) => {
-      const customEvent = event as CustomEvent<{ scope?: string; wrong?: string; correct?: string }>;
+      const customEvent = event as CustomEvent<{ scope?: string }>;
       if (customEvent.detail?.scope === 'private') {
         fetchDictionary();
       }
@@ -2164,21 +947,11 @@ export default function HomePage() {
       if (customEvent.detail?.scope === 'standard') {
         fetchStandardDictionary();
       }
-
-      const wrong = customEvent.detail?.wrong?.trim();
-      const correct = customEvent.detail?.correct?.trim();
-
-      if (!wrong || !correct) {
-        return;
-      }
-
-      const targetField = resolveFormattingTargetField();
-      setFieldText(targetField, (currentText) => replaceAllInText(currentText, wrong, correct));
     };
 
     window.addEventListener(DICTIONARY_CHANGED_EVENT, handleDictionaryChanged);
     return () => window.removeEventListener(DICTIONARY_CHANGED_EVENT, handleDictionaryChanged);
-  }, [fetchDictionary, fetchStandardDictionary, resolveFormattingTargetField, setFieldText]);
+  }, [fetchDictionary, fetchStandardDictionary]);
 
   // Event-Listener für Template-Aktualisierungen (wenn Templates im Modal geändert werden)
   useEffect(() => {
@@ -2224,82 +997,13 @@ export default function HomePage() {
     field: TextInsertionTarget,
     value: string,
     setter: (nextValue: string) => void,
-    textarea: HTMLTextAreaElement | HTMLDivElement
+    textarea: HTMLTextAreaElement
   ) => {
-    const stateKey = fieldToStateKey(field);
-    // Diese Änderung kommt vom Benutzer -> Baseline NICHT überschreiben.
-    pendingManualStateRef.current[stateKey] = true;
     setter(value);
     setPendingCorrection(true);
     syncTextSelection(field, textarea);
     logManualCorrection(field);
-
-    // Wörterbuch-Vorschlag erst nach kurzer Tipp-Pause ermitteln und immer gegen
-    // den zuletzt maschinell erzeugten Text (Baseline) diffen. So wird auch dann
-    // das ursprünglich falsch transkribierte Wort erkannt, wenn der Benutzer es
-    // Buchstabe für Buchstabe korrigiert.
-    const existingDebounce = manualSuggestDebounceRef.current[field];
-    if (existingDebounce) clearTimeout(existingDebounce);
-    manualSuggestDebounceRef.current[field] = setTimeout(() => {
-      const baseline = machineBaselineRef.current[stateKey];
-      const detectedChange = extractLastManualWordChange(baseline, value);
-      setManualCorrectionSuggestions((current) => ({
-        ...current,
-        [field]: detectedChange,
-      }));
-      delete manualSuggestDebounceRef.current[field];
-    }, 900);
   }, [logManualCorrection, syncTextSelection]);
-
-  // Hält die Baseline (zuletzt maschinell erzeugter Text) pro State aktuell.
-  // Stammt die Änderung vom Benutzer (pendingManualStateRef), bleibt die Baseline
-  // erhalten; andernfalls (Transkription/LLM/Template/Reset) wird sie übernommen.
-  useEffect(() => {
-    const states: Record<TextStateKey, string> = { transcript, methodik, beurteilung };
-    (Object.keys(states) as TextStateKey[]).forEach((key) => {
-      if (pendingManualStateRef.current[key]) {
-        pendingManualStateRef.current[key] = false;
-        return;
-      }
-      machineBaselineRef.current[key] = states[key];
-    });
-  }, [transcript, methodik, beurteilung]);
-
-  // Bestätigen/Verwerfen eines Vorschlags: Baseline auf den aktuellen Feldwert
-  // setzen, damit die bereits erledigte Korrektur nicht erneut vorgeschlagen wird.
-  const acknowledgeManualCorrection = useCallback((field: TextInsertionTarget) => {
-    const stateKey = fieldToStateKey(field);
-    machineBaselineRef.current[stateKey] = getFieldTextValue(field);
-    setManualCorrectionSuggestions((current) => ({ ...current, [field]: null }));
-  }, [getFieldTextValue]);
-
-  // Doppelklick auf ein Wort: Popup mit passenden Aktionen öffnen.
-  // Für Wörter, die durch das Wörterbuch-/Phonetik-Matching ersetzt wurden,
-  // wird die Quelle der Korrektur angezeigt; sonst nur „In Wörterbuch aufnehmen".
-  const handleWordDoubleClick = useCallback((
-    field: TextInsertionTarget,
-    info: { word: string; clientX: number; clientY: number }
-  ) => {
-    const { word, clientX, clientY } = info;
-    const corrections = fieldCorrections[field] ?? [];
-    // Exakte Wort-Übereinstimmung (case-insensitiv) und nicht self-mapping
-    const matched = corrections.find(
-      (c) => c.correctedWord.localeCompare(word, undefined, { sensitivity: 'accent' }) === 0
-        && c.originalWord.localeCompare(c.correctedWord, undefined, { sensitivity: 'accent' }) !== 0
-    ) ?? null;
-    setWordPopup({ word, position: { x: clientX, y: clientY }, correction: matched, field });
-  }, [fieldCorrections]);
-
-  const closeWordPopup = useCallback(() => {
-    setWordPopup(null);
-  }, []);
-
-  // Korrekturen für ein Feld leeren (z.B. nach Löschen / Schwächen),
-  // damit der Dialog nicht erneut auf dem gleichen Wort erscheint.
-  const invalidateFieldCorrections = useCallback((field: TextInsertionTarget) => {
-    setFieldCorrections((prev) => ({ ...prev, [field]: [] }));
-  }, []);
-
 
   const transcribeChunk = useCallback(async (blob: Blob, isLive: boolean = false, audioDurationSeconds?: number): Promise<string> => {
     try {
@@ -2308,7 +1012,6 @@ export default function HomePage() {
       if (username) {
         fd.append('username', username);
       }
-      fd.append('dictionarySet', dictionarySet);
       // Online-Diktat: Turbo-Modus (kein Alignment, schnellere Antwort)
       fd.append('speed_mode', 'turbo');
       fd.append('stats_event', isLive ? 'false' : 'true');
@@ -2335,7 +1038,7 @@ export default function HomePage() {
       }
       return '';
     }
-  }, [username, dictionarySet]);
+  }, [username]);
 
   // Kombiniert existierenden Text mit neuem Transkript
   const combineTexts = useCallback((existing: string, newText: string): string => {
@@ -2362,7 +1065,6 @@ export default function HomePage() {
         const fd = new FormData();
         fd.append('file', wavBlob, 'utterance.wav');
         if (username) fd.append('username', username);
-        fd.append('dictionarySet', dictionarySet);
         fd.append('speed_mode', 'turbo');
         if (promptContext) fd.append('prompt_context', promptContext);
         const res = await fetchWithDbToken('/api/transcribe', {
@@ -2386,7 +1088,7 @@ export default function HomePage() {
       }
     }
     throw lastError || new Error('Transkription nach mehreren Versuchen fehlgeschlagen');
-  }, [username, dictionarySet]);
+  }, [username]);
 
   const estimateWavDurationSeconds = useCallback((blob: Blob): number => {
     const wavHeaderBytes = 44;
@@ -2427,11 +1129,6 @@ export default function HomePage() {
         }]);
         combinedCommittedText = combineFormattedText(combinedCommittedText, text);
         didCommit = true;
-        continue;
-      }
-
-      if (tryApplySelectionFormattingCommand(entry.text)) {
-        console.log(`[VAD] Commit utterance #${seq}: selection formatting command applied (${getVadLogPreview(entry.text)})`);
         continue;
       }
 
@@ -2627,14 +1324,6 @@ export default function HomePage() {
 
   // Verarbeitet Text und verteilt auf die richtigen Felder (für Befund-Modus)
   const processTextForBefundFields = useCallback((rawText: string) => {
-    if (tryApplyInlineFormattingToggleCommand(rawText)) {
-      return;
-    }
-
-    if (tryApplySelectionFormattingCommand(rawText)) {
-      return;
-    }
-
     if (mode !== 'befund') {
       const formatted = applyFormattingControlWords(rawText);
       setTranscript(formatted);
@@ -2651,30 +1340,30 @@ export default function HomePage() {
       
       // Setze jeden Feldinhalt wenn vorhanden
       if (parsed.methodik !== null) {
-        setMethodik(combineTextForField('methodik', methodik, parsed.methodik, { applyActiveInlineFormatting: true }));
+        setMethodik(combineTextForField('methodik', methodik, parsed.methodik));
       }
       if (parsed.befund !== null) {
-        setTranscript(combineTextForField('befund', transcript, parsed.befund, { applyActiveInlineFormatting: true }));
+        setTranscript(combineTextForField('befund', transcript, parsed.befund));
       }
       if (parsed.beurteilung !== null) {
-        setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung, { applyActiveInlineFormatting: true }));
+        setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung));
       }
     } else {
       // Kein Steuerbefehl erkannt - Text geht ins aktive Feld
       switch (activeField) {
         case 'methodik':
-          setMethodik(combineTextForField('methodik', methodik, formattedText, { applyActiveInlineFormatting: true }));
+          setMethodik(combineTextForField('methodik', methodik, formattedText));
           break;
         case 'beurteilung':
-          setBeurteilung(combineTextForField('beurteilung', beurteilung, formattedText, { applyActiveInlineFormatting: true }));
+          setBeurteilung(combineTextForField('beurteilung', beurteilung, formattedText));
           break;
         case 'befund':
         default:
-          setTranscript(combineTextForField('befund', transcript, formattedText, { applyActiveInlineFormatting: true }));
+          setTranscript(combineTextForField('befund', transcript, formattedText));
           break;
       }
     }
-  }, [mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, tryApplyInlineFormattingToggleCommand, tryApplySelectionFormattingCommand]);
+  }, [mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript]);
 
   // Kontinuierliche Transkription während der Aufnahme
   const processLiveTranscription = useCallback(async () => {
@@ -2694,17 +1383,6 @@ export default function HomePage() {
         }
 
         const preparedDelta = prepareLiveInjectDelta(transcriptDelta);
-        if (tryApplyInlineFormattingToggleCommand(preparedDelta)) {
-          lastTranscriptRef.current = currentTranscript;
-          return;
-        }
-        if (tryApplySelectionFormattingCommand(preparedDelta)) {
-          lastTranscriptRef.current = currentTranscript;
-          return;
-        }
-        const liveInjectPreviewDelta = liveInjectEnabledRef.current
-          ? resolveLiveInjectInstruction(preparedDelta).text
-          : preparedDelta;
 
         if (isUnstableLiveInjectText(preparedDelta)) {
           setLiveInjectStatus('Live-Übertragung wartet auf stabiles Transkript');
@@ -2729,24 +1407,24 @@ export default function HomePage() {
             if (parsed.methodik !== null) {
               lastMethodikRef.current = parsed.methodik;
               if (liveInjectEnabledRef.current) {
-                applyLiveChunkPreview('methodik', resolveLiveInjectInstruction(parsed.methodik).text);
+                applyLiveChunkPreview('methodik', parsed.methodik);
               } else {
-                setMethodik(combineTextForField('methodik', methodik, parsed.methodik, { applyActiveInlineFormatting: true }));
+                setMethodik(combineTextForField('methodik', methodik, parsed.methodik));
               }
             }
             if (parsed.befund !== null) {
               if (liveInjectEnabledRef.current) {
-                applyLiveChunkPreview('befund', resolveLiveInjectInstruction(parsed.befund).text);
+                applyLiveChunkPreview('befund', parsed.befund);
               } else {
-                setTranscript(combineTextForField('befund', transcript, parsed.befund, { applyActiveInlineFormatting: true }));
+                setTranscript(combineTextForField('befund', transcript, parsed.befund));
               }
             }
             if (parsed.beurteilung !== null) {
               lastBeurteilungRef.current = parsed.beurteilung;
               if (liveInjectEnabledRef.current) {
-                applyLiveChunkPreview('beurteilung', resolveLiveInjectInstruction(parsed.beurteilung).text);
+                applyLiveChunkPreview('beurteilung', parsed.beurteilung);
               } else {
-                setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung, { applyActiveInlineFormatting: true }));
+                setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung));
               }
             }
           } else {
@@ -2755,25 +1433,25 @@ export default function HomePage() {
               case 'methodik':
                 lastMethodikRef.current = preparedDelta;
                 if (liveInjectEnabledRef.current) {
-                  applyLiveChunkPreview('methodik', liveInjectPreviewDelta);
+                  applyLiveChunkPreview('methodik', preparedDelta);
                 } else {
-                  setMethodik(combineTextForField('methodik', methodik, preparedDelta, { applyActiveInlineFormatting: true }));
+                  setMethodik(combineTextForField('methodik', methodik, preparedDelta));
                 }
                 break;
               case 'beurteilung':
                 lastBeurteilungRef.current = preparedDelta;
                 if (liveInjectEnabledRef.current) {
-                  applyLiveChunkPreview('beurteilung', liveInjectPreviewDelta);
+                  applyLiveChunkPreview('beurteilung', preparedDelta);
                 } else {
-                  setBeurteilung(combineTextForField('beurteilung', beurteilung, preparedDelta, { applyActiveInlineFormatting: true }));
+                  setBeurteilung(combineTextForField('beurteilung', beurteilung, preparedDelta));
                 }
                 break;
               case 'befund':
               default:
                 if (liveInjectEnabledRef.current) {
-                  applyLiveChunkPreview('befund', liveInjectPreviewDelta);
+                  applyLiveChunkPreview('befund', preparedDelta);
                 } else {
-                  setTranscript(combineTextForField('befund', transcript, preparedDelta, { applyActiveInlineFormatting: true }));
+                  setTranscript(combineTextForField('befund', transcript, preparedDelta));
                 }
                 break;
             }
@@ -2783,7 +1461,7 @@ export default function HomePage() {
           if (liveInjectEnabledRef.current) {
             applyLiveChunkPreview('transcript', preparedDelta);
           } else {
-            const fullText = combineTextForField('transcript', transcript, preparedDelta, { applyActiveInlineFormatting: true });
+            const fullText = combineTextForField('transcript', transcript, preparedDelta);
             setTranscript(fullText);
           }
         }
@@ -2791,7 +1469,7 @@ export default function HomePage() {
     } finally {
       setTranscribing(false);
     }
-  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, prepareLiveInjectDelta, queueLiveInject, applyLiveChunkPreview, tryApplyInlineFormattingToggleCommand, tryApplySelectionFormattingCommand]);
+  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, prepareLiveInjectDelta, queueLiveInject, applyLiveChunkPreview]);
 
   useEffect(() => {
     return () => {
@@ -2810,22 +1488,12 @@ export default function HomePage() {
       Object.values(manualCorrectionTimersRef.current).forEach((timer) => {
         if (timer) clearTimeout(timer);
       });
-      Object.values(manualSuggestDebounceRef.current).forEach((timer) => {
-        if (timer) clearTimeout(timer);
-      });
     };
   }, []);
 
   // Funktion zum Zurücksetzen aller Felder (New-Button) - hier oben für Hotkey-Unterstützung
   const handleReset = useCallback(() => {
     vadSessionIdRef.current += 1;
-    liveInjectSentTextRef.current = '';
-    // Offene Wörterbuch-Vorschläge und deren Debounce-Timer verwerfen.
-    Object.values(manualSuggestDebounceRef.current).forEach((timer) => {
-      if (timer) clearTimeout(timer);
-    });
-    manualSuggestDebounceRef.current = {};
-    setManualCorrectionSuggestions(EMPTY_MANUAL_WORD_CHANGES);
     setTranscript('');
     setMethodik('');
     setBeurteilung('');
@@ -3004,12 +1672,7 @@ export default function HomePage() {
     });
   };
 
-  const handleGlobalHotkeyAction = useCallback((action: GlobalHotkeyAction, source: HotkeyTriggerSource, details?: Record<string, unknown>) => {
-    logHotkeyEvent(action, source, {
-      recordingActive: recordingRef.current,
-      ...(details ?? {}),
-    });
-
+  const handleGlobalHotkeyAction = useCallback((action: GlobalHotkeyAction) => {
     switch (action) {
       case 'toggle-recording':
         if (recordingRef.current) {
@@ -3044,19 +1707,19 @@ export default function HomePage() {
       switch (e.key) {
         case 'F9':
           e.preventDefault();
-          handleGlobalHotkeyAction('toggle-recording', 'browser-keydown-fallback', { key: e.key, repeat: e.repeat });
+          handleGlobalHotkeyAction('toggle-recording');
           break;
         case 'F10':
           e.preventDefault();
-          handleGlobalHotkeyAction('stop-recording', 'browser-keydown-fallback', { key: e.key, repeat: e.repeat });
+          handleGlobalHotkeyAction('stop-recording');
           break;
         case 'F11':
           e.preventDefault();
-          handleGlobalHotkeyAction('transfer-text', 'browser-keydown-fallback', { key: e.key, repeat: e.repeat });
+          handleGlobalHotkeyAction('transfer-text');
           break;
         case 'Escape':
           e.preventDefault();
-          handleGlobalHotkeyAction('cancel-recording', 'browser-keydown-fallback', { key: e.key, repeat: e.repeat });
+          handleGlobalHotkeyAction('cancel-recording');
           break;
       }
     };
@@ -3066,38 +1729,11 @@ export default function HomePage() {
   }, [handleGlobalHotkeyAction]);
 
   useEffect(() => {
-    const handleExtensionMessage = (event: MessageEvent) => {
-      if (event.source !== window) return;
-
-      const data = event.data;
-      if (!data || data.source !== EXTENSION_BRIDGE_SOURCE) return;
-
-      if (data.type === 'global-hotkey' && typeof data.payload?.action === 'string') {
-        handleGlobalHotkeyAction(data.payload.action as GlobalHotkeyAction, 'extension-global-hotkey', {
-          payload: data.payload,
-        });
-        return;
-      }
-
-      if (data.type === 'global-hotkeys-registration' && data.result?.ok) {
-        console.info('[Hotkeys] Globaler Hotkey-Bridge aktiv', data.result);
-        return;
-      }
-
-      if (data.type === 'global-hotkeys-registration' && data.result && !data.result.ok) {
-        console.warn('[Hotkeys] Globaler Hotkey-Bridge konnte nicht aktiviert werden:', data.result.error || 'Unbekannter Fehler');
-      }
-    };
-
-    window.addEventListener('message', handleExtensionMessage);
-    console.info('[Hotkeys] Registriere globalen Hotkey-Bridge');
-    window.postMessage({ source: PAGE_BRIDGE_SOURCE, type: 'register-global-hotkeys' }, window.location.origin);
-
-    return () => {
-      window.removeEventListener('message', handleExtensionMessage);
-      console.info('[Hotkeys] Deregistriere globalen Hotkey-Bridge');
-      window.postMessage({ source: PAGE_BRIDGE_SOURCE, type: 'unregister-global-hotkeys' }, window.location.origin);
-    };
+    registerGlobalHotkeys((action) => {
+      handleGlobalHotkeyAction(action as GlobalHotkeyAction);
+    }).catch(() => {
+      // Hotkey registration via WebSocket failed — non-fatal
+    });
   }, [handleGlobalHotkeyAction]);
 
   useEffect(() => {
@@ -3106,11 +1742,6 @@ export default function HomePage() {
       if (!detail || detail.phase !== 'keydown' || detail.action !== 'record') {
         return;
       }
-
-      logHotkeyEvent('toggle-recording', 'hid-media-control', {
-        detail,
-        recordingActive: recordingRef.current,
-      });
 
       if (recordingRef.current) {
         void stopRecording();
@@ -3180,8 +1811,7 @@ export default function HomePage() {
   // Ref um zu tracken ob der letzte Text mit Punkt endete (für Groß-/Kleinschreibung)
   const fastWhisperEndsWithPeriodRef = useRef<boolean>(true); // Start mit true = erster Buchstabe groß
 
-  // LEGACY / DEPRECATED: Handler fuer die alten WebSocket-/Realtime-Pfade.
-  // Neue Online-Features nicht hier anbauen; maßgeblich ist heute der Chunk-/Nicht-WebSocket-Pfad.
+  // Fast Whisper WebSocket Transkription Handler
   // Diktat-Modus: Kein automatisches Satzende, "Punkt" als Sprachbefehl
   const handleFastWhisperTranscript = useCallback(async (text: string, isFinal: boolean) => {
     if (!text) return;
@@ -3196,16 +1826,6 @@ export default function HomePage() {
     // Diktat-Logik: Sprachbefehle erkennen und Satzenden verarbeiten
     let processedText = text.trim();
     let endsWithPeriod = false;
-
-    if (tryApplyInlineFormattingToggleCommand(processedText)) {
-      console.log('[FastWhisper] Persistenter Formatierungsbefehl angewendet');
-      return;
-    }
-
-    if (tryApplySelectionFormattingCommand(processedText)) {
-      console.log('[FastWhisper] Auswahlformatierungsbefehl angewendet');
-      return;
-    }
     
     // Prüfe ob der Text NUR "Punkt" ist (als separater Sprachbefehl)
     const isOnlyPunkt = /^punkt[.!?]?$/i.test(processedText);
@@ -3394,7 +2014,7 @@ export default function HomePage() {
       }
       updateDisplay();
     }
-  }, [mode, activeField, applyDictionaryToText, quickCorrectWithLLM, replaceTextAtEndOrInsertDelta, tryApplyInlineFormattingToggleCommand, tryApplySelectionFormattingCommand]);
+  }, [mode, activeField, applyDictionaryToText, quickCorrectWithLLM, replaceTextAtEndOrInsertDelta]);
 
   async function startRecording() {
     setError(null);
@@ -3412,8 +2032,7 @@ export default function HomePage() {
       lastBeurteilungRef.current = "";
     }
 
-    // LEGACY / DEPRECATED: Alter Fast-Whisper-WebSocket-Modus.
-    // Nicht mehr der primaere Onlinepfad; neue Aenderungen bitte im Chunk-/Nicht-WebSocket-Pfad umsetzen.
+    // Fast Whisper WebSocket Modus
     if (runtimeConfig?.transcriptionProvider === 'fast_whisper' && runtimeConfig.fastWhisperWsUrl) {
       // Finale Text-Refs zurücksetzen für neue Session
       fastWhisperFinalTextRef.current = "";
@@ -3575,8 +2194,7 @@ export default function HomePage() {
       return;
     }
     
-    // LEGACY / DEPRECATED: Alter Voxtral-Realtime-WebSocket-Modus.
-    // Nicht mehr der primaere Onlinepfad; neue Aenderungen bitte im Chunk-/Nicht-WebSocket-Pfad umsetzen.
+    // Voxtral Local Realtime WebSocket Modus
     if (
       runtimeConfig?.transcriptionProvider === 'voxtral_local' &&
       runtimeConfig.voxtralLocalOnlineMode !== 'chunk' &&
@@ -3615,6 +2233,16 @@ export default function HomePage() {
               input_audio_sample_rate: 16000,
             },
           };
+          
+          // Context Bias aus Wörterbuch (Einträge mit useInPrompt=true)
+          const promptWords = dictionaryEntries
+            .filter(e => e.useInPrompt && e.correct)
+            .map(e => e.correct);
+          
+          if (promptWords.length > 0) {
+            sessionConfig.session.context_bias = promptWords;
+            console.log('[Voxtral] Sending context_bias with', promptWords.length, 'words');
+          }
           
           ws.send(JSON.stringify(sessionConfig));
           
@@ -3834,7 +2462,7 @@ export default function HomePage() {
   }
 
   async function stopRecording() {
-    // LEGACY / DEPRECATED: Cleanup fuer den alten Fast-Whisper-WebSocket-Modus.
+    // Fast Whisper WebSocket Modus stoppen
     if (runtimeConfig?.transcriptionProvider === 'fast_whisper') {
       console.log('[FastWhisper] Stopping WebSocket recording');
       
@@ -3877,7 +2505,7 @@ export default function HomePage() {
       return;
     }
     
-    // LEGACY / DEPRECATED: Cleanup fuer den alten Voxtral-Realtime-WebSocket-Modus.
+    // Voxtral Local Realtime WebSocket stoppen
     if (
       runtimeConfig?.transcriptionProvider === 'voxtral_local' &&
       runtimeConfig.voxtralLocalOnlineMode !== 'chunk' &&
@@ -3963,14 +2591,6 @@ export default function HomePage() {
         recordingStartedAtRef.current = null;
         const sessionTranscript = await transcribeChunk(blob, false, audioDurationSeconds);
         if (sessionTranscript) {
-          if (tryApplyInlineFormattingToggleCommand(sessionTranscript)) {
-            return;
-          }
-
-          if (tryApplySelectionFormattingCommand(sessionTranscript)) {
-            return;
-          }
-
           queueFinalSessionLiveInject(sessionTranscript);
 
           // Formatierung, Wörterbuch und phonetische Korrektur anwenden.
@@ -4001,13 +2621,13 @@ export default function HomePage() {
               if (parsed.lastField) {
                 // Steuerbefehle erkannt - verteile auf entsprechende Felder
                 if (parsed.methodik !== null) {
-                  currentMethodik = combineTextForField('methodik', existingMethodikRef.current, parsed.methodik, { applyActiveInlineFormatting: true });
+                  currentMethodik = combineTextForField('methodik', existingMethodikRef.current, parsed.methodik);
                 }
                 if (parsed.befund !== null) {
-                  currentBefund = combineTextForField('befund', existingTextRef.current, parsed.befund, { applyActiveInlineFormatting: true });
+                  currentBefund = combineTextForField('befund', existingTextRef.current, parsed.befund);
                 }
                 if (parsed.beurteilung !== null) {
-                  currentBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, parsed.beurteilung, { applyActiveInlineFormatting: true });
+                  currentBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, parsed.beurteilung);
                 }
                 // Rohe Version
                 if (rawParsed.methodik !== null) {
@@ -4023,16 +2643,16 @@ export default function HomePage() {
               // Kein Steuerbefehl - Text geht ins aktive Feld
               switch (activeField) {
                 case 'methodik':
-                  currentMethodik = combineTextForField('methodik', existingMethodikRef.current, formattedTranscript, { applyActiveInlineFormatting: true });
+                  currentMethodik = combineTextForField('methodik', existingMethodikRef.current, formattedTranscript);
                   rawMethodik = combineTextForField('methodik', existingMethodikRef.current, sessionTranscript);
                   break;
                 case 'beurteilung':
-                  currentBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, formattedTranscript, { applyActiveInlineFormatting: true });
+                  currentBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, formattedTranscript);
                   rawBeurteilung = combineTextForField('beurteilung', existingBeurteilungRef.current, sessionTranscript);
                   break;
                 case 'befund':
                 default:
-                  currentBefund = combineTextForField('befund', existingTextRef.current, formattedTranscript, { applyActiveInlineFormatting: true });
+                  currentBefund = combineTextForField('befund', existingTextRef.current, formattedTranscript);
                   rawBefund = combineTextForField('befund', existingTextRef.current, sessionTranscript);
                   break;
               }
@@ -4142,7 +2762,7 @@ export default function HomePage() {
             }
           } else {
             // Im Arztbrief-Modus: Normales Verhalten
-            const fullText = combineTextForField('transcript', existingTextRef.current, formattedTranscript, { applyActiveInlineFormatting: true });
+            const fullText = combineTextForField('transcript', existingTextRef.current, formattedTranscript);
             const rawFullText = combineTextForField('transcript', existingTextRef.current, sessionTranscript);
             
             // Speichere Text VOR der Korrektur für Revert-Funktion (formatierte Version)
@@ -4405,25 +3025,21 @@ export default function HomePage() {
     setBusy(true);
     setError(null);
     setCorrecting(true);
-    console.log(`[Korrigieren] handleFormatBefund START, dictionarySet=${dictionarySet}, mode=${mode}`);
     try {
       const res = await fetchWithDbToken('/api/correct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify({ 
           befundFields: {
             methodik: methodik,
             befund: transcript,
             beurteilung: beurteilung
           },
-          username,
-          dictionarySet
+          username
         }),
       });
-      console.log(`[Korrigieren] handleFormatBefund response: ok=${res.ok} status=${res.status}`);
       if (res.ok) {
         const data = await res.json();
-        console.log(`[Korrigieren] handleFormatBefund data:`, data);
         if (data.befundFields) {
           setMethodik(data.befundFields.methodik || methodik);
           setTranscript(data.befundFields.befund || transcript);
@@ -4434,104 +3050,64 @@ export default function HomePage() {
           setChangeScore(data.changeScore ?? null);
           setCanRevert(true);
           setPendingCorrection(false);
-          console.log(`[Korrigieren] Befund-Felder aktualisiert, changeScore=${data.changeScore}`);
-        } else {
-          console.warn(`[Korrigieren] Response ok, aber keine befundFields in der Antwort`);
         }
       } else {
-        const errText = await res.text().catch(() => '');
-        console.error(`[Korrigieren] Server-Fehler: ${res.status} ${res.statusText}`, errText);
         throw new Error('Korrektur fehlgeschlagen');
       }
     } catch (err: any) {
-      console.error(`[Korrigieren] Fehler:`, err);
       setError(err.message || 'Fehler bei der Korrektur');
     } finally {
       setCorrecting(false);
       setBusy(false);
-      console.log(`[Korrigieren] handleFormatBefund END`);
     }
   }
 
   // Manuelle Korrektur für Arztbrief-Modus
   async function handleManualCorrect() {
     if (!transcript.trim()) return;
-
+    
     setBusy(true);
     setError(null);
     setCorrecting(true);
-    console.log(`[Korrigieren] handleManualCorrect START, dictionarySet=${dictionarySet}, transcript=${transcript.length} chars`);
     try {
       const res = await fetchWithDbToken('/api/correct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: transcript, username, dictionarySet }),
+        body: JSON.stringify({ text: transcript, username }),
       });
-      console.log(`[Korrigieren] handleManualCorrect response: ok=${res.ok} status=${res.status}`);
       if (res.ok) {
         const data = await res.json();
-        console.log(`[Korrigieren] handleManualCorrect data:`, data);
         setTranscript(data.correctedText || transcript);
         setChangeScore(data.changeScore ?? null);
         setCanRevert(true);
         setPendingCorrection(false);
-        console.log(`[Korrigieren] Transcript aktualisiert, changeScore=${data.changeScore}`);
       } else {
-        const errText = await res.text().catch(() => '');
-        console.error(`[Korrigieren] Server-Fehler: ${res.status} ${res.statusText}`, errText);
         throw new Error('Korrektur fehlgeschlagen');
       }
     } catch (err: any) {
-      console.error(`[Korrigieren] Fehler:`, err);
       setError(err.message || 'Fehler bei der Korrektur');
     } finally {
       setCorrecting(false);
       setBusy(false);
-      console.log(`[Korrigieren] handleManualCorrect END`);
     }
-  }
-
-  function buildCombinedRichTextDocument() {
-    const sections = [
-      { label: 'Methodik', text: methodik, formats: richTextFormats.methodik },
-      { label: 'Befund', text: transcript, formats: richTextFormats.befund },
-      { label: 'Beurteilung', text: beurteilung, formats: richTextFormats.beurteilung },
-    ].filter((section) => section.text.trim().length > 0);
-
-    let combinedText = '';
-    const combinedFormats: RichTextFormatRange[] = [];
-
-    for (const section of sections) {
-      if (combinedText) {
-        combinedText += '\n\n';
-      }
-
-      const contentOffset = combinedText.length + section.label.length + 2;
-      combinedText += `${section.label}:\n${section.text}`;
-
-      section.formats.forEach((range) => {
-        combinedFormats.push({
-          ...range,
-          start: range.start + contentOffset,
-          end: range.end + contentOffset,
-        });
-      });
-    }
-
-    return {
-      text: combinedText,
-      formats: normalizeRichTextRanges(combinedFormats, combinedText.length),
-    };
   }
 
   function handleCopyBefund() {
-    const combinedDocument = buildCombinedRichTextDocument();
-    void copyRichTextToClipboard(combinedDocument.text, buildRichTextHtml(combinedDocument.text, combinedDocument.formats));
+    const combinedText = [
+      methodik ? `Methodik:\n${methodik}` : '',
+      transcript ? `Befund:\n${transcript}` : '',
+      beurteilung ? `Beurteilung:\n${beurteilung}` : ''
+    ].filter(Boolean).join('\n\n');
+    copyToClipboard(combinedText);
   }
 
   async function handleExportDocxBefund() {
-    const combinedDocument = buildCombinedRichTextDocument();
-    await exportDocx(combinedDocument.text, mode, combinedDocument.formats);
+    const combinedText = [
+      methodik ? `Methodik:\n${methodik}` : '',
+      transcript ? `Befund:\n${transcript}` : '',
+      beurteilung ? `Beurteilung:\n${beurteilung}` : ''
+    ].filter(Boolean).join('\n\n');
+    await exportDocx(combinedText, mode);
   }
 
   // Beurteilung durch LLM vorschlagen lassen
@@ -4569,11 +3145,11 @@ export default function HomePage() {
   }
 
   function handleCopy() {
-    void copyRichTextToClipboard(transcript, buildRichTextHtml(transcript, richTextFormats.transcript));
+    copyToClipboard(transcript);
   }
 
   async function handleExportDocx() {
-    await exportDocx(transcript, mode, richTextFormats.transcript);
+    await exportDocx(transcript, mode);
   }
 
   const Aufnahme = (
@@ -4652,13 +3228,7 @@ export default function HomePage() {
           </button>
         )}
         <button
-          className={`btn text-sm py-2 ${
-            liveInjectEnabled
-              ? injectConnectionStatus === 'connected'
-                ? 'btn-success'
-                : 'btn-warning'
-              : 'btn-outline'
-          }`}
+          className={`btn text-sm py-2 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
           onClick={() => setLiveInjectEnabled((enabled) => !enabled)}
           title="Während der Aufnahme neue Wörter direkt in das aktuell aktive Windows-Fenster schreiben"
         >
@@ -4799,10 +3369,25 @@ export default function HomePage() {
 
   // Ref für den Mikrofon-Button
   const recordButtonRef = useRef<HTMLButtonElement>(null);
-  const hasCorrectionText = mode === 'befund'
-    ? Boolean(methodik.trim() || transcript.trim() || beurteilung.trim())
-    : Boolean(transcript.trim());
-  const correctionButtonDisabled = correcting || busy || !hasCorrectionText;
+
+  // Rechtsklick-Handler: Löst "Neu" aus (alle Felder löschen) - nur auf nicht-interaktiven Elementen
+  const handleContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    
+    // Prüfe ob das Ziel oder ein Elternelement ein interaktives Element ist
+    const interactiveSelectors = 'button, a, input, textarea, select, [role="button"], [tabindex]:not([tabindex="-1"])';
+    const isInteractive = target.closest(interactiveSelectors);
+    
+    // Prüfe ob ein Textfeld fokussiert ist (blinkender Cursor)
+    const activeElement = document.activeElement;
+    const isEditing = activeElement?.tagName === 'TEXTAREA' || activeElement?.tagName === 'INPUT';
+    
+    // Nur wenn nicht interaktiv und nicht am Editieren
+    if (!isInteractive && !isEditing) {
+      e.preventDefault(); // Verhindere das Standard-Kontextmenü
+      handleReset();
+    }
+  }, [handleReset]);
 
   // Kompakter Aufnahme-Button für Header-Bereich
   const RecordButton = (
@@ -4865,7 +3450,7 @@ export default function HomePage() {
   );
 
   return (
-    <div className="space-y-3 min-h-[calc(100vh-120px)]">
+    <div className="space-y-3 min-h-[calc(100vh-120px)]" onContextMenu={handleContextMenu}>
       {/* Kompakte Steuerleiste */}
       <div className="card">
         <div className="card-body py-3 flex items-center justify-between gap-3 flex-wrap">
@@ -4873,18 +3458,10 @@ export default function HomePage() {
             {RecordButton}
             <div className="flex flex-col gap-1">
               <button
-                className={`btn h-9 w-9 p-0 ${
-                  liveInjectEnabled
-                    ? injectConnectionStatus === 'connected'
-                      ? 'btn-success'
-                      : 'btn-warning'
-                    : 'btn-outline'
-                }`}
+                className={`btn h-9 w-9 p-0 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
                 onClick={() => setLiveInjectEnabled((enabled) => !enabled)}
                 title={liveInjectEnabled
-                  ? injectConnectionStatus === 'connected'
-                    ? 'Live-Übertragung an Ziel-App ist aktiv (verbunden)'
-                    : 'Live-Übertragung aktiviert – wartet auf erste Bestätigung der Ziel-App'
+                  ? 'Live-Übertragung an Ziel-App ist aktiv'
                   : 'Live-Übertragung an Ziel-App aktivieren'}
                 aria-label={liveInjectEnabled
                   ? 'Live-Übertragung an Ziel-App deaktivieren'
@@ -4898,69 +3475,20 @@ export default function HomePage() {
                   <path d="M21 17H3" />
                 </svg>
               </button>
-            </div>
-            <div className="flex flex-col gap-1 items-center justify-center">
-              <button
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${
-                  dictionarySet === 'medical'
-                    ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
-                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
-                }`}
-                onClick={() => void persistDictionarySet(dictionarySet === 'medical' ? 'alltag' : 'medical')}
-                disabled={dictionarySetSaving}
-                title={
-                  dictionarySet === 'medical'
-                    ? 'Medical-Modus: alle phonetischen Wörterbücher (Standard, Abteilung, persönlich) sind aktiv. Klicken zum Umschalten auf Alltag.'
-                    : 'Alltag-Modus: alle Wörterbücher sind aus. Klicken zum Umschalten auf Medical.'
-                }
-                aria-pressed={dictionarySet === 'medical'}
-                aria-label={dictionarySet === 'medical' ? 'Wörterbuch-Modus: Medical (an)' : 'Wörterbuch-Modus: Alltag (aus)'}
-              >
-                <span
-                  className={`inline-block w-2 h-2 rounded-full ${
-                    dictionarySet === 'medical' ? 'bg-white' : 'bg-gray-400'
-                  }`}
-                  aria-hidden="true"
-                />
-                {dictionarySet === 'medical' ? 'Medical' : 'Alltag'}
-              </button>
+              {liveInjectStatus && (
+                <span className="text-[11px] text-gray-500 dark:text-gray-400 max-w-64 truncate" title={liveInjectStatus}>
+                  {liveInjectStatus}
+                </span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              className="btn btn-outline h-9 w-9 p-0"
-              onClick={handleUndoTextHistory}
-              title="Letzte Textänderung rückgängig machen"
-              aria-label="Letzte Textänderung rückgängig machen"
-              disabled={!textHistoryAvailability.canUndo || isProcessing}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M9 14 4 9l5-5" />
-                <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
-              </svg>
-            </button>
-            <button
-              className="btn btn-outline h-9 w-9 p-0"
-              onClick={handleRedoTextHistory}
-              title="Rückgängig gemachte Textänderung wiederherstellen"
-              aria-label="Rückgängig gemachte Textänderung wiederherstellen"
-              disabled={!textHistoryAvailability.canRedo || isProcessing}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="m15 14 5-5-5-5" />
-                <path d="M20 9H10a6 6 0 0 0 0 12h3" />
-              </svg>
-            </button>
             <button 
-              className="btn btn-outline h-9 w-9 p-0" 
+              className="btn btn-outline text-sm py-1.5 px-3" 
               onClick={handleReset}
-              title="Alle Felder löschen"
-              aria-label="Alle Felder löschen"
+              title="Alle Felder löschen (oder Rechtsklick)"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <path d="M14 2v6h6" />
-              </svg>
+              ✨ Neu
             </button>
             {canRevert && preCorrectionState && (
               <>
@@ -5006,14 +3534,17 @@ export default function HomePage() {
                 </label>
               </>
             )}
-            <button 
-              className={`btn text-sm py-1.5 px-3 ${pendingCorrection && !correctionButtonDisabled ? 'btn-primary animate-pulse' : 'btn-outline'}`}
-              onClick={mode === 'befund' ? handleFormatBefund : handleManualCorrect}
-              title={hasCorrectionText ? 'KI-Korrektur durchführen' : 'Text eingeben, um die KI-Korrektur zu aktivieren'}
-              disabled={correctionButtonDisabled}
-            >
-              {correcting ? <Spinner size={14} /> : '🤖 Korrigieren'}
-            </button>
+            {/* Manueller Korrektur-Button wenn Änderungen vorliegen */}
+            {pendingCorrection && (
+              <button 
+                className="btn btn-primary text-sm py-1.5 px-3 animate-pulse" 
+                onClick={mode === 'befund' ? handleFormatBefund : handleManualCorrect}
+                title="KI-Korrektur durchführen"
+                disabled={correcting || busy || (mode === 'befund' ? !methodik.trim() && !transcript.trim() && !beurteilung.trim() : !transcript.trim())}
+              >
+                {correcting ? <Spinner size={14} /> : '🤖 Korrigieren'}
+              </button>
+            )}
             
             {/* Textbaustein-Auswahl */}
             {availableTemplates.length > 0 && (
@@ -5056,12 +3587,6 @@ export default function HomePage() {
           </div>
         </div>
       </div>
-
-      {liveInjectStatus && (
-        <div className="px-1 text-xs text-gray-600 dark:text-gray-300 break-words">
-          {liveInjectStatus}
-        </div>
-      )}
 
       {/* SSL-Zertifikat Warnung für Fast Whisper */}
       {sslCertWarning?.show && (
@@ -5215,18 +3740,19 @@ export default function HomePage() {
                   </div>
                 )}
                 <div className="relative">
-                  <RichTextDictationEditor
-                    editorRef={methodikTextareaRef}
-                    value={methodik}
-                    formats={richTextFormats.methodik}
-                    selection={textSelections.methodik}
+                  <textarea
+                    ref={methodikTextareaRef}
                     className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    onChange={(value, editor) => handleManualTextChange('methodik', value, setMethodik, editor)}
-                    onFocus={(editor) => { setActiveField('methodik'); setFocusedTextField('methodik'); syncTextSelection('methodik', editor); }}
+                    value={methodik}
+                    onChange={(e) => handleManualTextChange('methodik', e.target.value, setMethodik, e.currentTarget)}
+                    onFocus={(e) => { setActiveField('methodik'); setFocusedTextField('methodik'); syncTextSelection('methodik', e.currentTarget); }}
                     onBlur={() => setFocusedTextField((current) => current === 'methodik' ? null : current)}
-                    onSelectionChange={(editor) => syncTextSelection('methodik', editor)}
-                    onWordDoubleClick={(info) => handleWordDoubleClick('methodik', info)}
+                    onSelect={(e) => syncTextSelection('methodik', e.currentTarget)}
+                    onClick={(e) => syncTextSelection('methodik', e.currentTarget)}
+                    onKeyUp={(e) => syncTextSelection('methodik', e.currentTarget)}
+                    onMouseUp={(e) => syncTextSelection('methodik', e.currentTarget)}
                     placeholder="Methodik..."
+                    rows={2}
                     readOnly={isProcessing}
                   />
                   {showPersistentCaret && focusedTextField !== 'methodik' && caretOverlays.methodik.visible && (
@@ -5240,15 +3766,6 @@ export default function HomePage() {
                     />
                   )}
                 </div>
-                {manualCorrectionSuggestions.methodik && (
-                  <ManualCorrectionSuggestion
-                    originalWord={manualCorrectionSuggestions.methodik.originalWord}
-                    newWord={manualCorrectionSuggestions.methodik.newWord}
-                    targetUsername={username || undefined}
-                    onConfirm={() => acknowledgeManualCorrection('methodik')}
-                    onCancel={() => acknowledgeManualCorrection('methodik')}
-                  />
-                )}
               </div>
             </div>
             {/* Action Buttons für Methodik */}
@@ -5303,17 +3820,17 @@ export default function HomePage() {
                   </div>
                 )}
                 <div className="relative">
-                  <RichTextDictationEditor
-                    editorRef={befundTextareaRef}
-                    value={transcript}
-                    formats={richTextFormats.befund}
-                    selection={textSelections.befund}
+                  <textarea
+                    ref={befundTextareaRef}
                     className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    onChange={(value, editor) => handleManualTextChange('befund', value, setTranscript, editor)}
-                    onFocus={(editor) => { setActiveField('befund'); setFocusedTextField('befund'); syncTextSelection('befund', editor); }}
+                    value={transcript}
+                    onChange={(e) => handleManualTextChange('befund', e.target.value, setTranscript, e.currentTarget)}
+                    onFocus={(e) => { setActiveField('befund'); setFocusedTextField('befund'); syncTextSelection('befund', e.currentTarget); }}
                     onBlur={() => setFocusedTextField((current) => current === 'befund' ? null : current)}
-                    onSelectionChange={(editor) => syncTextSelection('befund', editor)}
-                    onWordDoubleClick={(info) => handleWordDoubleClick('befund', info)}
+                    onSelect={(e) => syncTextSelection('befund', e.currentTarget)}
+                    onClick={(e) => syncTextSelection('befund', e.currentTarget)}
+                    onKeyUp={(e) => syncTextSelection('befund', e.currentTarget)}
+                    onMouseUp={(e) => syncTextSelection('befund', e.currentTarget)}
                     placeholder="Befund..."
                     readOnly={isProcessing}
                   />
@@ -5328,15 +3845,6 @@ export default function HomePage() {
                     />
                   )}
                 </div>
-                {manualCorrectionSuggestions.befund && (
-                  <ManualCorrectionSuggestion
-                    originalWord={manualCorrectionSuggestions.befund.originalWord}
-                    newWord={manualCorrectionSuggestions.befund.newWord}
-                    targetUsername={username || undefined}
-                    onConfirm={() => acknowledgeManualCorrection('befund')}
-                    onCancel={() => acknowledgeManualCorrection('befund')}
-                  />
-                )}
                 {/* VAD Tentative Text: Zeigt an, dass gerade gesprochen wird */}
                 {recording && vad.isListening && tentativeText && (
                   <div className="px-2 py-1 text-sm italic text-gray-400 dark:text-gray-500 border-l-2 border-green-400 bg-green-50/50 dark:bg-green-900/20 rounded-r">
@@ -5407,18 +3915,19 @@ export default function HomePage() {
                   </div>
                 )}
                 <div className="relative">
-                  <RichTextDictationEditor
-                    editorRef={beurteilungTextareaRef}
-                    value={beurteilung}
-                    formats={richTextFormats.beurteilung}
-                    selection={textSelections.beurteilung}
+                  <textarea
+                    ref={beurteilungTextareaRef}
                     className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    onChange={(value, editor) => handleManualTextChange('beurteilung', value, setBeurteilung, editor)}
-                    onFocus={(editor) => { setActiveField('beurteilung'); setFocusedTextField('beurteilung'); syncTextSelection('beurteilung', editor); }}
+                    value={beurteilung}
+                    onChange={(e) => handleManualTextChange('beurteilung', e.target.value, setBeurteilung, e.currentTarget)}
+                    onFocus={(e) => { setActiveField('beurteilung'); setFocusedTextField('beurteilung'); syncTextSelection('beurteilung', e.currentTarget); }}
                     onBlur={() => setFocusedTextField((current) => current === 'beurteilung' ? null : current)}
-                    onSelectionChange={(editor) => syncTextSelection('beurteilung', editor)}
-                    onWordDoubleClick={(info) => handleWordDoubleClick('beurteilung', info)}
+                    onSelect={(e) => syncTextSelection('beurteilung', e.currentTarget)}
+                    onClick={(e) => syncTextSelection('beurteilung', e.currentTarget)}
+                    onKeyUp={(e) => syncTextSelection('beurteilung', e.currentTarget)}
+                    onMouseUp={(e) => syncTextSelection('beurteilung', e.currentTarget)}
                     placeholder="Zusammenfassung..."
+                    rows={2}
                     readOnly={isProcessing}
                   />
                   {showPersistentCaret && focusedTextField !== 'beurteilung' && caretOverlays.beurteilung.visible && (
@@ -5432,15 +3941,6 @@ export default function HomePage() {
                     />
                   )}
                 </div>
-                {manualCorrectionSuggestions.beurteilung && (
-                  <ManualCorrectionSuggestion
-                    originalWord={manualCorrectionSuggestions.beurteilung.originalWord}
-                    newWord={manualCorrectionSuggestions.beurteilung.newWord}
-                    targetUsername={username || undefined}
-                    onConfirm={() => acknowledgeManualCorrection('beurteilung')}
-                    onCancel={() => acknowledgeManualCorrection('beurteilung')}
-                  />
-                )}
                 <button 
                   className="btn btn-primary w-full text-sm py-2" 
                   onClick={handleSuggestBeurteilung} 
@@ -5511,17 +4011,17 @@ export default function HomePage() {
             <div className="flex gap-2">
               <div className="flex-1">
                 <div className="relative">
-                  <RichTextDictationEditor
-                    editorRef={transcriptTextareaRef}
-                    value={transcript}
-                    formats={richTextFormats.transcript}
-                    selection={textSelections.transcript}
+                  <textarea
+                    ref={transcriptTextareaRef}
                     className={`textarea font-mono text-sm min-h-40 w-full ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    onChange={(value, editor) => handleManualTextChange('transcript', value, setTranscript, editor)}
-                    onFocus={(editor) => { setFocusedTextField('transcript'); syncTextSelection('transcript', editor); }}
+                    value={transcript}
+                    onChange={(e) => handleManualTextChange('transcript', e.target.value, setTranscript, e.currentTarget)}
+                    onFocus={(e) => { setFocusedTextField('transcript'); syncTextSelection('transcript', e.currentTarget); }}
                     onBlur={() => setFocusedTextField((current) => current === 'transcript' ? null : current)}
-                    onSelectionChange={(editor) => syncTextSelection('transcript', editor)}
-                    onWordDoubleClick={(info) => handleWordDoubleClick('transcript', info)}
+                    onSelect={(e) => syncTextSelection('transcript', e.currentTarget)}
+                    onClick={(e) => syncTextSelection('transcript', e.currentTarget)}
+                    onKeyUp={(e) => syncTextSelection('transcript', e.currentTarget)}
+                    onMouseUp={(e) => syncTextSelection('transcript', e.currentTarget)}
                     placeholder="Text erscheint hier..."
                     readOnly={isProcessing}
                   />
@@ -5536,15 +4036,6 @@ export default function HomePage() {
                     />
                   )}
                 </div>
-                {manualCorrectionSuggestions.transcript && (
-                  <ManualCorrectionSuggestion
-                    originalWord={manualCorrectionSuggestions.transcript.originalWord}
-                    newWord={manualCorrectionSuggestions.transcript.newWord}
-                    targetUsername={username || undefined}
-                    onConfirm={() => acknowledgeManualCorrection('transcript')}
-                    onCancel={() => acknowledgeManualCorrection('transcript')}
-                  />
-                )}
                 {/* VAD Tentative Text: Zeigt an, dass gerade gesprochen wird */}
                 {recording && vad.isListening && tentativeText && (
                   <div className="px-2 py-1 text-sm italic text-gray-400 dark:text-gray-500 border-l-2 border-green-400 bg-green-50/50 dark:bg-green-900/20 rounded-r mt-1">
@@ -5570,103 +4061,9 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Seitliche Panels: Hilfe */}
-      <div className="pointer-events-none fixed right-0 top-[18vh] z-40 hidden md:flex items-start">
-        <aside
-          className={`w-80 max-w-[80vw] max-h-[calc(100vh-9rem)] overflow-y-auto rounded-l-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
-            showCheatSheetPanel
-              ? 'mr-2 translate-x-0 opacity-100 pointer-events-auto'
-              : 'mr-0 translate-x-full opacity-0 pointer-events-none'
-          }`}
-          aria-hidden={!showCheatSheetPanel}
-        >
-          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sprachbefehle Cheat-Sheet</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Live-Diktat Kurzhilfe</p>
-          </div>
-          <div className="px-4 py-3 space-y-3">
-            {DICTATION_CHEAT_SHEET_SECTIONS.map((section) => (
-              <div key={section.title}>
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-1">{section.title}</h4>
-                <ul className="space-y-1">
-                  {section.commands.map((command) => (
-                    <li key={command} className="text-xs text-gray-600 dark:text-gray-300 leading-snug">
-                      • {command}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </aside>
-
-        <button
-          className="pointer-events-auto h-16 w-10 rounded-l-xl border border-r-0 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-          onClick={() => setShowCheatSheetPanel((current) => !current)}
-          title={showCheatSheetPanel ? 'Cheat-Sheet schliessen' : 'Cheat-Sheet oeffnen'}
-          aria-label={showCheatSheetPanel ? 'Cheat-Sheet schliessen' : 'Cheat-Sheet oeffnen'}
-          aria-expanded={showCheatSheetPanel}
-        >
-          <span className="block text-[11px] leading-tight">Hilfe</span>
-          <span className="block text-base leading-none mt-0.5">{showCheatSheetPanel ? '›' : '‹'}</span>
-        </button>
-      </div>
-
-      {/* Seitliches Panel: Updates direkt unter Hilfe */}
-      <div className="pointer-events-none fixed right-0 top-[calc(18vh+4.25rem)] z-40 hidden md:flex items-start">
-        <aside
-          className={`overflow-y-auto rounded-l-xl border border-blue-200 dark:border-blue-900/60 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
-            showUpdatePanel
-              ? 'mr-2 translate-x-0 opacity-100 pointer-events-auto'
-              : 'mr-0 translate-x-full opacity-0 pointer-events-none'
-          }`}
-          style={{
-            width: 'min(42rem, calc(100vw - 4.5rem))',
-            maxWidth: 'calc(100vw - 4.5rem)',
-            maxHeight: 'calc(82vh - 6.25rem)',
-          }}
-          aria-hidden={!showUpdatePanel}
-        >
-          <div className="px-4 py-3 border-b border-blue-200 dark:border-blue-900/60">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Updates</h3>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Versionshinweise und neue Versionen</p>
-          </div>
-          <div className="px-4 py-3">
-            <UpdatePanel isOpen={showUpdatePanel} onRequestOpen={() => setShowUpdatePanel(true)} />
-          </div>
-        </aside>
-
-        <button
-          className="pointer-events-auto h-16 w-10 rounded-l-xl border border-r-0 border-blue-200 dark:border-blue-900/60 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-gray-700"
-          onClick={() => setShowUpdatePanel((current) => !current)}
-          title={showUpdatePanel ? 'Updates schliessen' : 'Updates oeffnen'}
-          aria-label={showUpdatePanel ? 'Updates schliessen' : 'Updates oeffnen'}
-          aria-expanded={showUpdatePanel}
-        >
-          <span className="block text-[11px] leading-tight">Update</span>
-          <span className="block text-base leading-none mt-0.5">{showUpdatePanel ? '›' : '‹'}</span>
-        </button>
-      </div>
-
       {/* Custom Actions Manager Modal */}
       {showCustomActionsManager && (
         <CustomActionsManager onClose={() => setShowCustomActionsManager(false)} />
-      )}
-
-      {/* Popup für Doppelklick auf ein Wort */}
-      {wordPopup && (
-        <WordActionPopup
-          word={wordPopup.word}
-          position={wordPopup.position}
-          correction={wordPopup.correction}
-          targetUsername={wordPopup.correction?.targetUsername || username || undefined}
-          groupId={wordPopup.correction?.groupId}
-          onClose={() => {
-            const field = wordPopup.field;
-            closeWordPopup();
-            invalidateFieldCorrections(field);
-          }}
-        />
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { XMLParser } from 'fast-xml-parser';
 import {
   APP_VERSION,
   compareVersions,
@@ -16,6 +17,24 @@ interface GitHubReleaseResponse {
   body?: string;
   html_url?: string;
   published_at?: string;
+}
+
+interface AtomFeedEntry {
+  title?: string;
+  updated?: string;
+  link?: {
+    '@_href'?: string;
+  } | Array<{
+    '@_href'?: string;
+    '@_rel'?: string;
+  }>;
+  content?: string | { '#text'?: string; '@_type'?: string } | null;
+}
+
+interface AtomFeedResponse {
+  feed?: {
+    entry?: AtomFeedEntry | AtomFeedEntry[];
+  };
 }
 
 function buildGitHubHeaders(): HeadersInit {
@@ -42,6 +61,106 @@ function mapReleasePayload(release: GitHubReleaseResponse | null): ReleaseSummar
     publishedAt: release.published_at || null,
     url: release.html_url || `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tag/${encodeURIComponent(release.tag_name)}`,
     notes: release.body?.trim() || '',
+  };
+}
+
+function isGitHubRateLimitError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return /status (403|429)/.test(error.message);
+}
+
+function extractAtomContentText(content: AtomFeedEntry['content']): string {
+  if (!content) {
+    return '';
+  }
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (typeof content === 'object' && typeof content['#text'] === 'string') {
+    return content['#text'];
+  }
+  return '';
+}
+
+function htmlToReleaseNotes(html: unknown): string {
+  if (typeof html !== 'string' || html.length === 0) {
+    return '';
+  }
+
+  return html
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\s*\/\s*(p|div|h1|h2|h3|h4|h5|h6|ul|ol)\s*>/gi, '\n\n')
+    .replace(/<\s*li\s*>/gi, '- ')
+    .replace(/<\s*\/\s*li\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function getAtomEntryLink(link: AtomFeedEntry['link']): string | null {
+  if (!link) {
+    return null;
+  }
+
+  if (Array.isArray(link)) {
+    const alternateLink = link.find((entry) => entry['@_rel'] === 'alternate') || link[0];
+    return alternateLink?.['@_href'] || null;
+  }
+
+  return link['@_href'] || null;
+}
+
+async function fetchReleaseInfoFromAtom(limit: number): Promise<{
+  latestRelease: ReleaseSummary | null;
+  currentRelease: ReleaseSummary | null;
+  recentReleases: ReleaseSummary[];
+}> {
+  const response = await fetch(`https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases.atom`, {
+    headers: buildGitHubHeaders(),
+    next: { revalidate: 300 },
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub releases Atom feed request failed with status ${response.status}`);
+  }
+
+  const xml = await response.text();
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+  });
+  const parsed = parser.parse(xml) as AtomFeedResponse;
+  const entries = parsed.feed?.entry
+    ? Array.isArray(parsed.feed.entry)
+      ? parsed.feed.entry
+      : [parsed.feed.entry]
+    : [];
+  const mappedEntries = entries
+    .map((entry) => {
+      const version = entry.title ? normalizeReleaseVersion(entry.title) : null;
+      const url = getAtomEntryLink(entry.link);
+
+      if (!version || !url) {
+        return null;
+      }
+
+      return {
+        version,
+        name: entry.title?.trim() || version,
+        publishedAt: entry.updated || null,
+        url,
+        notes: htmlToReleaseNotes(extractAtomContentText(entry.content)),
+      } satisfies ReleaseSummary;
+    })
+    .filter((entry): entry is ReleaseSummary => Boolean(entry));
+
+  return {
+    latestRelease: mappedEntries[0] || null,
+    currentRelease: mappedEntries.find((entry) => entry.version === APP_VERSION) || null,
+    recentReleases: mappedEntries.slice(0, limit),
   };
 }
 
@@ -95,12 +214,31 @@ export async function GET() {
   const checkedAt = new Date().toISOString();
 
   try {
-    const [latestPayload, currentRelease, recentReleases] = await Promise.all([
-      fetchGitHubRelease(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`),
-      fetchCurrentRelease(APP_VERSION),
-      fetchRecentReleases(3),
-    ]);
-    const latestRelease = mapReleasePayload(latestPayload);
+    let latestRelease: ReleaseSummary | null;
+    let currentRelease: ReleaseSummary | null;
+    let recentReleases: ReleaseSummary[];
+
+    try {
+      const [latestPayload, currentReleasePayload, recentReleasePayloads] = await Promise.all([
+        fetchGitHubRelease(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`),
+        fetchCurrentRelease(APP_VERSION),
+        fetchRecentReleases(3),
+      ]);
+
+      latestRelease = mapReleasePayload(latestPayload);
+      currentRelease = currentReleasePayload;
+      recentReleases = recentReleasePayloads;
+    } catch (error) {
+      if (!isGitHubRateLimitError(error)) {
+        throw error;
+      }
+
+      const fallbackPayload = await fetchReleaseInfoFromAtom(3);
+      latestRelease = fallbackPayload.latestRelease;
+      currentRelease = fallbackPayload.currentRelease;
+      recentReleases = fallbackPayload.recentReleases;
+    }
+
     const status = latestRelease && compareVersions(latestRelease.version, APP_VERSION) > 0
       ? 'update-available'
       : latestRelease

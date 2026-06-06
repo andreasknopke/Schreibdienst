@@ -23,12 +23,63 @@ function formatReleaseDate(value: string | null): string | null {
   }).format(date);
 }
 
-function releaseNotesToLines(notes: string): string[] {
-  return notes
+interface ReleaseNoteSection {
+  heading: string | null;
+  items: string[];
+}
+
+function isReleaseNoteHeading(line: string): boolean {
+  if (/^#{1,6}\s+/.test(line)) {
+    return true;
+  }
+
+  if (/^([-*]|\d+[.)])\s+/.test(line)) {
+    return false;
+  }
+
+  return line.length <= 48 && !/[.!?]$/.test(line);
+}
+
+function cleanReleaseNoteLine(line: string): string {
+  return line
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^([-*]|\d+[.)])\s+/, '')
+    .trim();
+}
+
+function releaseNotesToSections(notes: string): ReleaseNoteSection[] {
+  const sections: ReleaseNoteSection[] = [];
+  let currentSection: ReleaseNoteSection = { heading: null, items: [] };
+
+  const pushCurrentSection = () => {
+    if (currentSection.heading || currentSection.items.length > 0) {
+      sections.push(currentSection);
+    }
+  };
+
+  notes
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .slice(0, 8);
+    .slice(0, 20)
+    .forEach((line) => {
+      const text = cleanReleaseNoteLine(line);
+      if (!text) {
+        return;
+      }
+
+      if (isReleaseNoteHeading(line)) {
+        pushCurrentSection();
+        currentSection = { heading: text, items: [] };
+        return;
+      }
+
+      currentSection.items.push(text);
+    });
+
+  pushCurrentSection();
+
+  return sections;
 }
 
 function ReleaseCard({
@@ -42,7 +93,7 @@ function ReleaseCard({
   onToggle: () => void;
   subtitle: string;
 }) {
-  const lines = useMemo(() => releaseNotesToLines(release.notes || ''), [release.notes]);
+  const sections = useMemo(() => releaseNotesToSections(release.notes || ''), [release.notes]);
   const formattedDate = formatReleaseDate(release.publishedAt || null);
 
   return (
@@ -73,14 +124,25 @@ function ReleaseCard({
 
       {isOpen && (
         <div className="border-t border-blue-200/80 px-3 py-3 dark:border-blue-900/60">
-          {lines.length > 0 ? (
-            <ul className="space-y-1 text-sm text-gray-700 dark:text-gray-200">
-              {lines.map((line) => (
-                <li key={line} className="leading-snug">
-                  {line.replace(/^[-*]\s*/, '')}
-                </li>
+          {sections.length > 0 ? (
+            <div className="space-y-3 text-sm text-gray-700 dark:text-gray-200">
+              {sections.map((section, sectionIndex) => (
+                <section key={`${section.heading || 'release-notes'}-${sectionIndex}`} className="space-y-1.5">
+                  {section.heading && (
+                    <p className="font-semibold text-gray-900 dark:text-gray-100">{section.heading}</p>
+                  )}
+                  {section.items.length > 0 && (
+                    <ul className="list-disc space-y-1 pl-5">
+                      {section.items.map((item) => (
+                        <li key={item} className="leading-snug">
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
               ))}
-            </ul>
+            </div>
           ) : (
             <p className="text-sm text-gray-600 dark:text-gray-300">Noch keine Zusammenfassung fuer diese Version hinterlegt.</p>
           )}
@@ -124,8 +186,6 @@ export default function UpdatePanel({
         }
 
         setData(payload);
-        setSelectedRecentReleaseVersion((current) => current ?? payload.recentReleases[0]?.version ?? null);
-
         const lastSeenUpdateRelease = typeof window !== 'undefined'
           ? window.localStorage.getItem(LAST_SEEN_UPDATE_RELEASE_KEY)
           : null;
@@ -168,7 +228,10 @@ export default function UpdatePanel({
 
   const currentRelease = data?.currentRelease || null;
   const recentReleases = data?.recentReleases || [];
-  const selectedRecentRelease = recentReleases.find((release) => release.version === selectedRecentReleaseVersion) || recentReleases[0] || null;
+  const selectedRecentRelease = selectedRecentReleaseVersion
+    ? recentReleases.find((release) => release.version === selectedRecentReleaseVersion) || null
+    : null;
+  const visibleReleases = selectedRecentRelease ? [selectedRecentRelease] : recentReleases;
   const releasesUrl = data
     ? `https://github.com/${data.repoOwner}/${data.repoName}/releases`
     : null;
@@ -181,7 +244,7 @@ export default function UpdatePanel({
         </div>
       )}
 
-      {!isLoading && recentReleases.map((release) => {
+      {!isLoading && visibleReleases.map((release) => {
         const isCurrentVersion = release.version === currentRelease?.version;
         const isLatestAvailable = data?.status === 'update-available' && release.version === data.latestRelease?.version;
         const isOpen = release.version === selectedRecentRelease?.version;

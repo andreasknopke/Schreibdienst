@@ -818,33 +818,15 @@ bool sendPasteShortcut() {
 }
 
 PasteOutcome pasteClipboardText(const std::wstring& text) {
-    printf("[INJECT] pasteClipboardText START text=\"%ls\" (len=%zu)\n",
+    printf("[INJECT] pasteClipboardText START text=\"%ls\" (len=%zu) [TEST: simulating ClipboardBlocked]\n",
            text.substr(0, 80).c_str(), text.size());
     fflush(stdout);
 
-    const ClipboardSnapshot snapshot = readClipboardText();
-    if (!writeClipboardText(text)) {
-        printf("[INJECT] pasteClipboardText FAILED: writeClipboardText failed\n");
-        fflush(stdout);
-        return PasteOutcome::Failed;
-    }
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_READY_DELAY_MS));
-    const bool pasted = sendPasteShortcut();
-    printf("[INJECT] pasteClipboardText sendPasteShortcut result=%d\n", pasted);
+    // TEST MODE: Simulate clipboard blockage by returning ClipboardBlocked
+    // This forces the fallback to sendUnicodeText.
+    printf("[INJECT] pasteClipboardText TEST: returning ClipboardBlocked\n");
     fflush(stdout);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_RESTORE_DELAY_MS));
-
-    restoreClipboardText(snapshot);
-    printf("[INJECT] pasteClipboardText DONE\n");
-    fflush(stdout);
-
-    if (!pasted) {
-        return PasteOutcome::Failed;
-    }
-
-    return PasteOutcome::Success;
+    return PasteOutcome::ClipboardBlocked;
 }
 
 bool activatePreviousWindow(std::uint32_t delayMs) {
@@ -941,6 +923,26 @@ std::string handleRequest(const std::string& message) {
             printf("[INJECT] handleRequest SUCCESS (clipboard)\n");
             fflush(stdout);
             return makeResponse(true, "", "clipboard");
+        }
+
+        if (outcome == PasteOutcome::ClipboardBlocked) {
+            // Clipboard paste was blocked by target – fall back to SendInput Unicode
+            printf("[INJECT] handleRequest FALLBACK: clipboard blocked, trying sendUnicodeText\n");
+            fflush(stdout);
+
+            if (request.payload.delayMs > 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(request.payload.delayMs));
+            }
+
+            if (sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
+                printf("[INJECT] handleRequest SUCCESS (sendinput fallback)\n");
+                fflush(stdout);
+                return makeResponse(true, "", "sendinput");
+            }
+
+            printf("[INJECT] handleRequest FAILED: SendInput Unicode fallback failed\n");
+            fflush(stdout);
+            return makeResponse(false, "SendInput Unicode fallback failed after clipboard was blocked", "");
         }
 
         printf("[INJECT] handleRequest FAILED: clipboard paste failed\n");

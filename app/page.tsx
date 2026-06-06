@@ -344,7 +344,8 @@ export default function HomePage() {
   const [liveInjectStatus, setLiveInjectStatus] = useState<string | null>(null);
   const liveInjectEnabledRef = useRef(false);
   const liveInjectQueueRef = useRef<Promise<void>>(Promise.resolve());
-  
+  const lastLiveInjectEndedWithPunctuationRef = useRef<boolean>(false);
+
   // Status tracking for UI indicators
   // Show banner during entire recording session, not just during active processing
   const isProcessing = recording || transcribing || correcting || busy;
@@ -480,9 +481,16 @@ export default function HomePage() {
   }, [liveInjectEnabled]);
 
   const queueLiveInject = useCallback((text: string) => {
-    const normalizedText = normalizeChunkLeadingWhitespace(text);
+    let normalizedText = normalizeChunkLeadingWhitespace(text);
 
     if (!liveInjectEnabledRef.current || !normalizedText.trim()) return;
+
+    // If the previous injection ended with sentence-ending punctuation
+    // and the new text starts with a letter/digit, prepend a space
+    // so the next sentence doesn't stick to the period.
+    if (lastLiveInjectEndedWithPunctuationRef.current && /^[\p{L}\p{N}]/u.test(normalizedText)) {
+      normalizedText = ' ' + normalizedText;
+    }
 
     console.log(`[LiveInject] queueLiveInject CALL text="${normalizedText.substring(0, 80)}${normalizedText.length > 80 ? '…' : ''}" len=${normalizedText.length}`);
 
@@ -507,6 +515,9 @@ export default function HomePage() {
           setError(result.error || 'Live-Übertragung in die Ziel-App fehlgeschlagen');
           return;
         }
+
+        // Track whether this injection ends with sentence-ending punctuation
+        lastLiveInjectEndedWithPunctuationRef.current = /[.!?]\s*$/.test(normalizedText);
 
         setLiveInjectStatus(`Gesendet: ${normalizedText.trim().length} Zeichen`);
       });
@@ -1519,6 +1530,7 @@ export default function HomePage() {
     vadInFlightCountRef.current = 0;
     vadPendingResultsRef.current.clear();
     setVadFailedUtterances([]);
+    lastLiveInjectEndedWithPunctuationRef.current = false;
   }, []);
 
   // Revert-Funktion: Stellt den Text vor der letzten Korrektur wieder her

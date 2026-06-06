@@ -2,28 +2,18 @@
 
 ## Voraussetzungen
 - Windows
-- Google Chrome installiert
 - Das Rollout-ZIP wurde vollständig entpackt
 
 ## Inhalt des Pakets
-- `extension/` – Chrome-Erweiterung
-- `host/` – Native Windows-EXE
-- `scripts/` – Installations- und Deinstallationsskripte
+- `host/schreibdienst-injector.exe` – Native Windows-EXE für die Live-Übertragung in die Ziel-App
 - `README-DEPLOY.txt` – Kurz-Anleitung im Paket
 
 ## Installation
 1. Das ZIP vollständig entpacken.
-2. In den entpackten Ordner wechseln.
-3. `scripts/install-schreibdienst-injector.cmd` per Doppelklick starten.
-4. Falls Windows nachfragt, PowerShell-Ausführung zulassen.
-5. Google Chrome öffnen.
-6. In Chrome `chrome://extensions` aufrufen.
-7. Den **Entwicklermodus** aktivieren.
-8. **Entpackte Erweiterung laden** wählen.
-9. Den Ordner `extension` aus dem entpackten Paket auswählen.
-10. Die Chrome-Extension-ID kopieren.
-11. `scripts/install-schreibdienst-injector.cmd -ExtensionId DIE_EXTENSION_ID` erneut ausführen.
-12. Schreibdienst/PWA neu öffnen oder bestehende Seite neu laden.
+2. Den Ordner `host\` an einen dauerhaft erreichbaren Ort kopieren (z. B. `C:\Program Files\Schreibdienst\Injector`).
+3. Die PWA `Schreibdienst` neu öffnen oder die bestehende Seite neu laden.
+4. Beim ersten Versuch, die Live-Übertragung zu aktivieren, prüft die PWA automatisch, ob der Injector erreichbar ist.
+5. Wenn die PWA meldet, dass der Injector nicht installiert ist, die `schreibdienst-injector.exe` starten – sie läuft unsichtbar im Hintergrund.
 
 ## Funktionstest
 1. Schreibdienst öffnen.
@@ -32,25 +22,36 @@
 4. Diktieren und prüfen, ob Text in die Ziel-App übertragen wird.
 
 ## Globale Hotkeys
-Wenn der Injector korrekt installiert ist, stehen zusätzlich folgende Hotkeys zur Verfügung:
+Wenn der Injector läuft, stehen zusätzlich folgende Hotkeys zur Verfügung:
 - `F9` – Aufnahme starten/stoppen
 - `F10` – Aufnahme stoppen
 - `F11` – Aktuellen Editor-Text an die fokussierte Ziel-App übertragen
 - `Escape` – Aufnahme abbrechen
 
+## Startoptionen
+Der Injector läuft standardmäßig vollständig im Hintergrund (kein sichtbares Fenster, keine Logausgabe). Für Diagnosezwecke lässt sich das Konsolenfenster mit Logging manuell starten:
+- `schreibdienst-injector.exe -show` – startet den Injector mit sichtbarem Konsolenfenster und ausführlichem Logging
+- `schreibdienst-injector.exe -h` – zeigt die Hilfe mit allen Optionen an
+
+## Autostart (empfohlen)
+Damit der Injector bei jedem Login automatisch im Hintergrund startet:
+1. `Win+R` → `shell:startup` öffnen.
+2. Eine Verknüpfung auf `schreibdienst-injector.exe` in den geöffneten Ordner legen.
+3. Optional: Startparameter in der Verknüpfung entfernen, damit der Injector weiterhin ohne Fenster startet.
+
 ## Wichtige Hinweise
-- Der Installer schreibt standardmäßig nach `%LOCALAPPDATA%\Schreibdienst\Injector`.
-- Der Native Host wird erst nach dem zweiten Aufruf mit `-ExtensionId` vollständig für Chrome registriert.
+- Die PWA kommuniziert mit dem Injector über einen lokalen WebSocket auf `ws://localhost:58765`. Es ist keine Chrome-Erweiterung oder zusätzliche Software nötig.
+- Wenn die PWA meldet, dass der Injector nicht erreichbar ist, prüfen, ob die `schreibdienst-injector.exe` läuft (ggf. im Task-Manager unter „Schreibdienst Injector“).
 - Wenn globale Hotkeys nicht reagieren, ist die Taste eventuell bereits durch eine andere Software belegt.
-- Nach Updates der EXE oder der Erweiterung Chrome einmal neu starten oder die Erweiterung neu laden.
-- Wenn die PWA bereits geöffnet war, die Seite nach der Installation neu laden.
-- Wenn die Textübertragung funktioniert, aber Hotkeys nicht, zuerst die Chrome-Erweiterung neu laden.
+- Beim Wechsel der Ziel-App in den Vordergrund reicht ein Klick auf das gewünschte Fenster, danach wird der Text automatisch übertragen.
+- Nach Updates der EXE die Datei ersetzen und die PWA neu laden.
 
 ## Deinstallation
-1. `scripts/uninstall-schreibdienst-injector.cmd` ausführen.
-2. Die Chrome-Erweiterung in `chrome://extensions` entfernen.
+1. `schreibdienst-injector.exe` beenden (Task-Manager).
+2. Den Installationsordner löschen.
+3. Die Autostart-Verknüpfung (falls angelegt) aus dem Autostart-Ordner entfernen.
 
 ## Support-Hinweise
-- Wenn keine Textübertragung möglich ist, Installation erneut mit `install-schreibdienst-injector.cmd` ausführen.
-- Wenn Hotkeys nicht funktionieren, prüfen, ob die Erweiterung aktiv ist und Chrome nach der Installation neu gestartet wurde.
-- Wenn eine andere Anwendung dieselben Hotkeys global verwendet, können diese nicht gleichzeitig registriert werden.
+- Wenn keine Textübertragung möglich ist, prüfen, ob der Injector-Prozess läuft und ob `ws://localhost:58765` durch eine Firewall blockiert wird.
+- Wenn Hotkeys nicht funktionieren, prüfen, ob sie von einer anderen Anwendung belegt sind.
+- Für eine detaillierte Diagnose den Injector einmalig mit `schreibdienst-injector.exe -show` starten – die Logausgabe hilft bei der Fehlersuche.

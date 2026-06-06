@@ -4,11 +4,12 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#include <cstdio>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <cstdio>
 #include <future>
 #include <mutex>
 #include <optional>
@@ -19,6 +20,23 @@
 #include <vector>
 
 namespace {
+
+// Globale Logging-Funktion. Ueber ein globales Flag kann der gesamte
+// printf-Output an- bzw. ausgeschaltet werden. Im Default laeuft der
+// Injector ohne sichtbares Fenster und ohne Logging; ueber den
+// Startparameter "-show" wird beides eingeschaltet.
+bool g_loggingEnabled = false;
+
+void logLine(const char* fmt, ...) {
+    if (!g_loggingEnabled) {
+        return;
+    }
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+    fflush(stdout);
+}
 
 constexpr std::uint32_t CLIPBOARD_READY_DELAY_MS = 15;
 constexpr std::uint32_t CLIPBOARD_RESTORE_DELAY_MS = 30;
@@ -818,13 +836,13 @@ bool sendPasteShortcut() {
 }
 
 PasteOutcome pasteClipboardText(const std::wstring& text) {
-    printf("[INJECT] pasteClipboardText START text=\"%ls\" (len=%zu) [TEST: simulating ClipboardBlocked]\n",
+    logLine("[INJECT] pasteClipboardText START text=\"%ls\" (len=%zu) [TEST: simulating ClipboardBlocked]\n",
            text.substr(0, 80).c_str(), text.size());
     fflush(stdout);
 
     // TEST MODE: Simulate clipboard blockage by returning ClipboardBlocked
     // This forces the fallback to sendUnicodeText.
-    printf("[INJECT] pasteClipboardText TEST: returning ClipboardBlocked\n");
+    logLine("[INJECT] pasteClipboardText TEST: returning ClipboardBlocked\n");
     fflush(stdout);
     return PasteOutcome::ClipboardBlocked;
 }
@@ -898,7 +916,7 @@ std::string handleRequest(const std::string& message) {
     narrowText.resize(logLen, '?');
     std::wcstombs(&narrowText[0], request.payload.text.c_str(), logLen);
 
-    printf("[INJECT] handleRequest mode=%ls restorePrev=%d delayMs=%u text=\"%s\" (len=%zu)\n",
+    logLine("[INJECT] handleRequest mode=%ls restorePrev=%d delayMs=%u text=\"%s\" (len=%zu)\n",
            request.payload.mode.c_str(),
            request.payload.restorePreviousWindow,
            request.payload.delayMs,
@@ -907,7 +925,7 @@ std::string handleRequest(const std::string& message) {
     fflush(stdout);
 
     if (request.payload.restorePreviousWindow && !activatePreviousWindow(request.payload.delayMs)) {
-        printf("[INJECT] handleRequest FAILED: Alt-Tab failed\n");
+        logLine("[INJECT] handleRequest FAILED: Alt-Tab failed\n");
         fflush(stdout);
         return makeResponse(false, "Alt-Tab focus handover failed", "");
     }
@@ -920,14 +938,14 @@ std::string handleRequest(const std::string& message) {
         const PasteOutcome outcome = pasteClipboardText(request.payload.text);
 
         if (outcome == PasteOutcome::Success) {
-            printf("[INJECT] handleRequest SUCCESS (clipboard)\n");
+            logLine("[INJECT] handleRequest SUCCESS (clipboard)\n");
             fflush(stdout);
             return makeResponse(true, "", "clipboard");
         }
 
         if (outcome == PasteOutcome::ClipboardBlocked) {
             // Clipboard paste was blocked by target – fall back to SendInput Unicode
-            printf("[INJECT] handleRequest FALLBACK: clipboard blocked, trying sendUnicodeText\n");
+            logLine("[INJECT] handleRequest FALLBACK: clipboard blocked, trying sendUnicodeText\n");
             fflush(stdout);
 
             if (request.payload.delayMs > 0) {
@@ -935,17 +953,17 @@ std::string handleRequest(const std::string& message) {
             }
 
             if (sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
-                printf("[INJECT] handleRequest SUCCESS (sendinput fallback)\n");
+                logLine("[INJECT] handleRequest SUCCESS (sendinput fallback)\n");
                 fflush(stdout);
                 return makeResponse(true, "", "sendinput");
             }
 
-            printf("[INJECT] handleRequest FAILED: SendInput Unicode fallback failed\n");
+            logLine("[INJECT] handleRequest FAILED: SendInput Unicode fallback failed\n");
             fflush(stdout);
             return makeResponse(false, "SendInput Unicode fallback failed after clipboard was blocked", "");
         }
 
-        printf("[INJECT] handleRequest FAILED: clipboard paste failed\n");
+        logLine("[INJECT] handleRequest FAILED: clipboard paste failed\n");
         fflush(stdout);
         return makeResponse(false, "Clipboard write or paste failed", "");
     }
@@ -955,12 +973,12 @@ std::string handleRequest(const std::string& message) {
     }
 
     if (sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
-        printf("[INJECT] handleRequest SUCCESS (sendinput)\n");
+        logLine("[INJECT] handleRequest SUCCESS (sendinput)\n");
         fflush(stdout);
         return makeResponse(true, "", "sendinput");
     }
 
-    printf("[INJECT] handleRequest FAILED: SendInput failed\n");
+    logLine("[INJECT] handleRequest FAILED: SendInput failed\n");
     fflush(stdout);
     return makeResponse(false, "SendInput failed", "");
 }
@@ -968,17 +986,17 @@ std::string handleRequest(const std::string& message) {
 // ─── WebSocket client handler ───────────────────────────────────
 
 void handleClient(SOCKET client) {
-    printf("[WS] handleClient NEW connection\n");
+    logLine("[WS] handleClient NEW connection\n");
     fflush(stdout);
 
     if (!wsHandshake(client)) {
-        printf("[WS] handleClient handshake FAILED\n");
+        logLine("[WS] handleClient handshake FAILED\n");
         fflush(stdout);
         closesocket(client);
         return;
     }
 
-    printf("[WS] handleClient handshake OK\n");
+    logLine("[WS] handleClient handshake OK\n");
     fflush(stdout);
 
     // Add to client set for hotkey broadcasts
@@ -1099,11 +1117,65 @@ void wsServerThread() {
 // main
 // ══════════════════════════════════════════════════════════════════
 
-int main() {
+struct StartupOptions {
+    bool showConsole = false;
+    bool showHelp = false;
+};
+
+StartupOptions parseStartupOptions(int argc, char** argv) {
+    StartupOptions options;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i] ? argv[i] : "";
+        if (arg == "-show" || arg == "--show") {
+            options.showConsole = true;
+        } else if (arg == "-h" || arg == "--help" || arg == "/?") {
+            options.showHelp = true;
+        }
+    }
+    return options;
+}
+
+void printStartupHelp() {
+    std::printf("Schreibdienst Injector\n");
+    std::printf("Optionen:\n");
+    std::printf("  -show, --show   Konsolenfenster mit Logging oeffnen\n");
+    std::printf("  -h, --help      Diese Hilfe anzeigen\n");
+    std::printf("Standardmaessig laeuft der Injector im Hintergrund ohne sichtbares Fenster.\n");
+}
+
+int main(int argc, char** argv) {
+    StartupOptions options = parseStartupOptions(argc, argv);
+
+    if (options.showHelp) {
+        // Hilfe soll immer sichtbar sein -> Console erzwingen.
+        AllocConsole();
+        FILE* dummy = nullptr;
+        freopen_s(&dummy, "CONOUT$", "w", stdout);
+        freopen_s(&dummy, "CONOUT$", "w", stderr);
+        printStartupHelp();
+        // Kurz offen lassen, damit der Benutzer die Ausgabe lesen kann.
+        Sleep(2500);
+        return 0;
+    }
+
+    if (options.showConsole) {
+        g_loggingEnabled = true;
+        // Optionales Konsolenfenster fuer Diagnose/Logging.
+        AllocConsole();
+        FILE* dummy = nullptr;
+        freopen_s(&dummy, "CONOUT$", "w", stdout);
+        freopen_s(&dummy, "CONOUT$", "w", stderr);
+        std::printf("Schreibdienst Injector (Logging an)\n");
+    }
+
     // Initialize Winsock
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         return 1;
+    }
+
+    if (options.showConsole) {
+        std::printf("Winsock initialisiert, starte Hotkey-Listener und WebSocket-Server...\n");
     }
 
     // Start global hotkey listener
@@ -1112,6 +1184,10 @@ int main() {
     startHotkeyListener(hotkeyListener, hotkeyError);
     // Hotkey error is non-fatal for server startup; the client will be
     // notified via 'hotkey-listener-ready' when it sends 'listen-hotkeys'.
+
+    if (options.showConsole) {
+        std::printf("WebSocket-Server laeuft auf ws://127.0.0.1:%u\n", WS_PORT);
+    }
 
     // Start WebSocket server on 127.0.0.1:58765
     std::thread serverThread(wsServerThread);
@@ -1135,3 +1211,6 @@ int main() {
     WSACleanup();
     return 0;
 }
+
+
+

@@ -2,7 +2,7 @@
 import { useState } from 'react';
 
 export default function HelpPanel() {
-  const [expandedSection, setExpandedSection] = useState<string | null>('hotkeys');
+  const [expandedSection, setExpandedSection] = useState<string | null>(null);
 
   const toggleSection = (section: string) => {
     setExpandedSection(expandedSection === section ? null : section);
@@ -11,6 +11,7 @@ export default function HelpPanel() {
   return (
     <div className="space-y-4">
       {/* SpeechMike Hotkeys */}
+      {(expandedSection === null || expandedSection === 'hotkeys') && (
       <div className="border rounded-lg dark:border-gray-700">
         <button
           onClick={() => toggleSection('hotkeys')}
@@ -80,8 +81,10 @@ export default function HelpPanel() {
           </div>
         )}
       </div>
+      )}
 
       {/* Sprachbefehle */}
+      {(expandedSection === null || expandedSection === 'commands') && (
       <div className="border rounded-lg dark:border-gray-700">
         <button
           onClick={() => toggleSection('commands')}
@@ -132,8 +135,10 @@ export default function HelpPanel() {
           </div>
         )}
       </div>
+      )}
 
       {/* Maus-Bedienung */}
+      {(expandedSection === null || expandedSection === 'mouse') && (
       <div className="border rounded-lg dark:border-gray-700">
         <button
           onClick={() => toggleSection('mouse')}
@@ -162,6 +167,7 @@ export default function HelpPanel() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

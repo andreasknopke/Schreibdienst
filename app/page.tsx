@@ -4610,11 +4610,16 @@ export default function HomePage() {
       {/* Seitliches Panel: Hilfe */}
       <div className="pointer-events-none fixed right-0 top-[calc(18vh+4.25rem)] z-40 hidden md:flex items-start">
         <aside
-          className={`w-80 max-w-[80vw] max-h-[calc(100vh-9rem)] overflow-y-auto rounded-l-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
+          className={`overflow-y-auto rounded-l-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
             showHelpPanel
               ? 'mr-2 translate-x-0 opacity-100 pointer-events-auto'
               : 'mr-0 translate-x-full opacity-0 pointer-events-none'
           }`}
+          style={{
+            width: 'min(42rem, calc(100vw - 4.5rem))',
+            maxWidth: 'calc(100vw - 4.5rem)',
+            maxHeight: '82vh',
+          }}
           aria-hidden={!showHelpPanel}
         >
           <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
@@ -4628,13 +4633,21 @@ export default function HomePage() {
 
         <button
           className="pointer-events-auto h-16 w-10 rounded-l-xl border border-r-0 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-          onClick={() => setShowHelpPanel((current) => !current)}
+          onClick={() => {
+            setShowHelpPanel((current) => {
+              const next = !current;
+              if (next) {
+                setShowUpdatePanel(false);
+              }
+              return next;
+            });
+          }}
           title={showHelpPanel ? 'Hilfe schliessen' : 'Hilfe oeffnen'}
           aria-label={showHelpPanel ? 'Hilfe schliessen' : 'Hilfe oeffnen'}
           aria-expanded={showHelpPanel}
         >
           <span className="block text-[11px] leading-tight">Hilfe</span>
-          <span className="block text-base leading-none mt-0.5">{showHelpPanel ? '║' : '╣'}</span>
+          <span className="block text-base leading-none mt-0.5">←</span>
         </button>
       </div>
 
@@ -4658,19 +4671,33 @@ export default function HomePage() {
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Versionshinweise und neue Versionen</p>
           </div>
           <div className="px-4 py-3">
-            <UpdatePanel isOpen={showUpdatePanel} onRequestOpen={() => setShowUpdatePanel(true)} />
+            <UpdatePanel
+              isOpen={showUpdatePanel}
+              onRequestOpen={() => {
+                setShowHelpPanel(false);
+                setShowUpdatePanel(true);
+              }}
+            />
           </div>
         </aside>
 
         <button
           className="pointer-events-auto h-16 w-10 rounded-l-xl border border-r-0 border-blue-200 dark:border-blue-900/60 bg-white dark:bg-gray-800 shadow-lg text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-gray-700"
-          onClick={() => setShowUpdatePanel((current) => !current)}
+          onClick={() => {
+            setShowUpdatePanel((current) => {
+              const next = !current;
+              if (next) {
+                setShowHelpPanel(false);
+              }
+              return next;
+            });
+          }}
           title={showUpdatePanel ? 'Updates schliessen' : 'Updates oeffnen'}
           aria-label={showUpdatePanel ? 'Updates schliessen' : 'Updates oeffnen'}
           aria-expanded={showUpdatePanel}
         >
           <span className="block text-[11px] leading-tight">Update</span>
-          <span className="block text-base leading-none mt-0.5">{showUpdatePanel ? '║' : '╣'}</span>
+          <span className="block text-base leading-none mt-0.5">←</span>
         </button>
       </div>
 

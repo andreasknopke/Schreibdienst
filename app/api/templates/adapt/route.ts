@@ -156,6 +156,13 @@ WICHTIGE REGELN:
 - Behalte den professionellen medizinischen Schreibstil bei
 - Die Ausgabe muss ein vollständiger, medizinisch KONSISTENTER Befundtext sein
 
+LAYOUT EXAKT BEIBEHALTEN (SEHR WICHTIG):
+- Übernimm das Layout des Originals ZEICHENGENAU: Überschriften, Labels, Doppelpunkte, Bindestriche, Einrückungen, Leerzeilen und Zeilenumbrüche bleiben unverändert
+- Ändere KEINE Schreibweise von Labels/Überschriften (z. B. bleibt "Teil 1:" exakt "Teil 1:" und wird NICHT zu "**Teil 1**", "Teil 1 :" oder "TEIL 1:")
+- Füge KEINE Markdown- oder Formatierungszeichen hinzu, die im Original nicht vorkommen (kein **fett**, kein *kursiv*, keine #-Überschriften, keine Aufzählungszeichen)
+- Entferne KEINE vorhandenen Labels, Doppelpunkte oder Leerzeilen
+- Trage die diktierten Angaben NUR an der passenden Stelle hinter dem jeweiligen Label/Abschnitt ein und lasse die restliche Struktur unangetastet
+
 BEISPIELE:
 
 Beispiel 1 - Einfache Ergänzung (kein Widerspruch):
@@ -190,6 +197,37 @@ AUSGABEFORMAT:
 - KEINE Einleitungen wie "Der angepasste Text lautet:"
 - KEINE Erklärungen oder Kommentare
 - KEINE Markierungen oder Tags`;
+
+// Entfernt Markdown-Auszeichnungen aus dem LLM-Ergebnis, die im Original-Baustein
+// nicht vorkamen. So bleibt das Layout des Bausteins erhalten, falls das Modell
+// eigenmächtig **fett**, *kursiv* oder #-Überschriften hinzufügt.
+function stripIntroducedMarkdown(original: string, adapted: string): string {
+  let result = adapted;
+
+  // Fett (**text** / __text__) entfernen, wenn das Original es nicht verwendet hat
+  if (!original.includes('**')) {
+    result = result.replace(/\*\*(.*?)\*\*/g, '$1');
+  }
+  if (!original.includes('__')) {
+    result = result.replace(/__(.*?)__/g, '$1');
+  }
+
+  // Kursiv (*text* / _text_) entfernen, wenn das Original es nicht verwendet hat
+  if (!original.includes('*')) {
+    result = result.replace(/\*([^*\n]+)\*/g, '$1');
+  }
+  if (!original.includes('_')) {
+    result = result.replace(/_([^_\n]+)_/g, '$1');
+  }
+
+  // Markdown-Überschriften (# ...) am Zeilenanfang entfernen, wenn das Original
+  // keine verwendet hat
+  if (!/^#{1,6}\s/m.test(original)) {
+    result = result.replace(/^#{1,6}\s+/gm, '');
+  }
+
+  return result;
+}
 
 export async function POST(req: NextRequest) {
   console.log('\n=== Template Adapt Request ===');
@@ -261,6 +299,11 @@ Gib den vollständigen angepassten Text zurück:`;
       .replace(/^Hier ist der angepasste Text:?\s*/i, '')
       .replace(/^Ergebnis:?\s*/i, '')
       .trim();
+
+    // Layout-Schutz: Markdown-Auszeichnungen, die das Original NICHT enthielt,
+    // wieder entfernen, damit das ursprüngliche Layout des Bausteins erhalten bleibt
+    // (z. B. "**Teil 1**" -> "Teil 1").
+    adaptedText = stripIntroducedMarkdown(template, adaptedText);
     
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     const tokens = result.tokens ? `${result.tokens.input}/${result.tokens.output}` : 'unknown';

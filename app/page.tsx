@@ -963,15 +963,7 @@ export default function HomePage() {
         nextText = data.adaptedText;
       }
 
-      setPreCorrectionState({
-        methodik,
-        befund: transcript,
-        beurteilung,
-        transcript: '',
-      });
       setFieldText(template.field, nextText);
-      setCanRevert(true);
-      setIsReverted(false);
       setPendingCorrection(false);
       // Den aktiven Baustein-Kontext auf den bereits ausgefüllten Stand aktualisieren,
       // damit weitere Diktat-Runden inkrementell darauf aufbauen statt vorherige

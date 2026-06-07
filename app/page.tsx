@@ -1060,6 +1060,32 @@ export default function HomePage() {
       (c) => c.correctedWord.localeCompare(word, undefined, { sensitivity: 'accent' }) === 0
         && c.originalWord.localeCompare(c.correctedWord, undefined, { sensitivity: 'accent' }) !== 0
     ) ?? null;
+
+    // Wenn keine aktive Korrektur im Tracking, trotzdem prüfen ob das Wort
+    // in mergedEntriesRef vorkommt (z.B. bereits korrigierter Text).
+    // Dann zeigen wir ebenfalls die Wörterbuch-Aktionen (löschen/schwächen).
+    if (!matched) {
+      const dictEntry = mergedEntriesRef.current.find(
+        (e) => e.correct.localeCompare(word, undefined, { sensitivity: 'accent' }) === 0
+      );
+      if (dictEntry) {
+        setWordPopup({
+          word,
+          position: { x: clientX, y: clientY },
+          correction: {
+            originalWord: dictEntry.wrong,
+            correctedWord: dictEntry.correct,
+            dictionaryWrong: dictEntry.wrong,
+            dictionaryCorrect: dictEntry.correct,
+            source: dictEntry.source,
+            matchType: 'exact',
+          },
+          field,
+        });
+        return;
+      }
+    }
+
     setWordPopup({ word, position: { x: clientX, y: clientY }, correction: matched, field });
   }, [fieldCorrections, getWordAtCursor]);
 

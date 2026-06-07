@@ -919,8 +919,17 @@ export default function HomePage() {
     setError(null);
     setCorrecting(true);
 
+    // Basis für die Anpassung: Im Auto-Einarbeiten-Modus immer der aktuelle Feldinhalt
+    // in seinem letzten Zustand, damit bereits eingearbeitete Angaben (und manuelle
+    // Bearbeitungen) erhalten bleiben und die neuen Sprachbefehle nur ergänzt werden.
+    // Fällt der Feldinhalt weg, dient der ursprüngliche Baustein als Basis.
+    const currentFieldText = getTextForBefundField(template.field).trim();
+    const baseText = (autoIntegrateTemplateAudioRef.current && currentFieldText)
+      ? currentFieldText
+      : template.content;
+
     try {
-      let nextText = template.content;
+      let nextText = baseText;
 
       if (changesText) {
         console.log('[Template] Adapting template:', template.name);
@@ -934,7 +943,7 @@ export default function HomePage() {
             ...getDbTokenHeader(),
           },
           body: JSON.stringify({
-            template: template.content,
+            template: baseText,
             changes: changesText,
             field: template.field,
             username,

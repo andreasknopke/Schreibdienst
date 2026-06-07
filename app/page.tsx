@@ -1899,6 +1899,10 @@ export default function HomePage() {
         
         // Live-Deltas laufen durch dieselbe Vorverarbeitung wie die Ziel-App-Übertragung:
         // Formatierungswörter, Wörterbuch und phonetische Korrektur.
+        if (autoIntegrateTemplateAudio && activeTemplateContext) {
+          await applyTemplateChanges(activeTemplateContext, preparedDelta);
+          return;
+        }
         
         if (mode === 'befund') {
           // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
@@ -1973,7 +1977,7 @@ export default function HomePage() {
     } finally {
       setTranscribing(false);
     }
-  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, prepareLiveInjectDelta, queueLiveInject, applyLiveChunkPreview]);
+  }, [transcribeChunk, mode, activeField, parseFieldCommands, combineTextForField, methodik, beurteilung, transcript, prepareLiveInjectDelta, queueLiveInject, applyLiveChunkPreview, autoIntegrateTemplateAudio, activeTemplateContext, applyTemplateChanges]);
 
   useEffect(() => {
     return () => {

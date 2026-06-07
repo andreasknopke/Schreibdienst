@@ -869,6 +869,18 @@ export default function HomePage() {
   const [pendingTemplateInsertChoice, setPendingTemplateInsertChoice] = useState<PendingTemplateInsertChoice | null>(null);
   const [activeTemplateContext, setActiveTemplateContext] = useState<Template | null>(null);
   const [autoIntegrateTemplateAudio, setAutoIntegrateTemplateAudio] = useState(false);
+  // Refs für den VAD-/Online-Diktatpfad: Die VAD-Callbacks werden beim Start der
+  // Aufnahme einmal eingefroren, daher muss der aktuelle Baustein-Zustand über Refs
+  // gelesen werden, sonst greift der Auto-Einarbeiten-Modus nicht.
+  const autoIntegrateTemplateAudioRef = useRef(autoIntegrateTemplateAudio);
+  autoIntegrateTemplateAudioRef.current = autoIntegrateTemplateAudio;
+  const activeTemplateContextRef = useRef(activeTemplateContext);
+  activeTemplateContextRef.current = activeTemplateContext;
+  const applyTemplateChangesRef = useRef<((template: Template, changesOverride?: string) => Promise<boolean>) | null>(null);
+  // Sammelt im Auto-Einarbeiten-Modus den gesprochenen Text, bis die Aufnahme endet.
+  const templateAudioBufferRef = useRef('');
+  // Markiert, dass nach dem Leeren der VAD-Commit-Queue in den Baustein eingearbeitet werden soll.
+  const pendingTemplateIntegrationRef = useRef(false);
   const currentTemplateField: BefundField = mode === 'befund' ? activeField : 'befund';
   const availableTemplates = templates.filter((template) => template.field === currentTemplateField);
 
@@ -948,6 +960,7 @@ export default function HomePage() {
       setCorrecting(false);
     }
   }, [getTextForBefundField, getAuthHeader, getDbTokenHeader, username, methodik, transcript, beurteilung, setFieldText]);
+  applyTemplateChangesRef.current = applyTemplateChanges;
 
   const applySelectedTemplate = useCallback(async (changesOverride?: string) => {
     if (!selectedTemplate) {
@@ -1664,22 +1677,52 @@ export default function HomePage() {
       // Prompt-Kontext: letzte 2 gelockte Sätze (max. 200 Zeichen)
       const lastTwo = committed.slice(-2).join(' ');
       vadPromptContextRef.current = lastTwo.length > 200 ? lastTwo.slice(-200) : lastTwo;
-      // Transcript-State synchronisieren (für Export, Korrektur etc.).
-      // committed enthält im VAD-Pfad bereits den vollständigen aktuellen Textzustand,
-      // inklusive bestehendem Text vor Session-Start.
-      // Im Befund-Modus muss in das aktuell aktive Feld diktiert werden
-      // (methodik / befund / beurteilung), nicht pauschal in 'befund'.
-      const targetField: TextInsertionTarget = mode === 'befund'
-        ? activeFieldRef.current
-        : 'transcript';
-      const fullText = committed[0] || '';
-      const incomingDelta = getIncrementalTranscript(previousCommittedText, fullText);
-      replaceTextAtEndOrInsertDelta(targetField, fullText, incomingDelta);
+
+      if (autoIntegrateTemplateAudioRef.current && activeTemplateContextRef.current) {
+        // Auto-Einarbeiten-Modus: Das Feld zeigt weiterhin den unveränderten Baustein.
+        // Der gesprochene Text wird nur gesammelt und erst beim Stoppen der Aufnahme
+        // über die LLM-Anpassung an die richtige Stelle im Baustein eingearbeitet.
+        templateAudioBufferRef.current = committed[0] || '';
+      } else {
+        // Transcript-State synchronisieren (für Export, Korrektur etc.).
+        // committed enthält im VAD-Pfad bereits den vollständigen aktuellen Textzustand,
+        // inklusive bestehendem Text vor Session-Start.
+        // Im Befund-Modus muss in das aktuell aktive Feld diktiert werden
+        // (methodik / befund / beurteilung), nicht pauschal in 'befund'.
+        const targetField: TextInsertionTarget = mode === 'befund'
+          ? activeFieldRef.current
+          : 'transcript';
+        const fullText = committed[0] || '';
+        const incomingDelta = getIncrementalTranscript(previousCommittedText, fullText);
+        replaceTextAtEndOrInsertDelta(targetField, fullText, incomingDelta);
+      }
     }
 
-    // Tentative nur löschen, wenn keine Requests mehr in flight sind
+    // Tentative nur aktualisieren/löschen, wenn keine Requests mehr in flight sind
     if (vadInFlightCountRef.current === 0 && vadPendingResultsRef.current.size === 0) {
-      setTentativeText('');
+      if (autoIntegrateTemplateAudioRef.current && activeTemplateContextRef.current) {
+        // Gesprochenen Text als Vorschau anzeigen, solange noch diktiert wird.
+        setTentativeText(templateAudioBufferRef.current);
+      } else {
+        setTentativeText('');
+      }
+
+      // Aufnahme wurde gestoppt und alle Utterances sind verarbeitet:
+      // jetzt einmalig den gesammelten Text in den Baustein einarbeiten.
+      if (
+        pendingTemplateIntegrationRef.current &&
+        autoIntegrateTemplateAudioRef.current &&
+        activeTemplateContextRef.current &&
+        applyTemplateChangesRef.current
+      ) {
+        pendingTemplateIntegrationRef.current = false;
+        const spoken = templateAudioBufferRef.current.trim();
+        templateAudioBufferRef.current = '';
+        setTentativeText('');
+        if (spoken) {
+          void applyTemplateChangesRef.current(activeTemplateContextRef.current, spoken);
+        }
+      }
     }
   }, [mode, replaceTextAtEndOrInsertDelta]);
 
@@ -1897,13 +1940,15 @@ export default function HomePage() {
 
         queueLiveInject(preparedDelta);
         
-        // Live-Deltas laufen durch dieselbe Vorverarbeitung wie die Ziel-App-Übertragung:
-        // Formatierungswörter, Wörterbuch und phonetische Korrektur.
+        // Auto-Einarbeiten-Modus: Während der Aufnahme bleibt der Baustein im Feld
+        // unverändert. Der gesprochene Text wird erst beim Stoppen der Aufnahme aus
+        // dem vollständigen Transkript an die richtige Stelle eingearbeitet.
         if (autoIntegrateTemplateAudio && activeTemplateContext) {
-          await applyTemplateChanges(activeTemplateContext, preparedDelta);
           return;
         }
         
+        // Live-Deltas laufen durch dieselbe Vorverarbeitung wie die Ziel-App-Übertragung:
+        // Formatierungswörter, Wörterbuch und phonetische Korrektur.
         if (mode === 'befund') {
           // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
           const parsed = parseFieldCommands(preparedDelta);
@@ -2032,6 +2077,8 @@ export default function HomePage() {
     setActiveTemplateContext(null);
     setAutoIntegrateTemplateAudio(false);
     setPendingTemplateInsertChoice(null);
+    templateAudioBufferRef.current = '';
+    pendingTemplateIntegrationRef.current = false;
     setChangeScore(null);
     setBefundChangeScores({ methodik: 0, befund: 0, beurteilung: 0 });
     setApplyFormatting(true); // Reset auf Standard
@@ -2914,10 +2961,17 @@ export default function HomePage() {
       const startingFieldText = mode === 'befund'
         ? (activeField === 'methodik' ? methodik : activeField === 'beurteilung' ? beurteilung : transcript)
         : transcript;
-      const existingVADText = startingFieldText.trim();
+      // Im Auto-Einarbeiten-Modus zeigt das Feld den Baustein. Dieser darf NICHT als
+      // bereits diktierter Text gezählt werden, sonst würde er als „Änderung“ an die
+      // LLM-Anpassung weitergegeben. Daher startet der Kontext-Buffer hier leer und
+      // sammelt ausschließlich den gesprochenen Text.
+      const autoIntegrateActive = autoIntegrateTemplateAudio && !!activeTemplateContext;
+      const existingVADText = autoIntegrateActive ? '' : startingFieldText.trim();
       committedUtterancesRef.current = existingVADText ? [existingVADText] : [];
       setCommittedUtterances(existingVADText ? [existingVADText] : []);
       setTentativeText('');
+      templateAudioBufferRef.current = '';
+      pendingTemplateIntegrationRef.current = false;
       vadPromptContextRef.current = getVadPromptContext(existingVADText);
       // Sequenz-State für neue Session zurücksetzen (verhindert Verschlucken / falsche Reihenfolge)
       vadSeqCounterRef.current = 0;
@@ -3093,11 +3147,33 @@ export default function HomePage() {
     // VAD-Modus stoppen (wenn aktiv)
     if (vad.isListening) {
       console.log('[VAD] Stopping VAD recording');
+      // Auto-Einarbeiten-Modus: nach dem Leeren der Commit-Queue (inkl. der beim Stop
+      // geflushten letzten Utterance) wird der gesammelte Text in den Baustein eingearbeitet.
+      if (autoIntegrateTemplateAudio && activeTemplateContext) {
+        pendingTemplateIntegrationRef.current = true;
+      }
       await vad.stop();
       setAudioLevel(0);
       setRecording(false);
-      setTentativeText('');
       recordingStartedAtRef.current = null;
+      // Falls beim Stop keine Utterance mehr aussteht, kann direkt eingearbeitet werden.
+      if (
+        pendingTemplateIntegrationRef.current &&
+        autoIntegrateTemplateAudio &&
+        activeTemplateContext &&
+        vadInFlightCountRef.current === 0 &&
+        vadPendingResultsRef.current.size === 0
+      ) {
+        pendingTemplateIntegrationRef.current = false;
+        const spoken = templateAudioBufferRef.current.trim();
+        templateAudioBufferRef.current = '';
+        setTentativeText('');
+        if (spoken) {
+          await applyTemplateChanges(activeTemplateContext, spoken);
+        }
+      } else if (!pendingTemplateIntegrationRef.current) {
+        setTentativeText('');
+      }
       setPendingCorrection(true);
       return;
     }

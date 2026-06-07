@@ -943,6 +943,34 @@ export default function HomePage() {
     }
   }, [selectedTemplate, getTextForBefundField, getAuthHeader, getDbTokenHeader, username, methodik, transcript, beurteilung, setFieldText]);
 
+  const handleTemplateSelection = useCallback((template: Template | null) => {
+    if (!template) {
+      setSelectedTemplate(null);
+      setTemplateMode(false);
+      return;
+    }
+
+    const existingText = getTextForBefundField(template.field);
+    let nextText = template.content;
+
+    if (existingText.trim()) {
+      const shouldAppend = window.confirm(
+        'Im Textfeld ist bereits Inhalt.\n\nOK = anhaengen\nAbbrechen = bestehenden Text ersetzen'
+      );
+
+      if (shouldAppend) {
+        const separator = existingText.endsWith('\n') ? '\n' : '\n\n';
+        nextText = `${existingText}${separator}${template.content}`;
+      }
+    }
+
+    setFieldText(template.field, nextText);
+    setStoredSelection(template.field, getDefaultSelection(nextText));
+    setPendingCorrection(false);
+    setSelectedTemplate(null);
+    setTemplateMode(false);
+  }, [getTextForBefundField, setFieldText, setStoredSelection]);
+
   // Wörterbuch-Einträge für Echtzeit-Korrektur und Initial Prompt
   interface DictionaryEntry {
     wrong: string;
@@ -4053,8 +4081,7 @@ export default function HomePage() {
                   onChange={(e) => {
                     const id = parseInt(e.target.value);
                     const template = availableTemplates.find(t => t.id === id);
-                    setSelectedTemplate(template || null);
-                    setTemplateMode(!!template);
+                    handleTemplateSelection(template || null);
                   }}
                   title={mode === 'befund'
                     ? 'Textbaustein für das aktive Feld auswählen - diktieren Sie nur die Änderungen'

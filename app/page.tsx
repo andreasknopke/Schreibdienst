@@ -47,6 +47,10 @@ interface Template {
   field: BefundField;
 }
 
+interface PendingTemplateInsertChoice {
+  template: Template;
+}
+
 // Runtime Config Interface
 interface RuntimeConfig {
   transcriptionProvider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper' | 'voxtral_local';
@@ -862,6 +866,9 @@ export default function HomePage() {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [templateMode, setTemplateMode] = useState(false);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [pendingTemplateInsertChoice, setPendingTemplateInsertChoice] = useState<PendingTemplateInsertChoice | null>(null);
+  const [activeTemplateContext, setActiveTemplateContext] = useState<Template | null>(null);
+  const [autoIntegrateTemplateAudio, setAutoIntegrateTemplateAudio] = useState(false);
   const currentTemplateField: BefundField = mode === 'befund' ? activeField : 'befund';
   const availableTemplates = templates.filter((template) => template.field === currentTemplateField);
 
@@ -877,20 +884,20 @@ export default function HomePage() {
     }
   }, [methodik, transcript, beurteilung]);
 
-  const applySelectedTemplate = useCallback(async (changesOverride?: string) => {
-    if (!selectedTemplate) {
+  const applyTemplateChanges = useCallback(async (template: Template, changesOverride?: string) => {
+    if (!template) {
       return false;
     }
 
-    const changesText = (changesOverride ?? getTextForBefundField(selectedTemplate.field)).trim();
+    const changesText = (changesOverride ?? getTextForBefundField(template.field)).trim();
     setError(null);
     setCorrecting(true);
 
     try {
-      let nextText = selectedTemplate.content;
+      let nextText = template.content;
 
       if (changesText) {
-        console.log('[Template] Adapting template:', selectedTemplate.name);
+        console.log('[Template] Adapting template:', template.name);
         console.log('[Template] Changes:', changesText);
 
         const res = await fetch('/api/templates/adapt', {
@@ -901,9 +908,9 @@ export default function HomePage() {
             ...getDbTokenHeader(),
           },
           body: JSON.stringify({
-            template: selectedTemplate.content,
+            template: template.content,
             changes: changesText,
-            field: selectedTemplate.field,
+            field: template.field,
             username,
           }),
         });
@@ -927,10 +934,11 @@ export default function HomePage() {
         beurteilung,
         transcript: '',
       });
-      setFieldText(selectedTemplate.field, nextText);
+      setFieldText(template.field, nextText);
       setCanRevert(true);
       setIsReverted(false);
       setPendingCorrection(false);
+      setActiveTemplateContext(template);
       return true;
     } catch (err: any) {
       console.error('[Template] Apply error:', err);
@@ -938,38 +946,59 @@ export default function HomePage() {
       return false;
     } finally {
       setCorrecting(false);
+    }
+  }, [getTextForBefundField, getAuthHeader, getDbTokenHeader, username, methodik, transcript, beurteilung, setFieldText]);
+
+  const applySelectedTemplate = useCallback(async (changesOverride?: string) => {
+    if (!selectedTemplate) {
+      return false;
+    }
+
+    try {
+      return await applyTemplateChanges(selectedTemplate, changesOverride);
+    } finally {
       setSelectedTemplate(null);
       setTemplateMode(false);
     }
-  }, [selectedTemplate, getTextForBefundField, getAuthHeader, getDbTokenHeader, username, methodik, transcript, beurteilung, setFieldText]);
+  }, [selectedTemplate, applyTemplateChanges]);
+
+  const insertTemplateIntoField = useCallback((template: Template, insertMode: 'append' | 'replace') => {
+    const existingText = getTextForBefundField(template.field);
+    let nextText = template.content;
+
+    if (insertMode === 'append' && existingText.trim()) {
+      const separator = existingText.endsWith('\n') ? '\n' : '\n\n';
+      nextText = `${existingText}${separator}${template.content}`;
+    }
+
+    setFieldText(template.field, nextText);
+    setStoredSelection(template.field, getDefaultSelection(nextText));
+    setPendingCorrection(false);
+    setActiveTemplateContext(template);
+    setAutoIntegrateTemplateAudio(true);
+    setPendingTemplateInsertChoice(null);
+    setSelectedTemplate(null);
+    setTemplateMode(false);
+  }, [getTextForBefundField, setFieldText, setStoredSelection]);
 
   const handleTemplateSelection = useCallback((template: Template | null) => {
     if (!template) {
+      setPendingTemplateInsertChoice(null);
       setSelectedTemplate(null);
       setTemplateMode(false);
       return;
     }
 
     const existingText = getTextForBefundField(template.field);
-    let nextText = template.content;
-
     if (existingText.trim()) {
-      const shouldAppend = window.confirm(
-        'Im Textfeld ist bereits Inhalt.\n\nOK = anhaengen\nAbbrechen = bestehenden Text ersetzen'
-      );
-
-      if (shouldAppend) {
-        const separator = existingText.endsWith('\n') ? '\n' : '\n\n';
-        nextText = `${existingText}${separator}${template.content}`;
-      }
+      setPendingTemplateInsertChoice({ template });
+      setSelectedTemplate(null);
+      setTemplateMode(false);
+      return;
     }
 
-    setFieldText(template.field, nextText);
-    setStoredSelection(template.field, getDefaultSelection(nextText));
-    setPendingCorrection(false);
-    setSelectedTemplate(null);
-    setTemplateMode(false);
-  }, [getTextForBefundField, setFieldText, setStoredSelection]);
+    insertTemplateIntoField(template, 'replace');
+  }, [getTextForBefundField, insertTemplateIntoField]);
 
   // Wörterbuch-Einträge für Echtzeit-Korrektur und Initial Prompt
   interface DictionaryEntry {
@@ -1996,6 +2025,9 @@ export default function HomePage() {
     setRawWhisperState(null);
     setCanRevert(false);
     setPendingCorrection(false);
+    setActiveTemplateContext(null);
+    setAutoIntegrateTemplateAudio(false);
+    setPendingTemplateInsertChoice(null);
     setChangeScore(null);
     setBefundChangeScores({ methodik: 0, befund: 0, beurteilung: 0 });
     setApplyFormatting(true); // Reset auf Standard
@@ -3090,8 +3122,11 @@ export default function HomePage() {
           // Formatierung, Wörterbuch und phonetische Korrektur anwenden.
           const formattedTranscript = prepareLiveInjectDelta(sessionTranscript);
           
+          // Aktiver Baustein-Kontext: gesprochenen Text direkt in den eingefügten Baustein einarbeiten
+          if (autoIntegrateTemplateAudio && activeTemplateContext) {
+            await applyTemplateChanges(activeTemplateContext, formattedTranscript);
           // TEMPLATE-MODUS: Textbaustein mit diktierten Änderungen kombinieren
-          if (templateMode && selectedTemplate) {
+          } else if (templateMode && selectedTemplate) {
             await applySelectedTemplate(formattedTranscript);
           } else {
             // STANDARD-MODUS: Normale Verarbeitung
@@ -4183,6 +4218,75 @@ export default function HomePage() {
               </>
             );
           })()}
+        </div>
+      )}
+
+      {activeTemplateContext && !recording && (
+        <div className="text-sm bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 px-3 py-2 rounded-lg">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="text-emerald-700 dark:text-emerald-300 font-medium">🧩 Aktiver Baustein: {activeTemplateContext.name}</span>
+              <span className="text-xs px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">
+                {activeTemplateContext.field}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                className={`btn text-sm py-1.5 px-3 ${autoIntegrateTemplateAudio ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setAutoIntegrateTemplateAudio((current) => !current)}
+                title="Gesprochenen Text automatisch in den aktiven Baustein einarbeiten"
+                aria-pressed={autoIntegrateTemplateAudio}
+              >
+                {autoIntegrateTemplateAudio ? '✓ Audio automatisch in Baustein einarbeiten' : '☐ Audio automatisch in Baustein einarbeiten'}
+              </button>
+              <button
+                className="btn btn-outline text-sm py-1.5 px-3"
+                onClick={() => {
+                  setActiveTemplateContext(null);
+                  setAutoIntegrateTemplateAudio(false);
+                }}
+                title="Baustein-Kontext beenden"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-300 italic">
+            {autoIntegrateTemplateAudio
+              ? 'Neue Audio-Transkripte werden direkt in diesen Baustein eingearbeitet.'
+              : 'Neue Audio-Transkripte werden normal am Cursor oder am Feldende eingefügt.'}
+          </p>
+        </div>
+      )}
+
+      {pendingTemplateInsertChoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-5 shadow-2xl dark:border-gray-700 dark:bg-gray-900">
+            <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Baustein einfügen</h3>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+              Im Zielfeld ist bereits Text vorhanden. Wie soll der Baustein <strong>{pendingTemplateInsertChoice.template.name}</strong> eingefügt werden?
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                className="btn btn-outline text-sm py-1.5 px-3"
+                onClick={() => setPendingTemplateInsertChoice(null)}
+              >
+                Abbrechen
+              </button>
+              <button
+                className="btn btn-outline text-sm py-1.5 px-3"
+                onClick={() => insertTemplateIntoField(pendingTemplateInsertChoice.template, 'replace')}
+              >
+                Ersetzen
+              </button>
+              <button
+                className="btn btn-primary text-sm py-1.5 px-3"
+                onClick={() => insertTemplateIntoField(pendingTemplateInsertChoice.template, 'append')}
+              >
+                Anhängen
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -54,9 +54,9 @@ export default function WordActionPopup({
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  const dispatchDictionaryChanged = () => {
+  const dispatchDictionaryChanged = (wrong?: string, correct?: string) => {
     window.dispatchEvent(new CustomEvent(DICTIONARY_CHANGED_EVENT, {
-      detail: { scope: 'private' },
+      detail: { scope: 'private', wrong, correct },
     }));
   };
 
@@ -86,7 +86,7 @@ export default function WordActionPopup({
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'Fehler beim Speichern im Wörterbuch');
       }
-      dispatchDictionaryChanged();
+      dispatchDictionaryChanged(word, correctValue.trim());
       onClose();
     } catch (err: any) {
       setError(err.message || 'Verbindungsfehler');

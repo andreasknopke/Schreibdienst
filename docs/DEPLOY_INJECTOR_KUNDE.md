@@ -5,10 +5,20 @@
 - Das Rollout-ZIP wurde vollständig entpackt
 
 ## Inhalt des Pakets
-- `host/schreibdienst-injector.exe` – Native Windows-EXE für die Live-Übertragung in die Ziel-App
+- `schreibdienst-injector-setup-{version}.exe` – Installer (Inno Setup)
+- `host/schreibdienst-injector.exe` – Native Windows-EXE für die Live-Übertragung in die Ziel-App (nur für manuelle Installation)
 - `README-DEPLOY.txt` – Kurz-Anleitung im Paket
 
-## Installation
+## Installation (empfohlen – mit Installer)
+1. `schreibdienst-injector-setup-{version}.exe` als Administrator ausführen.
+2. Im Installationsassistenten den Zielordner wählen (Standard: `C:\Program Files\Schreibdienst Injector`).
+3. **Autostart-Option wählen:**
+   - *„Automatisch starten beim Windows-Anmelden“* – startet den Injector nur für den aktuellen Benutzer.
+   - *„Automatisch starten für alle Benutzer“* – startet den Injector für alle Benutzer des Computers (Computer-Autostart).
+4. Der Injector wird automatisch gestartet und läuft unsichtbar im Hintergrund.
+5. Die PWA `Schreibdienst` neu öffnen oder neu laden.
+
+## Manuelle Installation (ohne Installer)
 1. Das ZIP vollständig entpacken.
 2. Den Ordner `host\` an einen dauerhaft erreichbaren Ort kopieren (z. B. `C:\Program Files\Schreibdienst\Injector`).
 3. Die PWA `Schreibdienst` neu öffnen oder die bestehende Seite neu laden.
@@ -34,7 +44,11 @@ Der Injector läuft standardmäßig vollständig im Hintergrund (kein sichtbares
 - `schreibdienst-injector.exe -h` – zeigt die Hilfe mit allen Optionen an
 
 ## Autostart (empfohlen)
-Damit der Injector bei jedem Login automatisch im Hintergrund startet:
+Der Installer bietet direkt die Option, den Injector in den Autostart einzutragen:
+- **HKCU** (aktueller Benutzer): `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+- **HKLM** (alle Benutzer): `HKLM\Software\Microsoft\Windows\CurrentVersion\Run`
+
+Bei manueller Installation:
 1. `Win+R` → `shell:startup` öffnen.
 2. Eine Verknüpfung auf `schreibdienst-injector.exe` in den geöffneten Ordner legen.
 3. Optional: Startparameter in der Verknüpfung entfernen, damit der Injector weiterhin ohne Fenster startet.
@@ -47,6 +61,9 @@ Damit der Injector bei jedem Login automatisch im Hintergrund startet:
 - Nach Updates der EXE die Datei ersetzen und die PWA neu laden.
 
 ## Deinstallation
+Bei Installation mit dem Installer: Einfach in der Windows-Systemsteuerung unter „Apps & Features“ den „Schreibdienst Injector“ deinstallieren. Der Autostart-Eintrag wird automatisch entfernt.
+
+Bei manueller Installation:
 1. `schreibdienst-injector.exe` beenden (Task-Manager).
 2. Den Installationsordner löschen.
 3. Die Autostart-Verknüpfung (falls angelegt) aus dem Autostart-Ordner entfernen.

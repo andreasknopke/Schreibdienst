@@ -198,6 +198,89 @@ std::mutex g_clientsMutex;
 std::set<SOCKET> g_wsClients;
 std::atomic<bool> g_serverRunning{false};
 
+// Hidden message-only window for SendInput delegation.
+// SendInput(KEYEVENTF_UNICODE) requires the calling thread to have
+// a message queue. A GUI-subsystem process without a window has none.
+// We create a hidden window on a dedicated thread so all SendInput
+// calls execute on a thread that owns a message queue.
+constexpr UINT WM_APP_DO_SENDINPUT = WM_APP + 1;
+
+struct SendInputJob {
+    std::vector<INPUT> inputs;
+    std::promise<UINT> result;
+};
+
+HWND g_hiddenWnd = nullptr;
+HANDLE g_hiddenWndReady = nullptr;
+DWORD g_hiddenWndThreadId = 0;
+
+LRESULT CALLBACK HiddenWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_APP_DO_SENDINPUT) {
+        auto* job = reinterpret_cast<SendInputJob*>(lParam);
+        if (job && !job->inputs.empty()) {
+            UINT sent = SendInput(static_cast<UINT>(job->inputs.size()),
+                                  job->inputs.data(), sizeof(INPUT));
+            job->result.set_value(sent);
+        } else if (job) {
+            job->result.set_value(0);
+        }
+        return 0;
+    }
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+void hiddenWindowThread() {
+    // Register a window class for the hidden window
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = HiddenWndProc;
+    wc.hInstance = GetModuleHandle(nullptr);
+    wc.lpszClassName = L"SchreibdienstHiddenWnd";
+    if (!RegisterClassExW(&wc)) {
+        // Class may already be registered from a previous run
+    }
+
+    g_hiddenWnd = CreateWindowExW(0, L"SchreibdienstHiddenWnd",
+                                   L"", 0, 0, 0, 0, 0,
+                                   HWND_MESSAGE, nullptr,
+                                   GetModuleHandle(nullptr), nullptr);
+    g_hiddenWndThreadId = GetCurrentThreadId();
+
+    // Signal that the window is ready
+    SetEvent(g_hiddenWndReady);
+
+    // Message pump
+    MSG msg;
+    while (GetMessage(&msg, nullptr, 0, 0) > 0) {
+        DispatchMessage(&msg);
+    }
+}
+
+// Replacement for direct SendInput – delegates to the hidden window thread.
+UINT sendInputsViaHiddenWindow(const std::vector<INPUT>& inputs) {
+    if (inputs.empty()) return 0;
+    if (g_hiddenWnd == nullptr) return 0;
+
+    // If we're already on the hidden window thread, call SendInput directly
+    if (GetCurrentThreadId() == g_hiddenWndThreadId) {
+        return SendInput(static_cast<UINT>(inputs.size()),
+                         const_cast<INPUT*>(inputs.data()), sizeof(INPUT));
+    }
+
+    SendInputJob job;
+    job.inputs = inputs;
+    auto future = job.result.get_future();
+
+    SendMessage(g_hiddenWnd, WM_APP_DO_SENDINPUT, 0, reinterpret_cast<LPARAM>(&job));
+
+    // Wait with timeout
+    auto status = future.wait_for(std::chrono::seconds(5));
+    if (status == std::future_status::ready) {
+        return future.get();
+    }
+    return 0;
+}
+
 constexpr HotkeyBinding HOTKEY_BINDINGS[] = {
     {1, VK_F9, "toggle-recording", "F9"},
     {2, VK_F10, "stop-recording", "F10"},
@@ -716,7 +799,8 @@ bool sendInputs(const std::vector<INPUT>& inputs) {
     std::size_t offset = 0;
     while (offset < inputs.size()) {
         const std::size_t count = std::min(chunkSize, inputs.size() - offset);
-        const UINT sent = SendInput(static_cast<UINT>(count), const_cast<INPUT*>(&inputs[offset]), sizeof(INPUT));
+        std::vector<INPUT> chunk(inputs.begin() + offset, inputs.begin() + offset + count);
+        const UINT sent = sendInputsViaHiddenWindow(chunk);
         if (sent != count) {
             return false;
         }
@@ -836,15 +920,44 @@ bool sendPasteShortcut() {
 }
 
 PasteOutcome pasteClipboardText(const std::wstring& text) {
-    logLine("[INJECT] pasteClipboardText START text=\"%ls\" (len=%zu) [TEST: simulating ClipboardBlocked]\n",
+    logLine("[INJECT] pasteClipboardText START text=\"%ls\" (len=%zu)\n",
            text.substr(0, 80).c_str(), text.size());
     fflush(stdout);
 
-    // TEST MODE: Simulate clipboard blockage by returning ClipboardBlocked
-    // This forces the fallback to sendUnicodeText.
-    logLine("[INJECT] pasteClipboardText TEST: returning ClipboardBlocked\n");
+    // 1) Aktuelle Zwischenablage sichern
+    ClipboardSnapshot snapshot = readClipboardText();
+
+    // 2) Neuen Text in die Zwischenablage schreiben
+    if (!writeClipboardText(text)) {
+        logLine("[INJECT] pasteClipboardText FAILED: writeClipboardText\n");
+        fflush(stdout);
+        return PasteOutcome::Failed;
+    }
+
+    // Kurz warten, bis die Zwischenablage aktualisiert ist
+    std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_READY_DELAY_MS));
+
+    // 3) Ctrl+V senden
+    if (!sendPasteShortcut()) {
+        logLine("[INJECT] pasteClipboardText FAILED: sendPasteShortcut\n");
+        fflush(stdout);
+        restoreClipboardText(snapshot);
+        return PasteOutcome::Failed;
+    }
+
+    // Kurz warten, damit die Ziel-App den Paste-Vorgang abschließen kann
+    std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_RESTORE_DELAY_MS));
+
+    // 4) Ursprüngliche Zwischenablage wiederherstellen
+    if (!restoreClipboardText(snapshot)) {
+        logLine("[INJECT] pasteClipboardText WARNING: clipboard restore failed\n");
+        fflush(stdout);
+        // Nicht fatal – Text wurde bereits eingefügt
+    }
+
+    logLine("[INJECT] pasteClipboardText SUCCESS\n");
     fflush(stdout);
-    return PasteOutcome::ClipboardBlocked;
+    return PasteOutcome::Success;
 }
 
 bool activatePreviousWindow(std::uint32_t delayMs) {
@@ -1114,7 +1227,7 @@ void wsServerThread() {
 } // namespace
 
 // ══════════════════════════════════════════════════════════════════
-// main
+// WinMain – GUI-Entry-Point (kein Konsolenfenster)
 // ══════════════════════════════════════════════════════════════════
 
 struct StartupOptions {
@@ -1122,10 +1235,26 @@ struct StartupOptions {
     bool showHelp = false;
 };
 
-StartupOptions parseStartupOptions(int argc, char** argv) {
+StartupOptions parseStartupOptions(LPSTR lpCmdLine) {
     StartupOptions options;
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i] ? argv[i] : "";
+    if (lpCmdLine == nullptr) return options;
+
+    // Einfache Tokenisierung: Argumente durch Leerzeichen getrennt
+    std::string cmd(lpCmdLine);
+    std::vector<std::string> args;
+    std::string current;
+    bool inQuote = false;
+    for (char c : cmd) {
+        if (c == '"') { inQuote = !inQuote; continue; }
+        if (c == ' ' && !inQuote) {
+            if (!current.empty()) { args.push_back(current); current.clear(); }
+            continue;
+        }
+        current.push_back(c);
+    }
+    if (!current.empty()) args.push_back(current);
+
+    for (const auto& arg : args) {
         if (arg == "-show" || arg == "--show") {
             options.showConsole = true;
         } else if (arg == "-h" || arg == "--help" || arg == "/?") {
@@ -1143,8 +1272,9 @@ void printStartupHelp() {
     std::printf("Standardmaessig laeuft der Injector im Hintergrund ohne sichtbares Fenster.\n");
 }
 
-int main(int argc, char** argv) {
-    StartupOptions options = parseStartupOptions(argc, argv);
+int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/,
+                   LPSTR lpCmdLine, int /*nShowCmd*/) {
+    StartupOptions options = parseStartupOptions(lpCmdLine);
 
     if (options.showHelp) {
         // Hilfe soll immer sichtbar sein -> Console erzwingen.
@@ -1174,6 +1304,15 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Start hidden message-only window for SendInput delegation.
+    // SendInput(KEYEVENTF_UNICODE) requires a message queue on the
+    // calling thread. The hidden window thread provides one.
+    g_hiddenWndReady = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+    std::thread hiddenWndThread(hiddenWindowThread);
+    WaitForSingleObject(g_hiddenWndReady, 5000);
+    CloseHandle(g_hiddenWndReady);
+    g_hiddenWndReady = nullptr;
+
     if (options.showConsole) {
         std::printf("Winsock initialisiert, starte Hotkey-Listener und WebSocket-Server...\n");
     }
@@ -1198,6 +1337,14 @@ int main(int argc, char** argv) {
     // Cleanup
     g_serverRunning = false;
     stopHotkeyListener(hotkeyListener);
+
+    // Shut down hidden window thread
+    if (g_hiddenWnd != nullptr) {
+        PostMessage(g_hiddenWnd, WM_QUIT, 0, 0);
+    }
+    if (hiddenWndThread.joinable()) {
+        hiddenWndThread.join();
+    }
 
     // Close all remaining WebSocket clients
     {

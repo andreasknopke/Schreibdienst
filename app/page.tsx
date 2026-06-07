@@ -746,7 +746,7 @@ export default function HomePage() {
 
         const result = await injectToActiveWindow({
           text: normalizedText,
-          mode: 'clipboard',
+          mode: 'sendinput',
           restorePreviousWindow: shouldRestorePreviousWindow,
           delayMs: shouldRestorePreviousWindow ? 80 : 0,
           charDelayMs: 0,
@@ -2257,7 +2257,7 @@ export default function HomePage() {
 
     void injectToActiveWindow({
       text: textToTransfer,
-      mode: 'clipboard',
+      mode: 'sendinput',
       restorePreviousWindow: false,
       delayMs: 0,
       charDelayMs: 0,

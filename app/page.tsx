@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, useCallback, type SetStateAction } from 'react';
+import { diffWordsWithSpace } from 'diff';
 import { Tabs } from '@/components/Tabs';
 import { exportDocx } from '@/lib/formatMedical';
 import Spinner from '@/components/Spinner';
@@ -11,6 +12,7 @@ import { buildPhoneticIndex, applyPhoneticCorrections, applyPhoneticCorrectionsD
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
+import ManualCorrectionSuggestion from '@/components/ManualCorrectionSuggestion';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
 import HelpPanel from '@/components/HelpPanel';
 import WordActionPopup, { type WordCorrectionInfo } from '@/components/WordActionPopup';
@@ -54,6 +56,12 @@ interface RuntimeConfig {
 }
 
 type TextInsertionTarget = 'transcript' | BefundField;
+type TextStateKey = 'transcript' | 'methodik' | 'beurteilung';
+
+interface ManualWordChange {
+  originalWord: string;
+  newWord: string;
+}
 
 interface CaretSelection {
   start: number;
@@ -79,7 +87,54 @@ interface TextHistorySnapshot {
   beurteilung: string;
 }
 
+const EMPTY_MANUAL_WORD_CHANGES: Record<TextInsertionTarget, ManualWordChange | null> = {
+  transcript: null,
+  methodik: null,
+  befund: null,
+  beurteilung: null,
+};
+
 const TEXT_HISTORY_LIMIT = 50;
+
+function extractSuggestionTokens(text: string): string[] {
+  return text.match(/[A-Za-zÄÖÜäöüß0-9]+(?:[-'][A-Za-zÄÖÜäöüß0-9]+)*/g) || [];
+}
+
+function fieldToStateKey(field: TextInsertionTarget): TextStateKey {
+  if (field === 'methodik') return 'methodik';
+  if (field === 'beurteilung') return 'beurteilung';
+  return 'transcript';
+}
+
+function extractLastManualWordChange(previousText: string, nextText: string): ManualWordChange | null {
+  if (!previousText || !nextText || previousText === nextText) return null;
+
+  const parts = diffWordsWithSpace(previousText, nextText);
+  let lastRemovedWord: string | null = null;
+  let lastAddedWord: string | null = null;
+
+  for (const part of parts) {
+    const tokens = extractSuggestionTokens(part.value || '');
+    if (tokens.length === 0) continue;
+
+    if (part.removed) {
+      lastRemovedWord = tokens[tokens.length - 1];
+      continue;
+    }
+
+    if (part.added) {
+      lastAddedWord = tokens[tokens.length - 1];
+    }
+  }
+
+  if (!lastRemovedWord || !lastAddedWord) return null;
+  if (lastRemovedWord.toLowerCase() === lastAddedWord.toLowerCase()) return null;
+
+  return {
+    originalWord: lastRemovedWord,
+    newWord: lastAddedWord,
+  };
+}
 
 function areTextHistorySnapshotsEqual(a: TextHistorySnapshot, b: TextHistorySnapshot): boolean {
   return (
@@ -286,6 +341,9 @@ export default function HomePage() {
   const transcriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const recordingStartedAtRef = useRef<number | null>(null);
   const manualCorrectionTimersRef = useRef<Partial<Record<TextInsertionTarget, ReturnType<typeof setTimeout>>>>({});
+  const machineBaselineRef = useRef<Record<TextStateKey, string>>({ transcript: '', methodik: '', beurteilung: '' });
+  const pendingManualStateRef = useRef<Record<TextStateKey, boolean>>({ transcript: false, methodik: false, beurteilung: false });
+  const manualSuggestDebounceRef = useRef<Partial<Record<TextInsertionTarget, ReturnType<typeof setTimeout>>>>({});
   
   // Fast Whisper WebSocket State
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
@@ -511,6 +569,7 @@ export default function HomePage() {
   const [showDiffView, setShowDiffView] = useState(false);
   const [showHelpPanel, setShowHelpPanel] = useState(false);
   const [showUpdatePanel, setShowUpdatePanel] = useState(false);
+  const [manualCorrectionSuggestions, setManualCorrectionSuggestions] = useState<Record<TextInsertionTarget, ManualWordChange | null>>(EMPTY_MANUAL_WORD_CHANGES);
 
   // Custom Actions Manager
   const [showCustomActionsManager, setShowCustomActionsManager] = useState(false);
@@ -590,6 +649,19 @@ export default function HomePage() {
         break;
     }
   }, []);
+
+  const getFieldTextValue = useCallback((field: TextInsertionTarget): string => {
+    switch (field) {
+      case 'methodik':
+        return methodik;
+      case 'beurteilung':
+        return beurteilung;
+      case 'befund':
+      case 'transcript':
+      default:
+        return transcript;
+    }
+  }, [beurteilung, methodik, transcript]);
 
   const combineTextForField = useCallback((field: TextInsertionTarget, existing: string, newText: string) => {
     const result = insertTextAtSelection(existing, newText, getStoredSelection(field, existing));
@@ -1343,11 +1415,42 @@ export default function HomePage() {
     setter: (nextValue: string) => void,
     textarea: HTMLTextAreaElement
   ) => {
+    const stateKey = fieldToStateKey(field);
+    pendingManualStateRef.current[stateKey] = true;
     setter(value);
     setPendingCorrection(true);
     syncTextSelection(field, textarea);
     logManualCorrection(field);
+
+    const existingDebounce = manualSuggestDebounceRef.current[field];
+    if (existingDebounce) clearTimeout(existingDebounce);
+    manualSuggestDebounceRef.current[field] = setTimeout(() => {
+      const baseline = machineBaselineRef.current[stateKey];
+      const detectedChange = extractLastManualWordChange(baseline, value);
+      setManualCorrectionSuggestions((current) => ({
+        ...current,
+        [field]: detectedChange,
+      }));
+      delete manualSuggestDebounceRef.current[field];
+    }, 900);
   }, [logManualCorrection, syncTextSelection]);
+
+  useEffect(() => {
+    const states: Record<TextStateKey, string> = { transcript, methodik, beurteilung };
+    (Object.keys(states) as TextStateKey[]).forEach((key) => {
+      if (pendingManualStateRef.current[key]) {
+        pendingManualStateRef.current[key] = false;
+        return;
+      }
+      machineBaselineRef.current[key] = states[key];
+    });
+  }, [transcript, methodik, beurteilung]);
+
+  const acknowledgeManualCorrection = useCallback((field: TextInsertionTarget) => {
+    const stateKey = fieldToStateKey(field);
+    machineBaselineRef.current[stateKey] = getFieldTextValue(field);
+    setManualCorrectionSuggestions((current) => ({ ...current, [field]: null }));
+  }, [getFieldTextValue]);
 
   const transcribeChunk = useCallback(async (blob: Blob, isLive: boolean = false, audioDurationSeconds?: number): Promise<string> => {
     try {
@@ -1832,6 +1935,9 @@ export default function HomePage() {
       Object.values(manualCorrectionTimersRef.current).forEach((timer) => {
         if (timer) clearTimeout(timer);
       });
+      Object.values(manualSuggestDebounceRef.current).forEach((timer) => {
+        if (timer) clearTimeout(timer);
+      });
     };
   }, []);
 
@@ -1846,6 +1952,11 @@ export default function HomePage() {
     };
     restoringTextHistoryRef.current = true;
     setTextHistoryAvailability({ canUndo: false, canRedo: false });
+    Object.values(manualSuggestDebounceRef.current).forEach((timer) => {
+      if (timer) clearTimeout(timer);
+    });
+    manualSuggestDebounceRef.current = {};
+    setManualCorrectionSuggestions(EMPTY_MANUAL_WORD_CHANGES);
 
     vadSessionIdRef.current += 1;
     setTranscript('');
@@ -3724,6 +3835,10 @@ export default function HomePage() {
 
   // Ref für den Mikrofon-Button
   const recordButtonRef = useRef<HTMLButtonElement>(null);
+  const hasCorrectionText = mode === 'befund'
+    ? Boolean(methodik.trim() || transcript.trim() || beurteilung.trim())
+    : Boolean(transcript.trim());
+  const correctionButtonDisabled = correcting || busy || !hasCorrectionText;
 
   // Rechtsklick-Handler: Löst "Neu" aus (alle Felder löschen) - nur auf nicht-interaktiven Elementen
   const handleContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -3842,27 +3957,39 @@ export default function HomePage() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              className="btn btn-outline text-sm py-1.5 px-3"
+              className="btn btn-outline h-9 w-9 p-0"
               onClick={handleUndoTextHistory}
+              title="Letzte Textänderung rückgängig machen"
+              aria-label="Letzte Textänderung rückgängig machen"
               disabled={!textHistoryAvailability.canUndo || isProcessing}
-              title="Letzte Textänderung rückgängig"
             >
-              ↶ Zurück
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 14 4 9l5-5" />
+                <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
+              </svg>
             </button>
             <button
-              className="btn btn-outline text-sm py-1.5 px-3"
+              className="btn btn-outline h-9 w-9 p-0"
               onClick={handleRedoTextHistory}
+              title="Rückgängig gemachte Textänderung wiederherstellen"
+              aria-label="Rückgängig gemachte Textänderung wiederherstellen"
               disabled={!textHistoryAvailability.canRedo || isProcessing}
-              title="Rückgängig gemachte Änderung wiederherstellen"
             >
-              ↷ Vor
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m15 14 5-5-5-5" />
+                <path d="M20 9H10a6 6 0 0 0 0 12h3" />
+              </svg>
             </button>
             <button 
-              className="btn btn-outline text-sm py-1.5 px-3" 
+              className="btn btn-outline h-9 w-9 p-0" 
               onClick={handleReset}
-              title="Alle Felder löschen (oder Rechtsklick)"
+              title="Alle Felder löschen"
+              aria-label="Alle Felder löschen"
             >
-              ✨ Neu
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <path d="M14 2v6h6" />
+              </svg>
             </button>
             {canRevert && preCorrectionState && (
               <>
@@ -3908,17 +4035,14 @@ export default function HomePage() {
                 </label>
               </>
             )}
-            {/* Manueller Korrektur-Button wenn Änderungen vorliegen */}
-            {pendingCorrection && (
-              <button 
-                className="btn btn-primary text-sm py-1.5 px-3 animate-pulse" 
-                onClick={mode === 'befund' ? handleFormatBefund : handleManualCorrect}
-                title="KI-Korrektur durchführen"
-                disabled={correcting || busy || (mode === 'befund' ? !methodik.trim() && !transcript.trim() && !beurteilung.trim() : !transcript.trim())}
-              >
-                {correcting ? <Spinner size={14} /> : '🤖 Korrigieren'}
-              </button>
-            )}
+            <button 
+              className={`btn text-sm py-1.5 px-3 ${pendingCorrection && !correctionButtonDisabled ? 'btn-primary animate-pulse' : 'btn-outline'}`}
+              onClick={mode === 'befund' ? handleFormatBefund : handleManualCorrect}
+              title={hasCorrectionText ? 'KI-Korrektur durchführen' : 'Text eingeben, um die KI-Korrektur zu aktivieren'}
+              disabled={correctionButtonDisabled}
+            >
+              {correcting ? <Spinner size={14} /> : '🤖 Korrigieren'}
+            </button>
             
             {/* Textbaustein-Auswahl */}
             {availableTemplates.length > 0 && (
@@ -4149,6 +4273,15 @@ export default function HomePage() {
                     />
                   )}
                 </div>
+                {manualCorrectionSuggestions.methodik && (
+                  <ManualCorrectionSuggestion
+                    originalWord={manualCorrectionSuggestions.methodik.originalWord}
+                    newWord={manualCorrectionSuggestions.methodik.newWord}
+                    targetUsername={username || undefined}
+                    onConfirm={() => acknowledgeManualCorrection('methodik')}
+                    onCancel={() => acknowledgeManualCorrection('methodik')}
+                  />
+                )}
               </div>
             </div>
             {/* Action Buttons für Methodik */}
@@ -4229,6 +4362,15 @@ export default function HomePage() {
                     />
                   )}
                 </div>
+                {manualCorrectionSuggestions.befund && (
+                  <ManualCorrectionSuggestion
+                    originalWord={manualCorrectionSuggestions.befund.originalWord}
+                    newWord={manualCorrectionSuggestions.befund.newWord}
+                    targetUsername={username || undefined}
+                    onConfirm={() => acknowledgeManualCorrection('befund')}
+                    onCancel={() => acknowledgeManualCorrection('befund')}
+                  />
+                )}
                 {/* VAD Tentative Text: Zeigt an, dass gerade gesprochen wird */}
                 {recording && vad.isListening && tentativeText && (
                   <div className="px-2 py-1 text-sm italic text-gray-400 dark:text-gray-500 border-l-2 border-green-400 bg-green-50/50 dark:bg-green-900/20 rounded-r">
@@ -4326,6 +4468,15 @@ export default function HomePage() {
                     />
                   )}
                 </div>
+                {manualCorrectionSuggestions.beurteilung && (
+                  <ManualCorrectionSuggestion
+                    originalWord={manualCorrectionSuggestions.beurteilung.originalWord}
+                    newWord={manualCorrectionSuggestions.beurteilung.newWord}
+                    targetUsername={username || undefined}
+                    onConfirm={() => acknowledgeManualCorrection('beurteilung')}
+                    onCancel={() => acknowledgeManualCorrection('beurteilung')}
+                  />
+                )}
                 <button 
                   className="btn btn-primary w-full text-sm py-2" 
                   onClick={handleSuggestBeurteilung} 
@@ -4422,6 +4573,15 @@ export default function HomePage() {
                     />
                   )}
                 </div>
+                {manualCorrectionSuggestions.transcript && (
+                  <ManualCorrectionSuggestion
+                    originalWord={manualCorrectionSuggestions.transcript.originalWord}
+                    newWord={manualCorrectionSuggestions.transcript.newWord}
+                    targetUsername={username || undefined}
+                    onConfirm={() => acknowledgeManualCorrection('transcript')}
+                    onCancel={() => acknowledgeManualCorrection('transcript')}
+                  />
+                )}
                 {/* VAD Tentative Text: Zeigt an, dass gerade gesprochen wird */}
                 {recording && vad.isListening && tentativeText && (
                   <div className="px-2 py-1 text-sm italic text-gray-400 dark:text-gray-500 border-l-2 border-green-400 bg-green-50/50 dark:bg-green-900/20 rounded-r mt-1">

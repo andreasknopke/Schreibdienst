@@ -856,6 +856,20 @@ export default function HomePage() {
     });
   }, [transcript, methodik, beurteilung, textSelections, showPersistentCaret, getStoredSelection]);
 
+  // Textfelder automatisch an ihren Inhalt anpassen, damit ein eingefügter Baustein
+  // (oder langer diktierter Text) nicht im Feld scrollen muss, sondern das Feld wächst.
+  useEffect(() => {
+    const autoGrow = (el: HTMLTextAreaElement | null) => {
+      if (!el) return;
+      el.style.height = 'auto';
+      el.style.height = `${el.scrollHeight}px`;
+    };
+    autoGrow(methodikTextareaRef.current);
+    autoGrow(befundTextareaRef.current);
+    autoGrow(beurteilungTextareaRef.current);
+    autoGrow(transcriptTextareaRef.current);
+  }, [transcript, methodik, beurteilung, mode]);
+
   // SpeaKING Import State
   const [speakingMetadata, setSpeakingMetadata] = useState<SpeaKINGMetadata | null>(null);
   const [speakingWavFile, setSpeakingWavFile] = useState<File | null>(null);
@@ -950,7 +964,12 @@ export default function HomePage() {
       setCanRevert(true);
       setIsReverted(false);
       setPendingCorrection(false);
-      setActiveTemplateContext(template);
+      // Den aktiven Baustein-Kontext auf den bereits ausgefüllten Stand aktualisieren,
+      // damit weitere Diktat-Runden inkrementell darauf aufbauen statt vorherige
+      // Eintragungen zu überschreiben.
+      const updatedContext: Template = { ...template, content: nextText };
+      activeTemplateContextRef.current = updatedContext;
+      setActiveTemplateContext(updatedContext);
       return true;
     } catch (err: any) {
       console.error('[Template] Apply error:', err);

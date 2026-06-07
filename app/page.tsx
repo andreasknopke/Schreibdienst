@@ -1266,7 +1266,7 @@ export default function HomePage() {
 
   useEffect(() => {
     const handleDictionaryChanged = (event: Event) => {
-      const customEvent = event as CustomEvent<{ scope?: string; wrong?: string; correct?: string }>;
+      const customEvent = event as CustomEvent<{ scope?: string; wrong?: string; correct?: string; revertFrom?: string; revertTo?: string }>;
       if (customEvent.detail?.scope === 'private') {
         fetchDictionary();
       }
@@ -1278,12 +1278,19 @@ export default function HomePage() {
       const wrong = customEvent.detail?.wrong?.trim();
       const correct = customEvent.detail?.correct?.trim();
 
-      if (!wrong || !correct) {
-        return;
+      const revertFrom = customEvent.detail?.revertFrom?.trim();
+      const revertTo = customEvent.detail?.revertTo?.trim();
+
+      if (wrong && correct) {
+        const targetField = resolveFormattingTargetField();
+        setFieldText(targetField, (currentText) => replaceAllInText(currentText, wrong, correct));
       }
 
-      const targetField = resolveFormattingTargetField();
-      setFieldText(targetField, (currentText) => replaceAllInText(currentText, wrong, correct));
+      // Nach Löschen/Abschwächen: korrigiertes Wort durch Original ersetzen
+      if (revertFrom && revertTo && revertFrom !== revertTo) {
+        const targetField = resolveFormattingTargetField();
+        setFieldText(targetField, (currentText) => replaceAllInText(currentText, revertFrom, revertTo));
+      }
     };
 
     window.addEventListener(DICTIONARY_CHANGED_EVENT, handleDictionaryChanged);

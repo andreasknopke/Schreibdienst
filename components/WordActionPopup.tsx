@@ -54,9 +54,9 @@ export default function WordActionPopup({
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  const dispatchDictionaryChanged = (wrong?: string, correct?: string) => {
+  const dispatchDictionaryChanged = (wrong?: string, correct?: string, revertFrom?: string, revertTo?: string) => {
     window.dispatchEvent(new CustomEvent(DICTIONARY_CHANGED_EVENT, {
-      detail: { scope: 'private', wrong, correct },
+      detail: { scope: 'private', wrong, correct, revertFrom, revertTo },
     }));
   };
 
@@ -122,7 +122,7 @@ export default function WordActionPopup({
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'Löschen fehlgeschlagen');
       }
-      dispatchDictionaryChanged();
+      dispatchDictionaryChanged(undefined, undefined, correction.correctedWord, correction.originalWord);
       onClose();
     } catch (err: any) {
       setError(err.message || 'Verbindungsfehler');
@@ -155,7 +155,7 @@ export default function WordActionPopup({
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'Abschwächen fehlgeschlagen');
       }
-      dispatchDictionaryChanged();
+      dispatchDictionaryChanged(undefined, undefined, correction.correctedWord, correction.originalWord);
       onClose();
     } catch (err: any) {
       setError(err.message || 'Verbindungsfehler');

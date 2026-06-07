@@ -7,17 +7,19 @@ import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
 import { applyDeleteCommands, applyFormattingControlWords, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, preprocessTranscription, type OnlineUtteranceApplicationDebugStep } from '@/lib/textFormatting';
-import { buildPhoneticIndex, applyPhoneticCorrections } from '@/lib/phoneticMatch';
+import { buildPhoneticIndex, applyPhoneticCorrections, applyPhoneticCorrectionsDetailed, type PhoneticReplacementOperation } from '@/lib/phoneticMatch';
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
 import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
 import HelpPanel from '@/components/HelpPanel';
+import WordActionPopup, { type WordCorrectionInfo } from '@/components/WordActionPopup';
 import UpdatePanel from '@/components/UpdatePanel';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
 import { checkInjectorAvailability, injectToActiveWindow, registerGlobalHotkeys } from '@/lib/injectClient';
+import { replaceAllInText } from '@/lib/replaceText';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
@@ -356,6 +358,8 @@ export default function HomePage() {
     beurteilung: hiddenCaretOverlay(),
   });
   const [mode, setMode] = useState<'arztbrief' | 'befund'>('befund');
+  const modeRef = useRef<'arztbrief' | 'befund'>('befund');
+  useEffect(() => { modeRef.current = mode; }, [mode]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [liveInjectEnabled, setLiveInjectEnabled] = useState(false);
@@ -510,6 +514,20 @@ export default function HomePage() {
 
   // Custom Actions Manager
   const [showCustomActionsManager, setShowCustomActionsManager] = useState(false);
+
+  // Tracking der Wörterbuch-/Phonetik-Korrekturen pro Feld für das Doppelklick-Popup
+  const [fieldCorrections, setFieldCorrections] = useState<Record<TextInsertionTarget, WordCorrectionInfo[]>>({
+    transcript: [],
+    methodik: [],
+    befund: [],
+    beurteilung: [],
+  });
+  const [wordPopup, setWordPopup] = useState<{
+    word: string;
+    position: { x: number; y: number };
+    correction: WordCorrectionInfo | null;
+    field: TextInsertionTarget;
+  } | null>(null);
 
   const syncTextSelection = useCallback((field: TextInsertionTarget, textarea: HTMLTextAreaElement) => {
     const nextSelection: CaretSelection = {
@@ -906,15 +924,23 @@ export default function HomePage() {
   // Pass 1: Exaktes Matching, Pass 2: Phonetisches Matching (Kölner Phonetik)
   const phoneticIndexRef = useRef<ReturnType<typeof buildPhoneticIndex> | null>(null);
   
-  // Gemergte Einträge (User + Standard-Wörterbuch)
-  const mergedEntriesRef = useRef<{ wrong: string; correct: string }[]>([]);
+  // Gemergte Einträge (User + Standard-Wörterbuch) – inkl. Quellinformation
+  // (User vs. Standard) für die Doppelklick-Popup-Logik.
+  const mergedEntriesRef = useRef<{ wrong: string; correct: string; source: 'standard' | 'private' | 'group' }[]>([]);
   
   // Phonetischen Index neu aufbauen wenn sich Wörterbuch ändert
   useEffect(() => {
+    const userCount = dictionaryEntries.length;
     const merged = mergeWithStandardDictionary(dictionaryEntries, standardDictEntries.length > 0 ? standardDictEntries : undefined);
-    mergedEntriesRef.current = merged;
+    // Quelle pro Eintrag ableiten: User-Einträge stehen vorne, Standard hinten
+    const tagged = merged.map((entry, idx) => ({
+      wrong: entry.wrong,
+      correct: entry.correct,
+      source: (idx < userCount ? 'private' : 'standard') as 'standard' | 'private' | 'group',
+    }));
+    mergedEntriesRef.current = tagged;
     phoneticIndexRef.current = buildPhoneticIndex(merged);
-    console.log('[Phonetic] Index built with', merged.length, 'entries (', dictionaryEntries.length, 'user +', merged.length - dictionaryEntries.length, 'standard)');
+    console.log('[Phonetic] Index built with', tagged.length, 'entries (', dictionaryEntries.length, 'user +', tagged.length - dictionaryEntries.length, 'standard)');
   }, [dictionaryEntries, standardDictEntries]);
 
   const applyDictionaryToText = useCallback((text: string): string => {
@@ -937,6 +963,113 @@ export default function HomePage() {
     
     return result;
   }, [dictionaryEntries]);
+
+  const applyDictionaryToTextWithCorrections = useCallback((text: string): { text: string; corrections: WordCorrectionInfo[] } => {
+    if (!text || mergedEntriesRef.current.length === 0) return { text, corrections: [] };
+
+    // Pass 1: Exaktes Wort-Matching (User + Standard) – als Operationen mitschneiden
+    let result = text;
+    const exactCorrections: WordCorrectionInfo[] = [];
+    for (const entry of mergedEntriesRef.current) {
+      const escaped = entry.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escaped}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
+      result = result.replace(regex, (matched) => {
+        if (matched !== entry.correct) {
+          exactCorrections.push({
+            originalWord: matched,
+            correctedWord: entry.correct,
+            dictionaryWrong: entry.wrong,
+            dictionaryCorrect: entry.correct,
+            source: entry.source,
+            matchType: 'exact',
+          });
+        }
+        return entry.correct;
+      });
+    }
+
+    // Pass 2: Phonetisches Matching – Operationen mitführen
+    if (!phoneticIndexRef.current) {
+      return { text: result, corrections: exactCorrections };
+    }
+    const phoneticResult = applyPhoneticCorrectionsDetailed(result, phoneticIndexRef.current);
+    const phoneticCorrections: WordCorrectionInfo[] = phoneticResult.operations
+      .filter((op) => op.replacementText !== op.originalText)
+      .map((op) => ({
+        originalWord: op.originalText,
+        correctedWord: op.replacementText,
+        dictionaryWrong: op.dictionaryWrong,
+        dictionaryCorrect: op.dictionaryCorrect,
+        source: op.source,
+        matchType: 'phonetic',
+        confidence: op.confidence,
+        targetUsername: op.targetUsername,
+        groupId: op.groupId,
+      }));
+    return { text: phoneticResult.text, corrections: [...exactCorrections, ...phoneticCorrections] };
+  }, [dictionaryEntries]);
+
+  // Leitet bei jeder Text- und Wörterbuchänderung die Korrekturen neu ab
+  useEffect(() => {
+    const methodikResult = applyDictionaryToTextWithCorrections(methodik);
+    const beurteilungResult = applyDictionaryToTextWithCorrections(beurteilung);
+    const transcriptResult = applyDictionaryToTextWithCorrections(transcript);
+    setFieldCorrections({
+      methodik: methodikResult.corrections,
+      beurteilung: beurteilungResult.corrections,
+      befund: transcriptResult.corrections,
+      transcript: transcriptResult.corrections,
+    });
+  }, [methodik, beurteilung, transcript, dictionaryEntries, applyDictionaryToTextWithCorrections]);
+
+  // Doppelklick auf ein Wort: Popup mit passenden Aktionen öffnen
+  const getWordAtCursor = useCallback((textarea: HTMLTextAreaElement): { word: string; start: number; end: number } | null => {
+    const text = textarea.value;
+    const cursorPos = textarea.selectionStart;
+    if (cursorPos === undefined || cursorPos === null) return null;
+
+    // Finde Wortgrenzen rückwärts
+    let wordStart = cursorPos;
+    while (wordStart > 0 && /[A-Za-zÄÖÜäöüß0-9]/.test(text[wordStart - 1])) {
+      wordStart--;
+    }
+    // Finde Wortgrenzen vorwärts
+    let wordEnd = cursorPos;
+    while (wordEnd < text.length && /[A-Za-zÄÖÜäöüß0-9]/.test(text[wordEnd])) {
+      wordEnd++;
+    }
+
+    if (wordStart >= wordEnd) return null;
+    const word = text.slice(wordStart, wordEnd);
+    if (!word || /[\s]/.test(word)) return null;
+    return { word, start: wordStart, end: wordEnd };
+  }, []);
+
+  const handleWordDoubleClick = useCallback((
+    field: TextInsertionTarget,
+    textarea: HTMLTextAreaElement,
+    clientX: number,
+    clientY: number
+  ) => {
+    const wordInfo = getWordAtCursor(textarea);
+    if (!wordInfo) return;
+    const { word } = wordInfo;
+    const corrections = fieldCorrections[field] ?? [];
+    // Exakte Wort-Übereinstimmung (case-insensitiv) und nicht self-mapping
+    const matched = corrections.find(
+      (c) => c.correctedWord.localeCompare(word, undefined, { sensitivity: 'accent' }) === 0
+        && c.originalWord.localeCompare(c.correctedWord, undefined, { sensitivity: 'accent' }) !== 0
+    ) ?? null;
+    setWordPopup({ word, position: { x: clientX, y: clientY }, correction: matched, field });
+  }, [fieldCorrections, getWordAtCursor]);
+
+  const closeWordPopup = useCallback(() => {
+    setWordPopup(null);
+  }, []);
+
+  const invalidateFieldCorrections = useCallback((field: TextInsertionTarget) => {
+    setFieldCorrections((prev) => ({ ...prev, [field]: [] }));
+  }, []);
 
   const prepareLiveInjectDelta = useCallback((text: string): string => {
     return normalizeChunkLeadingWhitespace(applyDictionaryToText(applyFormattingControlWords(text)));
@@ -1100,9 +1233,14 @@ export default function HomePage() {
     }
   }, [username, fetchDictionary, fetchStandardDictionary]);
 
+  // Helper: ermittelt das Zielfeld für Auto-Replace basierend auf Modus und aktivem Feld
+  const resolveFormattingTargetField = useCallback((): TextInsertionTarget => {
+    return modeRef.current === 'befund' ? activeFieldRef.current : 'transcript';
+  }, []);
+
   useEffect(() => {
     const handleDictionaryChanged = (event: Event) => {
-      const customEvent = event as CustomEvent<{ scope?: string }>;
+      const customEvent = event as CustomEvent<{ scope?: string; wrong?: string; correct?: string }>;
       if (customEvent.detail?.scope === 'private') {
         fetchDictionary();
       }
@@ -1110,11 +1248,21 @@ export default function HomePage() {
       if (customEvent.detail?.scope === 'standard') {
         fetchStandardDictionary();
       }
+
+      const wrong = customEvent.detail?.wrong?.trim();
+      const correct = customEvent.detail?.correct?.trim();
+
+      if (!wrong || !correct) {
+        return;
+      }
+
+      const targetField = resolveFormattingTargetField();
+      setFieldText(targetField, (currentText) => replaceAllInText(currentText, wrong, correct));
     };
 
     window.addEventListener(DICTIONARY_CHANGED_EVENT, handleDictionaryChanged);
     return () => window.removeEventListener(DICTIONARY_CHANGED_EVENT, handleDictionaryChanged);
-  }, [fetchDictionary, fetchStandardDictionary]);
+  }, [fetchDictionary, fetchStandardDictionary, resolveFormattingTargetField, setFieldText]);
 
   // Event-Listener für Template-Aktualisierungen (wenn Templates im Modal geändert werden)
   useEffect(() => {
@@ -3952,6 +4100,7 @@ export default function HomePage() {
                     onClick={(e) => syncTextSelection('methodik', e.currentTarget)}
                     onKeyUp={(e) => syncTextSelection('methodik', e.currentTarget)}
                     onMouseUp={(e) => syncTextSelection('methodik', e.currentTarget)}
+                    onDoubleClick={(e) => handleWordDoubleClick('methodik', e.currentTarget, e.clientX, e.clientY)}
                     placeholder="Methodik..."
                     rows={2}
                     readOnly={isProcessing}
@@ -4032,6 +4181,7 @@ export default function HomePage() {
                     onClick={(e) => syncTextSelection('befund', e.currentTarget)}
                     onKeyUp={(e) => syncTextSelection('befund', e.currentTarget)}
                     onMouseUp={(e) => syncTextSelection('befund', e.currentTarget)}
+                    onDoubleClick={(e) => handleWordDoubleClick('befund', e.currentTarget, e.clientX, e.clientY)}
                     placeholder="Befund..."
                     readOnly={isProcessing}
                   />
@@ -4127,6 +4277,7 @@ export default function HomePage() {
                     onClick={(e) => syncTextSelection('beurteilung', e.currentTarget)}
                     onKeyUp={(e) => syncTextSelection('beurteilung', e.currentTarget)}
                     onMouseUp={(e) => syncTextSelection('beurteilung', e.currentTarget)}
+                    onDoubleClick={(e) => handleWordDoubleClick('beurteilung', e.currentTarget, e.clientX, e.clientY)}
                     placeholder="Zusammenfassung..."
                     rows={2}
                     readOnly={isProcessing}
@@ -4223,6 +4374,7 @@ export default function HomePage() {
                     onClick={(e) => syncTextSelection('transcript', e.currentTarget)}
                     onKeyUp={(e) => syncTextSelection('transcript', e.currentTarget)}
                     onMouseUp={(e) => syncTextSelection('transcript', e.currentTarget)}
+                    onDoubleClick={(e) => handleWordDoubleClick('transcript', e.currentTarget, e.clientX, e.clientY)}
                     placeholder="Text erscheint hier..."
                     readOnly={isProcessing}
                   />
@@ -4332,6 +4484,22 @@ export default function HomePage() {
       {/* Custom Actions Manager Modal */}
       {showCustomActionsManager && (
         <CustomActionsManager onClose={() => setShowCustomActionsManager(false)} />
+      )}
+
+      {/* Popup für Doppelklick auf ein Wort */}
+      {wordPopup && (
+        <WordActionPopup
+          word={wordPopup.word}
+          position={wordPopup.position}
+          correction={wordPopup.correction}
+          targetUsername={wordPopup.correction?.targetUsername || username || undefined}
+          groupId={wordPopup.correction?.groupId}
+          onClose={() => {
+            const field = wordPopup.field;
+            closeWordPopup();
+            invalidateFieldCorrections(field);
+          }}
+        />
       )}
     </div>
   );

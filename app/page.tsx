@@ -61,6 +61,7 @@ interface RuntimeConfig {
 }
 
 type TextInsertionTarget = 'transcript' | BefundField;
+type DictionarySet = 'alltag' | 'medical';
 type TextStateKey = 'transcript' | 'methodik' | 'beurteilung';
 
 interface ManualWordChange {
@@ -338,6 +339,8 @@ export default function HomePage() {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [correcting, setCorrecting] = useState(false);
+  const [dictionarySet, setDictionarySet] = useState<DictionarySet>('medical');
+  const [dictionarySetSaving, setDictionarySetSaving] = useState(false);
   // Flag um zu tracken ob nach Aufnahme noch keine Korrektur durchgeführt wurde
   const [pendingCorrection, setPendingCorrection] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -1324,6 +1327,76 @@ export default function HomePage() {
     }
   }, [defaultMode]);
 
+  // Wörterbuch-Set beim Start laden (nutzerspezifisch, sessionübergreifend)
+  useEffect(() => {
+    if (!username) {
+      setDictionarySet('medical');
+      return;
+    }
+
+    let cancelled = false;
+    const loadDictionarySet = async () => {
+      try {
+        const response = await fetch('/api/users/settings', {
+          headers: {
+            Authorization: getAuthHeader(),
+            ...getDbTokenHeader(),
+          },
+        });
+        const data = await response.json();
+        if (cancelled) return;
+
+        const nextSet = data?.dictionarySet;
+        if (nextSet === 'alltag' || nextSet === 'medical') {
+          setDictionarySet(nextSet);
+        } else {
+          setDictionarySet('medical');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('[DictionarySet] Could not load user setting:', error);
+        }
+      }
+    };
+
+    loadDictionarySet();
+    return () => {
+      cancelled = true;
+    };
+  }, [username, getAuthHeader, getDbTokenHeader]);
+
+  const persistDictionarySet = useCallback(async (nextSet: DictionarySet) => {
+    if (!username || nextSet === dictionarySet || dictionarySetSaving) {
+      return;
+    }
+
+    const previous = dictionarySet;
+    setDictionarySet(nextSet);
+    setDictionarySetSaving(true);
+    try {
+      const response = await fetch('/api/users/settings', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: getAuthHeader(),
+          ...getDbTokenHeader(),
+        },
+        body: JSON.stringify({ dictionarySet: nextSet }),
+      });
+
+      if (!response.ok) {
+        setDictionarySet(previous);
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error || 'Wörterbuch-Modus konnte nicht gespeichert werden');
+      }
+    } catch (error: any) {
+      console.error('[DictionarySet] Persist error:', error);
+      setError(error?.message || 'Wörterbuch-Modus konnte nicht gespeichert werden');
+    } finally {
+      setDictionarySetSaving(false);
+    }
+  }, [username, dictionarySet, dictionarySetSaving, getAuthHeader, getDbTokenHeader, setError]);
+
   // Runtime Config laden (für Fast Whisper WebSocket URL)
   useEffect(() => {
     const loadConfig = async () => {
@@ -1565,6 +1638,7 @@ export default function HomePage() {
       if (username) {
         fd.append('username', username);
       }
+      fd.append('dictionarySet', dictionarySet);
       // Online-Diktat: Turbo-Modus (kein Alignment, schnellere Antwort)
       fd.append('speed_mode', 'turbo');
       fd.append('stats_event', isLive ? 'false' : 'true');
@@ -1591,7 +1665,7 @@ export default function HomePage() {
       }
       return '';
     }
-  }, [username]);
+  }, [username, dictionarySet]);
 
   // Kombiniert existierenden Text mit neuem Transkript
   const combineTexts = useCallback((existing: string, newText: string): string => {
@@ -1618,6 +1692,7 @@ export default function HomePage() {
         const fd = new FormData();
         fd.append('file', wavBlob, 'utterance.wav');
         if (username) fd.append('username', username);
+        fd.append('dictionarySet', dictionarySet);
         fd.append('speed_mode', 'turbo');
         if (promptContext) fd.append('prompt_context', promptContext);
         const res = await fetchWithDbToken('/api/transcribe', {
@@ -1641,7 +1716,7 @@ export default function HomePage() {
       }
     }
     throw lastError || new Error('Transkription nach mehreren Versuchen fehlgeschlagen');
-  }, [username]);
+  }, [username, dictionarySet]);
 
   const estimateWavDurationSeconds = useCallback((blob: Blob): number => {
     const wavHeaderBytes = 44;
@@ -3679,7 +3754,8 @@ export default function HomePage() {
             befund: transcript,
             beurteilung: beurteilung
           },
-          username
+          username,
+          dictionarySet
         }),
       });
       if (res.ok) {
@@ -3717,7 +3793,7 @@ export default function HomePage() {
       const res = await fetchWithDbToken('/api/correct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: transcript, username }),
+        body: JSON.stringify({ text: transcript, username, dictionarySet }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -4131,6 +4207,32 @@ export default function HomePage() {
                   {liveInjectStatus}
                 </span>
               )}
+            </div>
+            <div className="flex flex-col gap-1 items-center justify-center">
+              <button
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                  dictionarySet === 'medical'
+                    ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+                onClick={() => void persistDictionarySet(dictionarySet === 'medical' ? 'alltag' : 'medical')}
+                disabled={dictionarySetSaving}
+                title={
+                  dictionarySet === 'medical'
+                    ? 'Medical-Modus: alle phonetischen Wörterbücher (Standard, Abteilung, persönlich) sind aktiv. Klicken zum Umschalten auf Alltag.'
+                    : 'Alltag-Modus: alle Wörterbücher sind aus. Klicken zum Umschalten auf Medical.'
+                }
+                aria-pressed={dictionarySet === 'medical'}
+                aria-label={dictionarySet === 'medical' ? 'Wörterbuch-Modus: Medical (an)' : 'Wörterbuch-Modus: Alltag (aus)'}
+              >
+                <span
+                  className={`inline-block w-2 h-2 rounded-full ${
+                    dictionarySet === 'medical' ? 'bg-white' : 'bg-gray-400'
+                  }`}
+                  aria-hidden="true"
+                />
+                {dictionarySet === 'medical' ? 'Medical' : 'Alltag'}
+              </button>
             </div>
           </div>
           <div className="flex items-center gap-2">

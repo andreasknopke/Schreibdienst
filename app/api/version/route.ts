@@ -12,6 +12,9 @@ import {
   type VersionInfoResponse,
 } from '@/lib/version';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 interface GitHubReleaseAsset {
   name?: string;
   browser_download_url?: string;
@@ -145,7 +148,7 @@ async function fetchReleaseInfoFromAtom(limit: number): Promise<{
 }> {
   const response = await fetch(`https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases.atom`, {
     headers: buildGitHubHeaders(),
-    next: { revalidate: 300 },
+    cache: 'no-store',
   });
 
   if (!response.ok) {
@@ -193,7 +196,7 @@ async function fetchReleaseInfoFromAtom(limit: number): Promise<{
 async function fetchGitHubRelease(url: string): Promise<GitHubReleaseResponse | null> {
   const response = await fetch(url, {
     headers: buildGitHubHeaders(),
-    next: { revalidate: 300 },
+    cache: 'no-store',
   });
 
   if (response.status === 404) {
@@ -210,7 +213,7 @@ async function fetchGitHubRelease(url: string): Promise<GitHubReleaseResponse | 
 async function fetchRecentReleases(limit: number): Promise<ReleaseSummary[]> {
   const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=${limit}`, {
     headers: buildGitHubHeaders(),
-    next: { revalidate: 300 },
+    cache: 'no-store',
   });
 
   if (!response.ok) {

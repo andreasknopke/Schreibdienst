@@ -7,9 +7,17 @@ import {
   GITHUB_OWNER,
   GITHUB_REPO,
   normalizeReleaseVersion,
+  type ReleaseAsset,
   type ReleaseSummary,
   type VersionInfoResponse,
 } from '@/lib/version';
+
+interface GitHubReleaseAsset {
+  name?: string;
+  browser_download_url?: string;
+  size?: number;
+  content_type?: string;
+}
 
 interface GitHubReleaseResponse {
   tag_name?: string;
@@ -17,6 +25,7 @@ interface GitHubReleaseResponse {
   body?: string;
   html_url?: string;
   published_at?: string;
+  assets?: GitHubReleaseAsset[];
 }
 
 interface AtomFeedEntry {
@@ -50,6 +59,21 @@ function buildGitHubHeaders(): HeadersInit {
   return headers;
 }
 
+function mapReleaseAssets(assets: GitHubReleaseAsset[] | undefined): ReleaseAsset[] {
+  if (!Array.isArray(assets)) {
+    return [];
+  }
+
+  return assets
+    .filter((asset) => asset?.name && asset?.browser_download_url)
+    .map((asset) => ({
+      name: asset.name as string,
+      downloadUrl: asset.browser_download_url as string,
+      sizeBytes: typeof asset.size === 'number' ? asset.size : null,
+      contentType: asset.content_type || null,
+    }));
+}
+
 function mapReleasePayload(release: GitHubReleaseResponse | null): ReleaseSummary | null {
   if (!release?.tag_name) {
     return null;
@@ -61,6 +85,7 @@ function mapReleasePayload(release: GitHubReleaseResponse | null): ReleaseSummar
     publishedAt: release.published_at || null,
     url: release.html_url || `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tag/${encodeURIComponent(release.tag_name)}`,
     notes: release.body?.trim() || '',
+    assets: mapReleaseAssets(release.assets),
   };
 }
 
@@ -139,7 +164,7 @@ async function fetchReleaseInfoFromAtom(limit: number): Promise<{
       : [parsed.feed.entry]
     : [];
   const mappedEntries = entries
-    .map((entry) => {
+    .map((entry): ReleaseSummary | null => {
       const version = entry.title ? normalizeReleaseVersion(entry.title) : null;
       const url = getAtomEntryLink(entry.link);
 
@@ -153,7 +178,8 @@ async function fetchReleaseInfoFromAtom(limit: number): Promise<{
         publishedAt: entry.updated || null,
         url,
         notes: htmlToReleaseNotes(extractAtomContentText(entry.content)),
-      } satisfies ReleaseSummary;
+        assets: [],
+      };
     })
     .filter((entry): entry is ReleaseSummary => Boolean(entry));
 

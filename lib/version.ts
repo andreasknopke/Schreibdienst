@@ -6,12 +6,20 @@ export const GITHUB_REPO = process.env.GITHUB_REPO_NAME || process.env.NEXT_PUBL
 
 export type VersionStatus = 'up-to-date' | 'update-available' | 'release-info-unavailable';
 
+export interface ReleaseAsset {
+  name: string;
+  downloadUrl: string;
+  sizeBytes: number | null;
+  contentType: string | null;
+}
+
 export interface ReleaseSummary {
   version: string;
   name: string;
   publishedAt: string | null;
   url: string;
   notes: string;
+  assets: ReleaseAsset[];
 }
 
 export interface VersionInfoResponse {
@@ -63,4 +71,36 @@ export function getBuildCommitSha(): string | null {
     || process.env.RAILWAY_GIT_COMMIT_SHA
     || process.env.COOLIFY_GIT_COMMIT_SHA
     || null;
+}
+
+/**
+ * Sucht in den Release-Assets nach dem Windows-Installer. Der CI-Workflow
+ * (`.github/workflows/build-windows-injector.yml`) veröffentlicht die Datei
+ * mit dem Namensmuster `schreibdienst-injector-setup-*.exe`. Fallback: jede
+ * `.exe` mit `setup` oder `install` im Namen. Damit ist die Funktion auch
+ * belastbar, wenn der Dateiname leicht variiert.
+ */
+export function findWindowsInstallerAsset(release: ReleaseSummary | null | undefined): ReleaseAsset | null {
+  if (!release?.assets?.length) {
+    return null;
+  }
+
+  const lower = (value: string) => value.toLowerCase();
+
+  const explicit = release.assets.find((asset) =>
+    lower(asset.name).startsWith('schreibdienst-injector-setup-')
+  );
+  if (explicit) {
+    return explicit;
+  }
+
+  const setupLike = release.assets.find((asset) => {
+    const name = lower(asset.name);
+    return name.endsWith('.exe') && (name.includes('setup') || name.includes('install'));
+  });
+  if (setupLike) {
+    return setupLike;
+  }
+
+  return release.assets.find((asset) => lower(asset.name).endsWith('.exe')) || null;
 }

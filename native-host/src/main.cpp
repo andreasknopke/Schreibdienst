@@ -1013,7 +1013,20 @@ bool sendUnicodeText(const std::wstring& text, std::uint32_t charDelayMs) {
         inputs.push_back(makeUnicodeInput(unit, true));
     }
 
-    return sendInputs(inputs);
+    const bool ok = sendInputs(inputs);
+
+    // Nachlauf-Pause: SendInput kehrt zurück, sobald die Events in der
+    // Windows-Input-Queue liegen, NICHT sobald die Ziel-App sie verarbeitet
+    // hat. Wenn unmittelbar danach der nächste Chunk geschickt wird, kann
+    // eine langsame Ziel-App (KIS, alte Textverarbeitung) Events
+    // "verschlucken". ~1.5ms pro Zeichen reicht in der Praxis aus, ohne
+    // die Übertragung spürbar auszubremsen.
+    if (ok && !text.empty()) {
+        const auto settleMs = static_cast<DWORD>(std::min<size_t>(text.size() * 2, 80));
+        std::this_thread::sleep_for(std::chrono::milliseconds(settleMs));
+    }
+
+    return ok;
 }
 
 // ─── Request handler ────────────────────────────────────────────

@@ -182,6 +182,7 @@ struct NativeRequest {
 struct HotkeyBinding {
     int id;
     UINT virtualKey;
+    UINT modifiers; // 0 oder MOD_SHIFT
     const char* action;
     const char* key;
 };
@@ -281,11 +282,20 @@ UINT sendInputsViaHiddenWindow(const std::vector<INPUT>& inputs) {
     return 0;
 }
 
+// Wir registrieren jeden Hotkey in zwei Varianten: ohne Modifier und mit
+// Shift. So kann auf Systemen, auf denen z. B. F9 durch eine andere App
+// blockiert wird, einfach Shift+F9 (oder Shift+F10/Shift+F11/Shift+Escape)
+// als Ausweich-Taste genutzt werden. Beide Varianten loesen dieselbe
+// Aktion aus.
 constexpr HotkeyBinding HOTKEY_BINDINGS[] = {
-    {1, VK_F9, "toggle-recording", "F9"},
-    {2, VK_F10, "stop-recording", "F10"},
-    {3, VK_F11, "transfer-text", "F11"},
-    {4, VK_ESCAPE, "cancel-recording", "Escape"},
+    {1,  VK_F9,     0,         "toggle-recording", "F9"},
+    {2,  VK_F10,    0,         "stop-recording",   "F10"},
+    {3,  VK_F11,    0,         "transfer-text",    "F11"},
+    {4,  VK_ESCAPE, 0,         "cancel-recording", "Escape"},
+    {5,  VK_F9,     MOD_SHIFT, "toggle-recording", "Shift+F9"},
+    {6,  VK_F10,    MOD_SHIFT, "stop-recording",   "Shift+F10"},
+    {7,  VK_F11,    MOD_SHIFT, "transfer-text",    "Shift+F11"},
+    {8,  VK_ESCAPE, MOD_SHIFT, "cancel-recording", "Shift+Escape"},
 };
 
 // ─── UTF-8 / JSON helpers ───────────────────────────────────────
@@ -544,7 +554,7 @@ const HotkeyBinding* findHotkeyBinding(WPARAM hotkeyId) {
 
 bool registerGlobalHotkeys(std::string& error) {
     for (const auto& binding : HOTKEY_BINDINGS) {
-        if (!RegisterHotKey(nullptr, binding.id, MOD_NOREPEAT, binding.virtualKey)) {
+        if (!RegisterHotKey(nullptr, binding.id, MOD_NOREPEAT | binding.modifiers, binding.virtualKey)) {
             error = std::string("RegisterHotKey fehlgeschlagen für ") + binding.key;
             for (const auto& registered : HOTKEY_BINDINGS) {
                 if (registered.id == binding.id) {
@@ -1270,6 +1280,11 @@ void printStartupHelp() {
     std::printf("  -show, --show   Konsolenfenster mit Logging oeffnen\n");
     std::printf("  -h, --help      Diese Hilfe anzeigen\n");
     std::printf("Standardmaessig laeuft der Injector im Hintergrund ohne sichtbares Fenster.\n");
+    std::printf("\nGlobale Hotkeys (auch mit Shift nutzbar):\n");
+    std::printf("  F9 / Shift+F9   Aufnahme starten / stoppen\n");
+    std::printf("  F10 / Shift+F10  Aufnahme stoppen\n");
+    std::printf("  F11 / Shift+F11  Editor-Text in die Ziel-App uebertragen\n");
+    std::printf("  Esc / Shift+Esc  Aufnahme abbrechen\n");
 }
 
 int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/,
@@ -1325,6 +1340,12 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/,
     // notified via 'hotkey-listener-ready' when it sends 'listen-hotkeys'.
 
     if (options.showConsole) {
+        if (hotkeyError.empty()) {
+            std::printf("Globale Hotkeys registriert: %u Varianten (F9/F10/F11/Esc, jeweils auch mit Shift)\n",
+                        static_cast<unsigned>(sizeof(HOTKEY_BINDINGS) / sizeof(HOTKEY_BINDINGS[0])));
+        } else {
+            std::printf("Globale Hotkeys konnten nicht registriert werden: %s\n", hotkeyError.c_str());
+        }
         std::printf("WebSocket-Server laeuft auf ws://127.0.0.1:%u\n", WS_PORT);
     }
 

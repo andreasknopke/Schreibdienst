@@ -5,7 +5,7 @@
 ; Build mit: ISCC.exe "schreibdienst-injector-setup.iss"
 
 #define MyAppName "Schreibdienst Injector"
-#define MyAppVersion "0.1.6"
+#define MyAppVersion "0.1.7"
 #define MyAppPublisher "Schreibdienst"
 #define MyAppURL "https://schreibdienst.app"
 #define MyAppExeName "schreibdienst-injector.exe"
@@ -39,7 +39,7 @@ Name: "autostart"; Description: "&Automatisch starten beim Windows-Anmelden (akt
 Name: "autostart_all"; Description: "&Automatisch starten für alle Benutzer (Computer-Autostart)"; GroupDescription: "Autostart:"; Flags: checkedonce exclusive
 
 [Files]
-Source: "..\build3\Release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\build\Release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 ; Optional: Konfigurationsdateien oder DLLs hier ergänzen
 
 [Icons]

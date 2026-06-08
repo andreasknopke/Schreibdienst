@@ -17,6 +17,7 @@ import DiffHighlight, { DiffStats } from '@/components/DiffHighlight';
 import HelpPanel from '@/components/HelpPanel';
 import WordActionPopup, { type WordCorrectionInfo } from '@/components/WordActionPopup';
 import UpdatePanel from '@/components/UpdatePanel';
+import InjectorDownloadDialog from '@/components/InjectorDownloadDialog';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
@@ -428,7 +429,6 @@ export default function HomePage() {
   const [liveInjectStatus, setLiveInjectStatus] = useState<string | null>(null);
   const liveInjectEnabledRef = useRef(false);
   const liveInjectQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const lastLiveInjectEndedWithPunctuationRef = useRef<boolean>(false);
   const [injectorCheckInProgress, setInjectorCheckInProgress] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -573,6 +573,10 @@ export default function HomePage() {
   const [showDiffView, setShowDiffView] = useState(false);
   const [showHelpPanel, setShowHelpPanel] = useState(false);
   const [showUpdatePanel, setShowUpdatePanel] = useState(false);
+  // Wird angezeigt, wenn der Injector beim Aktivieren des Live-Inject-Modus
+  // nicht erreichbar ist. Bietet den Download des aktuellen Installers an.
+  const [showInjectorDownloadDialog, setShowInjectorDownloadDialog] = useState(false);
+  const [injectorDownloadError, setInjectorDownloadError] = useState<string | null>(null);
   const [manualCorrectionSuggestions, setManualCorrectionSuggestions] = useState<Record<TextInsertionTarget, ManualWordChange | null>>(EMPTY_MANUAL_WORD_CHANGES);
 
   // Custom Actions Manager
@@ -714,7 +718,10 @@ export default function HomePage() {
       if (!availability.ok) {
         setLiveInjectEnabled(false);
         setLiveInjectStatus(null);
-        showToast('Injector nicht installiert oder nicht gestartet.');
+        // Statt eines flüchtigen Toasts den Download-Dialog öffnen, damit
+        // der Nutzer den fehlenden Injector direkt installieren kann.
+        setInjectorDownloadError(availability.error || 'Schreibdienst-Injector nicht erreichbar');
+        setShowInjectorDownloadDialog(true);
         return;
       }
 
@@ -722,19 +729,27 @@ export default function HomePage() {
     } finally {
       setInjectorCheckInProgress(false);
     }
-  }, [injectorCheckInProgress, liveInjectEnabled, showToast]);
+  }, [injectorCheckInProgress, liveInjectEnabled]);
 
   const queueLiveInject = useCallback((text: string) => {
-    let normalizedText = normalizeChunkLeadingWhitespace(text);
+    // Injektor-Konvention: Der Chunk wird IMMER ohne führendes Leerzeichen und
+    // IMMER mit genau einem abschließenden Leerzeichen gesendet. Dadurch
+    // landet der Cursor nach dem Leerzeichen und der naechste Chunk setzt
+    // automatisch mit einem Buchstaben/Zahl an, ohne an einem vorherigen
+    // Satzzeichen "anzukleben". Das gilt gleichermassen fuer VAD-Pausen-
+    // Auto-Chunking wie fuer manuell angehaengte Satzzeichen ("Punkt", "!").
+    let normalizedText = text.replace(/^\s+/, '');
 
     if (!liveInjectEnabledRef.current || !normalizedText.trim()) return;
 
-    // If the previous injection ended with sentence-ending punctuation
-    // and the new text starts with a letter/digit, prepend a space
-    // so the next sentence doesn't stick to the period.
-    if (lastLiveInjectEndedWithPunctuationRef.current && /^[\p{L}\p{N}]/u.test(normalizedText)) {
-      normalizedText = ' ' + normalizedText;
-    }
+    // Vorhandene Zeilenumbrueche am Ende erhalten (z. B. "neuer Absatz"),
+    // aber alle anderen trailing-Whitespace-Zeichen verwerfen und genau ein
+    // Leerzeichen anhaengen.
+    const trailingNewlines = normalizedText.match(/\n+$/)?.[0] ?? '';
+    const core = trailingNewlines
+      ? normalizedText.slice(0, -trailingNewlines.length).replace(/\s+$/, '')
+      : normalizedText.replace(/\s+$/, '');
+    normalizedText = core + (trailingNewlines || ' ');
 
     console.log(`[LiveInject] queueLiveInject CALL text="${normalizedText.substring(0, 80)}${normalizedText.length > 80 ? '…' : ''}" len=${normalizedText.length}`);
 
@@ -759,9 +774,6 @@ export default function HomePage() {
           setError(result.error || 'Live-Übertragung in die Ziel-App fehlgeschlagen');
           return;
         }
-
-        // Track whether this injection ends with sentence-ending punctuation
-        lastLiveInjectEndedWithPunctuationRef.current = /[.!?]\s*$/.test(normalizedText);
 
         setLiveInjectStatus(`Gesendet: ${normalizedText.trim().length} Zeichen`);
       });
@@ -2113,7 +2125,6 @@ export default function HomePage() {
     vadInFlightCountRef.current = 0;
     vadPendingResultsRef.current.clear();
     setVadFailedUtterances([]);
-    lastLiveInjectEndedWithPunctuationRef.current = false;
   }, []);
 
   // Revert-Funktion: Stellt den Text vor der letzten Korrektur wieder her
@@ -4952,6 +4963,19 @@ export default function HomePage() {
           }}
         />
       )}
+
+      {/* Download-Dialog für fehlenden Injector */}
+      <InjectorDownloadDialog
+        open={showInjectorDownloadDialog}
+        errorMessage={injectorDownloadError}
+        onClose={() => {
+          setShowInjectorDownloadDialog(false);
+          setInjectorDownloadError(null);
+        }}
+        onRetry={() => {
+          void handleToggleLiveInject();
+        }}
+      />
     </div>
   );
 }

@@ -5,7 +5,7 @@
 ; Build mit: ISCC.exe "schreibdienst-injector-setup.iss"
 
 #define MyAppName "Schreibdienst Injector"
-#define MyAppVersion "0.1.7"
+#define MyAppVersion "0.1.8"
 #define MyAppPublisher "Schreibdienst"
 #define MyAppURL "https://schreibdienst.app"
 #define MyAppExeName "schreibdienst-injector.exe"

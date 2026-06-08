@@ -107,12 +107,12 @@ async function sendToHost(
     function handleMessage(event: MessageEvent) {
       try {
         const data = JSON.parse(event.data);
-        // Only handle inject responses, not hotkey events
-        if (data.type === 'hotkey-event') return;
+        if (data.type && data.type !== 'inject-result') return;
+        if (data.requestId && data.requestId !== requestId) return;
 
         clearTimeout(timeout);
         ws.removeEventListener('message', handleMessage);
-        console.log(`[Injector] sendToHost RESPONSE id=${requestId} ok=${data.ok} method=${data.method ?? data.fallback ?? ''}`);
+        console.log(`[Injector] sendToHost RESPONSE id=${requestId} ok=${data.ok} method=${data.mode ?? data.method ?? data.fallback ?? ''}`);
         resolve(data as InjectResult);
       } catch {
         // Not JSON — ignore
@@ -123,6 +123,7 @@ async function sendToHost(
 
     const payload = {
       type: 'inject-text',
+      requestId,
       payload: request,
     };
 

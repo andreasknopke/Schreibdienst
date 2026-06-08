@@ -176,6 +176,7 @@ struct InjectPayload {
 
 struct NativeRequest {
     std::wstring type;
+    std::wstring requestId;
     InjectPayload payload;
 };
 
@@ -198,6 +199,7 @@ struct HotkeyListener {
 std::mutex g_clientsMutex;
 std::set<SOCKET> g_wsClients;
 std::atomic<bool> g_serverRunning{false};
+std::mutex g_injectMutex;
 
 // Hidden message-only window for SendInput delegation.
 // SendInput(KEYEVENTF_UNICODE) requires the calling thread to have
@@ -485,12 +487,22 @@ std::uint32_t getUIntValue(const std::string& json, const std::string& key, std:
 NativeRequest parseRequest(const std::string& json) {
     NativeRequest request;
     request.type = getStringValue(json, "type");
+    request.requestId = getStringValue(json, "requestId");
     request.payload.text = getStringValue(json, "text");
     request.payload.mode = getStringValue(json, "mode", L"sendinput");
     request.payload.restorePreviousWindow = getBoolValue(json, "restorePreviousWindow", true);
     request.payload.delayMs = getUIntValue(json, "delayMs", 120);
     request.payload.charDelayMs = getUIntValue(json, "charDelayMs", 2);
     return request;
+}
+
+std::string asciiFromWide(const std::wstring& value) {
+    std::string output;
+    output.reserve(value.size());
+    for (wchar_t ch : value) {
+        output.push_back(ch >= 0 && ch <= 0x7F ? static_cast<char>(ch) : '?');
+    }
+    return output;
 }
 
 std::string jsonEscape(const std::string& value) {
@@ -509,9 +521,12 @@ std::string jsonEscape(const std::string& value) {
     return escaped;
 }
 
-std::string makeResponse(bool ok, const std::string& error = "", const std::string& mode = "sendinput") {
-    std::string response = "{\"ok\":";
+std::string makeResponse(bool ok, const std::string& error = "", const std::string& mode = "sendinput", const std::string& requestId = "") {
+    std::string response = "{\"type\":\"inject-result\",\"ok\":";
     response += ok ? "true" : "false";
+    if (!requestId.empty()) {
+        response += ",\"requestId\":\"" + jsonEscape(requestId) + "\"";
+    }
     if (!mode.empty()) {
         response += ",\"mode\":\"" + jsonEscape(mode) + "\"";
     }
@@ -1039,12 +1054,16 @@ std::string handleRequest(const std::string& message) {
         return makeResponse(false, std::string("Invalid request: ") + error.what(), "");
     }
 
+    const std::string requestId = asciiFromWide(request.requestId);
+
     if (request.type != L"inject-text") {
-        return makeResponse(false, "Unknown message type", "");
+        return makeResponse(false, "Unknown message type", "", requestId);
     }
     if (request.payload.text.empty()) {
-        return makeResponse(false, "No text to inject", "");
+        return makeResponse(false, "No text to inject", "", requestId);
     }
+
+    std::lock_guard<std::mutex> injectLock(g_injectMutex);
 
     // Convert text to narrow string for logging (truncate at 80 chars)
     std::string narrowText;
@@ -1063,7 +1082,7 @@ std::string handleRequest(const std::string& message) {
     if (request.payload.restorePreviousWindow && !activatePreviousWindow(request.payload.delayMs)) {
         logLine("[INJECT] handleRequest FAILED: Alt-Tab failed\n");
         fflush(stdout);
-        return makeResponse(false, "Alt-Tab focus handover failed", "");
+        return makeResponse(false, "Alt-Tab focus handover failed", "", requestId);
     }
 
     if (request.payload.mode != L"clipboard" && request.payload.delayMs > 0) {
@@ -1076,7 +1095,7 @@ std::string handleRequest(const std::string& message) {
         if (outcome == PasteOutcome::Success) {
             logLine("[INJECT] handleRequest SUCCESS (clipboard)\n");
             fflush(stdout);
-            return makeResponse(true, "", "clipboard");
+            return makeResponse(true, "", "clipboard", requestId);
         }
 
         if (outcome == PasteOutcome::ClipboardBlocked) {
@@ -1091,17 +1110,17 @@ std::string handleRequest(const std::string& message) {
             if (sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
                 logLine("[INJECT] handleRequest SUCCESS (sendinput fallback)\n");
                 fflush(stdout);
-                return makeResponse(true, "", "sendinput");
+                return makeResponse(true, "", "sendinput", requestId);
             }
 
             logLine("[INJECT] handleRequest FAILED: SendInput Unicode fallback failed\n");
             fflush(stdout);
-            return makeResponse(false, "SendInput Unicode fallback failed after clipboard was blocked", "");
+            return makeResponse(false, "SendInput Unicode fallback failed after clipboard was blocked", "", requestId);
         }
 
         logLine("[INJECT] handleRequest FAILED: clipboard paste failed\n");
         fflush(stdout);
-        return makeResponse(false, "Clipboard write or paste failed", "");
+        return makeResponse(false, "Clipboard write or paste failed", "", requestId);
     }
 
     if (request.payload.restorePreviousWindow && request.payload.delayMs > 0) {
@@ -1111,12 +1130,12 @@ std::string handleRequest(const std::string& message) {
     if (sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
         logLine("[INJECT] handleRequest SUCCESS (sendinput)\n");
         fflush(stdout);
-        return makeResponse(true, "", "sendinput");
+        return makeResponse(true, "", "sendinput", requestId);
     }
 
     logLine("[INJECT] handleRequest FAILED: SendInput failed\n");
     fflush(stdout);
-    return makeResponse(false, "SendInput failed", "");
+    return makeResponse(false, "SendInput failed", "", requestId);
 }
 
 // ─── WebSocket client handler ───────────────────────────────────

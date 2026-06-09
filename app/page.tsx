@@ -162,6 +162,8 @@ function normalizeChunkLeadingWhitespace(text: string): string {
   return text.replace(/^\s+/, '');
 }
 
+const LIVE_INJECT_DUPLICATE_WINDOW_MS = 1200;
+
 function insertTextAtSelection(existing: string, incomingText: string, selection?: CaretSelection | null): TextInsertionResult {
   const normalizedIncomingText = normalizeChunkLeadingWhitespace(incomingText);
 
@@ -433,6 +435,7 @@ export default function HomePage() {
   const liveInjectEnabledRef = useRef(false);
   const liveInjectQueueRef = useRef<Promise<void>>(Promise.resolve());
   const liveInjectFailureCountRef = useRef(0);
+  const lastLiveInjectQueuedRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
   const [injectorCheckInProgress, setInjectorCheckInProgress] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -754,6 +757,21 @@ export default function HomePage() {
       ? normalizedText.slice(0, -trailingNewlines.length).replace(/\s+$/, '')
       : normalizedText.replace(/\s+$/, '');
     normalizedText = core + (trailingNewlines || ' ');
+
+    // Doppelte Live-Injections verhindern: derselbe Chunk kann bei
+    // Re-Processing (z. B. Wörterbuch-Korrekturen) in kurzer Folge mehrfach
+    // auftauchen. Das hier blockiert nur kurzfristige Duplikate.
+    // Bewusste Wiederholungen durch den Nutzer bleiben möglich, sobald ein
+    // kleiner zeitlicher Abstand dazwischen liegt.
+    const now = Date.now();
+    if (
+      lastLiveInjectQueuedRef.current.text === normalizedText &&
+      now - lastLiveInjectQueuedRef.current.at < LIVE_INJECT_DUPLICATE_WINDOW_MS
+    ) {
+      console.log(`[LiveInject] duplicate chunk suppressed text="${normalizedText.substring(0, 80)}${normalizedText.length > 80 ? '…' : ''}"`);
+      return;
+    }
+    lastLiveInjectQueuedRef.current = { text: normalizedText, at: now };
 
     console.log(`[LiveInject] queueLiveInject CALL text="${normalizedText.substring(0, 80)}${normalizedText.length > 80 ? '…' : ''}" len=${normalizedText.length}`);
 

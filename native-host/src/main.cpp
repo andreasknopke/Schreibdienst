@@ -213,6 +213,7 @@ bool g_trayIconRegistered = false;
 // We create a hidden window on a dedicated thread so all SendInput
 // calls execute on a thread that owns a message queue.
 constexpr UINT WM_APP_DO_SENDINPUT = WM_APP + 1;
+constexpr UINT WM_APP_UPDATE_RECORDING_OVERLAY = WM_APP + 2;
 
 struct SendInputJob {
     std::vector<INPUT> inputs;
@@ -222,6 +223,138 @@ struct SendInputJob {
 HWND g_hiddenWnd = nullptr;
 HANDLE g_hiddenWndReady = nullptr;
 DWORD g_hiddenWndThreadId = 0;
+HWND g_recordingOverlayWnd = nullptr;
+
+LRESULT CALLBACK RecordingOverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps{};
+        HDC hdc = BeginPaint(hwnd, &ps);
+
+        RECT clientRect{};
+        GetClientRect(hwnd, &clientRect);
+
+        HBRUSH background = CreateSolidBrush(RGB(190, 0, 0));
+        FillRect(hdc, &clientRect, background);
+        DeleteObject(background);
+
+        HPEN borderPen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
+        HGDIOBJ oldPen = SelectObject(hdc, borderPen);
+        HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+        Rectangle(hdc, clientRect.left, clientRect.top, clientRect.right, clientRect.bottom);
+        SelectObject(hdc, oldBrush);
+        SelectObject(hdc, oldPen);
+        DeleteObject(borderPen);
+
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, RGB(255, 255, 255));
+
+        HFONT font = CreateFontW(
+            30, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI"
+        );
+        HGDIOBJ oldFont = SelectObject(hdc, font);
+
+        RECT textRect = clientRect;
+        DrawTextW(hdc, L"REC - AUFNAHME AKTIV", -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+        SelectObject(hdc, oldFont);
+        DeleteObject(font);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+
+    if (msg == WM_NCHITTEST) {
+        return HTTRANSPARENT;
+    }
+
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+HWND ensureRecordingOverlayWindow() {
+    if (g_recordingOverlayWnd != nullptr) {
+        return g_recordingOverlayWnd;
+    }
+
+    static bool classRegistered = false;
+    if (!classRegistered) {
+        WNDCLASSEXW wc{};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = RecordingOverlayWndProc;
+        wc.hInstance = GetModuleHandle(nullptr);
+        wc.lpszClassName = L"SchreibdienstRecordingOverlay";
+        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+
+        if (!RegisterClassExW(&wc)) {
+            return nullptr;
+        }
+
+        classRegistered = true;
+    }
+
+    constexpr int overlayWidth = 430;
+    constexpr int overlayHeight = 74;
+    constexpr int marginTop = 24;
+    constexpr int marginRight = 24;
+
+    const int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+    const int x = std::max(0, screenWidth - overlayWidth - marginRight);
+    const int y = marginTop;
+
+    g_recordingOverlayWnd = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+        L"SchreibdienstRecordingOverlay",
+        L"",
+        WS_POPUP,
+        x,
+        y,
+        overlayWidth,
+        overlayHeight,
+        nullptr,
+        nullptr,
+        GetModuleHandle(nullptr),
+        nullptr
+    );
+
+    if (g_recordingOverlayWnd == nullptr) {
+        return nullptr;
+    }
+
+    SetLayeredWindowAttributes(g_recordingOverlayWnd, 0, 245, LWA_ALPHA);
+    return g_recordingOverlayWnd;
+}
+
+void updateRecordingOverlayVisibility(bool visible) {
+    HWND overlay = ensureRecordingOverlayWindow();
+    if (overlay == nullptr) {
+        return;
+    }
+
+    if (visible) {
+        SetWindowPos(
+            overlay,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE
+        );
+        InvalidateRect(overlay, nullptr, TRUE);
+        UpdateWindow(overlay);
+        return;
+    }
+
+    ShowWindow(overlay, SW_HIDE);
+}
+
+void postRecordingOverlayUpdate(bool visible) {
+    if (g_hiddenWnd == nullptr) {
+        return;
+    }
+
+    PostMessage(g_hiddenWnd, WM_APP_UPDATE_RECORDING_OVERLAY, visible ? 1 : 0, 0);
+}
 
 bool ensureTrayIconRegistered() {
     if (g_hiddenWnd == nullptr) {
@@ -237,7 +370,7 @@ bool ensureTrayIconRegistered() {
     nid.hWnd = g_hiddenWnd;
     nid.uID = SCHREIBDIENST_TRAY_ICON_ID;
     nid.uFlags = NIF_ICON | NIF_TIP;
-    nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    nid.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
     wcscpy_s(nid.szTip, L"Schreibdienst Injector");
 
     if (!Shell_NotifyIconW(NIM_ADD, &nid)) {
@@ -293,6 +426,13 @@ void showRecordingStatusNotification(bool active, const wchar_t* source) {
 
 void setRecordingState(bool active, const wchar_t* source, bool notify) {
     const bool previous = g_recordingState.exchange(active);
+
+    if (active) {
+        postRecordingOverlayUpdate(notify);
+    } else {
+        postRecordingOverlayUpdate(false);
+    }
+
     if (previous == active) {
         return;
     }
@@ -314,6 +454,12 @@ LRESULT CALLBACK HiddenWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         }
         return 0;
     }
+
+    if (msg == WM_APP_UPDATE_RECORDING_OVERLAY) {
+        updateRecordingOverlayVisibility(wParam != 0);
+        return 0;
+    }
+
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
@@ -1494,6 +1640,10 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/,
 
     // Shut down hidden window thread
     removeTrayIcon();
+    if (g_recordingOverlayWnd != nullptr) {
+        DestroyWindow(g_recordingOverlayWnd);
+        g_recordingOverlayWnd = nullptr;
+    }
     if (g_hiddenWnd != nullptr) {
         PostMessage(g_hiddenWnd, WM_QUIT, 0, 0);
     }

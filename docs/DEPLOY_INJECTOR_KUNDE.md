@@ -39,10 +39,9 @@ Wenn der Injector läuft, stehen zusätzlich folgende Hotkeys zur Verfügung:
 - `Escape` – Aufnahme abbrechen
 
 ### Sichtbares Aufnahme-Feedback (Windows-Benachrichtigung)
-- Der Injector zeigt beim Start/Stop der Aufnahme eine kurze Windows-Benachrichtigung, **wenn das Schreibdienst-Frontend nicht sichtbar im Vordergrund ist**:
-   - **„Aufnahme aktiv“**
-   - **„Aufnahme beendet“**
-- Ist das Frontend sichtbar im Vordergrund, wird keine zusätzliche Injector-Benachrichtigung eingeblendet.
+- Der Injector zeigt eine **deutlich sichtbare rote Overlay-Anzeige** mit dem Text **„REC - AUFNAHME AKTIV“**, wenn das Schreibdienst-Frontend nicht sichtbar im Vordergrund ist.
+- Die Overlay-Anzeige bleibt während der laufenden Aufnahme eingeblendet und verschwindet beim Stop.
+- Ist das Frontend sichtbar im Vordergrund, wird keine zusätzliche Injector-Anzeige eingeblendet.
 
 Hinweis zum Philips SpeechMike im HID-Event-Modus:
 - Die rote Geräte-LED wird im HID-Event-Modus in der Regel nicht automatisch vom Keyboard-/Hotkey-Flow gesetzt.

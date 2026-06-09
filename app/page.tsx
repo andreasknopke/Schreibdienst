@@ -2349,6 +2349,15 @@ export default function HomePage() {
   // - Escape: Online-Modul auf Neu setzen
   const recordingRef = useRef(recording);
   const injectorRecordingStateRef = useRef<boolean | null>(null);
+
+  const isFrontendVisibleForInjector = useCallback(() => {
+    if (typeof document === 'undefined') {
+      return true;
+    }
+
+    return !document.hidden;
+  }, []);
+
   recordingRef.current = recording;
   const startRecordingHotkeyRef = useRef(startRecording);
   const stopRecordingHotkeyRef = useRef(stopRecording);
@@ -2468,12 +2477,49 @@ export default function HomePage() {
       return;
     }
 
-    const frontendVisible = typeof document !== 'undefined'
-      && document.visibilityState === 'visible'
-      && document.hasFocus();
+    const frontendVisible = isFrontendVisibleForInjector();
 
     void reportInjectorRecordingState(recording, frontendVisible);
-  }, [recording]);
+  }, [recording, isFrontendVisibleForInjector]);
+
+  useEffect(() => {
+    const reportVisibility = () => {
+      if (!recordingRef.current) {
+        return;
+      }
+
+      const frontendVisible = isFrontendVisibleForInjector();
+
+      void reportInjectorRecordingState(true, frontendVisible);
+    };
+
+    window.addEventListener('focus', reportVisibility);
+    window.addEventListener('blur', reportVisibility);
+    window.addEventListener('pageshow', reportVisibility);
+    document.addEventListener('visibilitychange', reportVisibility);
+
+    return () => {
+      window.removeEventListener('focus', reportVisibility);
+      window.removeEventListener('blur', reportVisibility);
+      window.removeEventListener('pageshow', reportVisibility);
+      document.removeEventListener('visibilitychange', reportVisibility);
+    };
+  }, [isFrontendVisibleForInjector]);
+
+  useEffect(() => {
+    if (!recording) {
+      return;
+    }
+
+    const heartbeat = window.setInterval(() => {
+      const frontendVisible = isFrontendVisibleForInjector();
+      void reportInjectorRecordingState(true, frontendVisible);
+    }, 1500);
+
+    return () => {
+      window.clearInterval(heartbeat);
+    };
+  }, [recording, isFrontendVisibleForInjector]);
 
   useEffect(() => {
     const handleHidMediaControl = (event: Event) => {

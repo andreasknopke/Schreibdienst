@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { APP_VERSION, type ReleaseSummary, type VersionInfoResponse } from '@/lib/version';
 
 const LAST_SEEN_VERSION_KEY = 'schreibdienst:last-seen-version';
@@ -166,13 +166,51 @@ function ReleaseCard({
 export default function UpdatePanel({
   isOpen = true,
   onRequestOpen,
+  onAutoHide,
 }: {
   isOpen?: boolean;
   onRequestOpen?: () => void;
+  onAutoHide?: () => void;
 }) {
   const [data, setData] = useState<VersionInfoResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedRecentReleaseVersion, setSelectedRecentReleaseVersion] = useState<string | null>(null);
+  const [didAutoOpen, setDidAutoOpen] = useState(false);
+  const autoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-Hide Timer: startet nur bei Auto-Open, bricht bei Benutzerinteraktion ab
+  useEffect(() => {
+    if (!isOpen) {
+      if (autoHideTimerRef.current) {
+        clearTimeout(autoHideTimerRef.current);
+        autoHideTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (!didAutoOpen) {
+      return;
+    }
+
+    autoHideTimerRef.current = setTimeout(() => {
+      setDidAutoOpen(false);
+      onAutoHide?.();
+    }, 10000);
+
+    return () => {
+      if (autoHideTimerRef.current) {
+        clearTimeout(autoHideTimerRef.current);
+        autoHideTimerRef.current = null;
+      }
+    };
+  }, [isOpen, didAutoOpen, onAutoHide]);
+
+  const cancelAutoHide = useCallback(() => {
+    if (autoHideTimerRef.current) {
+      clearTimeout(autoHideTimerRef.current);
+      autoHideTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     let isCancelled = false;
@@ -201,6 +239,7 @@ export default function UpdatePanel({
 
         if (shouldAutoOpenForCurrentVersion || shouldAutoOpenForNewUpdate) {
           onRequestOpen?.();
+          setDidAutoOpen(true);
         }
 
         if (shouldAutoOpenForNewUpdate && payload.latestRelease?.version) {
@@ -245,7 +284,7 @@ export default function UpdatePanel({
     : null;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" onClick={cancelAutoHide}>
       <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-300">
         Installierte Version: <span className="font-medium text-gray-900 dark:text-gray-100">v{APP_VERSION}</span>
       </div>

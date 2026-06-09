@@ -7,8 +7,10 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#ifndef __MINGW32__
 #include <windows.data.xml.dom.h>
 #include <windows.ui.notifications.h>
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <wrl.h>
@@ -436,6 +438,7 @@ bool ensureToastShortcutRegistered() {
     return saved;
 }
 
+#ifndef __MINGW32__
 bool showModernRecordingToast(bool active) {
     using ABI::Windows::Data::Xml::Dom::IXmlDocument;
     using ABI::Windows::Data::Xml::Dom::IXmlDocumentIO;
@@ -546,6 +549,11 @@ bool showModernRecordingToast(bool active) {
 
     return SUCCEEDED(hr);
 }
+#else
+bool showModernRecordingToast(bool /*active*/) {
+    return false;
+}
+#endif
 
 HICON getTrayStatusIcon(bool recordingActive) {
     return LoadIcon(nullptr, recordingActive ? IDI_ERROR : IDI_APPLICATION);

@@ -5145,6 +5145,7 @@ export default function HomePage() {
                 setShowHelpPanel(false);
                 setShowUpdatePanel(true);
               }}
+              onAutoHide={() => setShowUpdatePanel(false)}
             />
           </div>
         </aside>
@@ -5165,7 +5166,7 @@ export default function HomePage() {
           aria-expanded={showUpdatePanel}
         >
           <span className="block text-[11px] leading-tight">Update</span>
-          <span className="block text-base leading-none mt-0.5">←</span>
+          <span className="block text-base leading-none mt-0.5">{showUpdatePanel ? '→' : '←'}</span>
         </button>
       </div>
 

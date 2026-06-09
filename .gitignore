@@ -20,3 +20,6 @@ native-host/installer/*.exe
 
 artifacts/
 tmp/
+native-host/build-mingw/
+native-host/installer/*.zip
+native-host/installer/cli-deploy/

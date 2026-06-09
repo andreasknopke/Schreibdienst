@@ -225,3 +225,16 @@ export async function registerGlobalHotkeys(callback: HotkeyCallback): Promise<b
   await g_hotkeyInitPromise;
   return true;
 }
+
+export async function reportInjectorRecordingState(active: boolean, frontendVisible: boolean): Promise<void> {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const ws = await getWs();
+    ws.send(JSON.stringify({ type: 'recording-status', active, frontendVisible }));
+  } catch {
+    // Injector not available — ignore silently.
+  }
+}

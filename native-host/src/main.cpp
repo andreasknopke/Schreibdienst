@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <shellapi.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
@@ -200,6 +201,11 @@ std::mutex g_clientsMutex;
 std::set<SOCKET> g_wsClients;
 std::atomic<bool> g_serverRunning{false};
 std::mutex g_injectMutex;
+std::mutex g_notificationMutex;
+std::atomic<bool> g_recordingState{false};
+
+constexpr UINT SCHREIBDIENST_TRAY_ICON_ID = 1;
+bool g_trayIconRegistered = false;
 
 // Hidden message-only window for SendInput delegation.
 // SendInput(KEYEVENTF_UNICODE) requires the calling thread to have
@@ -216,6 +222,85 @@ struct SendInputJob {
 HWND g_hiddenWnd = nullptr;
 HANDLE g_hiddenWndReady = nullptr;
 DWORD g_hiddenWndThreadId = 0;
+
+bool ensureTrayIconRegistered() {
+    if (g_hiddenWnd == nullptr) {
+        return false;
+    }
+
+    if (g_trayIconRegistered) {
+        return true;
+    }
+
+    NOTIFYICONDATAW nid{};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = g_hiddenWnd;
+    nid.uID = SCHREIBDIENST_TRAY_ICON_ID;
+    nid.uFlags = NIF_ICON | NIF_TIP;
+    nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    wcscpy_s(nid.szTip, L"Schreibdienst Injector");
+
+    if (!Shell_NotifyIconW(NIM_ADD, &nid)) {
+        return false;
+    }
+
+    nid.uVersion = NOTIFYICON_VERSION_4;
+    Shell_NotifyIconW(NIM_SETVERSION, &nid);
+    g_trayIconRegistered = true;
+    return true;
+}
+
+void removeTrayIcon() {
+    std::lock_guard<std::mutex> lock(g_notificationMutex);
+    if (!g_trayIconRegistered || g_hiddenWnd == nullptr) {
+        return;
+    }
+
+    NOTIFYICONDATAW nid{};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = g_hiddenWnd;
+    nid.uID = SCHREIBDIENST_TRAY_ICON_ID;
+    Shell_NotifyIconW(NIM_DELETE, &nid);
+    g_trayIconRegistered = false;
+}
+
+void showRecordingStatusNotification(bool active, const wchar_t* source) {
+    std::lock_guard<std::mutex> lock(g_notificationMutex);
+
+    if (!ensureTrayIconRegistered()) {
+        return;
+    }
+
+    NOTIFYICONDATAW nid{};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = g_hiddenWnd;
+    nid.uID = SCHREIBDIENST_TRAY_ICON_ID;
+    nid.uFlags = NIF_INFO;
+    nid.dwInfoFlags = active ? NIIF_INFO : NIIF_NONE;
+    nid.uTimeout = 2000;
+
+    if (active) {
+        wcscpy_s(nid.szInfoTitle, L"Schreibdienst");
+        wcscpy_s(nid.szInfo, L"Aufnahme aktiv");
+    } else {
+        wcscpy_s(nid.szInfoTitle, L"Schreibdienst");
+        wcscpy_s(nid.szInfo, L"Aufnahme beendet");
+    }
+
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+    logLine("[NOTIFY] recording=%d source=%ls\n", active ? 1 : 0, source);
+}
+
+void setRecordingState(bool active, const wchar_t* source, bool notify) {
+    const bool previous = g_recordingState.exchange(active);
+    if (previous == active) {
+        return;
+    }
+
+    if (notify) {
+        showRecordingStatusNotification(active, source);
+    }
+}
 
 LRESULT CALLBACK HiddenWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_APP_DO_SENDINPUT) {
@@ -781,6 +866,14 @@ bool startHotkeyListener(HotkeyListener& listener, std::string& error) {
                 continue;
             }
 
+            const std::string action(binding->action);
+            if (action == "toggle-recording") {
+                const bool nowRecording = !g_recordingState.load();
+                setRecordingState(nowRecording, L"hotkey", false);
+            } else if (action == "stop-recording" || action == "cancel-recording") {
+                setRecordingState(false, L"hotkey", false);
+            }
+
             broadcastToClients(makeHotkeyEventResponse(*binding));
         }
 
@@ -1205,6 +1298,14 @@ void handleClient(SOCKET client) {
             continue;
         }
 
+        if (nr.type == L"recording-status") {
+            const bool active = getBoolValue(request, "active", false);
+            const bool frontendVisible = getBoolValue(request, "frontendVisible", false);
+            setRecordingState(active, L"websocket", !frontendVisible);
+            sendWsFrame(client, 0x1, makeTypedResponse("recording-status-updated", true, ""));
+            continue;
+        }
+
         // Handle inject request
         std::string response = handleRequest(request);
         sendWsFrame(client, 0x1, response);
@@ -1392,6 +1493,7 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/,
     stopHotkeyListener(hotkeyListener);
 
     // Shut down hidden window thread
+    removeTrayIcon();
     if (g_hiddenWnd != nullptr) {
         PostMessage(g_hiddenWnd, WM_QUIT, 0, 0);
     }

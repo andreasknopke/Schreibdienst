@@ -38,6 +38,16 @@ Wenn der Injector läuft, stehen zusätzlich folgende Hotkeys zur Verfügung:
 - `F11` – Aktuellen Editor-Text an die fokussierte Ziel-App übertragen
 - `Escape` – Aufnahme abbrechen
 
+### Sichtbares Aufnahme-Feedback (Windows-Benachrichtigung)
+- Der Injector zeigt beim Start/Stop der Aufnahme eine kurze Windows-Benachrichtigung, **wenn das Schreibdienst-Frontend nicht sichtbar im Vordergrund ist**:
+   - **„Aufnahme aktiv“**
+   - **„Aufnahme beendet“**
+- Ist das Frontend sichtbar im Vordergrund, wird keine zusätzliche Injector-Benachrichtigung eingeblendet.
+
+Hinweis zum Philips SpeechMike im HID-Event-Modus:
+- Die rote Geräte-LED wird im HID-Event-Modus in der Regel nicht automatisch vom Keyboard-/Hotkey-Flow gesetzt.
+- Stattdessen stellt die Injector-Benachrichtigung eine sichtbare Rückmeldung zum Aufnahmezustand bereit.
+
 ## Startoptionen
 Der Injector läuft standardmäßig vollständig im Hintergrund (kein sichtbares Fenster, keine Logausgabe). Für Diagnosezwecke lässt sich das Konsolenfenster mit Logging manuell starten:
 - `schreibdienst-injector.exe -show` – startet den Injector mit sichtbarem Konsolenfenster und ausführlichem Logging

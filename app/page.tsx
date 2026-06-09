@@ -21,7 +21,7 @@ import InjectorDownloadDialog from '@/components/InjectorDownloadDialog';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
-import { checkInjectorAvailability, injectToActiveWindow, registerGlobalHotkeys } from '@/lib/injectClient';
+import { checkInjectorAvailability, injectToActiveWindow, registerGlobalHotkeys, reportInjectorRecordingState } from '@/lib/injectClient';
 import { replaceAllInText } from '@/lib/replaceText';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
@@ -2348,6 +2348,7 @@ export default function HomePage() {
   // - F11: Aktuellen Editor-Text an die fokussierte Ziel-App uebertragen
   // - Escape: Online-Modul auf Neu setzen
   const recordingRef = useRef(recording);
+  const injectorRecordingStateRef = useRef<boolean | null>(null);
   recordingRef.current = recording;
   const startRecordingHotkeyRef = useRef(startRecording);
   const stopRecordingHotkeyRef = useRef(stopRecording);
@@ -2454,6 +2455,25 @@ export default function HomePage() {
       // Hotkey registration via WebSocket failed — non-fatal
     });
   }, [handleGlobalHotkeyAction]);
+
+  useEffect(() => {
+    const previous = injectorRecordingStateRef.current;
+    injectorRecordingStateRef.current = recording;
+
+    if (previous === null && !recording) {
+      return;
+    }
+
+    if (previous === recording) {
+      return;
+    }
+
+    const frontendVisible = typeof document !== 'undefined'
+      && document.visibilityState === 'visible'
+      && document.hasFocus();
+
+    void reportInjectorRecordingState(recording, frontendVisible);
+  }, [recording]);
 
   useEffect(() => {
     const handleHidMediaControl = (event: Event) => {

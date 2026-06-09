@@ -4275,10 +4275,10 @@ export default function HomePage() {
     <div className="space-y-3 min-h-[calc(100vh-120px)]" onContextMenu={handleContextMenu}>
       {/* Kompakte Steuerleiste */}
       <div className="card">
-        <div className="card-body py-3 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-3 flex-wrap">
-            {RecordButton}
-            <div className="flex flex-col gap-1">
+        <div className="card-body py-3 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
+              {RecordButton}
               <button
                 className={`btn h-9 w-9 p-0 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
                 onClick={() => {
@@ -4300,132 +4300,136 @@ export default function HomePage() {
                   <path d="M21 17H3" />
                 </svg>
               </button>
-              {liveInjectStatus && (
-                <span className="text-[11px] text-gray-500 dark:text-gray-400 max-w-64 truncate" title={liveInjectStatus}>
-                  {liveInjectStatus}
-                </span>
-              )}
-            </div>
-            <div className="flex flex-col gap-1 items-center justify-center">
-              <button
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${
-                  dictionarySet === 'medical'
-                    ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
-                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
-                }`}
-                onClick={() => void persistDictionarySet(dictionarySet === 'medical' ? 'alltag' : 'medical')}
-                disabled={dictionarySetSaving}
-                title={
-                  dictionarySet === 'medical'
-                    ? 'Medical-Modus: alle phonetischen Wörterbücher (Standard, Abteilung, persönlich) sind aktiv. Klicken zum Umschalten auf Alltag.'
-                    : 'Alltag-Modus: alle Wörterbücher sind aus. Klicken zum Umschalten auf Medical.'
-                }
-                aria-pressed={dictionarySet === 'medical'}
-                aria-label={dictionarySet === 'medical' ? 'Wörterbuch-Modus: Medical (an)' : 'Wörterbuch-Modus: Alltag (aus)'}
-              >
-                <span
-                  className={`inline-block w-2 h-2 rounded-full ${
-                    dictionarySet === 'medical' ? 'bg-white' : 'bg-gray-400'
+              <div className="flex flex-col gap-1 items-center justify-center">
+                <button
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                    dictionarySet === 'medical'
+                      ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
+                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
                   }`}
-                  aria-hidden="true"
-                />
-                {dictionarySet === 'medical' ? 'Medical' : 'Alltag'}
+                  onClick={() => void persistDictionarySet(dictionarySet === 'medical' ? 'alltag' : 'medical')}
+                  disabled={dictionarySetSaving}
+                  title={
+                    dictionarySet === 'medical'
+                      ? 'Medical-Modus: alle phonetischen Wörterbücher (Standard, Abteilung, persönlich) sind aktiv. Klicken zum Umschalten auf Alltag.'
+                      : 'Alltag-Modus: alle Wörterbücher sind aus. Klicken zum Umschalten auf Medical.'
+                  }
+                  aria-pressed={dictionarySet === 'medical'}
+                  aria-label={dictionarySet === 'medical' ? 'Wörterbuch-Modus: Medical (an)' : 'Wörterbuch-Modus: Alltag (aus)'}
+                >
+                  <span
+                    className={`inline-block w-2 h-2 rounded-full ${
+                      dictionarySet === 'medical' ? 'bg-white' : 'bg-gray-400'
+                    }`}
+                    aria-hidden="true"
+                  />
+                  {dictionarySet === 'medical' ? 'Medical' : 'Alltag'}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="btn btn-outline h-9 w-9 p-0"
+                  onClick={handleUndoTextHistory}
+                  title="Letzte Textänderung rückgängig machen"
+                  aria-label="Letzte Textänderung rückgängig machen"
+                  disabled={!textHistoryAvailability.canUndo || isProcessing}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M9 14 4 9l5-5" />
+                    <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
+                  </svg>
+                </button>
+                <button
+                  className="btn btn-outline h-9 w-9 p-0"
+                  onClick={handleRedoTextHistory}
+                  title="Rückgängig gemachte Textänderung wiederherstellen"
+                  aria-label="Rückgängig gemachte Textänderung wiederherstellen"
+                  disabled={!textHistoryAvailability.canRedo || isProcessing}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="m15 14 5-5-5-5" />
+                    <path d="M20 9H10a6 6 0 0 0 0 12h3" />
+                  </svg>
+                </button>
+                <button
+                  className="btn btn-outline h-9 w-9 p-0"
+                  onClick={handleReset}
+                  title="Alle Felder löschen"
+                  aria-label="Alle Felder löschen"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 2v6h6" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {canRevert && preCorrectionState && (
+                <>
+                  <button
+                    className="btn btn-outline text-sm py-1.5 px-3 text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-600 dark:hover:bg-amber-900/20"
+                    onClick={handleRevert}
+                    title="Korrektur rückgängig machen - zeigt den Originaltext"
+                    disabled={correcting}
+                  >
+                    ↩ Revert
+                  </button>
+                  <button
+                    className={`btn text-sm py-1.5 px-3 ${showDiffView ? 'btn-primary' : 'btn-outline'}`}
+                    onClick={() => setShowDiffView(!showDiffView)}
+                    title="Zeigt Unterschiede zwischen Original und KI-Korrektur"
+                    disabled={correcting || isReverted}
+                  >
+                    🔍 {showDiffView ? 'Diff aus' : 'Diff'}
+                  </button>
+                </>
+              )}
+              {isReverted && preCorrectionState && (
+                <>
+                  <button
+                    className="btn btn-outline text-sm py-1.5 px-3 text-purple-600 border-purple-300 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-600 dark:hover:bg-purple-900/20"
+                    onClick={handleReCorrect}
+                    title="Korrektur erneut durchführen"
+                    disabled={correcting}
+                  >
+                    {correcting ? <Spinner size={14} /> : '🔄 Neu korrigieren'}
+                  </button>
+                  <label
+                    className="flex items-center gap-1.5 text-xs cursor-pointer select-none px-2 py-1 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    title="Sprachbefehle wie 'Punkt eins', 'Nächster Punkt', 'Absatz' anwenden"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={applyFormatting}
+                      onChange={(e) => handleApplyFormattingToggle(e.target.checked)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-gray-600 dark:text-gray-400">Formatierung</span>
+                  </label>
+                </>
+              )}
+              <button
+                className={`btn text-sm py-1.5 px-3 ${pendingCorrection && !correctionButtonDisabled ? 'btn-primary animate-pulse' : 'btn-outline'}`}
+                onClick={mode === 'befund' ? handleFormatBefund : handleManualCorrect}
+                title={hasCorrectionText ? 'KI-Korrektur durchführen' : 'Text eingeben, um die KI-Korrektur zu aktivieren'}
+                disabled={correctionButtonDisabled}
+              >
+                {correcting ? <Spinner size={14} /> : '🤖 Korrigieren'}
               </button>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              className="btn btn-outline h-9 w-9 p-0"
-              onClick={handleUndoTextHistory}
-              title="Letzte Textänderung rückgängig machen"
-              aria-label="Letzte Textänderung rückgängig machen"
-              disabled={!textHistoryAvailability.canUndo || isProcessing}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M9 14 4 9l5-5" />
-                <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
-              </svg>
-            </button>
-            <button
-              className="btn btn-outline h-9 w-9 p-0"
-              onClick={handleRedoTextHistory}
-              title="Rückgängig gemachte Textänderung wiederherstellen"
-              aria-label="Rückgängig gemachte Textänderung wiederherstellen"
-              disabled={!textHistoryAvailability.canRedo || isProcessing}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="m15 14 5-5-5-5" />
-                <path d="M20 9H10a6 6 0 0 0 0 12h3" />
-              </svg>
-            </button>
-            <button 
-              className="btn btn-outline h-9 w-9 p-0" 
-              onClick={handleReset}
-              title="Alle Felder löschen"
-              aria-label="Alle Felder löschen"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <path d="M14 2v6h6" />
-              </svg>
-            </button>
-            {canRevert && preCorrectionState && (
-              <>
-                <button 
-                  className="btn btn-outline text-sm py-1.5 px-3 text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-600 dark:hover:bg-amber-900/20" 
-                  onClick={handleRevert}
-                  title="Korrektur rückgängig machen - zeigt den Originaltext"
-                  disabled={correcting}
-                >
-                  ↩ Revert
-                </button>
-                <button 
-                  className={`btn text-sm py-1.5 px-3 ${showDiffView ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={() => setShowDiffView(!showDiffView)}
-                  title="Zeigt Unterschiede zwischen Original und KI-Korrektur"
-                  disabled={correcting || isReverted}
-                >
-                  🔍 {showDiffView ? 'Diff aus' : 'Diff'}
-                </button>
-              </>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            {liveInjectStatus ? (
+              <div className="text-[11px] text-gray-500 dark:text-gray-400" title={liveInjectStatus}>
+                {liveInjectStatus}
+              </div>
+            ) : (
+              <div />
             )}
-            {isReverted && preCorrectionState && (
-              <>
-                <button 
-                  className="btn btn-outline text-sm py-1.5 px-3 text-purple-600 border-purple-300 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-600 dark:hover:bg-purple-900/20" 
-                  onClick={handleReCorrect}
-                  title="Korrektur erneut durchführen"
-                  disabled={correcting}
-                >
-                  {correcting ? <Spinner size={14} /> : '🔄 Neu korrigieren'}
-                </button>
-                <label 
-                  className="flex items-center gap-1.5 text-xs cursor-pointer select-none px-2 py-1 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
-                  title="Sprachbefehle wie 'Punkt eins', 'Nächster Punkt', 'Absatz' anwenden"
-                >
-                  <input
-                    type="checkbox"
-                    checked={applyFormatting}
-                    onChange={(e) => handleApplyFormattingToggle(e.target.checked)}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-gray-600 dark:text-gray-400">Formatierung</span>
-                </label>
-              </>
-            )}
-            <button 
-              className={`btn text-sm py-1.5 px-3 ${pendingCorrection && !correctionButtonDisabled ? 'btn-primary animate-pulse' : 'btn-outline'}`}
-              onClick={mode === 'befund' ? handleFormatBefund : handleManualCorrect}
-              title={hasCorrectionText ? 'KI-Korrektur durchführen' : 'Text eingeben, um die KI-Korrektur zu aktivieren'}
-              disabled={correctionButtonDisabled}
-            >
-              {correcting ? <Spinner size={14} /> : '🤖 Korrigieren'}
-            </button>
-            
-            {/* Textbaustein-Auswahl */}
             {availableTemplates.length > 0 && (
               <div className="flex items-center gap-1">
-                <select 
+                <select
                   className={`select text-sm py-1.5 max-w-[10rem] truncate ${templateMode ? 'border-orange-400 ring-1 ring-orange-300' : ''}`}
                   value={selectedTemplate?.id || ''}
                   onChange={(e) => {

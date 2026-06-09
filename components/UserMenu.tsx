@@ -31,7 +31,10 @@ export default function UserMenu() {
   const [mounted, setMounted] = useState(false);
   const [hidSupported, setHidSupported] = useState(false);
   const [hidConnected, setHidConnected] = useState(false);
+  const [hidDeviceName, setHidDeviceName] = useState<string | null>(null);
   const [hidConnecting, setHidConnecting] = useState(false);
+  const [showHidConnectPrompt, setShowHidConnectPrompt] = useState(false);
+  const [hidPromptDismissed, setHidPromptDismissed] = useState(false);
   const [dictionaryInitialWord, setDictionaryInitialWord] = useState('');
 
   // Nur im Browser rendern
@@ -43,6 +46,7 @@ export default function UserMenu() {
     const applyStatus = (status: HidMediaControlStatusDetail) => {
       setHidSupported(status.supported);
       setHidConnected(status.connected);
+      setHidDeviceName(status.deviceName ?? null);
     };
 
     applyStatus(getHidMediaControlStatus());
@@ -55,12 +59,28 @@ export default function UserMenu() {
     return () => window.removeEventListener(HID_MEDIA_CONTROL_STATUS_EVENT, handleStatus as EventListener);
   }, []);
 
+  useEffect(() => {
+    if (!mounted || !hidSupported || hidConnected || hidPromptDismissed) {
+      return;
+    }
+
+    setShowHidConnectPrompt(true);
+  }, [mounted, hidSupported, hidConnected, hidPromptDismissed]);
+
+  useEffect(() => {
+    if (hidConnected) {
+      setShowHidConnectPrompt(false);
+    }
+  }, [hidConnected]);
+
   const handleConnectDictationMic = useCallback(async () => {
     setHidConnecting(true);
     try {
       const connectedCount = await connectDictationMicrophone();
       if (connectedCount === 0) {
         window.alert('Kein unterstütztes Diktiermikrofon ausgewählt.');
+      } else {
+        setShowHidConnectPrompt(false);
       }
     } catch (error) {
       window.alert(error instanceof Error ? error.message : 'Diktiermikrofon konnte nicht verbunden werden.');
@@ -295,6 +315,62 @@ export default function UserMenu() {
     document.body
   ) : null;
 
+  const hidConnectPrompt = showHidConnectPrompt && mounted ? createPortal(
+    <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-md w-full my-8 flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b dark:border-gray-700">
+          <h2 className="font-semibold flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
+              <line x1="12" y1="18" x2="12" y2="22"/>
+              <line x1="8" y1="22" x2="16" y2="22"/>
+            </svg>
+            Diktiermikrofon verbinden
+          </h2>
+          <button
+            onClick={() => {
+              setShowHidConnectPrompt(false);
+              setHidPromptDismissed(true);
+            }}
+            className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            title="Später schließen"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6L6 18"/>
+              <path d="M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div className="p-4 space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Jetzt mit Mikro verbinden.
+          </p>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={() => {
+                setShowHidConnectPrompt(false);
+                setHidPromptDismissed(true);
+              }}
+              className="btn btn-outline text-sm py-1.5 px-3"
+              disabled={hidConnecting}
+            >
+              Später
+            </button>
+            <button
+              onClick={() => void handleConnectDictationMic()}
+              className="btn btn-primary text-sm py-1.5 px-3"
+              disabled={hidConnecting}
+            >
+              {hidConnecting ? 'Verbinde...' : 'OK'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  ) : null;
+
   return (
     <>
       <div className="flex items-center gap-1 sm:gap-2">
@@ -305,14 +381,36 @@ export default function UserMenu() {
         <span className="hidden text-xs text-gray-400 sm:inline" title="Installierte Version">
           v{APP_VERSION}
         </span>
-        {mounted && hidSupported && !hidConnected && (
+        {mounted && hidSupported && (
           <button
-            onClick={handleConnectDictationMic}
-            className="text-xs text-blue-600 hover:text-blue-700 px-1.5 py-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20"
-            title="Diktiermikrofon einmalig per WebHID freigeben"
-            disabled={hidConnecting}
+            onClick={() => {
+              if (!hidConnected) {
+                void handleConnectDictationMic();
+              }
+            }}
+            className={`inline-flex items-center gap-1.5 text-xs px-1.5 sm:px-2 py-1 rounded border transition-colors ${
+              hidConnected
+                ? 'text-emerald-700 border-emerald-200 bg-emerald-50 dark:text-emerald-300 dark:border-emerald-800 dark:bg-emerald-900/20 cursor-default'
+                : 'text-amber-700 border-amber-200 bg-amber-50 hover:bg-amber-100 dark:text-amber-300 dark:border-amber-800 dark:bg-amber-900/20 dark:hover:bg-amber-900/30'
+            }`}
+            title={hidConnected
+              ? `Diktiergerät verbunden${hidDeviceName ? `: ${hidDeviceName}` : ''}`
+              : 'Diktiergerät nicht verbunden. Klicken zum Verbinden.'}
+            disabled={hidConnecting || hidConnected}
+            aria-label={hidConnected
+              ? `Diktiergerät verbunden${hidDeviceName ? `: ${hidDeviceName}` : ''}`
+              : 'Diktiergerät nicht verbunden. Klicken zum Verbinden.'}
           >
-            {hidConnecting ? '...' : '🎙️'}
+            <span
+              className={`h-2 w-2 rounded-full ${
+                hidConnected ? 'bg-emerald-500' : 'bg-amber-500'
+              }`}
+              aria-hidden="true"
+            />
+            <span>🎙️</span>
+            <span className="hidden sm:inline">
+              {hidConnecting ? 'Verbinde...' : hidConnected ? 'Verbunden' : 'Nicht verbunden'}
+            </span>
           </button>
         )}
         <button
@@ -397,6 +495,7 @@ export default function UserMenu() {
       {standardDictModal}
       {groupDictModal}
       {helpModal}
+      {hidConnectPrompt}
       <BugReportForm open={showBugReport} onClose={() => setShowBugReport(false)} />
     </>
   );

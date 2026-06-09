@@ -34,6 +34,9 @@ export const HID_MEDIA_CONTROL_STATUS_EVENT = 'schreibdienst:hid-media-control-s
 const GRUNDIG_SONICMIC_VENDOR_ID = 0x15d8;
 const GRUNDIG_SONICMIC_PRODUCT_ID = 0x0025;
 const GRUNDIG_SONICMIC_RECORD_REPORT_ID = 0x01;
+const PHILIPS_SPEECHMIKE_VENDOR_ID = 0x0911;
+const PHILIPS_SPEECHMIKE_III_PRODUCT_ID = 0x0c1c;
+const PHILIPS_SPEECHMIKE_III_RECORD_REPORT_ID = 0x00;
 
 const HID_USAGE_BY_ACTION: Record<HidMediaControlAction, string> = {
   play: '0xB0',
@@ -96,6 +99,13 @@ interface ConnectedWebHidDevice {
   recordPressed: boolean;
 }
 
+interface SupportedWebHidDeviceDefinition {
+  vendorId: number;
+  productId: number;
+  hidUsage: string;
+  matchesRecordReport: (reportId: number, bytes: number[]) => boolean;
+}
+
 const connectedWebHidDevices = new Map<WebHidDevice, ConnectedWebHidDevice>();
 
 let activeWindow: Window | null = null;
@@ -141,6 +151,14 @@ function getWebHidApi(): WebHidApi | null {
 
 function isGrundigSonicMic(device: WebHidDevice): boolean {
   return device.vendorId === GRUNDIG_SONICMIC_VENDOR_ID && device.productId === GRUNDIG_SONICMIC_PRODUCT_ID;
+}
+
+function isPhilipsSpeechMikeIII(device: WebHidDevice): boolean {
+  return device.vendorId === PHILIPS_SPEECHMIKE_VENDOR_ID && device.productId === PHILIPS_SPEECHMIKE_III_PRODUCT_ID;
+}
+
+function isSupportedWebHidDevice(device: WebHidDevice): boolean {
+  return isGrundigSonicMic(device) || isPhilipsSpeechMikeIII(device);
 }
 
 function inputReportBytes(data: DataView): number[] {
@@ -193,6 +211,62 @@ function isGrundigRecordReport(reportId: number, bytes: number[]): boolean {
   return false;
 }
 
+function matchesPhilipsSpeechMikeRecordPayload(payload: number[]): boolean {
+  return (
+    payload.length >= 9 &&
+    payload[0] === 0x80 &&
+    payload[1] === 0x00 &&
+    payload[2] === 0x00 &&
+    payload[3] === 0x00 &&
+    payload[4] === 0x00 &&
+    payload[5] === 0x00 &&
+    payload[6] === 0x00 &&
+    payload[7] === 0x00 &&
+    payload[8] === 0x01
+  );
+}
+
+function isPhilipsSpeechMikeRecordReport(reportId: number, bytes: number[]): boolean {
+  if (reportId !== PHILIPS_SPEECHMIKE_III_RECORD_REPORT_ID) {
+    return false;
+  }
+
+  const payloads = bytes.length > 1 && bytes[0] === reportId
+    ? [bytes, bytes.slice(1)]
+    : [bytes];
+
+  for (const payload of payloads) {
+    for (let offset = 0; offset <= payload.length - 9; offset += 1) {
+      if (matchesPhilipsSpeechMikeRecordPayload(payload.slice(offset, offset + 9))) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+const SUPPORTED_WEBHID_DEVICES: SupportedWebHidDeviceDefinition[] = [
+  {
+    vendorId: GRUNDIG_SONICMIC_VENDOR_ID,
+    productId: GRUNDIG_SONICMIC_PRODUCT_ID,
+    hidUsage: '0xFF00:0x0001/0x01',
+    matchesRecordReport: isGrundigRecordReport,
+  },
+  {
+    vendorId: PHILIPS_SPEECHMIKE_VENDOR_ID,
+    productId: PHILIPS_SPEECHMIKE_III_PRODUCT_ID,
+    hidUsage: '0xFFA1:0x0003/0x0004',
+    matchesRecordReport: isPhilipsSpeechMikeRecordReport,
+  },
+];
+
+function getSupportedWebHidDeviceDefinition(device: WebHidDevice): SupportedWebHidDeviceDefinition | null {
+  return SUPPORTED_WEBHID_DEVICES.find((definition) => (
+    definition.vendorId === device.vendorId && definition.productId === device.productId
+  )) ?? null;
+}
+
 function dispatchActionEvent(
   target: Window,
   detail: HidMediaControlEventDetail,
@@ -240,7 +314,8 @@ async function connectWebHidDevice(
   target: Window,
   onEvent?: (detail: HidMediaControlEventDetail) => void,
 ): Promise<boolean> {
-  if (!isGrundigSonicMic(device)) {
+  const deviceDefinition = getSupportedWebHidDeviceDefinition(device);
+  if (!deviceDefinition) {
     return false;
   }
 
@@ -259,13 +334,13 @@ async function connectWebHidDevice(
 
   const handleInputReport = (event: Event) => {
     const inputEvent = event as WebHidInputReportEvent;
-    const recordPressed = isGrundigRecordReport(inputEvent.reportId, inputReportBytes(inputEvent.data));
+    const recordPressed = deviceDefinition.matchesRecordReport(inputEvent.reportId, inputReportBytes(inputEvent.data));
 
     if (recordPressed && !state.recordPressed) {
       state.recordPressed = true;
       dispatchActionEvent(target, {
         action: 'record',
-        hidUsage: '0xFF00:0x0001/0x01',
+        hidUsage: deviceDefinition.hidUsage,
         key: 'MediaRecord',
         code: 'MediaRecord',
         phase: 'keydown',
@@ -279,7 +354,7 @@ async function connectWebHidDevice(
       state.recordPressed = false;
       dispatchActionEvent(target, {
         action: 'record',
-        hidUsage: '0xFF00:0x0001/0x01',
+        hidUsage: deviceDefinition.hidUsage,
         key: 'MediaRecord',
         code: 'MediaRecord',
         phase: 'keyup',
@@ -307,7 +382,7 @@ async function connectGrantedWebHidDevices(
   }
 
   const devices = await hid.getDevices();
-  const matches = devices.filter(isGrundigSonicMic);
+  const matches = devices.filter(isSupportedWebHidDevice);
   await Promise.all(matches.map((device) => connectWebHidDevice(device, target, onEvent)));
   dispatchStatusEvent(target);
 
@@ -332,7 +407,7 @@ export function getHidMediaControlStatus(): HidMediaControlStatusDetail {
   };
 }
 
-export async function connectGrundigSonicMic(options: HidMediaControlsOptions = {}): Promise<number> {
+export async function connectDictationMicrophone(options: HidMediaControlsOptions = {}): Promise<number> {
   if (typeof window === 'undefined') {
     return 0;
   }
@@ -344,16 +419,21 @@ export async function connectGrundigSonicMic(options: HidMediaControlsOptions = 
 
   const target = options.target ?? window;
   const selectedDevices = await hid.requestDevice({
-    filters: [{ vendorId: GRUNDIG_SONICMIC_VENDOR_ID, productId: GRUNDIG_SONICMIC_PRODUCT_ID }],
+    filters: SUPPORTED_WEBHID_DEVICES.map((definition) => ({
+      vendorId: definition.vendorId,
+      productId: definition.productId,
+    })),
   });
   const grantedDevices = await hid.getDevices();
-  const devices = grantedDevices.filter(isGrundigSonicMic);
+  const devices = grantedDevices.filter(isSupportedWebHidDevice);
 
   await Promise.all(devices.map((device) => connectWebHidDevice(device, target, options.onEvent)));
   dispatchStatusEvent(target);
 
   return selectedDevices.length;
 }
+
+export const connectGrundigSonicMic = connectDictationMicrophone;
 
 export function startHidMediaControls(options: HidMediaControlsOptions = {}): void {
   if (typeof window === 'undefined') {

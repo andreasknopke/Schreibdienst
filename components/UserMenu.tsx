@@ -12,7 +12,7 @@ import GroupDictionaryManager from './GroupDictionaryManager';
 import BugReportForm from './BugReportForm';
 import { APP_VERSION } from '@/lib/version';
 import {
-  connectGrundigSonicMic,
+  connectDictationMicrophone,
   getHidMediaControlStatus,
   HID_MEDIA_CONTROL_STATUS_EVENT,
   type HidMediaControlStatusDetail,
@@ -55,15 +55,15 @@ export default function UserMenu() {
     return () => window.removeEventListener(HID_MEDIA_CONTROL_STATUS_EVENT, handleStatus as EventListener);
   }, []);
 
-  const handleConnectSonicMic = useCallback(async () => {
+  const handleConnectDictationMic = useCallback(async () => {
     setHidConnecting(true);
     try {
-      const connectedCount = await connectGrundigSonicMic();
+      const connectedCount = await connectDictationMicrophone();
       if (connectedCount === 0) {
-        window.alert('Kein Grundig SonicMic II ausgewählt.');
+        window.alert('Kein unterstütztes Diktiermikrofon ausgewählt.');
       }
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'SonicMic konnte nicht verbunden werden.');
+      window.alert(error instanceof Error ? error.message : 'Diktiermikrofon konnte nicht verbunden werden.');
     } finally {
       setHidConnecting(false);
     }
@@ -307,9 +307,9 @@ export default function UserMenu() {
         </span>
         {mounted && hidSupported && !hidConnected && (
           <button
-            onClick={handleConnectSonicMic}
+            onClick={handleConnectDictationMic}
             className="text-xs text-blue-600 hover:text-blue-700 px-1.5 py-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20"
-            title="Grundig SonicMic II einmalig freigeben"
+            title="Diktiermikrofon einmalig per WebHID freigeben"
             disabled={hidConnecting}
           >
             {hidConnecting ? '...' : '🎙️'}

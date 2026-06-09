@@ -432,6 +432,7 @@ export default function HomePage() {
   const [liveInjectStatus, setLiveInjectStatus] = useState<string | null>(null);
   const liveInjectEnabledRef = useRef(false);
   const liveInjectQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const liveInjectFailureCountRef = useRef(0);
   const [injectorCheckInProgress, setInjectorCheckInProgress] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -762,9 +763,9 @@ export default function HomePage() {
         const shouldRestorePreviousWindow = typeof document !== 'undefined' && document.hasFocus();
         setLiveInjectStatus(shouldRestorePreviousWindow ? 'Sende an vorherige Ziel-App…' : 'Sende an aktive Ziel-App…');
 
-        const result = await injectToActiveWindow({
+        const request = {
           text: normalizedText,
-          mode: 'sendinput',
+          mode: 'sendinput' as const,
           restorePreviousWindow: shouldRestorePreviousWindow,
           delayMs: shouldRestorePreviousWindow ? 35 : 0,
           // Eine kleine Pause zwischen den Unicode-Events gibt langsamen
@@ -773,15 +774,28 @@ export default function HomePage() {
           // landet. Sonst gehen bei Bursts Zeichen verloren.
           charDelayMs: 2,
           fallbackToClipboard: false,
-        });
+        };
+
+        let result = await injectToActiveWindow(request);
+
+        // Kurzzeitige Unterbrechungen (z. B. minimierte App / Fokuswechsel)
+        // werden mit einem direkten Retry abgefangen.
+        if (!result.ok) {
+          await new Promise((resolve) => setTimeout(resolve, 220));
+          result = await injectToActiveWindow(request);
+        }
 
         if (!result.ok) {
-          setLiveInjectEnabled(false);
-          setLiveInjectStatus('Live-Übertragung fehlgeschlagen');
-          setError(result.error || 'Live-Übertragung in die Ziel-App fehlgeschlagen');
+          liveInjectFailureCountRef.current += 1;
+          setLiveInjectStatus('Live-Übertragung kurz unterbrochen – warte auf Verbindung…');
+          // NICHT deaktivieren: Ziel-App-Modus bleibt aktiv und ist nur per Button ausschaltbar.
+          if (liveInjectFailureCountRef.current % 5 === 1) {
+            setError(result.error || 'Live-Übertragung derzeit nicht möglich (Modus bleibt aktiv).');
+          }
           return;
         }
 
+        liveInjectFailureCountRef.current = 0;
         setLiveInjectStatus(`Gesendet: ${normalizedText.trim().length} Zeichen`);
       });
   }, []);

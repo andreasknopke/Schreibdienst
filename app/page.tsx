@@ -766,12 +766,12 @@ export default function HomePage() {
           text: normalizedText,
           mode: 'sendinput',
           restorePreviousWindow: shouldRestorePreviousWindow,
-          delayMs: shouldRestorePreviousWindow ? 80 : 0,
+          delayMs: shouldRestorePreviousWindow ? 35 : 0,
           // Eine kleine Pause zwischen den Unicode-Events gibt langsamen
           // Ziel-Apps (KIS, alte Textverarbeitung) Zeit, jedes Zeichen
           // tatsächlich zu verarbeiten, bevor das nächste im Tastaturpuffer
           // landet. Sonst gehen bei Bursts Zeichen verloren.
-          charDelayMs: 5,
+          charDelayMs: 2,
           fallbackToClipboard: false,
         });
 

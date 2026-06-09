@@ -356,6 +356,31 @@ void postRecordingOverlayUpdate(bool visible) {
     PostMessage(g_hiddenWnd, WM_APP_UPDATE_RECORDING_OVERLAY, visible ? 1 : 0, 0);
 }
 
+HICON getTrayStatusIcon(bool recordingActive) {
+    return LoadIcon(nullptr, recordingActive ? IDI_ERROR : IDI_APPLICATION);
+}
+
+void updateTrayIconAppearanceLocked(bool recordingActive) {
+    if (!g_trayIconRegistered || g_hiddenWnd == nullptr) {
+        return;
+    }
+
+    NOTIFYICONDATAW nid{};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = g_hiddenWnd;
+    nid.uID = SCHREIBDIENST_TRAY_ICON_ID;
+    nid.uFlags = NIF_ICON | NIF_TIP;
+    nid.hIcon = getTrayStatusIcon(recordingActive);
+
+    if (recordingActive) {
+        wcscpy_s(nid.szTip, L"Schreibdienst Injector - Aufnahme aktiv");
+    } else {
+        wcscpy_s(nid.szTip, L"Schreibdienst Injector");
+    }
+
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
 bool ensureTrayIconRegistered() {
     if (g_hiddenWnd == nullptr) {
         return false;
@@ -370,8 +395,8 @@ bool ensureTrayIconRegistered() {
     nid.hWnd = g_hiddenWnd;
     nid.uID = SCHREIBDIENST_TRAY_ICON_ID;
     nid.uFlags = NIF_ICON | NIF_TIP;
-    nid.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
-    wcscpy_s(nid.szTip, L"Schreibdienst Injector");
+    nid.hIcon = getTrayStatusIcon(g_recordingState.load());
+    wcscpy_s(nid.szTip, g_recordingState.load() ? L"Schreibdienst Injector - Aufnahme aktiv" : L"Schreibdienst Injector");
 
     if (!Shell_NotifyIconW(NIM_ADD, &nid)) {
         return false;
@@ -409,6 +434,9 @@ void showRecordingStatusNotification(bool active, const wchar_t* source) {
     nid.hWnd = g_hiddenWnd;
     nid.uID = SCHREIBDIENST_TRAY_ICON_ID;
     nid.uFlags = NIF_INFO;
+#ifdef NIF_REALTIME
+    nid.uFlags |= NIF_REALTIME;
+#endif
     nid.dwInfoFlags = active ? NIIF_INFO : NIIF_NONE;
     nid.uTimeout = 2000;
 
@@ -421,6 +449,7 @@ void showRecordingStatusNotification(bool active, const wchar_t* source) {
     }
 
     Shell_NotifyIconW(NIM_MODIFY, &nid);
+    MessageBeep(active ? MB_ICONASTERISK : MB_OK);
     logLine("[NOTIFY] recording=%d source=%ls\n", active ? 1 : 0, source);
 }
 
@@ -431,6 +460,13 @@ void setRecordingState(bool active, const wchar_t* source, bool notify) {
         postRecordingOverlayUpdate(notify);
     } else {
         postRecordingOverlayUpdate(false);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_notificationMutex);
+        if (ensureTrayIconRegistered()) {
+            updateTrayIconAppearanceLocked(active);
+        }
     }
 
     if (previous == active) {

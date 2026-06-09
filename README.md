@@ -381,6 +381,8 @@ Eine detaillierte Entwicklerdokumentation für den Einstieg und die Weiterentwic
 
 - [docs/ENTWICKLERDOKU.md](docs/ENTWICKLERDOKU.md)
 - [docs/API_REFERENZ.md](docs/API_REFERENZ.md)
+- [docs/DEPLOY_INJECTOR_ADMIN.md](docs/DEPLOY_INJECTOR_ADMIN.md)
+- [docs/DEPLOY_INJECTOR_KUNDE.md](docs/DEPLOY_INJECTOR_KUNDE.md)
 - [docs/Schreibdienst.postman_collection.json](docs/Schreibdienst.postman_collection.json)
 - [docs/Schreibdienst.insomnia.json](docs/Schreibdienst.insomnia.json)
 

@@ -246,6 +246,10 @@ export default function UpdatePanel({
 
   return (
     <div className="space-y-3">
+      <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-300">
+        Installierte Version: <span className="font-medium text-gray-900 dark:text-gray-100">v{APP_VERSION}</span>
+      </div>
+
       {isLoading && (
         <div className="rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-300">
           Pruefe Versionsinformationen ...

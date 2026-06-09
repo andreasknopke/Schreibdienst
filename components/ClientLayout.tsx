@@ -10,7 +10,7 @@ import LoginForm from '@/components/LoginForm';
 import { startHidMediaControls, stopHidMediaControls } from '@/lib/hidMediaControls';
 
 function LayoutContent({ children }: { children: ReactNode }) {
-  const { isLoggedIn, canViewAllDictations } = useAuth();
+  const { isLoggedIn, canViewAllDictations, username, isAdmin } = useAuth();
   const pathname = usePathname();
   
   // Offline- und Statistik-Seiten bekommen volle Breite (Tabellen/Dashboards)
@@ -46,16 +46,22 @@ function LayoutContent({ children }: { children: ReactNode }) {
     <>
       <header className="border-b bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:bg-zinc-900/80 sticky top-0 z-40">
         <div className={`${isFullWidth ? 'w-full' : 'max-w-2xl'} mx-auto px-3 py-2 flex items-center justify-between`}>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <div className="h-7 w-7 rounded-lg bg-[rgb(var(--primary-600))] flex items-center justify-center">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="white">
                 <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
                 <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
               </svg>
             </div>
-            <h1 className="text-base font-semibold">Schreibdienst</h1>
+            <div className="min-w-0 leading-tight">
+              <h1 className="text-base font-semibold">Schreibdienst</h1>
+              <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                {username}
+                {isAdmin && <span className="ml-1 text-blue-600 dark:text-blue-400">(Admin)</span>}
+              </p>
+            </div>
           </div>
-          <nav className="flex items-center gap-2 text-sm text-gray-600">
+          <nav className="flex flex-1 min-w-0 items-center justify-end gap-2 text-sm text-gray-600">
             <UserMenu />
             <VoiceAgentButton />
             <ThemeToggle />

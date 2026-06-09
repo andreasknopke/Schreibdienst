@@ -5072,9 +5072,18 @@ export default function HomePage() {
           }}
           aria-hidden={!showHelpPanel}
         >
-          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Hilfe</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Sprachbefehle, Hotkeys und Bedienung</p>
+          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Hilfe</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Sprachbefehle, Hotkeys und Bedienung</p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-outline text-sm py-1.5 px-3 shrink-0"
+              onClick={() => setShowHelpPanel(false)}
+            >
+              Schliessen
+            </button>
           </div>
           <div className="px-4 py-3">
             <HelpPanel />
@@ -5116,9 +5125,18 @@ export default function HomePage() {
           }}
           aria-hidden={!showUpdatePanel}
         >
-          <div className="px-4 py-3 border-b border-blue-200 dark:border-blue-900/60">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Updates</h3>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Versionshinweise und neue Versionen</p>
+          <div className="px-4 py-3 border-b border-blue-200 dark:border-blue-900/60 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Updates</h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Versionshinweise und neue Versionen</p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-outline text-sm py-1.5 px-3 shrink-0"
+              onClick={() => setShowUpdatePanel(false)}
+            >
+              Schliessen
+            </button>
           </div>
           <div className="px-4 py-3">
             <UpdatePanel

@@ -1,5 +1,7 @@
 # Schreibdienst Injector – Installationsanleitung für Kund:innen
 
+Für Massenrollout, Silent-Installation und Admin-Skripte siehe auch `docs/DEPLOY_INJECTOR_ADMIN.md`.
+
 ## Voraussetzungen
 - Windows
 - Das Rollout-ZIP wurde vollständig entpackt
@@ -17,6 +19,40 @@
    - *„Automatisch starten für alle Benutzer“* – startet den Injector für alle Benutzer des Computers (Computer-Autostart).
 4. Der Injector wird automatisch gestartet und läuft unsichtbar im Hintergrund.
 5. Die PWA `Schreibdienst` neu öffnen oder neu laden.
+
+## Unbeaufsichtigte Installation per Kommandozeile
+Der Installer basiert auf Inno Setup und kann daher ohne GUI per Kommandozeile ausgerollt werden.
+
+### Typische Silent-Installation
+```powershell
+.\schreibdienst-injector-setup-{version}.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+```
+
+### Silent-Installation mit Autostart für den aktuellen Benutzer
+```powershell
+.\schreibdienst-injector-setup-{version}.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /TASKS="autostart"
+```
+
+### Silent-Installation mit Autostart für alle Benutzer
+```powershell
+.\schreibdienst-injector-setup-{version}.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /TASKS="autostart_all"
+```
+
+### Silent-Installation in ein eigenes Zielverzeichnis
+```powershell
+.\schreibdienst-injector-setup-{version}.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="C:\Program Files\Schreibdienst Injector"
+```
+
+Wichtige Hinweise für Admins:
+- `/TASKS="autostart"` setzt den HKCU-Autostart für den ausführenden Benutzer.
+- `/TASKS="autostart_all"` setzt den HKLM-Autostart für alle Benutzer und benötigt Administrator-Rechte.
+- Bei Silent-Installationen startet der Injector nach dem Setup nicht automatisch sofort im aktuellen Benutzerkontext. Der Autostart greift beim nächsten Windows-Login oder der Injector wird danach separat gestartet.
+- Für Softwareverteilung per RMM, GPO oder Intune ist `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-` die sinnvollste Basis.
+
+### Unbeaufsichtigte Deinstallation
+```powershell
+"C:\Program Files\Schreibdienst Injector\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+```
 
 ## Manuelle Installation (ohne Installer)
 1. Das ZIP vollständig entpacken.

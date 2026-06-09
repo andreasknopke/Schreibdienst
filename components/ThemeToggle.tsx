@@ -20,12 +20,12 @@ export default function ThemeToggle() {
 
   return (
     <button
-      className="btn btn-ghost"
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
       onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
       aria-label="Theme umschalten"
-      title="Theme umschalten"
+      title={theme === 'dark' ? 'Helles Theme aktivieren' : 'Dunkles Theme aktivieren'}
     >
-      {theme === 'dark' ? '☾ Dark' : '☀︎ Light'}
+      <span aria-hidden="true">{theme === 'dark' ? '☾' : '☀︎'}</span>
     </button>
   );
 }

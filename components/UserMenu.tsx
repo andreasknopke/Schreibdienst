@@ -1,16 +1,14 @@
 "use client";
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from './AuthProvider';
 import UserManagement from './UserManagement';
 import DictionaryManager from './DictionaryManager';
 import TemplatesManager from './TemplatesManager';
 import ConfigPanel from './ConfigPanel';
-import HelpPanel from './HelpPanel';
 import StandardDictionaryManager from './StandardDictionaryManager';
 import GroupDictionaryManager from './GroupDictionaryManager';
 import BugReportForm from './BugReportForm';
-import { APP_VERSION } from '@/lib/version';
 import {
   connectDictationMicrophone,
   getHidMediaControlStatus,
@@ -24,10 +22,10 @@ export default function UserMenu() {
   const [showDictionary, setShowDictionary] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
   const [showStandardDict, setShowStandardDict] = useState(false);
   const [showGroupDict, setShowGroupDict] = useState(false);
   const [showBugReport, setShowBugReport] = useState(false);
+  const [showDictionaryMenu, setShowDictionaryMenu] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [hidSupported, setHidSupported] = useState(false);
   const [hidConnected, setHidConnected] = useState(false);
@@ -36,6 +34,7 @@ export default function UserMenu() {
   const [showHidConnectPrompt, setShowHidConnectPrompt] = useState(false);
   const [hidPromptDismissed, setHidPromptDismissed] = useState(false);
   const [dictionaryInitialWord, setDictionaryInitialWord] = useState('');
+  const dictionaryMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Nur im Browser rendern
   useEffect(() => {
@@ -73,6 +72,32 @@ export default function UserMenu() {
     }
   }, [hidConnected]);
 
+  useEffect(() => {
+    if (!showDictionaryMenu) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!dictionaryMenuRef.current?.contains(event.target as Node)) {
+        setShowDictionaryMenu(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowDictionaryMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showDictionaryMenu]);
+
   const handleConnectDictationMic = useCallback(async () => {
     setHidConnecting(true);
     try {
@@ -94,6 +119,7 @@ export default function UserMenu() {
     const selection = window.getSelection();
     const selectedText = selection?.toString().trim() || '';
     setDictionaryInitialWord(selectedText);
+    setShowDictionaryMenu(false);
     setShowDictionary(true);
   }, []);
 
@@ -102,6 +128,8 @@ export default function UserMenu() {
     setShowDictionary(false);
     setDictionaryInitialWord('');
   }, []);
+
+  const dictionaryMenuItemClass = 'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs transition-colors hover:bg-gray-100 dark:hover:bg-gray-800';
 
   if (!isLoggedIn) return null;
 
@@ -284,37 +312,6 @@ export default function UserMenu() {
     document.body
   ) : null;
 
-  const helpModal = showHelp && mounted ? createPortal(
-    <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-lg w-full my-8 flex flex-col max-h-[calc(100vh-4rem)]">
-        <div className="flex items-center justify-between p-4 border-b dark:border-gray-700 flex-shrink-0">
-          <h2 className="font-semibold flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-              <path d="M12 17h.01"/>
-            </svg>
-            Hilfe & Bedienung
-          </h2>
-          <button
-            onClick={() => setShowHelp(false)}
-            className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-            title="Schließen"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6L6 18"/>
-              <path d="M6 6l12 12"/>
-            </svg>
-          </button>
-        </div>
-        <div className="p-4 overflow-y-auto flex-1">
-          <HelpPanel />
-        </div>
-      </div>
-    </div>,
-    document.body
-  ) : null;
-
   const hidConnectPrompt = showHidConnectPrompt && mounted ? createPortal(
     <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
       <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-md w-full my-8 flex flex-col">
@@ -373,14 +370,7 @@ export default function UserMenu() {
 
   return (
     <>
-      <div className="flex items-center gap-1 sm:gap-2">
-        <span className="text-xs text-gray-500 hidden sm:inline">
-          {username}
-          {isAdmin && <span className="ml-1 text-blue-600">(Admin)</span>}
-        </span>
-        <span className="hidden text-xs text-gray-400 sm:inline" title="Installierte Version">
-          v{APP_VERSION}
-        </span>
+      <div className="flex flex-1 flex-wrap items-center justify-end gap-1 sm:gap-2 min-w-0 max-w-full">
         {mounted && hidSupported && (
           <button
             onClick={() => {
@@ -420,13 +410,75 @@ export default function UserMenu() {
         >
           🐞<span className="hidden sm:inline"> Melden</span>
         </button>
-        <button
-          onClick={handleOpenDictionary}
-          className="text-xs text-green-600 hover:text-green-700 px-1.5 sm:px-2 py-1 rounded hover:bg-green-50 dark:hover:bg-green-900/20"
-          title="Mein Wörterbuch (markierter Text wird übernommen)"
-        >
-          📖<span className="hidden sm:inline"> Wörterbuch</span>
-        </button>
+        {isAdmin ? (
+          <div ref={dictionaryMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setShowDictionaryMenu((current) => !current)}
+              className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50/80 px-2 py-1 text-xs text-green-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800/60 dark:text-green-400 dark:hover:bg-gray-800"
+              title="Wörterbücher öffnen"
+              aria-haspopup="menu"
+              aria-expanded={showDictionaryMenu}
+            >
+              <span aria-hidden="true">📖</span>
+              <span className="hidden sm:inline">Wörterbücher</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m6 9 6 6 6-6"/>
+              </svg>
+            </button>
+            {showDictionaryMenu && (
+              <div
+                className="absolute right-0 top-full z-30 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+                role="menu"
+              >
+                <button
+                  type="button"
+                  onClick={handleOpenDictionary}
+                  className={`${dictionaryMenuItemClass} text-green-700 dark:text-green-400`}
+                  title="Mein Wörterbuch (markierter Text wird übernommen)"
+                  role="menuitem"
+                >
+                  <span aria-hidden="true">📖</span>
+                  <span>Mein Wörterbuch</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDictionaryMenu(false);
+                    setShowGroupDict(true);
+                  }}
+                  className={`${dictionaryMenuItemClass} text-cyan-700 dark:text-cyan-400`}
+                  title="Gruppen-Wörterbücher verwalten"
+                  role="menuitem"
+                >
+                  <span aria-hidden="true">👥</span>
+                  <span>Gruppen-Wörterbücher</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDictionaryMenu(false);
+                    setShowStandardDict(true);
+                  }}
+                  className={`${dictionaryMenuItemClass} text-teal-700 dark:text-teal-400`}
+                  title="Standard-Wörterbuch verwalten (für alle Benutzer)"
+                  role="menuitem"
+                >
+                  <span aria-hidden="true">📚</span>
+                  <span>Standard-Wörterbuch</span>
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            onClick={handleOpenDictionary}
+            className="text-xs text-green-600 hover:text-green-700 px-1.5 sm:px-2 py-1 rounded hover:bg-green-50 dark:hover:bg-green-900/20"
+            title="Mein Wörterbuch (markierter Text wird übernommen)"
+          >
+            📖<span className="hidden sm:inline"> Wörterbuch</span>
+          </button>
+        )}
         <button
           onClick={() => setShowTemplates(true)}
           className="text-xs text-orange-600 hover:text-orange-700 px-1.5 sm:px-2 py-1 rounded hover:bg-orange-50 dark:hover:bg-orange-900/20"
@@ -434,32 +486,6 @@ export default function UserMenu() {
         >
           📝<span className="hidden sm:inline"> Bausteine</span>
         </button>
-        <button
-          onClick={() => setShowHelp(!showHelp)}
-          className="text-xs text-gray-600 hover:text-gray-700 px-1.5 sm:px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-900/20"
-          title="Hilfe & Bedienung"
-        >
-          ❓
-        </button>
-        {/* Standard-Wörterbuch nur für Admins */}
-        {isAdmin && (
-          <button
-            onClick={() => setShowStandardDict(!showStandardDict)}
-            className="text-xs text-teal-600 hover:text-teal-700 px-1.5 sm:px-2 py-1 rounded hover:bg-teal-50 dark:hover:bg-teal-900/20"
-            title="Standard-Wörterbuch verwalten (für alle Benutzer)"
-          >
-            📚<span className="hidden sm:inline"> Standard</span>
-          </button>
-        )}
-        {isAdmin && (
-          <button
-            onClick={() => setShowGroupDict(!showGroupDict)}
-            className="text-xs text-cyan-600 hover:text-cyan-700 px-1.5 sm:px-2 py-1 rounded hover:bg-cyan-50 dark:hover:bg-cyan-900/20"
-            title="Gruppen-Wörterbücher verwalten"
-          >
-            👥<span className="hidden sm:inline"> Gruppen</span>
-          </button>
-        )}
         {/* Config only visible for root user */}
         {username?.toLowerCase() === 'root' && (
           <button
@@ -494,7 +520,6 @@ export default function UserMenu() {
       {userManagementModal}
       {standardDictModal}
       {groupDictModal}
-      {helpModal}
       {hidConnectPrompt}
       <BugReportForm open={showBugReport} onClose={() => setShowBugReport(false)} />
     </>

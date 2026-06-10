@@ -39,12 +39,389 @@ export interface PreprocessTranscriptionResult {
   operations: DictionaryCorrectionOperation[];
 }
 
+export interface MedicalAbbreviationOperation extends DictionaryCorrectionOperation {
+  originalText: string;
+  replacementText: string;
+  dictionaryWrong: string;
+  dictionaryCorrect: string;
+  source: 'standard';
+  matchType: 'exact';
+  ruleKey: string;
+  category: keyof typeof MEDICAL_ABBREVIATION_RULES;
+}
+
+export interface PreprocessTranscriptionOptions {
+  targetUsername?: string;
+  dictionarySet?: 'alltag' | 'medical';
+}
+
 type DictionarySource = 'standard' | 'private' | 'group';
 
 type AnnotatedDictionaryEntry = DictionaryEntry & {
   source: DictionarySource;
   targetUsername?: string;
 };
+
+const MEDICAL_ABBREVIATION_RULES = {
+  volumen: {
+    milliliter: 'ml',
+    mikroliter: 'µl',
+    liter: 'l',
+    deziliter: 'dl',
+    kubikzentimeter: 'ccm',
+    tropfen: 'gtt',
+  },
+  masse: {
+    gramm: 'g',
+    milligramm: 'mg',
+    mikrogramm: 'µg',
+    nanogramm: 'ng',
+    kilogramm: 'kg',
+    internationale_einheit: 'IE',
+    einheiten: 'E',
+  },
+  konzentration: {
+    milligramm_pro_deziliter: 'mg/dl',
+    millimol_pro_liter: 'mmol/l',
+    mikromol_pro_liter: 'µmol/l',
+    gramm_pro_liter: 'g/l',
+    gramm_pro_deziliter: 'g/dl',
+    milligramm_pro_kilogramm: 'mg/kg',
+    millimol_pro_kilogramm: 'mmol/kg',
+    mikrogramm_pro_kilogramm: 'µg/kg',
+    internationale_einheit_pro_kilogramm: 'IE/kg',
+    einheiten_pro_kilogramm: 'E/kg',
+    milliliter_pro_kilogramm: 'ml/kg',
+    tropfen_pro_minute: 'gtt/min',
+    promille: '‰',
+    prozent: '%',
+  },
+  vitalwerte_zeit: {
+    schlaege_pro_minute: 'bpm',
+    atemzuege_pro_minute: '/min',
+    millimeter_quecksilbersaeule: 'mmHg',
+    grad_celsius: '°C',
+    sekunden: 's',
+    minuten: 'min',
+    stunden: 'h',
+    tage: 'd',
+    milliliter_pro_stunde: 'ml/h',
+    milliliter_pro_minute: 'ml/min',
+    gramm_pro_stunde: 'g/h',
+    milligramm_pro_stunde: 'mg/h',
+    mikrogramm_pro_kilogramm_pro_minute: 'µg/kg/min',
+  },
+  dosierung: {
+    mal_taeglich: 'x/d',
+    zweimal_taeglich: '2x/d',
+    dreimal_taeglich: '3x/d',
+    viermal_taeglich: '4x/d',
+    bei_bedarf: 'b.B.',
+    sofort: 'stat',
+    tablette: 'Tbl.',
+    kapsel: 'Kps',
+    ampulle: 'Amp.',
+    einheiten: 'E',
+  },
+  applikation: {
+    intravenoes: 'i.v.',
+    intramuskulaer: 'i.m.',
+    subkutan: 's.c.',
+    intrakutan: 'i.c.',
+    intraarteriell: 'i.a.',
+    intraossaer: 'i.o.',
+    intrathekal: 'i.th.',
+    per_os: 'p.o.',
+    sublingual: 's.l.',
+    rektal: 'rektal',
+    inhalativ: 'inhal.',
+    nasal: 'nasal',
+    ophthalmisch: 'ophth.',
+    transdermal: 't.d.',
+  },
+  anordnung: {
+    vor_dem_essen: 'v.d.E.',
+    nach_dem_essen: 'n.d.E.',
+    zur_nacht: 'z.N.',
+    nuechtern: 'nuechtern',
+    nicht_per_os: 'NPO',
+    linkes_auge: 'LA',
+    rechtes_auge: 'RA',
+    beide_augen: 'BA',
+  },
+  labor_kurzzeichen: {
+    ekg: 'EKG',
+    rr: 'RR',
+    hf: 'HF',
+    af: 'AF',
+    spo2: 'SpO2',
+    crp: 'CRP',
+    hba1c: 'HbA1c',
+    bga: 'BGA',
+    blutzucker: 'BZ',
+    blutdruck: 'RR',
+    herzfrequenz: 'HF',
+    sauerstoffsaettigung: 'SpO2',
+    leukozyten: 'Leuko',
+    thrombozyten: 'Thrombo',
+    haemoglobin: 'Hb',
+    haematokrit: 'Hkt',
+    kreatinin: 'Krea',
+    glomerulaere_filtrationsrate: 'GFR',
+    c_reaktives_protein: 'CRP',
+  },
+  diagnostik_und_befund: {
+    z_n: 'Z.n.',
+    v_a: 'V.a.',
+    o_b: 'o.B.',
+    ohne_befund: 'o.B.',
+    unauffaellig: 'o.B.',
+    pathologisch: 'path.',
+    rechts: 're.',
+    links: 'li.',
+    bilateral: 'bds.',
+    praemedikation: 'Prämed.',
+    komplikationslos: 'kompl.-los',
+    in_lokalanesthesia: 'i.L.A.',
+    in_vollnarkose: 'i.V.N.',
+    in_narkose: 'i.N.',
+    antibiotikaprophylaxe: 'ABP',
+    thromboseprophylaxe: 'TPX',
+    antikoagulation: 'AK',
+  },
+} as const;
+
+type MedicalAbbreviationRules = typeof MEDICAL_ABBREVIATION_RULES;
+
+type MedicalAbbreviationRuleEntry = {
+  category: keyof MedicalAbbreviationRules;
+  ruleKey: string;
+  replacement: string;
+  aliases: string[];
+};
+
+const MEDICAL_ABBREVIATION_ALIASES: Record<string, Record<string, string[]>> = {
+  volumen: {
+    milliliter: ['milliliter', 'milli liter', 'milli-liter'],
+    mikroliter: ['mikroliter', 'micro liter', 'micro-liter', 'mikro liter', 'mikro-liter'],
+    liter: ['liter'],
+    deziliter: ['deziliter', 'dezi liter', 'dezi-liter'],
+    kubikzentimeter: ['kubikzentimeter', 'kubik zentimeter', 'kubik-zentimeter'],
+    tropfen: ['tropfen', 'tropfen pro minute'],
+  },
+  masse: {
+    gramm: ['gramm', 'gram'],
+    milligramm: ['milligramm', 'milli gramm', 'milli-gramm'],
+    mikrogramm: ['mikrogramm', 'micro gramm', 'micro-gramm', 'mikro gramm', 'mikro-gramm'],
+    nanogramm: ['nanogramm', 'nano gramm', 'nano-gramm'],
+    kilogramm: ['kilogramm', 'kilo gramm', 'kilo-gramm'],
+    internationale_einheit: ['internationale einheit', 'internationale einheiten', 'internationaler einheit'],
+    einheiten: ['einheiten', 'einheit'],
+  },
+  konzentration: {
+    milligramm_pro_deziliter: ['milligramm pro deziliter', 'milligramm pro dezi liter'],
+    millimol_pro_liter: ['millimol pro liter', 'milli mol pro liter'],
+    mikromol_pro_liter: ['mikromol pro liter', 'micro mol pro liter', 'mikro mol pro liter'],
+    gramm_pro_liter: ['gramm pro liter'],
+    gramm_pro_deziliter: ['gramm pro deziliter', 'gramm pro dezi liter'],
+    milligramm_pro_kilogramm: ['milligramm pro kilogramm', 'milligramm pro kilo gramm'],
+    millimol_pro_kilogramm: ['millimol pro kilogramm', 'milli mol pro kilogramm'],
+    mikrogramm_pro_kilogramm: ['mikrogramm pro kilogramm', 'micro gramm pro kilogramm', 'mikro gramm pro kilogramm'],
+    internationale_einheit_pro_kilogramm: ['internationale einheit pro kilogramm', 'internationaler einheit pro kilogramm'],
+    einheiten_pro_kilogramm: ['einheiten pro kilogramm', 'einheit pro kilogramm'],
+    milliliter_pro_kilogramm: ['milliliter pro kilogramm', 'milli liter pro kilogramm'],
+    tropfen_pro_minute: ['tropfen pro minute', 'tropfen pro minute'],
+    promille: ['promille'],
+    prozent: ['prozent', 'pro zent'],
+  },
+  vitalwerte_zeit: {
+    schlaege_pro_minute: ['schlaege pro minute', 'schläge pro minute', 'herzschlaege pro minute', 'herzschläge pro minute'],
+    atemzuege_pro_minute: ['atemzuege pro minute', 'atemzüge pro minute'],
+    millimeter_quecksilbersaeule: ['millimeter quecksilbersaeule', 'millimeter quecksilbersäule'],
+    grad_celsius: ['grad celsius'],
+    sekunden: ['sekunden', 'sekunde', 'seconds'],
+    minuten: ['minuten', 'minute', 'mins'],
+    stunden: ['stunden', 'stunde', 'std', 'stds'],
+    tage: ['tage', 'tag'],
+    milliliter_pro_stunde: ['milliliter pro stunde', 'milli liter pro stunde'],
+    milliliter_pro_minute: ['milliliter pro minute', 'milli liter pro minute'],
+    gramm_pro_stunde: ['gramm pro stunde'],
+    milligramm_pro_stunde: ['milligramm pro stunde', 'milli gramm pro stunde'],
+    mikrogramm_pro_kilogramm_pro_minute: ['mikrogramm pro kilogramm pro minute', 'micro gramm pro kilogramm pro minute', 'mikro gramm pro kilogramm pro minute'],
+  },
+  dosierung: {
+    mal_taeglich: ['mal taeglich', 'mal täglich', 'mal pro tag'],
+    zweimal_taeglich: ['zweimal taeglich', 'zweimal täglich', 'zwei mal taeglich', 'zwei mal täglich'],
+    dreimal_taeglich: ['dreimal taeglich', 'dreimal täglich', 'drei mal taeglich', 'drei mal täglich'],
+    viermal_taeglich: ['viermal taeglich', 'viermal täglich', 'vier mal taeglich', 'vier mal täglich'],
+    bei_bedarf: ['bei bedarf'],
+    sofort: ['sofort', 'sofortig'],
+    tablette: ['tablette', 'tabletten', 'tab', 'tabs'],
+    kapsel: ['kapsel', 'kapseln'],
+    ampulle: ['ampulle', 'ampullen'],
+    einheiten: ['einheiten', 'einheit'],
+  },
+  applikation: {
+    intravenoes: ['intravenoes', 'intravenös', 'intravenoese', 'intravenöse'],
+    intramuskulaer: ['intramuskulaer', 'intramuskulär', 'intramuskulaere', 'intramuskuläre'],
+    subkutan: ['subkutan', 'subcutan'],
+    intrakutan: ['intrakutan', 'intracutan'],
+    intraarteriell: ['intraarteriell', 'intra arterial'],
+    intraossaer: ['intraossaer', 'intraossär', 'intraossaeer', 'intraossäre'],
+    intrathekal: ['intrathekal', 'intra thekal'],
+    per_os: ['per os', 'per oral'],
+    sublingual: ['sublingual'],
+    rektal: ['rektal', 'rectal'],
+    inhalativ: ['inhalativ', 'inhalation'],
+    nasal: ['nasal'],
+    ophthalmisch: ['ophthalmisch', 'ophthalmologisch', 'augen'],
+    transdermal: ['transdermal', 'transderm'],
+  },
+  anordnung: {
+    vor_dem_essen: ['vor dem essen', 'vor den essen', 'vor essensbeginn'],
+    nach_dem_essen: ['nach dem essen', 'nach den essen', 'nach essensbeginn'],
+    zur_nacht: ['zur nacht', 'nacht'],
+    nuechtern: ['nuechtern', 'nüchtern', 'nuechter', 'nüchter'],
+    nicht_per_os: ['nicht per os', 'nicht per oral', 'npo'],
+    linkes_auge: ['linkes auge'],
+    rechtes_auge: ['rechtes auge'],
+    beide_augen: ['beide augen'],
+  },
+  labor_kurzzeichen: {
+    ekg: ['ekg', 'e kg'],
+    rr: ['rr', 'r r'],
+    hf: ['hf', 'h f'],
+    af: ['af', 'a f'],
+    spo2: ['spo2', 'sp o 2', 'sauerstoff saettigung', 'sauerstoffsättigung'],
+    crp: ['crp', 'c r p'],
+    hba1c: ['hba1c', 'hba 1 c', 'hba eins c'],
+    bga: ['bga', 'b g a'],
+    blutzucker: ['blutzucker', 'blut zucker', 'b z'],
+    blutdruck: ['blutdruck', 'blut druck', 'r r'],
+    herzfrequenz: ['herzfrequenz', 'herz frequenz', 'h f'],
+    sauerstoffsaettigung: ['sauerstoffsättigung', 'sauerstoff saettigung', 'spo2'],
+    leukozyten: ['leukozyten', 'leukos', 'leuko'],
+    thrombozyten: ['thrombozyten', 'thrombos', 'thrombo'],
+    haemoglobin: ['haemoglobin', 'hämoglobin', 'h b'],
+    haematokrit: ['haematokrit', 'hämatokrit', 'hkt'],
+    kreatinin: ['kreatinin', 'krea'],
+    glomerulaere_filtrationsrate: ['glomerulaere filtrationsrate', 'glomeruläre filtrationsrate', 'gfr'],
+    c_reaktives_protein: ['c reaktives protein', 'c-reaktives protein', 'crp'],
+  },
+  diagnostik_und_befund: {
+    z_n: ['z n', 'zustand nach'],
+    v_a: ['v a', 'verdacht auf', 'v d a'],
+    o_b: ['o b', 'ohne befund', 'unauffällig'],
+    ohne_befund: ['ohne befund'],
+    unauffaellig: ['unauffällig', 'unauffaellig', 'o b'],
+    pathologisch: ['pathologisch', 'path', 'pathologisch'],
+    rechts: ['rechts', 'recht', 're'],
+    links: ['links', 'link', 'li'],
+    bilateral: ['bilateral', 'beidseitig', 'bds'],
+    praemedikation: ['praemedikation', 'prämedikation', 'prämed'],
+    komplikationslos: ['komplikationslos', 'komplikations frei', 'kompllos'],
+    in_lokalanesthesia: ['in lokalanesthesia', 'in lokalanästhesie', 'in lokaler betaubung', 'in lokaler betäubung'],
+    in_vollnarkose: ['in vollnarkose', 'in voll narkose'],
+    in_narkose: ['in narkose'],
+    antibiotikaprophylaxe: ['antibiotikaprophylaxe', 'antibiotika prophylaxe', 'abp'],
+    thromboseprophylaxe: ['thromboseprophylaxe', 'thrombose prophylaxe', 'tpx'],
+    antikoagulation: ['antikoagulation', 'anti koagulation', 'ak'],
+  },
+};
+
+function getMedicalAbbreviationRuleEntries(): Array<{
+  category: keyof MedicalAbbreviationRules;
+  ruleKey: string;
+  replacement: string;
+  aliases: string[];
+}> {
+  const entries: Array<{
+    category: keyof MedicalAbbreviationRules;
+    ruleKey: string;
+    replacement: string;
+    aliases: string[];
+  }> = [];
+
+  for (const category of Object.keys(MEDICAL_ABBREVIATION_RULES) as Array<keyof MedicalAbbreviationRules>) {
+    const categoryRules = MEDICAL_ABBREVIATION_RULES[category];
+    for (const ruleKey of Object.keys(categoryRules) as Array<keyof typeof categoryRules>) {
+      const replacement = categoryRules[ruleKey];
+      const aliases = (MEDICAL_ABBREVIATION_ALIASES[category] && MEDICAL_ABBREVIATION_ALIASES[category][ruleKey])
+        ? MEDICAL_ABBREVIATION_ALIASES[category][ruleKey]
+        : [String(ruleKey).replace(/_/g, ' ')];
+      entries.push({ category, ruleKey: String(ruleKey), replacement, aliases });
+    }
+  }
+
+  return entries.sort((a, b) => b.aliases.reduce((sum, alias) => sum + alias.length, 0) - a.aliases.reduce((sum, alias) => sum + alias.length, 0));
+}
+
+function normalizeMedicalAbbreviationInput(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/\u0301/g, '')
+    .replace(/\u0308/g, '')
+    .replace(/ä/g, 'ae')
+    .replace(/ö/g, 'oe')
+    .replace(/ü/g, 'ue')
+    .replace(/ß/g, 'ss')
+    .replace(/[’']/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function applyMedicalAbbreviationsIfEnabled(
+  text: string,
+  dictionarySet: 'alltag' | 'medical' = 'medical'
+): { text: string; operations: MedicalAbbreviationOperation[] } {
+  if (dictionarySet !== 'medical') return { text, operations: [] };
+  if (!text) return { text, operations: [] };
+
+  const rules = getMedicalAbbreviationRuleEntries();
+  let result = text;
+  const operations: MedicalAbbreviationOperation[] = [];
+
+  for (const rule of rules) {
+    const normalizedAliases = [...new Set(rule.aliases.map(normalizeMedicalAbbreviationInput))]
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+
+    if (normalizedAliases.length === 0) continue;
+
+    const aliasPattern = normalizedAliases
+      .map(alias => alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|');
+
+    const regex = new RegExp(`(?<![A-Za-zÄÖÜäöüß0-9])(${aliasPattern})(?![A-Za-zÄÖÜäöüß0-9])`, 'gi');
+    result = result.replace(regex, (match) => {
+      const normalizedMatch = normalizeMedicalAbbreviationInput(match);
+      const matchedAlias = normalizedAliases.find(alias => alias === normalizedMatch);
+      if (!matchedAlias) return match;
+      if (rule.replacement === match) return match;
+
+      operations.push({
+        originalText: match,
+        replacementText: rule.replacement,
+        dictionaryWrong: matchedAlias,
+        dictionaryCorrect: rule.replacement,
+        source: 'standard',
+        matchType: 'exact',
+        ruleKey: rule.ruleKey,
+        category: rule.category,
+      });
+
+      return rule.replacement;
+    });
+  }
+
+  return { text: result, operations };
+}
+
+export function applyMedicalAbbreviations(text: string, dictionarySet: 'alltag' | 'medical' = 'medical'): string {
+  return applyMedicalAbbreviationsIfEnabled(text, dictionarySet).text;
+}
 
 /**
  * Apply dictionary corrections to text.
@@ -63,7 +440,7 @@ export function applyDictionaryCorrectionsDetailed(
   text: string,
   entries: DictionaryEntry[],
   standardEntries?: { wrong: string; correct: string; phoneticMinSimilarity?: number }[],
-  options?: { targetUsername?: string }
+  options?: PreprocessTranscriptionOptions
 ): PreprocessTranscriptionResult {
   if (!text) {
     return { text, operations: [] };
@@ -86,10 +463,6 @@ export function applyDictionaryCorrectionsDetailed(
     ...annotatedUserEntries,
     ...annotatedStandardEntries.filter((entry) => !userWrongWords.has(entry.wrong.toLowerCase())),
   ];
-  if (mergedEntries.length === 0) {
-    return { text, operations: [] };
-  }
-
   let result = text;
   let replacementCount = 0;
   let stemReplacementCount = 0;
@@ -906,7 +1279,7 @@ export function preprocessTranscriptionDetailed(
   text: string,
   dictionaryEntries?: DictionaryEntry[],
   standardEntries?: { wrong: string; correct: string; phoneticMinSimilarity?: number }[],
-  options?: { targetUsername?: string }
+  options?: PreprocessTranscriptionOptions
 ): PreprocessTranscriptionResult {
   if (!text) return { text, operations: [] };
   
@@ -927,6 +1300,11 @@ export function preprocessTranscriptionDetailed(
     result = dictionaryResult.text;
     operations.push(...dictionaryResult.operations);
   }
+  
+  // Step 4: Deterministic medical abbreviation conversion, only in Medical mode.
+  const abbreviationResult = applyMedicalAbbreviationsIfEnabled(result, options?.dictionarySet ?? 'medical');
+  result = abbreviationResult.text;
+  operations.push(...abbreviationResult.operations);
   
   return { text: result, operations };
 }

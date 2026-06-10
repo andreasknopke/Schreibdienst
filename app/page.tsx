@@ -7,7 +7,7 @@ import Spinner from '@/components/Spinner';
 import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
-import { applyDeleteCommands, applyFormattingControlWords, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, preprocessTranscription, type OnlineUtteranceApplicationDebugStep } from '@/lib/textFormatting';
+import { applyDeleteCommands, applyFormattingControlWords, applyMedicalAbbreviations, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, preprocessTranscription, type OnlineUtteranceApplicationDebugStep } from '@/lib/textFormatting';
 import { buildPhoneticIndex, applyPhoneticCorrections, applyPhoneticCorrectionsDetailed, type PhoneticReplacementOperation } from '@/lib/phoneticMatch';
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
@@ -1190,25 +1190,32 @@ export default function HomePage() {
   }, [dictionaryEntries, standardDictEntries]);
 
   const applyDictionaryToText = useCallback((text: string): string => {
-    if (!text || mergedEntriesRef.current.length === 0) return text;
+    if (!text) return text;
     
-    // Pass 1: Exaktes Wort-Matching (User + Standard)
-    let result = text;
-    for (const entry of mergedEntriesRef.current) {
-      // Unicode-sichere Wortgrenzen, damit z.B. "IgE" nicht das Suffix in
-      // "übermäßige" trifft. \b ist dafür mit Umlauten/ß zu ungenau.
-      const escaped = entry.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escaped}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
-      result = result.replace(regex, entry.correct);
+    // Pass 1+2: Exaktes + Phonetisches Matching (User + Standard) – nur wenn Einträge vorhanden
+    if (mergedEntriesRef.current.length > 0) {
+      let result = text;
+      for (const entry of mergedEntriesRef.current) {
+        // Unicode-sichere Wortgrenzen, damit z.B. "IgE" nicht das Suffix in
+        // "übermäßige" trifft. \b ist dafür mit Umlauten/ß zu ungenau.
+        const escaped = entry.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(?<![A-ZÄÖÜa-zäöüß])${escaped}(?![A-ZÄÖÜa-zäöüß])`, 'gi');
+        result = result.replace(regex, entry.correct);
+      }
+      
+      // Pass 2: Phonetisches Matching für verbleibende unerkannte Wörter
+      if (phoneticIndexRef.current) {
+        result = applyPhoneticCorrections(result, phoneticIndexRef.current);
+      }
+      
+      text = result;
     }
     
-    // Pass 2: Phonetisches Matching für verbleibende unerkannte Wörter
-    if (phoneticIndexRef.current) {
-      result = applyPhoneticCorrections(result, phoneticIndexRef.current);
-    }
+    // Pass 3: Medizinische Abkürzungen/Units (nur wenn Medical-Modus aktiv)
+    text = applyMedicalAbbreviations(text, dictionarySet);
     
-    return result;
-  }, [dictionaryEntries]);
+    return text;
+  }, [dictionaryEntries, dictionarySet]);
 
   const applyDictionaryToTextWithCorrections = useCallback((text: string): { text: string; corrections: WordCorrectionInfo[] } => {
     if (!text || mergedEntriesRef.current.length === 0) return { text, corrections: [] };

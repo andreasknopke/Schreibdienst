@@ -24,6 +24,7 @@ import { applyLLMPhoneticGuard } from '@/lib/phoneticMatch';
 import { compressAudioForSpeech, normalizeAudioForWhisper } from '@/lib/audioCompression';
 import { mergeTranscriptionsWithMarkers, createMergePrompt, stripNovelWordsFromMergeOutput, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
+import { getUserSettingsWithRequest } from '@/lib/usersDb';
 
 // LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
 const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);
@@ -209,13 +210,16 @@ export async function processDictation(request: NextRequest, dictationId: number
     const audioData = new Uint8Array(audioResult.audio_data);
     const audioBlob = new Blob([audioData], { type: audioResult.audio_mime_type });
     console.log(`[Worker] Audio blob created: size=${audioBlob.size}, type=${audioBlob.type}, originalMime=${audioResult.audio_mime_type}`);
+    const userSettings = dictation.username ? await getUserSettingsWithRequest(request, dictation.username) : null;
+    const dictionarySet = userSettings?.dictionarySet ?? 'medical';
     const transcriptionResult = await transcribeAudio(
       request, 
       audioBlob, 
       dictationId, 
       dictation.username,
       dictation.patient_name,
-      dictation.patient_dob
+      dictation.patient_dob,
+      dictionarySet
     );
     
     if (!transcriptionResult.text) {
@@ -248,12 +252,12 @@ export async function processDictation(request: NextRequest, dictationId: number
       rawTranscript,
       dictionaryEntries,
       standardDictionaryEntries,
-      { targetUsername: dictation.username }
+      { targetUsername: dictation.username, dictionarySet }
     );
     const preprocessedText = preprocessingResult.text;
     console.log(
       `[Worker] Preprocessed text: ${rawTranscript.length} → ${preprocessedText.length} chars ` +
-      `(user dictionary: ${dictionaryEntries.length}, standard dictionary: ${standardDictionaryEntries.length})`
+      `(user dictionary: ${dictionaryEntries.length}, standard dictionary: ${standardDictionaryEntries.length}, dictionarySet: ${dictionarySet})`
     );
 
     if (preprocessedText !== rawTranscript) {
@@ -615,7 +619,8 @@ async function transcribeAudio(
   dictationId: number, 
   username?: string,
   patientName?: string,
-  patientDob?: string
+  patientDob?: string,
+  dictionarySet: 'alltag' | 'medical' = 'medical'
 ): Promise<{ text: string; segments?: any[] }> {
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
   
@@ -698,7 +703,7 @@ async function transcribeAudio(
         primaryResult.text,
         dictionaryEntries,
         standardDictionaryEntries,
-        { targetUsername: username }
+        { targetUsername: username, dictionarySet }
       );
       const fallbackText = preprocessedPrimary.text;
       const fallbackMetadata = {

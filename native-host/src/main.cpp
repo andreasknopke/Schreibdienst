@@ -1,16 +1,9 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
-#include <roapi.h>
-#include <propkey.h>
-#include <propvarutil.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
-#ifndef __MINGW32__
-#include <windows.data.xml.dom.h>
-#include <windows.ui.notifications.h>
-#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <wrl.h>
@@ -54,8 +47,6 @@ constexpr std::uint32_t CLIPBOARD_READY_DELAY_MS = 15;
 constexpr std::uint32_t CLIPBOARD_RESTORE_DELAY_MS = 30;
 constexpr uint16_t WS_PORT = 58765;
 constexpr char WS_MAGIC_GUID[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-constexpr wchar_t SCHREIBDIENST_TOAST_APP_ID[] = L"Schreibdienst.Injector";
-constexpr wchar_t SCHREIBDIENST_TOAST_SHORTCUT_NAME[] = L"Schreibdienst Injector.lnk";
 
 // ─── SHA1 (RFC 3174) ────────────────────────────────────────────
 
@@ -185,7 +176,7 @@ struct InjectPayload {
     std::wstring mode = L"sendinput";
     bool restorePreviousWindow = true;
     std::uint32_t delayMs = 120;
-    std::uint32_t charDelayMs = 2;
+    std::uint32_t charDelayMs = 0;
 };
 
 struct NativeRequest {
@@ -387,167 +378,9 @@ std::wstring getExecutableDirectory() {
     return executablePath.substr(0, separator);
 }
 
-bool ensureToastShortcutRegistered() {
-    PWSTR programsPathRaw = nullptr;
-    const HRESULT folderHr = SHGetKnownFolderPath(FOLDERID_Programs, KF_FLAG_CREATE, nullptr, &programsPathRaw);
-    if (FAILED(folderHr) || programsPathRaw == nullptr) {
-        return false;
-    }
-
-    std::wstring shortcutPath(programsPathRaw);
-    CoTaskMemFree(programsPathRaw);
-    shortcutPath += L"\\";
-    shortcutPath += SCHREIBDIENST_TOAST_SHORTCUT_NAME;
-
-    const HRESULT coInitHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-
-    Microsoft::WRL::ComPtr<IShellLinkW> shellLink;
-    const HRESULT createHr = CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&shellLink));
-    if (FAILED(createHr)) {
-        if (SUCCEEDED(coInitHr)) {
-            CoUninitialize();
-        }
-        return false;
-    }
-
-    const std::wstring executablePath = getExecutablePath();
-    const std::wstring workingDirectory = getExecutableDirectory();
-    shellLink->SetPath(executablePath.c_str());
-    shellLink->SetWorkingDirectory(workingDirectory.c_str());
-    shellLink->SetDescription(L"Schreibdienst Injector");
-
-    Microsoft::WRL::ComPtr<IPropertyStore> propertyStore;
-    if (SUCCEEDED(shellLink.As(&propertyStore))) {
-        PROPVARIANT appIdVariant;
-        PropVariantInit(&appIdVariant);
-        if (SUCCEEDED(InitPropVariantFromString(SCHREIBDIENST_TOAST_APP_ID, &appIdVariant))) {
-            propertyStore->SetValue(PKEY_AppUserModel_ID, appIdVariant);
-            propertyStore->Commit();
-            PropVariantClear(&appIdVariant);
-        }
-    }
-
-    Microsoft::WRL::ComPtr<IPersistFile> persistFile;
-    const HRESULT saveHr = shellLink.As(&persistFile);
-    const bool saved = SUCCEEDED(saveHr) && SUCCEEDED(persistFile->Save(shortcutPath.c_str(), TRUE));
-
-    if (SUCCEEDED(coInitHr)) {
-        CoUninitialize();
-    }
-
-    return saved;
-}
-
 #ifndef __MINGW32__
-bool showModernRecordingToast(bool active) {
-    using ABI::Windows::Data::Xml::Dom::IXmlDocument;
-    using ABI::Windows::Data::Xml::Dom::IXmlDocumentIO;
-    using ABI::Windows::UI::Notifications::IToastNotification;
-    using ABI::Windows::UI::Notifications::IToastNotificationFactory;
-    using ABI::Windows::UI::Notifications::IToastNotificationManagerStatics;
-    using ABI::Windows::UI::Notifications::IToastNotifier;
-    using Microsoft::WRL::ComPtr;
-    using Microsoft::WRL::Wrappers::HStringReference;
-
-    if (!ensureToastShortcutRegistered()) {
-        return false;
-    }
-
-    const HRESULT roInitHr = RoInitialize(RO_INIT_MULTITHREADED);
-    if (FAILED(roInitHr) && roInitHr != RPC_E_CHANGED_MODE) {
-        return false;
-    }
-
-    ComPtr<IToastNotificationManagerStatics> toastManager;
-    HRESULT hr = RoGetActivationFactory(
-        HStringReference(RuntimeClass_Windows_UI_Notifications_ToastNotificationManager).Get(),
-        IID_PPV_ARGS(&toastManager)
-    );
-    if (FAILED(hr)) {
-        if (SUCCEEDED(roInitHr)) {
-            RoUninitialize();
-        }
-        return false;
-    }
-
-    ComPtr<IToastNotifier> notifier;
-    hr = toastManager->CreateToastNotifierWithId(HStringReference(SCHREIBDIENST_TOAST_APP_ID).Get(), &notifier);
-    if (FAILED(hr)) {
-        if (SUCCEEDED(roInitHr)) {
-            RoUninitialize();
-        }
-        return false;
-    }
-
-    std::wstring xml = LR"(<toast duration="short"><visual><binding template="ToastGeneric"><text>Schreibdienst</text><text>)";
-    xml += active ? L"Aufnahme aktiv" : L"Aufnahme beendet";
-    xml += LR"(</text></binding></visual><audio src="ms-winsoundevent:Notification.Default"/></toast>)";
-
-    ComPtr<IInspectable> xmlDocumentInspectable;
-    hr = RoActivateInstance(
-        HStringReference(RuntimeClass_Windows_Data_Xml_Dom_XmlDocument).Get(),
-        &xmlDocumentInspectable
-    );
-    if (FAILED(hr)) {
-        if (SUCCEEDED(roInitHr)) {
-            RoUninitialize();
-        }
-        return false;
-    }
-
-    ComPtr<IXmlDocument> xmlDocument;
-    hr = xmlDocumentInspectable.As(&xmlDocument);
-    if (FAILED(hr)) {
-        if (SUCCEEDED(roInitHr)) {
-            RoUninitialize();
-        }
-        return false;
-    }
-
-    ComPtr<IXmlDocumentIO> xmlDocumentIo;
-    hr = xmlDocument.As(&xmlDocumentIo);
-    if (FAILED(hr)) {
-        if (SUCCEEDED(roInitHr)) {
-            RoUninitialize();
-        }
-        return false;
-    }
-
-    hr = xmlDocumentIo->LoadXml(HStringReference(xml.c_str()).Get());
-    if (FAILED(hr)) {
-        if (SUCCEEDED(roInitHr)) {
-            RoUninitialize();
-        }
-        return false;
-    }
-
-    ComPtr<IToastNotificationFactory> toastFactory;
-    hr = RoGetActivationFactory(
-        HStringReference(RuntimeClass_Windows_UI_Notifications_ToastNotification).Get(),
-        IID_PPV_ARGS(&toastFactory)
-    );
-    if (FAILED(hr)) {
-        if (SUCCEEDED(roInitHr)) {
-            RoUninitialize();
-        }
-        return false;
-    }
-
-    ComPtr<IToastNotification> toastNotification;
-    hr = toastFactory->CreateToastNotification(xmlDocument.Get(), &toastNotification);
-    if (FAILED(hr)) {
-        if (SUCCEEDED(roInitHr)) {
-            RoUninitialize();
-        }
-        return false;
-    }
-
-    hr = notifier->Show(toastNotification.Get());
-    if (SUCCEEDED(roInitHr)) {
-        RoUninitialize();
-    }
-
-    return SUCCEEDED(hr);
+bool showModernRecordingToast(bool /*active*/) {
+    return false;
 }
 #else
 bool showModernRecordingToast(bool /*active*/) {
@@ -628,32 +461,6 @@ void showRecordingStatusNotification(bool active, const wchar_t* source) {
         return;
     }
 
-    if (showModernRecordingToast(active)) {
-        logLine("[TOAST] recording=%d source=%ls\n", active ? 1 : 0, source);
-        return;
-    }
-
-    NOTIFYICONDATAW nid{};
-    nid.cbSize = sizeof(nid);
-    nid.hWnd = g_hiddenWnd;
-    nid.uID = SCHREIBDIENST_TRAY_ICON_ID;
-    nid.uFlags = NIF_INFO;
-#ifdef NIF_REALTIME
-    nid.uFlags |= NIF_REALTIME;
-#endif
-    nid.dwInfoFlags = active ? NIIF_INFO : NIIF_NONE;
-    nid.uTimeout = 2000;
-
-    if (active) {
-        wcscpy_s(nid.szInfoTitle, L"Schreibdienst");
-        wcscpy_s(nid.szInfo, L"Aufnahme aktiv");
-    } else {
-        wcscpy_s(nid.szInfoTitle, L"Schreibdienst");
-        wcscpy_s(nid.szInfo, L"Aufnahme beendet");
-    }
-
-    Shell_NotifyIconW(NIM_MODIFY, &nid);
-    MessageBeep(active ? MB_ICONASTERISK : MB_OK);
     logLine("[NOTIFY] recording=%d source=%ls\n", active ? 1 : 0, source);
 }
 
@@ -1511,13 +1318,9 @@ bool sendUnicodeText(const std::wstring& text, std::uint32_t charDelayMs) {
 
     // Nachlauf-Pause: SendInput kehrt zurück, sobald die Events in der
     // Windows-Input-Queue liegen, NICHT sobald die Ziel-App sie verarbeitet
-    // hat. Wenn unmittelbar danach der nächste Chunk geschickt wird, kann
-    // eine langsame Ziel-App (KIS, alte Textverarbeitung) Events
-    // "verschlucken". ~1.5ms pro Zeichen reicht in der Praxis aus, ohne
-    // die Übertragung spürbar auszubremsen.
+    // hat. Ein kurzer flat Sleep reicht, damit der Input ankommt.
     if (ok && !text.empty()) {
-        const auto settleMs = static_cast<DWORD>(std::min<size_t>(text.size() * 2, 80));
-        std::this_thread::sleep_for(std::chrono::milliseconds(settleMs));
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
 
     return ok;
@@ -1809,7 +1612,7 @@ void printStartupHelp() {
 int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/,
                    LPSTR lpCmdLine, int /*nShowCmd*/) {
     StartupOptions options = parseStartupOptions(lpCmdLine);
-    SetCurrentProcessExplicitAppUserModelID(SCHREIBDIENST_TOAST_APP_ID);
+    SetCurrentProcessExplicitAppUserModelID(L"Schreibdienst.Injector");
 
     if (options.showHelp) {
         // Hilfe soll immer sichtbar sein -> Console erzwingen.

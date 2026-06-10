@@ -21,7 +21,7 @@ import InjectorDownloadDialog from '@/components/InjectorDownloadDialog';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
-import { checkInjectorAvailability, injectToActiveWindow, registerGlobalHotkeys, reportInjectorRecordingState } from '@/lib/injectClient';
+import { checkInjectorAvailability, injectToActiveWindow, registerGlobalHotkeys, reportInjectorRecordingState, configureTargetWindow } from '@/lib/injectClient';
 import { replaceAllInText } from '@/lib/replaceText';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
@@ -437,6 +437,8 @@ export default function HomePage() {
   const liveInjectFailureCountRef = useRef(0);
   const lastLiveInjectQueuedRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
   const [injectorCheckInProgress, setInjectorCheckInProgress] = useState(false);
+  const [targetWindowPattern, setTargetWindowPattern] = useState<string>('');
+  const targetWindowPatternLoadedRef = useRef(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -686,8 +688,39 @@ export default function HomePage() {
 
   useEffect(() => {
     liveInjectEnabledRef.current = liveInjectEnabled;
-    setLiveInjectStatus(liveInjectEnabled ? 'Bereit – Ziel-App fokussieren oder zuletzt verwendete App nutzen' : null);
+    setLiveInjectStatus(liveInjectEnabled ? 'Bereit – Ziel-App wird automatisch erkannt und wieder in den Vordergrund geholt' : null);
   }, [liveInjectEnabled]);
+
+  // Ziel-Fenster-Pattern aus localStorage laden
+  useEffect(() => {
+    if (targetWindowPatternLoadedRef.current) return;
+    targetWindowPatternLoadedRef.current = true;
+    try {
+      const saved = localStorage.getItem('schreibdienst:targetWindowPattern');
+      if (saved) {
+        setTargetWindowPattern(saved);
+      }
+    } catch {
+      // localStorage nicht verfügbar (z. B. SSR)
+    }
+  }, []);
+
+  // Ziel-Fenster-Pattern in localStorage speichern und an Injector senden
+  useEffect(() => {
+    if (!targetWindowPatternLoadedRef.current) return;
+    try {
+      localStorage.setItem('schreibdienst:targetWindowPattern', targetWindowPattern);
+    } catch {
+      // localStorage nicht verfügbar
+    }
+
+    // An nativen Host senden (fire-and-forget)
+    if (targetWindowPattern.trim()) {
+      configureTargetWindow({ windowTitle: targetWindowPattern.trim() }).catch(() => {});
+    } else {
+      configureTargetWindow({ clear: true }).catch(() => {});
+    }
+  }, [targetWindowPattern]);
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
@@ -779,7 +812,7 @@ export default function HomePage() {
       .catch(() => undefined)
       .then(async () => {
         const shouldRestorePreviousWindow = typeof document !== 'undefined' && document.hasFocus();
-        setLiveInjectStatus(shouldRestorePreviousWindow ? 'Sende an vorherige Ziel-App…' : 'Sende an aktive Ziel-App…');
+        setLiveInjectStatus(shouldRestorePreviousWindow ? 'Sende an Ziel-App…' : 'Sende an aktive Ziel-App…');
 
         const request = {
           text: normalizedText,
@@ -4420,9 +4453,34 @@ export default function HomePage() {
             </div>
           </div>
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            {liveInjectStatus ? (
-              <div className="text-[11px] text-gray-500 dark:text-gray-400" title={liveInjectStatus}>
-                {liveInjectStatus}
+            {liveInjectEnabled ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                {liveInjectStatus ? (
+                  <div className="text-[11px] text-gray-500 dark:text-gray-400" title={liveInjectStatus}>
+                    {liveInjectStatus}
+                  </div>
+                ) : (
+                  <div />
+                )}
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    className="text-[11px] px-2 py-0.5 w-36 border border-gray-200 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 placeholder-gray-400 dark:placeholder-gray-500 focus:border-purple-400 focus:ring-1 focus:ring-purple-300 dark:focus:border-purple-500 dark:focus:ring-purple-700 focus:outline-none"
+                    placeholder="Ziel-Fenster-Titel…"
+                    value={targetWindowPattern}
+                    onChange={(e) => setTargetWindowPattern(e.target.value)}
+                    title="Teil des Fenstertitels der Ziel-App (z. B. 'Radiologie'). Der Injector findet das Fenster auch nach Fokusverlust wieder."
+                  />
+                  {targetWindowPattern && (
+                    <button
+                      className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 px-1"
+                      onClick={() => setTargetWindowPattern('')}
+                      title="Fenster-Suche zurücksetzen"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
               </div>
             ) : (
               <div />

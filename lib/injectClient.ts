@@ -234,6 +234,73 @@ export async function checkInjectorAvailability(): Promise<InjectorAvailabilityR
   }
 }
 
+// ─── Ziel-Fenster-Konfiguration ────────────────────────────────
+
+export interface TargetWindowConfig {
+  /** Teil-String, der im Fenstertitel der Ziel-App vorkommen muss (z. B. "Radiologie") */
+  windowTitle?: string;
+  /** Windows-Klassenname der Ziel-App (z. B. "WindowsForms10.Window.8.app.0") */
+  windowClass?: string;
+  /** Konfiguration löschen und wieder auf automatische Erkennung zurücksetzen */
+  clear?: boolean;
+}
+
+/**
+ * Konfiguriert das Ziel-Fenster für die Text-Injection im nativen Host.
+ *
+ * Der Host merkt sich das Fenster, in das zuletzt erfolgreich Text injected wurde.
+ * Mit dieser Funktion kann zusätzlich ein Fenster-Titel-Pattern oder Klassenname
+ * hinterlegt werden, um das Ziel-Fenster auch nach einem Neustart oder Fenster-
+ * Wechsel zuverlässig wiederzufinden.
+ *
+ * @example
+ * // Ziel-App anhand des Fenstertitels konfigurieren
+ * await configureTargetWindow({ windowTitle: 'Radiologie' });
+ *
+ * @example
+ * // Konfiguration löschen (wieder rein automatische Erkennung)
+ * await configureTargetWindow({ clear: true });
+ */
+export async function configureTargetWindow(config: TargetWindowConfig): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    const ws = await getWs();
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        resolve(false);
+      }, RESPONSE_TIMEOUT_MS);
+
+      function handleMessage(event: MessageEvent) {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type !== 'target-window-set') return;
+
+          clearTimeout(timeout);
+          ws.removeEventListener('message', handleMessage);
+          resolve(data.ok === true);
+        } catch {
+          // Not JSON — ignore
+        }
+      }
+
+      ws.addEventListener('message', handleMessage);
+
+      const payload = {
+        type: 'set-target-window',
+        windowTitle: config.windowTitle || '',
+        windowClass: config.windowClass || '',
+        clear: config.clear === true,
+      };
+
+      ws.send(JSON.stringify(payload));
+    });
+  } catch {
+    return false;
+  }
+}
+
 // ─── Hotkey registration via WebSocket ─────────────────────────
 
 type HotkeyCallback = (action: string, key: string) => void;

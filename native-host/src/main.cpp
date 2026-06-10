@@ -208,6 +208,80 @@ std::mutex g_injectMutex;
 std::mutex g_notificationMutex;
 std::atomic<bool> g_recordingState{false};
 
+// ─── Target-Window-Tracking ────────────────────────────────────
+// Merkt sich das Fenster, in das zuletzt erfolgreich Text injected wurde.
+// Bei der nächsten Injection wird versucht, genau dieses Fenster wieder in
+// den Vordergrund zu holen – nicht nur das "vorherige" per Alt+Tab.
+// Zusätzlich können Frontend-seitig Fenster-Titel/Class-Patterns konfiguriert
+// werden, um das Ziel-Fenster auch nach einem Neustart wiederzufinden.
+HWND g_targetWindow = nullptr;
+std::wstring g_targetWindowTitlePattern;
+std::wstring g_targetWindowClassName;
+std::mutex g_targetWindowMutex;
+
+// Callback für EnumWindows: sucht ein Fenster mit bestimmtem Titel-Pattern oder Klassenname.
+struct FindTargetWindowContext {
+    std::wstring titlePattern;
+    std::wstring className;
+    HWND foundHwnd = nullptr;
+};
+
+BOOL CALLBACK enumFindTargetWindow(HWND hwnd, LPARAM lParam) {
+    auto* ctx = reinterpret_cast<FindTargetWindowContext*>(lParam);
+    if (!IsWindowVisible(hwnd)) return TRUE;
+
+    // Klassenname prüfen, falls gesetzt
+    if (!ctx->className.empty()) {
+        wchar_t classBuf[256] = {};
+        GetClassNameW(hwnd, classBuf, static_cast<int>(std::size(classBuf)));
+        // Case-insensitive Vergleich (portable, kein _wcsicmp nötig)
+        bool classMatch = true;
+        if (wcslen(classBuf) != ctx->className.length()) {
+            classMatch = false;
+        } else {
+            for (size_t i = 0; i < ctx->className.length(); ++i) {
+                if (towlower(classBuf[i]) != towlower(ctx->className[i])) {
+                    classMatch = false;
+                    break;
+                }
+            }
+        }
+        if (!classMatch) return TRUE;
+    }
+
+    // Titel-Pattern prüfen, falls gesetzt
+    if (!ctx->titlePattern.empty()) {
+        wchar_t titleBuf[512] = {};
+        GetWindowTextW(hwnd, titleBuf, static_cast<int>(std::size(titleBuf)));
+        if (wcslen(titleBuf) == 0) return TRUE;
+        std::wstring title(titleBuf);
+        // Case-insensitive Substring-Suche
+        auto it = std::search(
+            title.begin(), title.end(),
+            ctx->titlePattern.begin(), ctx->titlePattern.end(),
+            [](wchar_t a, wchar_t b) { return towlower(a) == towlower(b); }
+        );
+        if (it == title.end()) return TRUE;
+    }
+
+    // Gefunden!
+    ctx->foundHwnd = hwnd;
+    return FALSE; // Enumeration abbrechen
+}
+
+HWND findTargetWindowByPattern() {
+    FindTargetWindowContext ctx;
+    {
+        std::lock_guard<std::mutex> lock(g_targetWindowMutex);
+        ctx.titlePattern = g_targetWindowTitlePattern;
+        ctx.className = g_targetWindowClassName;
+    }
+    if (ctx.titlePattern.empty() && ctx.className.empty()) return nullptr;
+
+    EnumWindows(enumFindTargetWindow, reinterpret_cast<LPARAM>(&ctx));
+    return ctx.foundHwnd;
+}
+
 // Deduplizierung von doppelten Text-Injection-Aufrufen.
 // Der Client wiederholt einen Request bei Timeout – der erste Request
 // wurde dann aber vom Host bereits verarbeitet. Dieselbe Text-Injection
@@ -1283,7 +1357,96 @@ PasteOutcome pasteClipboardText(const std::wstring& text) {
     return PasteOutcome::Success;
 }
 
+// Versucht, ein bestimmtes Fenster via SetForegroundWindow in den
+// Vordergrund zu holen. Nutzt den AttachThreadInput-Trick, um die
+// foreground-lock-Zeitbeschränkung zu umgehen.
+bool forceForegroundWindow(HWND target) {
+    if (target == nullptr || !IsWindow(target)) return false;
+    if (GetForegroundWindow() == target) return true; // Bereits im Vordergrund
+
+    // Falls minimiert: wiederherstellen
+    if (IsIconic(target)) {
+        ShowWindow(target, SW_RESTORE);
+    }
+
+    // AttachThreadInput-Trick: Erlaubt SetForegroundWindow auch ohne
+    // foreground-lock-Berechtigung (z. B. wenn der Injector selbst kein
+    // aktives Fenster hat / im Hintergrund läuft).
+    const DWORD currentThreadId = GetCurrentThreadId();
+    const DWORD targetThreadId = GetWindowThreadProcessId(target, nullptr);
+    const DWORD foregroundThreadId = GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
+
+    bool attached1 = false;
+    bool attached2 = false;
+
+    if (foregroundThreadId != 0 && foregroundThreadId != currentThreadId) {
+        attached1 = AttachThreadInput(currentThreadId, foregroundThreadId, TRUE) != 0;
+    }
+    if (targetThreadId != currentThreadId && targetThreadId != foregroundThreadId) {
+        attached2 = AttachThreadInput(currentThreadId, targetThreadId, TRUE) != 0;
+    }
+
+    // Fenster kurz auf topmost setzen, dann zurücksetzen – hilft bei
+    // manchen Anwendungen, die sonst nicht in den Vordergrund kommen.
+    SetWindowPos(target, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    const BOOL result = SetForegroundWindow(target);
+    SetWindowPos(target, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    // Thread-Input wieder trennen
+    if (attached2) AttachThreadInput(currentThreadId, targetThreadId, FALSE);
+    if (attached1) AttachThreadInput(currentThreadId, foregroundThreadId, FALSE);
+
+    return result != 0;
+}
+
+// Aktiviert das Ziel-Fenster für die Text-Injection. Verwendet eine
+// mehrstufige Strategie:
+// 1. Gespeichertes HWND (g_targetWindow) – schnell und präzise
+// 2. Fenster-Suche per Titel/Class-Pattern – robuster nach Neustart
+// 3. Alt+Tab – Fallback wenn nichts konfiguriert ist
 bool activatePreviousWindow(std::uint32_t delayMs) {
+    HWND target = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_targetWindowMutex);
+        target = g_targetWindow;
+    }
+
+    // Strategie 1: Gespeichertes HWND nutzen
+    if (target != nullptr && IsWindow(target) && IsWindowVisible(target)) {
+        logLine("[INJECT] activatePreviousWindow: trying saved HWND 0x%p\n", target);
+        fflush(stdout);
+        if (forceForegroundWindow(target)) {
+            if (delayMs > 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+            }
+            return true;
+        }
+        logLine("[INJECT] activatePreviousWindow: saved HWND failed, invalidating\n");
+        fflush(stdout);
+        // HWND ist ungültig geworden → zurücksetzen
+        std::lock_guard<std::mutex> lock(g_targetWindowMutex);
+        g_targetWindow = nullptr;
+    }
+
+    // Strategie 2: Fenster per Titel/Class-Pattern suchen
+    HWND foundByPattern = findTargetWindowByPattern();
+    if (foundByPattern != nullptr) {
+        logLine("[INJECT] activatePreviousWindow: found by pattern 0x%p\n", foundByPattern);
+        fflush(stdout);
+        if (forceForegroundWindow(foundByPattern)) {
+            // Gefundenes Fenster als neues Target merken
+            std::lock_guard<std::mutex> lock(g_targetWindowMutex);
+            g_targetWindow = foundByPattern;
+            if (delayMs > 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+            }
+            return true;
+        }
+    }
+
+    // Strategie 3: Alt+Tab als Fallback
+    logLine("[INJECT] activatePreviousWindow: falling back to Alt+Tab\n");
+    fflush(stdout);
     std::vector<INPUT> inputs;
     inputs.push_back(makeVirtualKeyInput(VK_MENU, false));
     inputs.push_back(makeVirtualKeyInput(VK_TAB, false));
@@ -1338,14 +1501,43 @@ bool sendUnicodeText(const std::wstring& text, std::uint32_t charDelayMs) {
     return ok;
 }
 
+// ─── Target-Window speichern ────────────────────────────────────
+
+void saveTargetWindow() {
+    HWND foreground = GetForegroundWindow();
+    if (foreground == nullptr) return;
+
+    std::lock_guard<std::mutex> lock(g_targetWindowMutex);
+    g_targetWindow = foreground;
+
+    // Auch Titel und Klassenname für spätere Wiedererkennung speichern,
+    // falls das HWND ungültig wird (z. B. nach App-Neustart).
+    wchar_t titleBuf[512] = {};
+    GetWindowTextW(foreground, titleBuf, static_cast<int>(std::size(titleBuf)));
+    if (wcslen(titleBuf) > 0) {
+        g_targetWindowTitlePattern = titleBuf;
+    }
+
+    wchar_t classBuf[256] = {};
+    GetClassNameW(foreground, classBuf, static_cast<int>(std::size(classBuf)));
+    if (wcslen(classBuf) > 0) {
+        g_targetWindowClassName = classBuf;
+    }
+
+    logLine("[INJECT] saveTargetWindow: HWND=0x%p title=\"%ls\" class=\"%ls\"\n",
+           foreground, titleBuf, classBuf);
+    fflush(stdout);
+}
+
 // ─── Request handler ────────────────────────────────────────────
 
 std::string handleRequest(const std::string& message) {
     NativeRequest request;
     try {
         request = parseRequest(message);
-    } catch (const std::exception& error) {
-        return makeResponse(false, std::string("Invalid request: ") + error.what(), "");
+    } catch (const std::exception& /*error*/) {
+        // Fehlertext absichtlich generisch für Robustheit
+        return makeResponse(false, "Invalid request", "");
     }
 
     const std::string requestId = asciiFromWide(request.requestId);
@@ -1406,6 +1598,7 @@ std::string handleRequest(const std::string& message) {
         if (outcome == PasteOutcome::Success) {
             logLine("[INJECT] handleRequest SUCCESS (clipboard)\n");
             fflush(stdout);
+            saveTargetWindow();
             return makeResponse(true, "", "clipboard", requestId);
         }
 
@@ -1421,6 +1614,7 @@ std::string handleRequest(const std::string& message) {
             if (sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
                 logLine("[INJECT] handleRequest SUCCESS (sendinput fallback)\n");
                 fflush(stdout);
+                saveTargetWindow();
                 return makeResponse(true, "", "sendinput", requestId);
             }
 
@@ -1441,6 +1635,7 @@ std::string handleRequest(const std::string& message) {
     if (sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
         logLine("[INJECT] handleRequest SUCCESS (sendinput)\n");
         fflush(stdout);
+        saveTargetWindow();
         return makeResponse(true, "", "sendinput", requestId);
     }
 
@@ -1521,6 +1716,41 @@ void handleClient(SOCKET client) {
             const bool frontendVisible = getBoolValue(request, "frontendVisible", false);
             setRecordingState(active, L"websocket", !frontendVisible);
             sendWsFrame(client, 0x1, makeTypedResponse("recording-status-updated", true, ""));
+            continue;
+        }
+
+        if (nr.type == L"set-target-window") {
+            // Frontend-seitige Konfiguration des Ziel-Fensters.
+            // Erlaubt dem Nutzer, Titel-Pattern und/oder Klassenname
+            // für die Ziel-App festzulegen (z. B. "Radiologie" im Titel).
+            const std::wstring windowTitle = getStringValue(request, "windowTitle");
+            const std::wstring windowClass = getStringValue(request, "windowClass");
+            const bool clear = getBoolValue(request, "clear", false);
+
+            {
+                std::lock_guard<std::mutex> lock(g_targetWindowMutex);
+                if (clear) {
+                    g_targetWindowTitlePattern.clear();
+                    g_targetWindowClassName.clear();
+                    g_targetWindow = nullptr;
+                } else {
+                    if (!windowTitle.empty()) g_targetWindowTitlePattern = windowTitle;
+                    if (!windowClass.empty()) g_targetWindowClassName = windowClass;
+                }
+            }
+
+            // Versuche sofort das Fenster zu finden und als Target zu setzen
+            HWND found = findTargetWindowByPattern();
+            if (found != nullptr) {
+                std::lock_guard<std::mutex> lock(g_targetWindowMutex);
+                g_targetWindow = found;
+            }
+
+            logLine("[WS] set-target-window title=\"%ls\" class=\"%ls\" clear=%d found=0x%p\n",
+                   windowTitle.c_str(), windowClass.c_str(), clear ? 1 : 0, found);
+            fflush(stdout);
+
+            sendWsFrame(client, 0x1, makeTypedResponse("target-window-set", true, ""));
             continue;
         }
 

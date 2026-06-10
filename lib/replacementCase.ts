@@ -11,12 +11,23 @@ function capitalize(value: string): string {
 /**
  * Wörterbuch-Schreibweise ist maßgeblich; nur ALLCAPS und Satzanfangs-
  * Großschreibung des Originals werden gespiegelt.
+ *
+ * Die ALLCAPS-Regel greift NUR, wenn der Ersatztext selbst keine gemischte
+ * Groß-/Kleinschreibung enthält. Enthält er sie (z. B. "TIPS-Nadel"), wurde
+ * die Schreibweise bewusst im Wörterbuch festgelegt und wird nicht durch
+ * ein kurzes Akronym im Originaltext überschrieben.
  */
 export function applyDictionaryReplacementCase(original: string, replacement: string): string {
   if (!original || !replacement) return replacement;
 
   if (original === original.toUpperCase()) {
-    return replacement.toUpperCase();
+    // Nur ALLCAPS erzwingen, wenn der Ersatztext nicht bereits gemischte
+    // Groß-/Kleinschreibung enthält (bewusste Wörterbuch-Entscheidung).
+    const hasMixedCase = replacement !== replacement.toUpperCase() &&
+                         replacement !== replacement.toLowerCase();
+    if (!hasMixedCase) {
+      return replacement.toUpperCase();
+    }
   }
 
   if (!startsWithUppercase(replacement) && startsWithUppercase(original)) {

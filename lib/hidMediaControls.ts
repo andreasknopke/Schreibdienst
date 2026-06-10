@@ -2,7 +2,7 @@ export type HidMediaControlAction = 'play' | 'pause' | 'record' | 'fast-forward'
 
 export type HidMediaControlPhase = 'keydown' | 'keyup';
 
-export type HidMediaControlSource = 'keyboard' | 'webhid';
+export type HidMediaControlSource = 'keyboard' | 'webhid' | 'native-host';
 
 export interface HidMediaControlEventDetail {
   action: HidMediaControlAction;
@@ -20,6 +20,7 @@ export interface HidMediaControlStatusDetail {
   connected: boolean;
   deviceName?: string;
   connectedDeviceCount: number;
+  source?: HidMediaControlSource;
 }
 
 export interface HidMediaControlsOptions {
@@ -30,6 +31,17 @@ export interface HidMediaControlsOptions {
 
 export const HID_MEDIA_CONTROL_EVENT = 'schreibdienst:hid-media-control';
 export const HID_MEDIA_CONTROL_STATUS_EVENT = 'schreibdienst:hid-media-control-status';
+
+// Native-Host-HID-Integration (kein Chrome-Permission-Dialog nötig)
+import {
+  connectNativeHid,
+  disconnectNativeHid,
+  onNativeHidEvent,
+  onNativeHidStatus,
+  isNativeHidConnected,
+} from './hidNativeClient';
+
+let g_nativeHidCleanup: (() => void) | null = null;
 
 const GRUNDIG_SONICMIC_VENDOR_ID = 0x15d8;
 const GRUNDIG_SONICMIC_PRODUCT_ID = 0x0025;
@@ -394,11 +406,26 @@ export function stopHidMediaControls(): void {
   removeListeners = null;
   connectedWebHidDevices.forEach((deviceState) => deviceState.removeListener());
   connectedWebHidDevices.clear();
+  stopNativeHidCleanup();
+  disconnectNativeHid();
   activeWindow = null;
 }
 
 export function getHidMediaControlStatus(): HidMediaControlStatusDetail {
   const firstDevice = connectedWebHidDevices.keys().next().value as WebHidDevice | undefined;
+  const nativeConnected = isNativeHidConnected();
+
+  // Native Host hat Vorrang
+  if (nativeConnected) {
+    return {
+      supported: true,
+      connected: true,
+      deviceName: undefined,
+      connectedDeviceCount: 1,
+      source: 'native-host',
+    };
+  }
+
   return {
     supported: getWebHidApi() !== null,
     connected: connectedWebHidDevices.size > 0,
@@ -461,28 +488,100 @@ export function startHidMediaControls(options: HidMediaControlsOptions = {}): vo
     dispatchControlEvent(target, event, 'keyup', options.onEvent);
   };
 
+  target.addEventListener('keydown', handleKeyDown);
+  target.addEventListener('keyup', handleKeyUp);
+
+  // ── Native-Host-HID (primär) ──
+  // Versuche zuerst die HID-Steuerung über den Native Host – kein Chrome-Dialog nötig.
+  connectNativeHid().then((ok) => {
+    if (!ok) return;
+
+    // Native HID Event → HidMediaControlEventDetail konvertieren
+    const unsubEvent = onNativeHidEvent((nativeEvent) => {
+      dispatchActionEvent(target, {
+        action: 'record',
+        hidUsage: '0xFF00:0x0001/0x01',
+        key: 'MediaRecord',
+        code: 'MediaRecord',
+        phase: nativeEvent.phase === 'keydown' ? 'keydown' : 'keyup',
+        source: 'native-host',
+        deviceName: nativeEvent.deviceName,
+      }, options.onEvent);
+    });
+
+    // Status-Propagation von Native Host ins HidMediaControlStatusDetail
+    const unsubStatus = onNativeHidStatus((status) => {
+      const detail: HidMediaControlStatusDetail = {
+        supported: status.supported || getWebHidApi() !== null,
+        connected: status.connected,
+        deviceName: status.deviceName,
+        connectedDeviceCount: status.connected ? 1 : 0,
+        source: 'native-host',
+      };
+      target.dispatchEvent(new CustomEvent<HidMediaControlStatusDetail>(
+        HID_MEDIA_CONTROL_STATUS_EVENT,
+        { detail },
+      ));
+    });
+
+    g_nativeHidCleanup = () => {
+      unsubEvent();
+      unsubStatus();
+    };
+
+    console.info('[HID] Native-Host-HID aktiv – kein WebHID-Fallback nötig');
+  }).catch(() => {
+    // Native Host nicht erreichbar → WebHID-Fallback
+    console.info('[HID] Native Host nicht erreichbar – verwende WebHID-Fallback');
+    startWebHidFallback(target, options);
+  });
+
+  activeWindow = target;
+  removeListeners = () => {
+    target.removeEventListener('keydown', handleKeyDown);
+    target.removeEventListener('keyup', handleKeyUp);
+    stopWebHidListeners();
+    stopNativeHidCleanup();
+  };
+}
+
+/**
+ * WebHID-Fallback: Registriert Keyboard- und WebHID-Listener wie bisher.
+ */
+function startWebHidFallback(target: Window, options: HidMediaControlsOptions): void {
   const hid = getWebHidApi();
+
   const handleDisconnect = (event: Event) => {
     const device = (event as WebHidConnectionEvent).device;
     const deviceState = connectedWebHidDevices.get(device);
-    if (!deviceState) {
-      return;
-    }
+    if (!deviceState) return;
 
     deviceState.removeListener();
     connectedWebHidDevices.delete(device);
     dispatchStatusEvent(target);
   };
 
-  target.addEventListener('keydown', handleKeyDown);
-  target.addEventListener('keyup', handleKeyUp);
   hid?.addEventListener('disconnect', handleDisconnect);
-  void connectGrantedWebHidDevices(target, options.onEvent).catch(() => undefined);
 
-  activeWindow = target;
+  // Bestehende WebHID-Listener-Registrierung in removeListeners übernehmen
+  const prevRemove = removeListeners;
   removeListeners = () => {
-    target.removeEventListener('keydown', handleKeyDown);
-    target.removeEventListener('keyup', handleKeyUp);
+    prevRemove?.();
     hid?.removeEventListener('disconnect', handleDisconnect);
   };
+
+  void connectGrantedWebHidDevices(target, options.onEvent).catch(() => undefined);
+}
+
+/**
+ * Cleanup für WebHID-Listener (wird beim Umschalten auf Native Host aufgerufen).
+ */
+function stopWebHidListeners(): void {
+  connectedWebHidDevices.forEach((deviceState) => deviceState.removeListener());
+  connectedWebHidDevices.clear();
+}
+
+function stopNativeHidCleanup(): void {
+  g_nativeHidCleanup?.();
+  g_nativeHidCleanup = null;
 }

@@ -30,6 +30,7 @@ export interface NativeHidDeviceStatus {
 
 const WS_URL = 'ws://localhost:58765';
 const WS_CONNECT_TIMEOUT_MS = 2000;
+const HID_CONFIRM_TIMEOUT_MS = 2000;
 const WS_PING_INTERVAL_MS = 30000;
 
 type HidEventCallback = (event: NativeHidEvent) => void;
@@ -37,7 +38,7 @@ type DeviceStatusCallback = (status: NativeHidDeviceStatus) => void;
 
 let g_ws: WebSocket | null = null;
 let g_wsReady: Promise<WebSocket> | null = null;
-let g_hidAvailable = false;
+let g_hidConfirmed = false;
 let g_deviceStatus: NativeHidDeviceStatus = { connected: false, supported: false };
 let g_eventCallbacks = new Set<HidEventCallback>();
 let g_statusCallbacks = new Set<DeviceStatusCallback>();
@@ -74,6 +75,48 @@ function stopPing() {
   }
 }
 
+/**
+ * Richtet den dauerhaften Message-Handler für HID-Events ein.
+ * Wird erst NACH erfolgreichem hid-status-Confirmation-Handshake aufgerufen.
+ */
+function setupMessageHandler(ws: WebSocket): void {
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+
+      if (data.type === 'hid-event' && data.event) {
+        const hidEvent: NativeHidEvent = {
+          action: data.event.action,
+          phase: data.event.phase,
+          deviceName: data.event.deviceName || 'Unbekanntes Gerät',
+          vendorId: data.event.vendorId ?? 0,
+          productId: data.event.productId ?? 0,
+        };
+        g_eventCallbacks.forEach(cb => {
+          try { cb(hidEvent); } catch {}
+        });
+      } else if (data.type === 'hid-device-connected') {
+        updateDeviceStatus({
+          connected: data.connected === true,
+          deviceName: data.deviceName,
+          vendorId: data.vendorId,
+          productId: data.productId,
+        });
+      } else if (data.type === 'hid-status') {
+        updateDeviceStatus({
+          connected: data.connected === true,
+          deviceName: data.deviceName,
+          vendorId: data.vendorId,
+          productId: data.productId,
+          supported: true,
+        });
+      }
+    } catch {
+      // Not JSON or unknown format — ignore
+    }
+  };
+}
+
 function getSharedWs(): Promise<WebSocket> {
   if (g_ws && g_ws.readyState === WebSocket.OPEN) {
     return Promise.resolve(g_ws);
@@ -103,16 +146,54 @@ function getSharedWs(): Promise<WebSocket> {
     ws.onopen = () => {
       clearTimeout(connectTimeout);
       console.info('[HID-Native] WebSocket verbunden');
-      g_ws = ws;
-      g_wsReady = null;
-      g_hidAvailable = true;
-      updateDeviceStatus({ supported: true });
 
-      // HID beim Native Host aktivieren
+      // HID beim Native Host aktivieren und auf Bestätigung warten.
+      // Alter Injector (v0.1.12) hat noch kein HID-Support und antwortet
+      // nicht auf start-hid → Timeout → Fallback auf WebHID.
+      let confirmTimeout: ReturnType<typeof setTimeout> | null = null;
+      let confirmed = false;
+
+      const confirmHandler = (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'hid-status') {
+            confirmed = true;
+            if (confirmTimeout !== null) clearTimeout(confirmTimeout);
+            // Listener für Bestätigung entfernen, regulären Handler set up
+            ws.removeEventListener('message', confirmHandler);
+            setupMessageHandler(ws);
+            g_ws = ws;
+            g_wsReady = null;
+            g_hidConfirmed = true;
+            updateDeviceStatus({
+              supported: true,
+              connected: data.connected === true,
+              deviceName: data.deviceName,
+            });
+            startPing(ws);
+            resolve(ws);
+            console.info('[HID-Native] HID-Unterstützung bestätigt (neuer Injector)');
+          }
+        } catch {
+          // Not JSON — ignore during handshake
+        }
+      };
+
+      ws.addEventListener('message', confirmHandler);
+
+      confirmTimeout = setTimeout(() => {
+        if (confirmed) return;
+        ws.removeEventListener('message', confirmHandler);
+        console.warn('[HID-Native] Keine HID-Bestätigung – alter Injector erkannt, Fallback auf WebHID');
+        try { ws.close(); } catch {}
+        g_ws = null;
+        g_wsReady = null;
+        g_hidConfirmed = false;
+        updateDeviceStatus({ supported: false, connected: false });
+        reject(new Error('Alter Injector (kein HID-Support)'));
+      }, HID_CONFIRM_TIMEOUT_MS);
+
       ws.send(JSON.stringify({ type: 'start-hid' }));
-
-      startPing(ws);
-      resolve(ws);
     };
 
     ws.onerror = () => {
@@ -129,44 +210,8 @@ function getSharedWs(): Promise<WebSocket> {
       stopPing();
       g_ws = null;
       g_wsReady = null;
-      g_hidAvailable = false;
+      g_hidConfirmed = false;
       updateDeviceStatus({ connected: false, supported: false });
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-
-        if (data.type === 'hid-event' && data.event) {
-          const hidEvent: NativeHidEvent = {
-            action: data.event.action,
-            phase: data.event.phase,
-            deviceName: data.event.deviceName || 'Unbekanntes Gerät',
-            vendorId: data.event.vendorId ?? 0,
-            productId: data.event.productId ?? 0,
-          };
-          g_eventCallbacks.forEach(cb => {
-            try { cb(hidEvent); } catch {}
-          });
-        } else if (data.type === 'hid-device-connected') {
-          updateDeviceStatus({
-            connected: data.connected === true,
-            deviceName: data.deviceName,
-            vendorId: data.vendorId,
-            productId: data.productId,
-          });
-        } else if (data.type === 'hid-status') {
-          updateDeviceStatus({
-            connected: data.connected === true,
-            deviceName: data.deviceName,
-            vendorId: data.vendorId,
-            productId: data.productId,
-            supported: true,
-          });
-        }
-      } catch {
-        // Not JSON or unknown format — ignore
-      }
     };
   });
 
@@ -225,7 +270,7 @@ export function getNativeHidStatus(): NativeHidDeviceStatus {
  * Prüft, ob der Native-Host-HID-Modus aktiv ist.
  */
 export function isNativeHidConnected(): boolean {
-  return g_hidAvailable && g_deviceStatus.connected;
+  return g_hidConfirmed && g_deviceStatus.connected;
 }
 
 /**
@@ -241,6 +286,6 @@ export function disconnectNativeHid(): void {
     g_ws = null;
     g_wsReady = null;
   }
-  g_hidAvailable = false;
+  g_hidConfirmed = false;
   updateDeviceStatus({ connected: false, supported: false });
 }

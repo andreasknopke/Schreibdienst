@@ -23,6 +23,35 @@ export interface InjectorAvailabilityResult {
 const WS_URL = 'ws://localhost:58765';
 const RESPONSE_TIMEOUT_MS = 1500;
 
+// Client-seitige Deduplizierung: Derselbe Text darf nicht mehrmals innerhalb
+// kurzer Zeit gesendet werden. Der Retry bei Timeout (original request + 220ms
+// Pause + erneuter Versuch) dauert länger als RESPONSE_TIMEOUT_MS, sodass der
+// erste Request bereits auf dem Native Host verarbeitet wurde – die Antwort
+// ging nur verloren. Der Retry-Missbrauch wird hiermit blockiert.
+// Verwendung eines Ringpuffers (3 Einträge), der Text + Timestamp speichert,
+// um auch abwechselnde Duplikate zuverlässig zu erkennen.
+const CLIENT_DEDUP_WINDOW_MS = 3000;
+const CLIENT_DEDUP_HISTORY = 3;
+const g_sentHistory: { text: string; time: number }[] = [];
+
+function isDuplicateText(text: string): boolean {
+  const now = Date.now();
+  for (const entry of g_sentHistory) {
+    if (entry.text === text && (now - entry.time) < CLIENT_DEDUP_WINDOW_MS) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function recordSentText(text: string): void {
+  // Ältesten Eintrag ersetzen (Ringpuffer)
+  if (g_sentHistory.length >= CLIENT_DEDUP_HISTORY) {
+    g_sentHistory.shift();
+  }
+  g_sentHistory.push({ text, time: Date.now() });
+}
+
 let g_ws: WebSocket | null = null;
 let g_wsReady: Promise<WebSocket> | null = null;
 let g_wsUnavailable = false;
@@ -112,6 +141,13 @@ async function sendToHost(
 
         clearTimeout(timeout);
         ws.removeEventListener('message', handleMessage);
+
+        // Erfolgreiche Antwort im History-Ringpuffer vermerken,
+        // damit ein Retry mit demselben Text erkannt wird.
+        if (data.ok) {
+          recordSentText(request.text);
+        }
+
         console.log(`[Injector] sendToHost RESPONSE id=${requestId} ok=${data.ok} method=${data.mode ?? data.method ?? data.fallback ?? ''}`);
         resolve(data as InjectResult);
       } catch {
@@ -145,6 +181,14 @@ export async function injectToActiveWindow({
 
   if (typeof window === 'undefined' || typeof navigator === 'undefined') {
     return { ok: false, error: 'Nur im Browser verfügbar' };
+  }
+
+  // Client-seitige Deduplizierung: Derselbe Text wurde bereits innerhalb
+  // des Zeitfensters erfolgreich gesendet → sofort ok zurückgeben.
+  // Der Ringpuffer mit 3 Einträgen fängt auch abwechselnde Duplikate.
+  if (isDuplicateText(text)) {
+    console.log(`[Injector] DEDUP SUPPRESSED: same text already sent recently`);
+    return { ok: true, fallback: undefined };
   }
 
   const requestId = createRequestId();

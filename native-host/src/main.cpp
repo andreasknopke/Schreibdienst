@@ -208,6 +208,18 @@ std::mutex g_injectMutex;
 std::mutex g_notificationMutex;
 std::atomic<bool> g_recordingState{false};
 
+// Deduplizierung von doppelten Text-Injection-Aufrufen.
+// Der Client wiederholt einen Request bei Timeout – der erste Request
+// wurde dann aber vom Host bereits verarbeitet. Dieselbe Text-Injection
+// darf nicht ein zweites Mal ausgeführt werden.
+struct InjectDedupEntry {
+    std::wstring text;
+    std::chrono::steady_clock::time_point timestamp;
+};
+InjectDedupEntry g_lastInjectDedup;
+std::mutex g_injectDedupMutex;
+constexpr auto INJECT_DEDUP_WINDOW = std::chrono::seconds(8);
+
 constexpr UINT SCHREIBDIENST_TRAY_ICON_ID = 1;
 bool g_trayIconRegistered = false;
 
@@ -1346,6 +1358,23 @@ std::string handleRequest(const std::string& message) {
     }
 
     std::lock_guard<std::mutex> injectLock(g_injectMutex);
+
+    // Deduplizierung: Derselbe Text darf nicht innerhalb INJECT_DEDUP_WINDOW
+    // erneut injected werden. Der Client macht bei Timeout einen Retry, der
+    // erste Request wurde dann aber bereits verarbeitet.
+    {
+        std::lock_guard<std::mutex> dedupLock(g_injectDedupMutex);
+        const auto now = std::chrono::steady_clock::now();
+        if (g_lastInjectDedup.text == request.payload.text &&
+            (now - g_lastInjectDedup.timestamp) < INJECT_DEDUP_WINDOW) {
+            logLine("[INJECT] handleRequest DEDUP SUPPRESSED (duplicate text within %llds)\n",
+                   static_cast<long long>(INJECT_DEDUP_WINDOW.count()));
+            fflush(stdout);
+            return makeResponse(true, "", asciiFromWide(request.payload.mode), requestId);
+        }
+        g_lastInjectDedup.text = request.payload.text;
+        g_lastInjectDedup.timestamp = now;
+    }
 
     // Convert text to narrow string for logging (truncate at 80 chars)
     std::string narrowText;

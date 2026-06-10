@@ -162,7 +162,7 @@ function normalizeChunkLeadingWhitespace(text: string): string {
   return text.replace(/^\s+/, '');
 }
 
-const LIVE_INJECT_DUPLICATE_WINDOW_MS = 1200;
+const LIVE_INJECT_DUPLICATE_WINDOW_MS = 3000;
 
 function insertTextAtSelection(existing: string, incomingText: string, selection?: CaretSelection | null): TextInsertionResult {
   const normalizedIncomingText = normalizeChunkLeadingWhitespace(incomingText);

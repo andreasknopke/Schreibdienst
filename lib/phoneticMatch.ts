@@ -646,6 +646,60 @@ export function buildPhoneticIndex(entries: { wrong: string; correct: string; so
   return { byPhoneticCode, allEntries };
 }
 
+// Schwellwert: Unterschreitet die phonetische Ähnlichkeit zwischen
+// wrong und correct diesen Wert, wird vor dem Eintrag gewarnt.
+const PHONETIC_ENTRY_WARNING_THRESHOLD = 0.35;
+
+/**
+ * Berechnet die phonetische Ähnlichkeit zwischen zwei Wörtern.
+ * Nutzt den normalisierten Text (nicht nur die Codes), da kurze Codes
+ * (z.B. „den“ → „26“ vs. „pAVK IIb“ → „13421“) bei reinem Code-Vergleich
+ * zu trügerisch hohen/niedrigen Werten führen.
+ *
+ * Verwendet wird die Levenshtein-Distanz auf den normalisierten Formen,
+ * kombiniert mit der phonetischen Code-Distanz als Plausibilitätsprüfung.
+ *
+ * @returns Wert zwischen 0 (völlig verschieden) und 1 (identisch).
+ */
+export function computeEntryPhoneticSimilarity(wrong: string, correct: string): number {
+  const wNorm = normalizeForComparison(wrong);
+  const cNorm = normalizeForComparison(correct);
+  const textSimilarity = normalizedSimilarity(wNorm, cNorm);
+
+  // Phonetische Code-Distanz als zweite Meinung
+  const wCode = colognePhonetic(wrong);
+  const cCode = colognePhonetic(correct);
+  const maxCodeLen = Math.max(wCode.length, cCode.length, 1);
+  const codeSimilarity = 1 - (levenshtein(wCode, cCode) / maxCodeLen);
+
+  // Kombination: der schlechtere der beiden Werte dominiert (konservativ)
+  return Math.min(textSimilarity, codeSimilarity);
+}
+
+/**
+ * Prüft, ob ein Wörterbuch-Eintrag phonetisch zu weit auseinander liegt
+ * und gibt ggf. eine erklärende Warnung zurück.
+ *
+ * @returns Warn-String oder null, wenn keine Warnung nötig ist.
+ */
+export function getEntryPhoneticWarning(wrong: string, correct: string): string | null {
+  const similarity = computeEntryPhoneticSimilarity(wrong, correct);
+
+  if (similarity >= PHONETIC_ENTRY_WARNING_THRESHOLD) {
+    return null;
+  }
+
+  const wCode = colognePhonetic(wrong);
+  const cCode = colognePhonetic(correct);
+
+  return (
+    `Achtung: „${wrong}“ und „${correct}“ sind phonetisch sehr verschieden ` +
+    `(Ähnlichkeit: ${Math.round(similarity * 100)}%, Codes: ${wCode} ↔ ${cCode}). ` +
+    `Das phonetische Matching könnte dadurch falsche Ersetzungen auslösen. ` +
+    `Bitte prüfe, ob dieser Eintrag sinnvoll ist, oder schwäche das Matching über „Phonetisch abschwächen“ ab.`
+  );
+}
+
 /**
  * Generiert alle phonetischen Code-Variationen mit Levenshtein-Distanz 1.
  * Erlaubt: Ersetzung einer Ziffer, Löschung einer Ziffer, Einfügung einer Ziffer.

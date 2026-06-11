@@ -333,6 +333,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
   const [dictWrong, setDictWrong] = useState('');
   const [dictCorrect, setDictCorrect] = useState('');
   const [dictFeedback, setDictFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [dictWarning, setDictWarning] = useState<string | null>(null);
   
   // Revert/Re-Correct state
   const [isReverted, setIsReverted] = useState(false);
@@ -994,10 +995,12 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
       
       if (res.ok) {
         setDictFeedback({ type: 'success', message: `"${dictWrong}" → "${dictCorrect}" hinzugefügt` });
+        setDictWarning(data.warning || null);
         setDictWrong('');
         setDictCorrect('');
         setTimeout(() => {
           setDictFeedback(null);
+          setDictWarning(null);
           setShowDictForm(false);
         }, 2000);
       } else {
@@ -2012,7 +2015,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                       </button>
                       <button
                         className="btn btn-sm btn-outline"
-                        onClick={() => { setShowDictForm(false); setDictWrong(''); setDictCorrect(''); setDictFeedback(null); }}
+                        onClick={() => { setShowDictForm(false); setDictWrong(''); setDictCorrect(''); setDictFeedback(null); setDictWarning(null); }}
                       >
                         ✕
                       </button>
@@ -2024,6 +2027,11 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                           : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
                       }`}>
                         {dictFeedback.message}
+                      </div>
+                    )}
+                    {dictWarning && (
+                      <div className="text-xs p-2 rounded bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-700">
+                        <span className="font-medium">⚠️ </span>{dictWarning}
                       </div>
                     )}
                   </div>
@@ -2661,6 +2669,7 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             setDictWrong('');
                             setDictCorrect('');
                             setDictFeedback(null);
+                            setDictWarning(null);
                           }}
                         >
                           ✕
@@ -2673,6 +2682,11 @@ export default function DictationQueue({ username, canViewAll = false, isSecreta
                             : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
                         }`}>
                           {dictFeedback.message}
+                        </div>
+                      )}
+                      {dictWarning && (
+                        <div className="text-xs p-2 rounded bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-700">
+                          <span className="font-medium">⚠️ </span>{dictWarning}
                         </div>
                       )}
                     </div>

@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getPoolForRequest } from './db';
 import type { DictionaryEntry } from './dictionaryDb';
+import { getEntryPhoneticWarning } from './phoneticMatch';
 
 export interface DictionaryGroup {
   id: number;
@@ -432,11 +433,14 @@ export async function upsertDictionaryGroupEntryWithRequest(
   useInPrompt: boolean,
   matchStem: boolean,
   addedBy: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; warning?: string }> {
   const wrongTrimmed = wrong?.trim();
   const correctTrimmed = correct?.trim();
   if (!wrongTrimmed || !correctTrimmed) return { success: false, error: 'Beide Felder müssen ausgefüllt sein' };
   if (wrongTrimmed === correctTrimmed) return { success: false, error: 'Falsches und korrektes Wort sind identisch' };
+
+  // Phonetische Distanz-Warnung prüfen
+  const warning = getEntryPhoneticWarning(wrongTrimmed, correctTrimmed);
 
   try {
     await ensureGroupDictionaryTables(request);
@@ -447,7 +451,7 @@ export async function upsertDictionaryGroupEntryWithRequest(
        ON DUPLICATE KEY UPDATE correct_word = VALUES(correct_word), use_in_prompt = VALUES(use_in_prompt), match_stem = VALUES(match_stem), added_by = VALUES(added_by), added_at = CURRENT_TIMESTAMP`,
       [groupId, wrongTrimmed, correctTrimmed, useInPrompt ? 1 : 0, matchStem ? 1 : 0, addedBy]
     );
-    return { success: true };
+    return { success: true, warning: warning ?? undefined };
   } catch (error) {
     console.error('[GroupDictionary] Upsert entry error:', error);
     return { success: false, error: 'Datenbankfehler' };

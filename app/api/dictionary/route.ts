@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
     const result = await addEntryWithRequest(request, username, wrong, correct, useInPrompt, matchStem);
     
     if (result.success) {
-      let response = NextResponse.json({ success: true, message: 'Eintrag hinzugefügt' });
+      let response = NextResponse.json({ success: true, message: 'Eintrag hinzugefügt', warning: result.warning ?? undefined });
 
       if (addToGroup) {
         try {

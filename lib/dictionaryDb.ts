@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { query, execute, getPoolForRequest } from './db';
 import { getEntriesForUserGroupsWithRequest } from './groupDictionaryDb';
+import { getEntryPhoneticWarning } from './phoneticMatch';
 
 export interface DictionaryEntry {
   wrong: string;
@@ -405,7 +406,7 @@ export async function addEntryWithRequest(
   correct: string,
   useInPrompt: boolean = false,
   matchStem: boolean = false
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; warning?: string }> {
   if (!wrong?.trim() || !correct?.trim()) {
     return { success: false, error: 'Beide Felder müssen ausgefüllt sein' };
   }
@@ -417,6 +418,9 @@ export async function addEntryWithRequest(
     return { success: false, error: 'Falsches und korrektes Wort sind identisch' };
   }
 
+  // Phonetische Distanz-Warnung prüfen
+  const warning = getEntryPhoneticWarning(wrongTrimmed, correctTrimmed);
+
   try {
     const db = await getPoolForRequest(request);
     await db.execute(
@@ -427,7 +431,7 @@ export async function addEntryWithRequest(
     );
     
     console.log('[Dictionary] Added/updated entry (with request) for', username, ':', wrongTrimmed, '->', correctTrimmed, `(prompt: ${useInPrompt}, stem: ${matchStem})`);
-    return { success: true };
+    return { success: true, warning: warning ?? undefined };
   } catch (error) {
     console.error('[Dictionary] Add entry error (with request):', error);
     return { success: false, error: 'Datenbankfehler' };

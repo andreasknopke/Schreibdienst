@@ -6,6 +6,7 @@
 import { NextRequest } from 'next/server';
 import { query, execute, queryWithRequest, executeWithRequest, tableExistsCache } from './db';
 import { STANDARD_DICTIONARY } from './standardDictionary';
+import { getEntryPhoneticWarning } from './phoneticMatch';
 
 const AUTO_SELF_MAPPING_CATEGORY = 'auto-self-mapping';
 const EXTERNAL_MEDICALTERMS_CATEGORY = 'external-medicalterms-de';
@@ -181,9 +182,14 @@ export async function addStandardDictEntry(
   wrong: string,
   correct: string,
   category: string = ''
-): Promise<{ success: boolean; createdSelfMapping?: boolean; error?: string }> {
+): Promise<{ success: boolean; createdSelfMapping?: boolean; warning?: string; error?: string }> {
   try {
     await ensureTable(request);
+
+    // Phonetische Distanz-Warnung prüfen (nur wenn kein Self-Mapping)
+    const warning = wrong.toLowerCase() !== correct.toLowerCase()
+      ? getEntryPhoneticWarning(wrong, correct) : null;
+
     await executeWithRequest(
       request,
       'INSERT INTO standard_dictionary (wrong_word, correct_word, category) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE correct_word = VALUES(correct_word), category = VALUES(category)',
@@ -200,7 +206,7 @@ export async function addStandardDictEntry(
       createdSelfMapping = selfMappingResult.affectedRows > 0;
     }
 
-    return { success: true, createdSelfMapping };
+    return { success: true, createdSelfMapping, warning: warning ?? undefined };
   } catch (error: any) {
     console.error('[StandardDict] Add error:', error);
     return { success: false, error: error.message };

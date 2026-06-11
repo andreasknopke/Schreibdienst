@@ -78,6 +78,7 @@ export default function GroupDictionaryManager() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [warning, setWarning] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDescription, setNewGroupDescription] = useState('');
   const [wrong, setWrong] = useState('');
@@ -315,6 +316,7 @@ export default function GroupDictionaryManager() {
     if (!selectedGroupId) return;
     setError('');
     setSuccess('');
+    setWarning('');
 
     try {
       const trimmedWrong = wrong.trim();
@@ -344,6 +346,7 @@ export default function GroupDictionaryManager() {
       }
 
       setSuccess(editingGroupEntry ? `"${trimmedWrong}" aktualisiert` : `"${trimmedWrong}" in Gruppe übernommen`);
+      setWarning(data.warning || '');
       resetEntryForm();
       await fetchGroupDetails(selectedGroupId);
       await fetchOverview();
@@ -566,6 +569,12 @@ export default function GroupDictionaryManager() {
     <div className="space-y-4">
       {error && <div className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-lg">{error}</div>}
       {success && <div className="text-sm text-green-600 bg-green-50 dark:bg-green-900/20 px-3 py-2 rounded-lg">{success}</div>}
+      {warning && (
+        <div className="text-sm text-amber-700 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 rounded-lg border border-amber-200 dark:border-amber-800">
+          <span className="font-medium">⚠️ Hinweis zum phonetischen Matching: </span>
+          {warning}
+        </div>
+      )}
 
       {/* Tabs: Gruppen-Manager / Alle Benutzerwörterbücher (nur root) */}
       {isRoot && (

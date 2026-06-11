@@ -22,6 +22,7 @@ export default function StandardDictionaryManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [warning, setWarning] = useState('');
   const [filter, setFilter] = useState('');
   
   // Form state
@@ -58,6 +59,7 @@ export default function StandardDictionaryManager() {
     if (!wrong.trim() || !correct.trim()) return;
     setError('');
     setSuccess('');
+    setWarning('');
     setAdding(true);
 
     try {
@@ -70,6 +72,7 @@ export default function StandardDictionaryManager() {
       if (response.ok && data.success) {
         const autoMappingHint = data.createdSelfMapping ? ' + phonetischer Self-Mapping-Eintrag' : '';
         setSuccess(`"${wrong}" → "${correct}" hinzugefügt${autoMappingHint}`);
+        setWarning(data.warning || '');
         setWrong('');
         setCorrect('');
         await fetchEntries();
@@ -219,6 +222,12 @@ export default function StandardDictionaryManager() {
       {success && (
         <div className="text-sm text-green-600 bg-green-50 dark:bg-green-900/20 px-3 py-2 rounded-lg">
           {success}
+        </div>
+      )}
+      {warning && (
+        <div className="text-sm text-amber-700 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 rounded-lg border border-amber-200 dark:border-amber-800">
+          <span className="font-medium">⚠️ Hinweis zum phonetischen Matching: </span>
+          {warning}
         </div>
       )}
 

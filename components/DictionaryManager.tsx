@@ -26,6 +26,7 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [warning, setWarning] = useState('');
   
   // Form state
   const [wrong, setWrong] = useState(initialWrong);
@@ -92,7 +93,13 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
 
       if (data.success) {
         notifyDictionaryChanged({ scope: 'private', wrong, correct });
-        setSuccess(`"${wrong}" → "${correct}" hinzugefügt`);
+        const successMsg = `"${wrong}" → "${correct}" hinzugefügt`;
+        setSuccess(successMsg);
+        if (data.warning) {
+          setWarning(data.warning);
+        } else {
+          setWarning('');
+        }
         setWrong('');
         setCorrect('');
         setAddToGroup(false);
@@ -161,6 +168,13 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
       {success && (
         <div className="text-sm text-green-600 bg-green-50 dark:bg-green-900/20 px-3 py-2 rounded-lg">
           {success}
+        </div>
+      )}
+
+      {warning && (
+        <div className="text-sm text-amber-700 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 rounded-lg border border-amber-200 dark:border-amber-800">
+          <span className="font-medium">⚠️ Hinweis zum phonetischen Matching: </span>
+          {warning}
         </div>
       )}
 

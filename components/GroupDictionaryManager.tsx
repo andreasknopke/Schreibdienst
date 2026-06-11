@@ -227,6 +227,31 @@ export default function GroupDictionaryManager() {
     }
   };
 
+  const handleDeleteAllUserEntry = async (targetUsername: string, wrongWord: string) => {
+    setError('');
+    setSuccess('');
+    try {
+      const response = await fetch('/api/dictionary', {
+        method: 'DELETE',
+        headers: requestJsonHeaders(),
+        body: JSON.stringify({ username: targetUsername, wrong: wrongWord }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        setError(data.error || 'Fehler beim Löschen');
+        return;
+      }
+      setSuccess(`„${wrongWord}“ von ${targetUsername} gelöscht`);
+      // Tabelle aktualisieren
+      setAllUserEntries(prev => prev.filter(
+        e => !(e.username === targetUsername && e.wrong === wrongWord)
+      ));
+      notifyDictionaryChanged();
+    } catch {
+      setError('Verbindungsfehler');
+    }
+  };
+
   useEffect(() => {
     fetchOverview();
   }, []);
@@ -667,6 +692,7 @@ export default function GroupDictionaryManager() {
                           <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Hinzugefügt</th>
                           <th className="text-center px-3 py-2 font-medium whitespace-nowrap w-14">Prompt</th>
                           <th className="text-center px-3 py-2 font-medium whitespace-nowrap w-14">Stamm</th>
+                          <th className="text-center px-3 py-2 font-medium whitespace-nowrap w-14">Aktion</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y dark:divide-gray-700">
@@ -683,6 +709,16 @@ export default function GroupDictionaryManager() {
                             </td>
                             <td className="px-3 py-1.5 text-center">{entry.useInPrompt ? '✓' : ''}</td>
                             <td className="px-3 py-1.5 text-center">{entry.matchStem ? '✓' : ''}</td>
+                            <td className="px-3 py-1.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteAllUserEntry(entry.username, entry.wrong)}
+                                className="text-xs text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 hover:underline"
+                                title={`Eintrag „${entry.wrong}“ von ${entry.username} löschen`}
+                              >
+                                Löschen
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>

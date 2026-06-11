@@ -725,11 +725,27 @@ bool isGrundigRecordPayload(const uint8_t* data, size_t size) {
 }
 
 bool isPhilipsSpeechMikeRecordPayload(const uint8_t* data, size_t size) {
-    // Philips SpeechMike III Record-Payload: 80 00 00 00 00 00 00 00 01
-    if (size < 9) return false;
-    return data[0] == 0x80 && data[1] == 0x00 && data[2] == 0x00
-        && data[3] == 0x00 && data[4] == 0x00 && data[5] == 0x00
-        && data[6] == 0x00 && data[7] == 0x00 && data[8] == 0x01;
+    // Philips SpeechMike III auf UsagePage 0xFFA0:
+    // Report-Format: [00] [Button] [00 00 00 00 00 00] [???] [Pressed]
+    // Byte 0 = Report-ID (0x00)
+    // Byte 1 = Button-Mask (0x80 = Record, 0x9E = Stop, etc.)
+    // Byte 8 = unbekannt
+    // Byte 9 = 0x01 = gedrueckt, 0x00 = losgelassen
+    if (size < 10) return false;
+
+    // Philips auf 0xFFA0: Byte 0=0x00, Byte 1=0x80 = Record
+    if (data[0] == 0x00 && data[1] == 0x80) {
+        // Byte 9 = 0x01 bedeutet gedrueckt
+        return data[9] == 0x01;
+    }
+
+    // Altes Format (UsagePage 0xFFA1, ohne Report-ID):
+    // 80 00 00 00 00 00 00 00 01
+    return size >= 9 && data[0] == 0x80 && data[1] == 0x00
+        && data[2] == 0x00 && data[3] == 0x00
+        && data[4] == 0x00 && data[5] == 0x00
+        && data[6] == 0x00 && data[7] == 0x00
+        && data[8] == 0x01;
 }
 
 bool isGrundigDevice(uint16_t vendorId, uint16_t productId) {

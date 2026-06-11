@@ -4320,6 +4320,27 @@ export default function HomePage() {
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3 flex-wrap">
               {RecordButton}
+              {/* Raumgeräusch-Schwelle — nur anzeigen wenn nicht via non-VAD-Provider aufgenommen wird */}
+              {(!recording || !runtimeConfig || runtimeConfig.transcriptionProvider === 'voxtral_local' || runtimeConfig.transcriptionProvider === 'whisperx' || runtimeConfig.transcriptionProvider === 'mistral') && (
+                <div className="flex items-center gap-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1">
+                  <span className="text-gray-500 select-none" title="Je höher, desto lauter muss Sprache sein um erkannt zu werden">🎚️</span>
+                  <input
+                    type="range"
+                    min="0.30"
+                    max="0.75"
+                    step="0.01"
+                    value={roomNoiseThreshold}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      setRoomNoiseThreshold(val);
+                      try { localStorage.setItem('schreibdienst:vadThreshold', String(val)); } catch {}
+                    }}
+                    className="w-16 h-1 accent-blue-600 cursor-pointer"
+                    title={`VAD-Empfindlichkeit: ${roomNoiseThreshold.toFixed(2)}`}
+                  />
+                  <span className="text-gray-400 w-8 tabular-nums">{roomNoiseThreshold.toFixed(2)}</span>
+                </div>
+              )}
               <button
                 className={`btn h-9 w-9 p-0 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
                 onClick={() => {

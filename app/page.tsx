@@ -7,7 +7,7 @@ import Spinner from '@/components/Spinner';
 import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
-import { applyDeleteCommands, applyFormattingControlWords, applyMedicalAbbreviations, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, preprocessTranscription, type OnlineUtteranceApplicationDebugStep } from '@/lib/textFormatting';
+import { applyDeleteCommands, applyFormattingControlWords, applyMedicalAbbreviations, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, fixConcatenatedPunkt, preprocessTranscription, type OnlineUtteranceApplicationDebugStep } from '@/lib/textFormatting';
 import { buildPhoneticIndex, applyPhoneticCorrections, applyPhoneticCorrectionsDetailed, type PhoneticReplacementOperation } from '@/lib/phoneticMatch';
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
@@ -384,6 +384,9 @@ export default function HomePage() {
   
   // Mikrofonpegel-Visualisierung
   const [audioLevel, setAudioLevel] = useState(0);
+  
+  // Raumgeräusch-Schwelle für VAD (0.30 = empfindlich, 0.75 = nur laute Stimme)
+  const [roomNoiseThreshold, setRoomNoiseThreshold] = useState(0.42);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -698,6 +701,24 @@ export default function HomePage() {
       const saved = localStorage.getItem('schreibdienst:targetWindowPattern');
       if (saved) {
         setTargetWindowPattern(saved);
+      }
+    } catch {
+      // localStorage nicht verfügbar (z. B. SSR)
+    }
+  }, []);
+
+  // Raumgeräusch-Schwelle aus localStorage laden
+  const roomNoiseThresholdLoadedRef = useRef(false);
+  useEffect(() => {
+    if (roomNoiseThresholdLoadedRef.current) return;
+    roomNoiseThresholdLoadedRef.current = true;
+    try {
+      const saved = localStorage.getItem('schreibdienst:vadThreshold');
+      if (saved) {
+        const val = parseFloat(saved);
+        if (!isNaN(val) && val >= 0.30 && val <= 0.75) {
+          setRoomNoiseThreshold(val);
+        }
       }
     } catch {
       // localStorage nicht verfügbar (z. B. SSR)
@@ -1190,6 +1211,22 @@ export default function HomePage() {
 
   const applyDictionaryToText = useCallback((text: string): string => {
     if (!text) return text;
+    
+    // Pass 0: Concatenated "punkt" words reparieren (z.B. "stehenpunkt." → "stehen. ")
+    // Läuft VOR den dictionary corrections, damit der abgetrennte Stamm
+    // anschließend phonetisch korrigiert werden kann ("Unazit" → "Unazid").
+    if (mergedEntriesRef.current.length > 0) {
+      const knownCorrectWords = new Set<string>();
+      for (const e of mergedEntriesRef.current) {
+        knownCorrectWords.add(e.correct.toLowerCase());
+      }
+      const punktResult = fixConcatenatedPunkt(text, knownCorrectWords);
+      text = punktResult.text;
+    } else {
+      // Auch ohne Wörterbuch: Regel 1 (automatischer Punkt danach) greift
+      const punktResult = fixConcatenatedPunkt(text);
+      text = punktResult.text;
+    }
     
     // Pass 1+2: Exaktes + Phonetisches Matching (User + Standard) –
     // werden NUR im Medical-Modus angewendet, konsistent zur Beschriftung
@@ -1915,6 +1952,7 @@ export default function HomePage() {
     onUtterance: handleVadUtterance,
     onSpeechStart: handleVadSpeechStart,
     onAudioLevel: handleVadAudioLevel,
+    vadThreshold: roomNoiseThreshold,
   });
 
   // Erkennt Steuerbefehle und teilt Text auf alle Felder auf
@@ -3980,6 +4018,28 @@ export default function HomePage() {
         ) : (
           <span className="badge">Bereit</span>
         )}
+      </div>
+      
+      {/* Raumgeräusch-Schwelle */}
+      <div className="flex items-center gap-3 text-xs">
+        <span className="text-gray-500 dark:text-gray-400 whitespace-nowrap select-none" title="Höhere Werte blenden leise Hintergrundgeräusche und Nebengespräche aus">
+          🎚️ Raumgeräusch
+        </span>
+        <input
+          type="range"
+          min="0.30"
+          max="0.75"
+          step="0.01"
+          value={roomNoiseThreshold}
+          onChange={(e) => {
+            const val = parseFloat(e.target.value);
+            setRoomNoiseThreshold(val);
+            try { localStorage.setItem('schreibdienst:vadThreshold', String(val)); } catch {}
+          }}
+          className="flex-1 h-1.5 accent-blue-600 cursor-pointer"
+          title="Je höher, desto lauter muss Sprache sein, um erkannt zu werden"
+        />
+        <span className="text-gray-400 w-10 text-right tabular-nums">{roomNoiseThreshold.toFixed(2)}</span>
       </div>
       
       {/* Hinweis zu Sprachbefehlen */}

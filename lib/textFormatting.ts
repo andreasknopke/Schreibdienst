@@ -1265,6 +1265,93 @@ export function removeFillerWords(text: string): string {
 }
 
 /**
+ * Erkennt und repariert Wörter bei denen der gesprochene Befehl "Punkt"
+ * versehentlich mit dem vorherigen Wort zusammengezogen wurde.
+ *
+ * Beispiele:
+ *   "stehenpunkt."  → "stehen. "
+ *   "Unazitpunkt."  → "Unazit. "  (später korrigiert phonetisches Matching "Unazit"→"Unazid")
+ *   "Diespunkt ist" → "Dies. ist" (wenn "Dies" im Wörterbuch)
+ *
+ * Zwei Erkennungsregeln:
+ *   1. Das Wort wird von einem automatischen Punkt gefolgt → hohe Sicherheit, immer trennen.
+ *   2. Der Wortstamm (ohne "punkt") ist ein bekannter Wörterbuch-Eintrag → trennen.
+ *
+ * @param text - Rohtext aus der Transkription
+ * @param knownCorrectWords - Set von bekannten korrekten Schreibweisen aus dem Wörterbuch
+ * @returns Bereinigter Text und ausgeführte Operationen
+ */
+export function fixConcatenatedPunkt(
+  text: string,
+  knownCorrectWords?: Set<string>
+): { text: string; operations: DictionaryCorrectionOperation[] } {
+  if (!text) return { text, operations: [] };
+
+  const operations: DictionaryCorrectionOperation[] = [];
+
+  // Bekannte Wörter die legitimerweise auf "punkt" enden (keine Zusammenziehung)
+  const legitimatePunktWords = new Set([
+    'zeit', 'stand', 'gesichts', 'schwer', 'dreh', 'angel', 'angriffs',
+    'ansatz', 'ausgangs', 'blick', 'brenn', 'eck', 'end', 'fix', 'flucht',
+    'flieh', 'gegen', 'haupt', 'hinter', 'höhe', 'kern', 'knack', 'kristallisations',
+    'markierungs', 'mittel', 'null', 'setz', 'siede',
+    'stütz', 'tief', 'treff', 'umkehr', 'verknüpfungs', 'wahl', 'wende',
+    'wolken',
+  ]);
+
+  // Regex: Wort das mit "punkt" endet (case-insensitive), aber mind. 3 Zeichen Stamm.
+  // Gruppe 1: Wortstamm vor "punkt", Gruppe 2: nachfolgender Whitespace+Punkt oder Satzende.
+  const concatenatedPunktRegex = /\b([A-ZÄÖÜa-zäöüß]{2,})punkt(\s*\.\s*|\s*\.$|$)/gi;
+
+  const result = text.replace(concatenatedPunktRegex, (match, stem: string, trailing: string, offset: number) => {
+    const stemLower = stem.toLowerCase();
+
+    // Überspringe legitime Zusammensetzungen mit "punkt"
+    if (legitimatePunktWords.has(stemLower)) return match;
+
+    const hasTrailingPeriod = trailing.includes('.');
+
+    // Regel 1: Automatischer Punkt folgt → hohe Sicherheit, immer trennen
+    if (hasTrailingPeriod) {
+      const replacement = stem + '. ';
+      operations.push({
+        originalText: match.trim(),
+        replacementText: replacement.trim(),
+        dictionaryWrong: stem + 'punkt',
+        dictionaryCorrect: stem + '.',
+        source: 'standard',
+        matchType: 'exact',
+      });
+      return replacement;
+    }
+
+    // Regel 2: Wortstamm ist im Wörterbuch bekannt → trennen
+    if (knownCorrectWords && knownCorrectWords.has(stemLower)) {
+      const replacement = stem + '. ';
+      operations.push({
+        originalText: match.trim(),
+        replacementText: replacement.trim(),
+        dictionaryWrong: stem + 'punkt',
+        dictionaryCorrect: stem + '.',
+        source: 'standard',
+        matchType: 'exact',
+      });
+      return replacement;
+    }
+
+    // Kein Match → unverändert lassen
+    return match;
+  });
+
+  if (operations.length > 0) {
+    console.log(`[PunktConcat] Fixed ${operations.length} concatenated "punkt" word(s):`,
+      operations.map(o => `"${o.dictionaryWrong}"→"${o.dictionaryCorrect}"`).join(', '));
+  }
+
+  return { text: result, operations };
+}
+
+/**
  * Combined preprocessing: apply formatting + remove fillers + dictionary corrections
  * Use this before sending to LLM
  * 
@@ -1292,9 +1379,30 @@ export function preprocessTranscriptionDetailed(
   // Step 2: Apply formatting control words (logs automatically if any found)
   result = applyFormattingControlWords(result);
   
-  // Step 3: Apply dictionary corrections (if entries provided, logs automatically if any applied)
+  // Step 2b: Fix concatenated "punkt" words (z.B. "stehenpunkt." → "stehen. ")
+  // Läuft NACH den control words (die standalone "Punkt" behandeln) und VOR
+  // den dictionary corrections (die den abgetrennten Stamm phonetisch korrigieren).
   const hasDictionaryEntries = (dictionaryEntries?.length ?? 0) > 0;
   const hasStandardEntries = (standardEntries?.length ?? 0) > 0;
+  if (hasDictionaryEntries || hasStandardEntries) {
+    const allCorrectWords = new Set<string>();
+    for (const e of (dictionaryEntries ?? [])) {
+      allCorrectWords.add(e.correct.toLowerCase());
+    }
+    for (const e of (standardEntries ?? [])) {
+      allCorrectWords.add(e.correct.toLowerCase());
+    }
+    const punktResult = fixConcatenatedPunkt(result, allCorrectWords);
+    result = punktResult.text;
+    operations.push(...punktResult.operations);
+  } else {
+    // Auch ohne Wörterbuch: Regel 1 (automatischer Punkt danach) greift trotzdem
+    const punktResult = fixConcatenatedPunkt(result);
+    result = punktResult.text;
+    operations.push(...punktResult.operations);
+  }
+  
+  // Step 3: Apply dictionary corrections (if entries provided, logs automatically if any applied)
   if (hasDictionaryEntries || hasStandardEntries) {
     const dictionaryResult = applyDictionaryCorrectionsDetailed(result, dictionaryEntries ?? [], standardEntries, options);
     result = dictionaryResult.text;

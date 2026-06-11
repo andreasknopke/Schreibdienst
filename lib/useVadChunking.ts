@@ -46,6 +46,9 @@ export interface UseVadChunkingOptions {
   onSpeechStart?: () => void;
   /** Audio-Level Callback (0-100) */
   onAudioLevel?: (level: number) => void;
+  /** VAD-Erkennungsschwelle (0.30 = empfindlich, 0.75 = unempfindlich). Default: 0.42.
+   *  Höhere Werte filtern leise Hintergrundgeräusche und Nebengespräche besser aus. */
+  vadThreshold?: number;
 }
 
 export interface UseVadChunkingReturn {
@@ -56,7 +59,7 @@ export interface UseVadChunkingReturn {
 }
 
 export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingReturn {
-  const { onUtterance, onSpeechStart, onAudioLevel } = options;
+  const { onUtterance, onSpeechStart, onAudioLevel, vadThreshold = 0.42 } = options;
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const vadRef = useRef<any>(null);
@@ -116,12 +119,10 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       onnxWASMBasePath: '/',
       model: 'v5',
 
-      // Tuning: etwas konservativer, damit kurze Denk-/Atempausen
-      // nicht mitten im Satz ein Utterance beenden.
-      // Etwas empfindlicherer Start, damit der Beginn leiser/komplizierter
-      // Wortfolgen nicht erst mitten in der Äußerung erkannt wird.
-      positiveSpeechThreshold: 0.42,
-      negativeSpeechThreshold: 0.35,
+      // VAD-Erkennungsschwelle: Höhere Werte = weniger empfindlich.
+      // Bei Raumgeräuschen/Nebengesprächen hilft ein höherer Schwellwert.
+      positiveSpeechThreshold: vadThreshold,
+      negativeSpeechThreshold: Math.max(0.1, vadThreshold - 0.07),
       redemptionFrames: 10,       // ~600ms Pause bis zum Commit
       minSpeechFrames: 4,         // Mind. ~240ms Sprache gegen Fehlzündungen
       preSpeechPadFrames: 15,     // ~900ms Audio vor Sprechbeginn

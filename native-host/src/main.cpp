@@ -219,6 +219,55 @@ constexpr uint16_t GRUNDIG_SONICMIC_PRODUCT_ID = 0x0025;
 constexpr uint16_t PHILIPS_SPEECHMIKE_VENDOR_ID = 0x0911;
 constexpr uint16_t PHILIPS_SPEECHMIKE_III_PRODUCT_ID = 0x0C1C;
 
+// HID-Diagnose-Logging: Wird als hid-diagnostic per WebSocket an den Browser
+// gesendet, damit Fehler in der Browser-Konsole sichtbar sind.
+// logLine() ist ohne -show stumm; hidDiagnostic() ist immer aktiv.
+bool g_hidDiagnosticEnabled = true;
+
+// Forward-Declaration fuer broadcastToClients / sendWsFrame
+void broadcastToClients(const std::string& message);
+bool sendWsFrame(SOCKET client, uint8_t opcode, const std::string& payload);
+
+void hidDiagnostic(const char* fmt, ...) {
+    if (!g_hidDiagnosticEnabled) return;
+    char buf[1024];
+    va_list args;
+    va_start(args, fmt);
+    const int n = vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+
+    // Immer auf stdout (sichtbar nur mit -show / DebugView mit AllocConsole)
+    printf("[HID-Diag] %s\n", buf);
+    fflush(stdout);
+
+    // Zusaetzlich als WebSocket-Nachricht an alle Clients broadcasten
+    if (n > 0 && static_cast<size_t>(n) < sizeof(buf)) {
+        std::string msg = "{\"type\":\"hid-diagnostic\",\"message\":\"";
+        // JSON-Escaping (vereinfacht: nur \" und \\)
+        for (int i = 0; i < n; ++i) {
+            if (buf[i] == '"') msg += "\\\"";
+            else if (buf[i] == '\\') msg += "\\\\";
+            else if (buf[i] == '\n') msg += "\\n";
+            else msg += buf[i];
+        }
+        msg += "\"}";
+        broadcastToClients(msg);
+    }
+}
+
+// Helfer: Raw-HID-Bytes als Hex-String formatieren
+std::string hexDump(const uint8_t* data, size_t size) {
+    std::string out;
+    out.reserve(size * 3);
+    for (size_t i = 0; i < size; ++i) {
+        static const char hex[] = "0123456789ABCDEF";
+        out += hex[data[i] >> 4];
+        out += hex[data[i] & 0xF];
+        if (i + 1 < size) out += ' ';
+    }
+    return out;
+}
+
 struct HidDeviceState {
     std::wstring deviceName;
     uint16_t vendorId = 0;
@@ -663,7 +712,12 @@ void handleRawInputRecordPress(HRAWINPUT hRawInput);
 // ─── HID Raw Input Registration ─────────────────────────────────
 
 bool registerHidRawInputDevices() {
-    if (g_hidRawInputRegistered) return true;
+    if (g_hidRawInputRegistered) {
+        hidDiagnostic("registerHidRawInputDevices: bereits registriert");
+        return true;
+    }
+
+    hidDiagnostic("registerHidRawInputDevices: registriere Grundig(0xFF00:0x0001) + Philips(0xFFA1:0x0003)");
 
     // Registriere für beide Geräte mit RIDEV_INPUTSINK, damit wir
     // Reports auch dann bekommen, wenn das Fenster nicht im Vordergrund ist.
@@ -682,12 +736,15 @@ bool registerHidRawInputDevices() {
     devices[1].hwndTarget = g_hiddenWnd;
 
     if (!RegisterRawInputDevices(devices, 2, sizeof(RAWINPUTDEVICE))) {
-        logLine("[HID] RegisterRawInputDevices FAILED (error=%lu)\n", GetLastError());
+        DWORD err = GetLastError();
+        hidDiagnostic("RegisterRawInputDevices FEHLGESCHLAGEN (error=%lu)", err);
+        logLine("[HID] RegisterRawInputDevices FAILED (error=%lu)\n", err);
         fflush(stdout);
         return false;
     }
 
     g_hidRawInputRegistered = true;
+    hidDiagnostic("RegisterRawInputDevices OK (2 Geraete, RIDEV_INPUTSINK, hwndTarget=0x%p)", g_hiddenWnd);
     logLine("[HID] RegisterRawInputDevices OK (2 devices)\n");
     fflush(stdout);
     return true;
@@ -735,18 +792,25 @@ HidDeviceState* findOrCreateHidDeviceState(uint16_t vendorId, uint16_t productId
 
 LRESULT CALLBACK HiddenWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_INPUT) {
+        static DWORD lastLogTime = 0;
+        DWORD now = GetTickCount();
+        // Nur alle 2000ms loggen, um Spam bei schnellen Reports zu vermeiden
+        if (now - lastLogTime > 2000) {
+            lastLogTime = now;
+            hidDiagnostic("WM_INPUT empfangen (Sekunden seit Start: %lu)", now / 1000);
+        }
         handleRawInputRecordPress(reinterpret_cast<HRAWINPUT>(lParam));
         return DefWindowProc(hwnd, msg, wParam, lParam);
     }
 
     if (msg == WM_INPUT_DEVICE_CHANGE) {
         if (wParam == GIDC_ARRIVAL) {
+            hidDiagnostic("Geraet angeschlossen (GIDC_ARRIVAL)");
             logLine("[HID] Device ARRIVAL detected\n");
             fflush(stdout);
-            // Bei neuem Gerät: Raw-Input-Registrierung ist bereits aktiv,
-            // Status-Update an Clients senden.
             dispatchHidStatusEvent();
         } else if (wParam == GIDC_REMOVAL) {
+            hidDiagnostic("Geraet entfernt (GIDC_REMOVAL)");
             logLine("[HID] Device REMOVAL detected\n");
             fflush(stdout);
             {
@@ -779,6 +843,8 @@ LRESULT CALLBACK HiddenWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 }
 
 void hiddenWindowThread() {
+    hidDiagnostic("hiddenWindowThread gestartet");
+
     // Register a window class for the hidden window
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);
@@ -786,7 +852,10 @@ void hiddenWindowThread() {
     wc.hInstance = GetModuleHandle(nullptr);
     wc.lpszClassName = L"SchreibdienstHiddenWnd";
     if (!RegisterClassExW(&wc)) {
-        // Class may already be registered from a previous run
+        DWORD err = GetLastError();
+        if (err != ERROR_CLASS_ALREADY_EXISTS) {
+            hidDiagnostic("RegisterClassExW FEHLER (error=%lu)", err);
+        }
     }
 
     g_hiddenWnd = CreateWindowExW(0, L"SchreibdienstHiddenWnd",
@@ -795,11 +864,15 @@ void hiddenWindowThread() {
                                    GetModuleHandle(nullptr), nullptr);
     g_hiddenWndThreadId = GetCurrentThreadId();
 
+    hidDiagnostic("HiddenWindow erstellt: hwnd=0x%p threadId=%lu", g_hiddenWnd, g_hiddenWndThreadId);
+
     // Register HID Raw Input für Diktiermikrofone (kein Admin nötig).
     registerHidRawInputDevices();
 
     // Signal that the window is ready
     SetEvent(g_hiddenWndReady);
+
+    hidDiagnostic("Nachrichtenschleife gestartet – warte auf WM_INPUT...");
 
     // Message pump
     MSG msg;
@@ -807,6 +880,7 @@ void hiddenWindowThread() {
         DispatchMessage(&msg);
     }
 
+    hidDiagnostic("Nachrichtenschleife beendet (WM_QUIT)");
     // Cleanup HID registration before thread exits
     unregisterHidRawInputDevices();
 }
@@ -1399,15 +1473,26 @@ void handleHidRecordEvent(uint16_t vendorId, uint16_t productId,
 void handleRawInputRecordPress(HRAWINPUT hRawInput) {
     UINT size = 0;
     GetRawInputData(hRawInput, RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER));
-    if (size == 0) return;
+    if (size == 0) {
+        hidDiagnostic("handleRawInput: GetRawInputData size=0 -> Abbruch");
+        return;
+    }
 
     std::vector<uint8_t> buffer(size);
     if (GetRawInputData(hRawInput, RID_INPUT, buffer.data(), &size, sizeof(RAWINPUTHEADER)) != size) {
+        hidDiagnostic("handleRawInput: GetRawInputData buffer-Fehler");
         return;
     }
 
     const RAWINPUT* raw = reinterpret_cast<const RAWINPUT*>(buffer.data());
-    if (raw->header.dwType != RIM_TYPEHID) return;
+
+    // Logge den Header-Typ
+    hidDiagnostic("handleRawInput: dwType=%lu (HID=%d)", raw->header.dwType, RIM_TYPEHID);
+
+    if (raw->header.dwType != RIM_TYPEHID) {
+        hidDiagnostic("handleRawInput: Kein HID-Geraet (dwType=%lu) -> ignoriert", raw->header.dwType);
+        return;
+    }
 
     // Geräte-Info auslesen (Vendor/Product ID)
     RID_DEVICE_INFO deviceInfo{};
@@ -1416,15 +1501,29 @@ void handleRawInputRecordPress(HRAWINPUT hRawInput) {
 
     if (GetRawInputDeviceInfoW(raw->header.hDevice, RIDI_DEVICEINFO,
                                &deviceInfo, &deviceInfoSize) != sizeof(deviceInfo)) {
+        hidDiagnostic("handleRawInput: GetRawInputDeviceInfoW fehlgeschlagen");
         return;
     }
 
-    if (deviceInfo.dwType != RIM_TYPEHID) return;
+    if (deviceInfo.dwType != RIM_TYPEHID) {
+        hidDiagnostic("handleRawInput: deviceInfo.dwType=%lu (kein HID)", deviceInfo.dwType);
+        return;
+    }
 
     const uint16_t vendorId = deviceInfo.hid.dwVendorId;
     const uint16_t productId = deviceInfo.hid.dwProductId;
+    const DWORD usagePage = deviceInfo.hid.usUsagePage;
+    const DWORD usage = deviceInfo.hid.usUsage;
 
-    if (!isSupportedHidDevice(vendorId, productId)) return;
+    // Logge VID/PID/Usage – wichtig für unbekannte Geraete
+    hidDiagnostic("handleRawInput: VID=0x%04X PID=0x%04X UsagePage=0x%04X Usage=0x%04X",
+                  vendorId, productId, usagePage, usage);
+
+    if (!isSupportedHidDevice(vendorId, productId)) {
+        hidDiagnostic("handleRawInput: Nicht unterstuetztes Geraet (VID=0x%04X PID=0x%04X) -> ignoriert",
+                      vendorId, productId);
+        return;
+    }
 
     // Gerätename auslesen
     UINT nameLen = 0;
@@ -1457,7 +1556,15 @@ void handleRawInputRecordPress(HRAWINPUT hRawInput) {
     const uint8_t* reportData = raw->data.hid.bRawData;
     const DWORD reportSize = raw->data.hid.dwSizeHid;
 
+    // Logge die ersten 10 HID-Report-Bytes als Hex
+    size_t logSize = reportSize;
+    if (logSize > 10) logSize = 10;
+    hidDiagnostic("handleRawInput: HID-Report size=%lu bytes=[%s]",
+                  reportSize, hexDump(reportData, logSize).c_str());
+
     const bool recordPressed = detectRecordPress(vendorId, productId, reportData, reportSize);
+
+    hidDiagnostic("handleRawInput: recordPressed=%d (vor Debounce)", recordPressed ? 1 : 0);
 
     // Debounce: nur bei Zustandsänderung reagieren
     HidDeviceState* deviceState = nullptr;
@@ -1466,13 +1573,19 @@ void handleRawInputRecordPress(HRAWINPUT hRawInput) {
         deviceState = findOrCreateHidDeviceState(vendorId, productId, deviceName);
     }
 
-    if (deviceState && deviceState->recordPressed == recordPressed) return;
+    if (deviceState && deviceState->recordPressed == recordPressed) {
+        hidDiagnostic("handleRawInput: Debounce – Zustand unveraendert (recordPressed=%d)", recordPressed ? 1 : 0);
+        return;
+    }
 
     {
         std::lock_guard<std::mutex> lock(g_hidMutex);
         deviceState = findOrCreateHidDeviceState(vendorId, productId, deviceName);
         deviceState->recordPressed = recordPressed;
     }
+
+    hidDiagnostic("handleRawInput: Event dispatch – device=\"%ls\" phase=%s",
+                  deviceName.c_str(), recordPressed ? "keydown" : "keyup");
 
     handleHidRecordEvent(vendorId, productId, deviceName, recordPressed);
 }
@@ -2121,13 +2234,32 @@ void handleClient(SOCKET client) {
         }
 
         if (nr.type == L"start-hid") {
+            hidDiagnostic("=== HID-Start angefordert vom Frontend ===");
+            hidDiagnostic("HiddenWindow: hwnd=0x%p threadId=%lu", g_hiddenWnd, g_hiddenWndThreadId);
+            hidDiagnostic("HID-Registrierung aktuell: %s", g_hidRawInputRegistered ? "aktiv" : "inaktiv");
+            hidDiagnostic("Geraete bekannt: %zu", g_hidDevices.size());
+            for (const auto& dev : g_hidDevices) {
+                hidDiagnostic("  -> VID=0x%04X PID=0x%04X name=\"%ls\" pressed=%d",
+                    dev.vendorId, dev.productId, dev.deviceName.c_str(), dev.recordPressed ? 1 : 0);
+            }
+            {
+                std::lock_guard<std::mutex> lock(g_clientsMutex);
+                hidDiagnostic("Clients verbunden: %zu (vor start-hid)", g_wsClients.size());
+            }
+
             registerHidRawInputDevices();
+
+            hidDiagnostic("Nach registerHidRawInputDevices: %s",
+                g_hidRawInputRegistered ? "ERFOLG" : "FEHLGESCHLAGEN");
+
             sendWsFrame(client, 0x1, makeTypedResponse("hid-listener-ready", g_hidRawInputRegistered,
                 g_hidRawInputRegistered ? "" : "HID Raw Input registration failed"));
             // Sende zusaetzlich hid-status, damit der Frontend-Handshake
             // (hidNativeClient.ts) die HID-Bestaetigung erhaelt.
             // Das Frontend wartet nach start-hid auf type:"hid-status".
-            sendWsFrame(client, 0x1, makeHidStatusResponse());
+            const std::string statusMsg = makeHidStatusResponse();
+            hidDiagnostic("WebSocket: sende hid-status: %s", statusMsg.c_str());
+            sendWsFrame(client, 0x1, statusMsg);
             continue;
         }
 

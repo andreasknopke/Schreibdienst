@@ -110,6 +110,9 @@ function setupMessageHandler(ws: WebSocket): void {
           productId: data.productId,
           supported: true,
         });
+      } else if (data.type === 'hid-diagnostic') {
+        // Native-Host-Diagnose-Meldungen in der Browser-Konsole anzeigen
+        console.info('[HID-Diag]', data.message);
       }
     } catch {
       // Not JSON or unknown format — ignore
@@ -147,6 +150,22 @@ function getSharedWs(): Promise<WebSocket> {
       clearTimeout(connectTimeout);
       console.info('[HID-Native] WebSocket verbunden');
 
+      // Sofort einen generischen Message-Handler installieren, der ALLE
+      // Nachrichtentypen erfasst – insbesondere hid-diagnostic, damit
+      // Startup-Diagnose des Native Hosts sichtbar ist, bevor der
+      // start-hid-Handshake abgeschlossen ist.
+      const earlyHandler = (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'hid-diagnostic') {
+            console.info('[HID-Diag]', data.message);
+          }
+        } catch {
+          // ignore
+        }
+      };
+      ws.addEventListener('message', earlyHandler);
+
       // HID beim Native Host aktivieren und auf Bestätigung warten.
       // Alter Injector (v0.1.12) hat noch kein HID-Support und antwortet
       // nicht auf start-hid → Timeout → Fallback auf WebHID.
@@ -156,10 +175,16 @@ function getSharedWs(): Promise<WebSocket> {
       const confirmHandler = (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          // Auch waehrend des Handshakes hid-diagnostic durchlassen
+          if (data.type === 'hid-diagnostic') {
+            console.info('[HID-Diag]', data.message);
+            return;
+          }
           if (data.type === 'hid-status') {
             confirmed = true;
             if (confirmTimeout !== null) clearTimeout(confirmTimeout);
-            // Listener für Bestätigung entfernen, regulären Handler set up
+            // Early-Handler entfernen, dafuer SetupMessageHandler installieren
+            ws.removeEventListener('message', earlyHandler);
             ws.removeEventListener('message', confirmHandler);
             setupMessageHandler(ws);
             g_ws = ws;

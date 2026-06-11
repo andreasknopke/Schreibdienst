@@ -516,9 +516,13 @@ export function startHidMediaControls(options: HidMediaControlsOptions = {}): vo
 
     // Status-Propagation von Native Host ins HidMediaControlStatusDetail
     const unsubStatus = onNativeHidStatus((status) => {
+      // Native-Host-Infrastruktur ist bereit – melde connected: true,
+      // auch wenn gerade kein physikalisches Geraet aktiv ist.
+      // Der Native Host hoert via Raw Input auf HID-Geraete und meldet
+      // sich, sobald ein Record-Event eingeht.
       const detail: HidMediaControlStatusDetail = {
         supported: status.supported || getWebHidApi() !== null,
-        connected: status.connected,
+        connected: true, // Native Host ist bereit
         deviceName: status.deviceName,
         connectedDeviceCount: status.connected ? 1 : 0,
         source: 'native-host',

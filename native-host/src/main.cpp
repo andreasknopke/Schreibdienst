@@ -268,6 +268,69 @@ std::string hexDump(const uint8_t* data, size_t size) {
     return out;
 }
 
+// Alle angeschlossenen Raw-Input-Geraete auflisten – zur Diagnose,
+// ob Windows das Mikrofon ueberhaupt erkennt.
+void enumerateAllRawInputDevices() {
+    UINT count = 0;
+    if (GetRawInputDeviceList(nullptr, &count, sizeof(RAWINPUTDEVICELIST)) != 0) {
+        hidDiagnostic("GetRawInputDeviceList: Fehler beim Ermitteln der Geraeteanzahl");
+        return;
+    }
+    hidDiagnostic("GetRawInputDeviceList: %u Raw-Input-Geraete im System", count);
+
+    if (count == 0) return;
+
+    std::vector<RAWINPUTDEVICELIST> list(count);
+    if (GetRawInputDeviceList(list.data(), &count, sizeof(RAWINPUTDEVICELIST)) == (UINT)-1) {
+        hidDiagnostic("GetRawInputDeviceList: Fehler beim Abrufen der Geraeteliste");
+        return;
+    }
+
+    for (UINT i = 0; i < count; ++i) {
+        RID_DEVICE_INFO info{};
+        info.cbSize = sizeof(info);
+        UINT infoSize = sizeof(info);
+        if (GetRawInputDeviceInfoW(list[i].hDevice, RIDI_DEVICEINFO, &info, &infoSize) != infoSize) {
+            hidDiagnostic("  [%u] Typ=%lu – GetRawInputDeviceInfoW fehlgeschlagen",
+                         i, list[i].dwType);
+            continue;
+        }
+
+        UINT nameLen = 0;
+        GetRawInputDeviceInfoW(list[i].hDevice, RIDI_DEVICENAME, nullptr, &nameLen);
+        std::wstring name;
+        if (nameLen > 0) {
+            std::vector<wchar_t> buf(nameLen);
+            if (GetRawInputDeviceInfoW(list[i].hDevice, RIDI_DEVICENAME,
+                                       buf.data(), &nameLen) > 0) {
+                name = buf.data();
+            }
+        }
+
+        if (info.dwType == RIM_TYPEKEYBOARD) {
+            hidDiagnostic("  [%u] TASTATUR hDevice=0x%p name=\"%ls\"",
+                         i, list[i].hDevice, name.c_str());
+        } else if (info.dwType == RIM_TYPEMOUSE) {
+            hidDiagnostic("  [%u] MAUS hDevice=0x%p name=\"%ls\"",
+                         i, list[i].hDevice, name.c_str());
+        } else if (info.dwType == RIM_TYPEHID) {
+            const bool supported = (info.hid.dwVendorId == 0x15D8 && info.hid.dwProductId == 0x0025) ||
+                                   (info.hid.dwVendorId == 0x0911 && info.hid.dwProductId == 0x0C1C);
+            hidDiagnostic("  [%u] HID VID=0x%04X PID=0x%04X UsagePage=0x%04X Usage=0x%04X %s name=\"%ls\"",
+                         i,
+                         info.hid.dwVendorId,
+                         info.hid.dwProductId,
+                         info.hid.usUsagePage,
+                         info.hid.usUsage,
+                         supported ? "<- UNTERSTUETZT" : "",
+                         name.c_str());
+        } else {
+            hidDiagnostic("  [%u] UNBEKANNT Typ=%lu name=\"%ls\"",
+                         i, list[i].dwType, name.c_str());
+        }
+    }
+}
+
 struct HidDeviceState {
     std::wstring deviceName;
     uint16_t vendorId = 0;
@@ -865,6 +928,9 @@ void hiddenWindowThread() {
     g_hiddenWndThreadId = GetCurrentThreadId();
 
     hidDiagnostic("HiddenWindow erstellt: hwnd=0x%p threadId=%lu", g_hiddenWnd, g_hiddenWndThreadId);
+
+    // Alle aktuell angeschlossenen Raw-Input-Geraete auflisten
+    enumerateAllRawInputDevices();
 
     // Register HID Raw Input für Diktiermikrofone (kein Admin nötig).
     registerHidRawInputDevices();
@@ -2237,6 +2303,10 @@ void handleClient(SOCKET client) {
             hidDiagnostic("=== HID-Start angefordert vom Frontend ===");
             hidDiagnostic("HiddenWindow: hwnd=0x%p threadId=%lu", g_hiddenWnd, g_hiddenWndThreadId);
             hidDiagnostic("HID-Registrierung aktuell: %s", g_hidRawInputRegistered ? "aktiv" : "inaktiv");
+
+            // Alle aktuell angeschlossenen Raw-Input-Geraete auflisten
+            enumerateAllRawInputDevices();
+
             hidDiagnostic("Geraete bekannt: %zu", g_hidDevices.size());
             for (const auto& dev : g_hidDevices) {
                 hidDiagnostic("  -> VID=0x%04X PID=0x%04X name=\"%ls\" pressed=%d",
@@ -2270,6 +2340,7 @@ void handleClient(SOCKET client) {
         }
 
         if (nr.type == L"hid-status") {
+            hidDiagnostic("hid-status abgefragt (Geraete bekannt: %zu)", g_hidDevices.size());
             const std::string statusMsg = makeHidStatusResponse();
             sendWsFrame(client, 0x1, statusMsg);
             continue;

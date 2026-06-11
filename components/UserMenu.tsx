@@ -77,6 +77,13 @@ export default function UserMenu() {
     }
   }, [hidConnected]);
 
+  // Prompt sofort schliessen, sobald der Native-Host-Handshake bestaetigt ist
+  useEffect(() => {
+    if (hidSource === 'native-host') {
+      setShowHidConnectPrompt(false);
+    }
+  }, [hidSource]);
+
   useEffect(() => {
     if (!showDictionaryMenu) {
       return;

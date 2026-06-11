@@ -5,7 +5,8 @@ import {
   changePasswordWithRequest, 
   listUsersWithRequest, 
   authenticateUserWithRequest, 
-  updateUserPermissionsWithRequest 
+  updateUserPermissionsWithRequest,
+  renameUserWithRequest
 } from '@/lib/usersDb';
 
 // Middleware to check if request is from admin
@@ -93,7 +94,7 @@ export async function DELETE(request: NextRequest) {
   }
 }
 
-// PATCH /api/users - Change user password or permissions (admin only)
+// PATCH /api/users - Change user password, permissions, or rename (admin only)
 export async function PATCH(request: NextRequest) {
   try {
     const auth = await isAdmin(request);
@@ -102,7 +103,18 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Nur für Administratoren' }, { status: 403 });
     }
 
-    const { username, newPassword, permissions } = await request.json();
+    const { username, newPassword, newUsername, permissions } = await request.json();
+    
+    // Rename user (all references: dictations, dictionary, templates, groups, etc.)
+    if (newUsername) {
+      const result = await renameUserWithRequest(request, username, newUsername);
+      
+      if (result.success) {
+        return NextResponse.json({ success: true, message: `Benutzer umbenannt in "${newUsername}"` });
+      }
+      
+      return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+    }
     
     // If permissions update
     if (permissions) {

@@ -514,6 +514,83 @@ export async function changePasswordWithRequest(request: NextRequest, username: 
   }
 }
 
+// Rename user (admin only). Aktualisiert ALLE Referenzen in der Datenbank:
+// users, dictionary_entries, templates, offline_dictations, custom_actions,
+// dictionary_group_members, dictionary_group_entries (added_by).
+export async function renameUserWithRequest(
+  request: NextRequest,
+  oldUsername: string,
+  newUsername: string
+): Promise<{ success: boolean; error?: string }> {
+  if (oldUsername.toLowerCase() === 'root' || newUsername.toLowerCase() === 'root') {
+    return { success: false, error: 'Root-Benutzer kann nicht umbenannt werden' };
+  }
+
+  const newTrimmed = newUsername.trim();
+  if (!newTrimmed || newTrimmed.length < 2) {
+    return { success: false, error: 'Neuer Benutzername muss mindestens 2 Zeichen haben' };
+  }
+  if (newTrimmed === oldUsername) {
+    return { success: false, error: 'Neuer und alter Benutzername sind identisch' };
+  }
+
+  try {
+    const db = await getPoolForRequest(request);
+
+    // Prüfen ob der neue Name bereits existiert
+    const [existing] = await db.execute<any[]>(
+      'SELECT username FROM users WHERE username = ? LIMIT 1',
+      [newTrimmed]
+    );
+    if (existing.length > 0) {
+      return { success: false, error: `Benutzer "${newTrimmed}" existiert bereits` };
+    }
+
+    const tables: Array<{ table: string; column: string }> = [
+      { table: 'dictionary_entries', column: 'username' },
+      { table: 'templates', column: 'username' },
+      { table: 'offline_dictations', column: 'username' },
+      { table: 'custom_actions', column: 'username' },
+      { table: 'dictionary_group_members', column: 'username' },
+    ];
+
+    // In einer Transaktion alle Referenzen aktualisieren
+    await db.execute('START TRANSACTION');
+
+    try {
+      for (const { table, column } of tables) {
+        await db.execute(
+          `UPDATE \`${table}\` SET \`${column}\` = ? WHERE \`${column}\` = ?`,
+          [newTrimmed, oldUsername]
+        );
+      }
+
+      // dictionary_group_entries.added_by separat (anderer Spaltenname)
+      await db.execute(
+        'UPDATE dictionary_group_entries SET added_by = ? WHERE added_by = ?',
+        [newTrimmed, oldUsername]
+      );
+
+      // Zuletzt den User selbst umbenennen
+      await db.execute(
+        'UPDATE users SET username = ? WHERE username = ?',
+        [newTrimmed, oldUsername]
+      );
+
+      await db.execute('COMMIT');
+
+      console.log(`[Users] Renamed user "${oldUsername}" -> "${newTrimmed}" (all references updated)`);
+      return { success: true };
+    } catch (innerError) {
+      await db.execute('ROLLBACK');
+      throw innerError;
+    }
+  } catch (error) {
+    console.error('[Users] Rename user error:', error);
+    return { success: false, error: 'Datenbankfehler beim Umbenennen' };
+  }
+}
+
 // Update permissions with Request context
 export async function updateUserPermissionsWithRequest(
   request: NextRequest,

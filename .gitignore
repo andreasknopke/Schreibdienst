@@ -16,6 +16,7 @@ out/
 *.local
 native-host/build/
 native-host/build3/
+native-host/build-win/
 native-host/installer/*.exe
 
 artifacts/

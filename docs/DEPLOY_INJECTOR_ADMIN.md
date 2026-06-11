@@ -85,6 +85,83 @@ Start-Process -FilePath ".\schreibdienst-injector-setup-{version}.exe" -Argument
 - EXE: `C:\Program Files\Schreibdienst Injector\schreibdienst-injector.exe`
 - Uninstaller: `C:\Program Files\Schreibdienst Injector\unins000.exe`
 
+## PWA automatisch per Gruppenrichtlinie installieren
+
+Damit Benutzer den Schreibdienst nicht manuell im Browser installieren müssen, kann die PWA über eine **Chrome-Gruppenrichtlinie** für alle Domänenbenutzer vorinstalliert werden.
+
+### Funktionsweise
+
+Chrome (und Edge) unterstützen die Richtlinie `WebAppInstallForceList`. Sie zwingt den Browser, eine oder mehrere PWAs geräteweit zu installieren – ohne Benutzerinteraktion. Die PWA erscheint dann im Startmenü, in der Taskleiste und als eigenständige App.
+
+### Vorbereitung: Chrome-ADMX-Vorlagen einspielen
+
+Damit die Richtlinie im Gruppenrichtlinien-Editor (GPMC) sichtbar wird:
+
+1. **ADMX-Vorlagen herunterladen**  
+   [chromeenterprise.google/browser/download/#manage-policies](https://chromeenterprise.google/browser/download/#manage-policies)  
+   → `chrome-admx.zip` entpacken
+
+2. **In den Central Store kopieren** (Domänencontroller, `\\domäne\SYSVOL\domäne\Policies\PolicyDefinitions`)  
+   - `chrome.admx` → `PolicyDefinitions\`  
+   - `google.admx` → `PolicyDefinitions\`  
+   - Ordner `de-DE\` (oder `en-US\`) mit den `.adml`-Dateien → `PolicyDefinitions\de-DE\`
+
+3. **GPMC neu öffnen** – unter *Computerkonfiguration → Administrative Vorlagen → Google Chrome → Web Apps* erscheint die Richtlinie *"List of force-installed Web Apps"*.
+
+### GPO-Konfiguration (empfohlen)
+
+| Schritt | Aktion |
+|---|---|
+| 1 | Neue GPO erstellen, z. B. *"Schreibdienst PWA"* |
+| 2 | Bearbeiten → **Computerkonfiguration → Administrative Vorlagen → Google Chrome → Web Apps** |
+| 3 | Richtlinie **"List of force-installed Web Apps"** öffnen → **Aktiviert** |
+| 4 | Unter **"Web App URLs"** folgenden JSON-Wert eintragen (Schaltfläche *Anzeigen* → ein Wert): |
+
+```json
+{
+  "url": "https://schreibdienst.coolify.kliniksued-rostock.de/",
+  "default_launch_container": "window",
+  "create_desktop_shortcut": true,
+  "fallback_app_name": "Schreibdienst"
+}
+```
+
+| Schritt | Aktion |
+|---|---|
+| 5 | GPO mit der OU verknüpfen, in der sich die Windows-Rechner befinden |
+| 6 | `gpupdate /force` auf einem Testrechner ausführen |
+| 7 | Chrome (neu) starten – die PWA installiert sich automatisch |
+
+Nach der Installation finden die Benutzer den Schreibdienst:
+- Im **Startmenü** unter *S*
+- Als **Desktopprotokoll** (wenn `create_desktop_shortcut: true`)
+- Über **Windows-Suche** nach "Schreibdienst"
+
+### Alternative: Edge
+
+Für Microsoft Edge lautet der Richtlinienname **WebAppInstallForceList** (identisch), die ADMX-Vorlagen gibt es unter [microsoft.com/edge/business/download](https://www.microsoft.com/edge/business/download).
+
+### PowerShell-Hilfsskript (lokale Testrechner ohne GPO)
+
+Für Rechner, die nicht in der Domäne sind, oder für schnelle Tests kann die Richtlinie auch direkt in die lokale Registry geschrieben werden. Ein fertiges Skript liegt unter:
+
+`native-host/installer/install-pwa.ps1`
+
+```powershell
+# PWA installieren (Chrome, Standard-URL)
+.\install-pwa.ps1
+
+# PWA installieren (Edge)
+.\install-pwa.ps1 -Browser Edge
+
+# PWA-Richtlinie wieder entfernen
+.\install-pwa.ps1 -Remove
+```
+
+Das Skript schreibt die Chrome-Richtlinie in `HKLM\Software\Policies\Google\Chrome\WebAppInstallForceList`. Nach dem nächsten Chrome-Neustart wird die PWA automatisch installiert.
+
+**Hinweis:** Für den dauerhaften Einsatz in der Domäne ist die GPO-Variante oben zu bevorzugen. Das Skript dient vor allem Tests und Workgroup-Rechnern.
+
 ## Hinweise für GitHub und Dokumentation
 - Diese Admin-README liegt im Repository und ist damit automatisch Teil jedes Commits.
 - Dadurch ist sie direkt auf GitHub im Code-Tab versioniert und nachvollziehbar.

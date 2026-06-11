@@ -780,11 +780,11 @@ bool registerHidRawInputDevices() {
         return true;
     }
 
-    hidDiagnostic("registerHidRawInputDevices: registriere Grundig(0xFF00:0x0001) + Philips(0xFFA1:0x0003)");
+    hidDiagnostic("registerHidRawInputDevices: registriere Grundig(0xFF00:0x0001) + Philips(0xFFA0:0x0001) + Consumer(0x000C:0x0001)");
 
-    // Registriere für beide Geräte mit RIDEV_INPUTSINK, damit wir
+    // Registriere fuer alle Geraete mit RIDEV_INPUTSINK, damit wir
     // Reports auch dann bekommen, wenn das Fenster nicht im Vordergrund ist.
-    RAWINPUTDEVICE devices[2] = {};
+    RAWINPUTDEVICE devices[3] = {};
 
     // Grundig SonicMic: Usage Page 0xFF00 (Vendor-defined), Usage 0x0001
     devices[0].usUsagePage = 0xFF00;
@@ -792,13 +792,21 @@ bool registerHidRawInputDevices() {
     devices[0].dwFlags = RIDEV_INPUTSINK;
     devices[0].hwndTarget = g_hiddenWnd;
 
-    // Philips SpeechMike III: Usage Page 0xFFA1 (Vendor-defined), Usage 0x0003
-    devices[1].usUsagePage = 0xFFA1;
-    devices[1].usUsage = 0x0003;
+    // Philips SpeechMike III: Usage Page 0xFFA0 (Vendor-defined), Usage 0x0001
+    // ACHTUNG: 0xFFA1/0x0003 ist FALSCH – der SpeechMike meldet sich auf 0xFFA0/0x0001!
+    devices[1].usUsagePage = 0xFFA0;
+    devices[1].usUsage = 0x0001;
     devices[1].dwFlags = RIDEV_INPUTSINK;
     devices[1].hwndTarget = g_hiddenWnd;
 
-    if (!RegisterRawInputDevices(devices, 2, sizeof(RAWINPUTDEVICE))) {
+    // Consumer Controls (0x000C:0x0001) – Standard-HID-Seite fuer Media-Tasten
+    // Viele Diktiermikrofone senden Record/Pause/Stop auch als Consumer-Control-Usage.
+    devices[2].usUsagePage = 0x000C;
+    devices[2].usUsage = 0x0001;
+    devices[2].dwFlags = RIDEV_INPUTSINK;
+    devices[2].hwndTarget = g_hiddenWnd;
+
+    if (!RegisterRawInputDevices(devices, 3, sizeof(RAWINPUTDEVICE))) {
         DWORD err = GetLastError();
         hidDiagnostic("RegisterRawInputDevices FEHLGESCHLAGEN (error=%lu)", err);
         logLine("[HID] RegisterRawInputDevices FAILED (error=%lu)\n", err);
@@ -807,8 +815,8 @@ bool registerHidRawInputDevices() {
     }
 
     g_hidRawInputRegistered = true;
-    hidDiagnostic("RegisterRawInputDevices OK (2 Geraete, RIDEV_INPUTSINK, hwndTarget=0x%p)", g_hiddenWnd);
-    logLine("[HID] RegisterRawInputDevices OK (2 devices)\n");
+    hidDiagnostic("RegisterRawInputDevices OK (3 Geraete, RIDEV_INPUTSINK, hwndTarget=0x%p)", g_hiddenWnd);
+    logLine("[HID] RegisterRawInputDevices OK (3 devices)\n");
     fflush(stdout);
     return true;
 }
@@ -816,17 +824,24 @@ bool registerHidRawInputDevices() {
 void unregisterHidRawInputDevices() {
     if (!g_hidRawInputRegistered) return;
 
-    RAWINPUTDEVICE devices[2] = {};
+    RAWINPUTDEVICE devices[3] = {};
 
     devices[0].usUsagePage = 0xFF00;
     devices[0].usUsage = 0x0001;
     devices[0].dwFlags = RIDEV_REMOVE;
     devices[0].hwndTarget = nullptr;
 
-    devices[1].usUsagePage = 0xFFA1;
-    devices[1].usUsage = 0x0003;
+    devices[1].usUsagePage = 0xFFA0;
+    devices[1].usUsage = 0x0001;
     devices[1].dwFlags = RIDEV_REMOVE;
     devices[1].hwndTarget = nullptr;
+
+    devices[2].usUsagePage = 0x000C;
+    devices[2].usUsage = 0x0001;
+    devices[2].dwFlags = RIDEV_REMOVE;
+    devices[2].hwndTarget = nullptr;
+
+    RegisterRawInputDevices(devices, 3, sizeof(RAWINPUTDEVICE));
 
     RegisterRawInputDevices(devices, 2, sizeof(RAWINPUTDEVICE));
     g_hidRawInputRegistered = false;
@@ -1628,7 +1643,33 @@ void handleRawInputRecordPress(HRAWINPUT hRawInput) {
     hidDiagnostic("handleRawInput: HID-Report size=%lu bytes=[%s]",
                   reportSize, hexDump(reportData, logSize).c_str());
 
-    const bool recordPressed = detectRecordPress(vendorId, productId, reportData, reportSize);
+    // Record-Taste erkennen – abhaengig von UsagePage
+    bool recordPressed = false;
+
+    if (usagePage == 0x000C) {
+        // Consumer Controls (standard HID): Usage 0xB2 = Media Record
+        // Der Report enthaelt typischerweise 2 Bytes mit der Usage-ID.
+        // Wenn eines der Bytes 0xB2 ist, ist Record gedrueckt.
+        // Bei 0x0000 ist losgelassen.
+        hidDiagnostic("handleRawInput: Consumer-Control-Report (0x000C:0x0001)");
+        bool anyNonZero = false;
+        for (DWORD i = 0; i < reportSize; ++i) {
+            if (reportData[i] == 0xB2) {
+                recordPressed = true;
+                hidDiagnostic("handleRawInput: Consumer Record (0xB2) detected");
+                break;
+            }
+            if (reportData[i] != 0x00) anyNonZero = true;
+        }
+        // Wenn unerwartete Bytes kommen, logge sie zur Diagnose
+        if (anyNonZero && !recordPressed) {
+            hidDiagnostic("handleRawInput: Unbekannter Consumer-Control-Code (nicht Record)");
+        }
+    } else {
+        // Vendor-definierte Seiten (0xFF00 Grundig, 0xFFA0 Philips):
+        // Bekannte Record-Payloads erkennen
+        recordPressed = detectRecordPress(vendorId, productId, reportData, reportSize);
+    }
 
     hidDiagnostic("handleRawInput: recordPressed=%d (vor Debounce)", recordPressed ? 1 : 0);
 

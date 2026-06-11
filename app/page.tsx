@@ -342,7 +342,6 @@ export default function HomePage() {
   const [transcribing, setTranscribing] = useState(false);
   const [correcting, setCorrecting] = useState(false);
   const [dictionarySet, setDictionarySet] = useState<DictionarySet>('medical');
-  const [dictionarySetSaving, setDictionarySetSaving] = useState(false);
   // Flag um zu tracken ob nach Aufnahme noch keine Korrektur durchgeführt wurde
   const [pendingCorrection, setPendingCorrection] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -1192,8 +1191,10 @@ export default function HomePage() {
   const applyDictionaryToText = useCallback((text: string): string => {
     if (!text) return text;
     
-    // Pass 1+2: Exaktes + Phonetisches Matching (User + Standard) – nur wenn Einträge vorhanden
-    if (mergedEntriesRef.current.length > 0) {
+    // Pass 1+2: Exaktes + Phonetisches Matching (User + Standard) –
+    // werden NUR im Medical-Modus angewendet, konsistent zur Beschriftung
+    // ("Alltag: alle Wörterbücher sind aus").
+    if (dictionarySet === 'medical' && mergedEntriesRef.current.length > 0) {
       let result = text;
       for (const entry of mergedEntriesRef.current) {
         // Unicode-sichere Wortgrenzen, damit z.B. "IgE" nicht das Suffix in
@@ -1218,7 +1219,10 @@ export default function HomePage() {
   }, [dictionaryEntries, dictionarySet]);
 
   const applyDictionaryToTextWithCorrections = useCallback((text: string): { text: string; corrections: WordCorrectionInfo[] } => {
-    if (!text || mergedEntriesRef.current.length === 0) return { text, corrections: [] };
+    // Im Alltag-Modus werden keine Wörterbuchkorrekturen angewendet.
+    if (!text || dictionarySet !== 'medical' || mergedEntriesRef.current.length === 0) {
+      return { text, corrections: [] };
+    }
 
     // Pass 1: Exaktes Wort-Matching (User + Standard) – als Operationen mitschneiden
     let result = text;
@@ -1260,7 +1264,7 @@ export default function HomePage() {
         groupId: op.groupId,
       }));
     return { text: phoneticResult.text, corrections: [...exactCorrections, ...phoneticCorrections] };
-  }, [dictionaryEntries]);
+  }, [dictionaryEntries, dictionarySet]);
 
   // Leitet bei jeder Text- und Wörterbuchänderung die Korrekturen neu ab
   useEffect(() => {
@@ -1399,75 +1403,12 @@ export default function HomePage() {
     }
   }, [defaultMode]);
 
-  // Wörterbuch-Set beim Start laden (nutzerspezifisch, sessionübergreifend)
-  useEffect(() => {
-    if (!username) {
-      setDictionarySet('medical');
-      return;
-    }
-
-    let cancelled = false;
-    const loadDictionarySet = async () => {
-      try {
-        const response = await fetch('/api/users/settings', {
-          headers: {
-            Authorization: getAuthHeader(),
-            ...getDbTokenHeader(),
-          },
-        });
-        const data = await response.json();
-        if (cancelled) return;
-
-        const nextSet = data?.dictionarySet;
-        if (nextSet === 'alltag' || nextSet === 'medical') {
-          setDictionarySet(nextSet);
-        } else {
-          setDictionarySet('medical');
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.warn('[DictionarySet] Could not load user setting:', error);
-        }
-      }
-    };
-
-    loadDictionarySet();
-    return () => {
-      cancelled = true;
-    };
-  }, [username, getAuthHeader, getDbTokenHeader]);
-
-  const persistDictionarySet = useCallback(async (nextSet: DictionarySet) => {
-    if (!username || nextSet === dictionarySet || dictionarySetSaving) {
-      return;
-    }
-
-    const previous = dictionarySet;
-    setDictionarySet(nextSet);
-    setDictionarySetSaving(true);
-    try {
-      const response = await fetch('/api/users/settings', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: getAuthHeader(),
-          ...getDbTokenHeader(),
-        },
-        body: JSON.stringify({ dictionarySet: nextSet }),
-      });
-
-      if (!response.ok) {
-        setDictionarySet(previous);
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload?.error || 'Wörterbuch-Modus konnte nicht gespeichert werden');
-      }
-    } catch (error: any) {
-      console.error('[DictionarySet] Persist error:', error);
-      setError(error?.message || 'Wörterbuch-Modus konnte nicht gespeichert werden');
-    } finally {
-      setDictionarySetSaving(false);
-    }
-  }, [username, dictionarySet, dictionarySetSaving, getAuthHeader, getDbTokenHeader, setError]);
+  // Dictionary-Set: immer mit Medical starten, Umschalten nur session-lokal.
+  // Kein Laden aus der DB und kein Persistieren – vermeidet Zustandsverwirrung
+  // durch veraltete DB-Werte und Browser-Caches.
+  const toggleDictionarySet = useCallback(() => {
+    setDictionarySet((prev) => (prev === 'medical' ? 'alltag' : 'medical'));
+  }, []);
 
   // Runtime Config laden (für Fast Whisper WebSocket URL)
   useEffect(() => {
@@ -4347,8 +4288,7 @@ export default function HomePage() {
                       ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
                       : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
                   }`}
-                  onClick={() => void persistDictionarySet(dictionarySet === 'medical' ? 'alltag' : 'medical')}
-                  disabled={dictionarySetSaving}
+                  onClick={toggleDictionarySet}
                   title={
                     dictionarySet === 'medical'
                       ? 'Medical-Modus: alle phonetischen Wörterbücher (Standard, Abteilung, persönlich) sind aktiv. Klicken zum Umschalten auf Alltag.'

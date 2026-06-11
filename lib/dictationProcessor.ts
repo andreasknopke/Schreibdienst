@@ -24,7 +24,6 @@ import { applyLLMPhoneticGuard } from '@/lib/phoneticMatch';
 import { compressAudioForSpeech, normalizeAudioForWhisper } from '@/lib/audioCompression';
 import { mergeTranscriptionsWithMarkers, createMergePrompt, stripNovelWordsFromMergeOutput, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
-import { getUserSettingsWithRequest } from '@/lib/usersDb';
 
 // LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
 const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);
@@ -210,8 +209,10 @@ export async function processDictation(request: NextRequest, dictationId: number
     const audioData = new Uint8Array(audioResult.audio_data);
     const audioBlob = new Blob([audioData], { type: audioResult.audio_mime_type });
     console.log(`[Worker] Audio blob created: size=${audioBlob.size}, type=${audioBlob.type}, originalMime=${audioResult.audio_mime_type}`);
-    const userSettings = dictation.username ? await getUserSettingsWithRequest(request, dictation.username) : null;
-    const dictionarySet = userSettings?.dictionarySet ?? 'medical';
+    // Offline-Diktate haben keinen UI-Toggle für das Wörterbuch-Set –
+    // wir verwenden immer den Medical-Modus mit allen Wörterbüchern.
+    // Kein DB-Lookup, um veraltete/stale Werte zu vermeiden (session-lokal wie im Frontend).
+    const dictionarySet: 'medical' = 'medical';
     const transcriptionResult = await transcribeAudio(
       request, 
       audioBlob, 

@@ -1545,17 +1545,11 @@ void handleHidRecordEvent(uint16_t vendorId, uint16_t productId,
         const bool nowRecording = !g_recordingState.load();
         setRecordingState(nowRecording, L"hid-mic", true);
 
-        // Broadcast als hid-event UND als hotkey-event,
-        // damit der bestehende toggle-recording Code im Frontend triggert.
+        // Broadcast als hid-event. Das Frontend hoert auf HID_MEDIA_CONTROL_EVENT
+        // und toggelt die Aufnahme. Kein zusaetzliches hotkey-event mehr noetig
+        // – das fuehrte zu doppeltem Toggle (einmal via hid-event, einmal via
+        // hotkey-event).
         dispatchHidActionEvent(deviceName, vendorId, productId, "keydown");
-
-        // Zusätzliches hotkey-event für Abwärtskompatibilität:
-        // Der Frontend-Code horcht auf "toggle-recording" Hotkey-Events.
-        // Wir emulieren den gleichen Event, damit kein neuer Handler nötig ist.
-        const std::string hotkeyLike = "{\"type\":\"hotkey-event\",\"event\":{"
-            "\"action\":\"toggle-recording\","
-            "\"key\":\"HID-" + jsonEscape(asciiFromWide(deviceName)) + "\"}}";
-        broadcastToClients(hotkeyLike);
 
         logLine("[HID] Record PRESS from device=\"%ls\" (vendor=0x%04X product=0x%04X)\n",
                deviceName.c_str(), vendorId, productId);

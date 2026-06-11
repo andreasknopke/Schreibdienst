@@ -68,6 +68,12 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
   const sessionIdRef = useRef(0);
   const stopPromiseRef = useRef<Promise<void> | null>(null);
   
+  // Ref für vadThreshold — immer aktuell, auch wenn start() schon via useCallback
+  // eingefroren wurde. Der Wert wird bei MicVAD.new() gelesen, also beim Start
+  // der nächsten Aufnahme.
+  const vadThresholdRef = useRef(vadThreshold);
+  vadThresholdRef.current = vadThreshold;
+  
   // Auto-Chunk: Sammelt Frames seit Sprechbeginn für forced flush
   const speechFramesRef = useRef<Float32Array[]>([]);
   const preSpeechFramesRef = useRef<Float32Array[]>([]);
@@ -121,13 +127,17 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
 
       // VAD-Erkennungsschwelle: Höhere Werte = weniger empfindlich.
       // Bei Raumgeräuschen/Nebengesprächen hilft ein höherer Schwellwert.
-      positiveSpeechThreshold: vadThreshold,
-      negativeSpeechThreshold: Math.max(0.1, vadThreshold - 0.07),
+      // Nutzt Ref statt destructured-Prop, damit Slider-Änderungen auch ohne
+      // Neu-Rendern des start-Callbacks wirksam werden.
+      positiveSpeechThreshold: vadThresholdRef.current,
+      negativeSpeechThreshold: Math.max(0.1, vadThresholdRef.current - 0.07),
       redemptionFrames: 10,       // ~600ms Pause bis zum Commit
       minSpeechFrames: 4,         // Mind. ~240ms Sprache gegen Fehlzündungen
       preSpeechPadFrames: 15,     // ~900ms Audio vor Sprechbeginn
 
       onSpeechStart: () => {
+        if (sessionId !== sessionIdRef.current) return;
+        setIsSpeaking(true);
         if (sessionId !== sessionIdRef.current) return;
         setIsSpeaking(true);
         isSpeechActiveRef.current = true;
@@ -211,6 +221,8 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
         }
       },
     });
+
+    console.log(`[VAD] MicVAD created with thresholds: pos=${vadThresholdRef.current.toFixed(2)}, neg=${Math.max(0.1, vadThresholdRef.current - 0.07).toFixed(2)}`);
 
     vadRef.current = vad;
 

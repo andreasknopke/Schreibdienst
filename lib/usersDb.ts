@@ -125,7 +125,7 @@ export async function deleteUser(username: string): Promise<{ success: boolean; 
     // Also delete user's dictionary entries
     await execute(
       'DELETE FROM dictionary_entries WHERE username = ?',
-      [username]
+      [username.toLowerCase()]
     );
     
     console.log('[Users] Deleted user:', username);
@@ -473,7 +473,7 @@ export async function deleteUserWithRequest(request: NextRequest, username: stri
     // Also delete user's dictionary entries
     await db.execute(
       'DELETE FROM dictionary_entries WHERE username = ?',
-      [username]
+      [username.toLowerCase()]
     );
     
     console.log('[Users] Deleted user (with request):', username);

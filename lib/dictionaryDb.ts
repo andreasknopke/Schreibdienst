@@ -28,9 +28,10 @@ interface DbDictionaryEntry {
 // Get all entries for a user
 export async function getEntries(username: string): Promise<DictionaryEntry[]> {
   try {
+    const normalizedUsername = username.toLowerCase();
     const entries = await query<DbDictionaryEntry>(
       'SELECT wrong_word, correct_word, added_at, COALESCE(use_in_prompt, 0) as use_in_prompt, COALESCE(match_stem, 0) as match_stem FROM dictionary_entries WHERE username = ? ORDER BY added_at DESC',
-      [username]
+      [normalizedUsername]
     );
     
     return entries.map(e => ({
@@ -48,7 +49,7 @@ export async function getEntries(username: string): Promise<DictionaryEntry[]> {
       try {
         const entries = await query<DbDictionaryEntry>(
           'SELECT wrong_word, correct_word, added_at FROM dictionary_entries WHERE username = ? ORDER BY added_at DESC',
-          [username]
+          [username.toLowerCase()]
         );
         
         return entries.map(e => ({
@@ -114,7 +115,7 @@ export async function updateEntryOptions(
   try {
     const result = await execute(
       'UPDATE dictionary_entries SET use_in_prompt = ?, match_stem = ? WHERE username = ? AND wrong_word = ?',
-      [useInPrompt ? 1 : 0, matchStem ? 1 : 0, username, wrong]
+      [useInPrompt ? 1 : 0, matchStem ? 1 : 0, username.toLowerCase(), wrong]
     );
     
     if (result.affectedRows === 0) {
@@ -134,7 +135,7 @@ export async function removeEntry(username: string, wrong: string): Promise<{ su
   try {
     const result = await execute(
       'DELETE FROM dictionary_entries WHERE username = ? AND wrong_word = ?',
-      [username, wrong]
+      [username.toLowerCase(), wrong]
     );
     
     if (result.affectedRows === 0) {
@@ -355,7 +356,7 @@ export async function getEntriesWithRequest(request: NextRequest, username: stri
     
     const [rows] = await db.execute<any[]>(
       'SELECT wrong_word, correct_word, added_at, COALESCE(use_in_prompt, 0) as use_in_prompt, COALESCE(match_stem, 0) as match_stem, phonetic_min_similarity FROM dictionary_entries WHERE username = ? ORDER BY added_at DESC',
-      [username]
+      [username.toLowerCase()]
     );
     
     return (rows as DbDictionaryEntry[]).map(e => ({
@@ -376,7 +377,7 @@ export async function getEntriesWithRequest(request: NextRequest, username: stri
         const db = await getPoolForRequest(request);
         const [rows] = await db.execute<any[]>(
           'SELECT wrong_word, correct_word, added_at FROM dictionary_entries WHERE username = ? ORDER BY added_at DESC',
-          [username]
+          [username.toLowerCase()]
         );
         
         return (rows as DbDictionaryEntry[]).map(e => ({
@@ -445,7 +446,7 @@ export async function updateEntryOptionsWithRequest(
     const db = await getPoolForRequest(request);
     const [result] = await db.execute(
       'UPDATE dictionary_entries SET use_in_prompt = ?, match_stem = ? WHERE username = ? AND wrong_word = ?',
-      [useInPrompt ? 1 : 0, matchStem ? 1 : 0, username, wrong]
+      [useInPrompt ? 1 : 0, matchStem ? 1 : 0, username.toLowerCase(), wrong]
     );
     
     if ((result as any).affectedRows === 0) {
@@ -470,7 +471,7 @@ export async function removeEntryWithRequest(
     const db = await getPoolForRequest(request);
     const [result] = await db.execute(
       'DELETE FROM dictionary_entries WHERE username = ? AND wrong_word = ?',
-      [username, wrong]
+      [username.toLowerCase(), wrong]
     );
     
     if ((result as any).affectedRows === 0) {
@@ -523,6 +524,35 @@ export async function loadDictionaryWithRequest(request: NextRequest, username: 
   return { entries };
 }
 
+/**
+ * Gibt ALLE Benutzerwörterbuch-Einträge im System zurück.
+ * Nur für root-Admin-Diagnosezwecke.
+ * Sortiert nach Username, dann nach Hinzufüge-Datum.
+ */
+export async function getAllUserEntriesWithRequest(request: NextRequest): Promise<
+  Array<DictionaryEntry & { username: string }>
+> {
+  const db = await getPoolForRequest(request);
+  const [rows] = await db.execute<any[]>(
+    `SELECT username, wrong_word, correct_word, added_at,
+            COALESCE(use_in_prompt, 0) as use_in_prompt,
+            COALESCE(match_stem, 0) as match_stem,
+            phonetic_min_similarity
+     FROM dictionary_entries
+     ORDER BY username ASC, added_at DESC`
+  );
+
+  return (rows as any[]).map(e => ({
+    username: e.username,
+    wrong: e.wrong_word,
+    correct: e.correct_word,
+    addedAt: new Date(e.added_at).toISOString(),
+    useInPrompt: Boolean(e.use_in_prompt),
+    matchStem: Boolean(e.match_stem),
+    phoneticMinSimilarity: e.phonetic_min_similarity ?? undefined,
+  }));
+}
+
 function getDefaultPhoneticMinSimilarity(wrong: string, correct: string): number {
   return wrong.trim().toLowerCase() === correct.trim().toLowerCase() ? 0.82 : 0.5;
 }
@@ -540,7 +570,7 @@ export async function increaseEntryPhoneticMinSimilarityWithRequest(
 
     const [rows] = await db.execute<any[]>(
       'SELECT wrong_word, correct_word, phonetic_min_similarity FROM dictionary_entries WHERE username = ? AND wrong_word = ? LIMIT 1',
-      [username, wrong]
+      [username.toLowerCase(), wrong]
     );
 
     const entry = rows?.[0];
@@ -554,7 +584,7 @@ export async function increaseEntryPhoneticMinSimilarityWithRequest(
 
     await db.execute(
       'UPDATE dictionary_entries SET phonetic_min_similarity = ? WHERE username = ? AND wrong_word = ?',
-      [newValue, username, wrong]
+      [newValue, username.toLowerCase(), wrong]
     );
 
     console.log('[Dictionary] Increased phonetic_min_similarity for', username, wrong, `${oldValue} -> ${newValue}`);

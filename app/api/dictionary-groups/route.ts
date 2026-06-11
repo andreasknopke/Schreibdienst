@@ -13,6 +13,7 @@ import {
   updateDictionaryGroupPromptInsertWithRequest,
   upsertDictionaryGroupEntryWithRequest,
 } from '@/lib/groupDictionaryDb';
+import { getAllUserEntriesWithRequest } from '@/lib/dictionaryDb';
 
 async function getAdmin(request: NextRequest): Promise<{ valid: boolean; username?: string }> {
   const authHeader = request.headers.get('Authorization');
@@ -45,6 +46,15 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const groupId = parseGroupId(searchParams.get('groupId'));
     const include = searchParams.get('include') || 'summary';
+
+    // Nur root darf ALLE Benutzerwörterbucheinträge sehen
+    if (include === 'all-user-entries') {
+      if (auth.username !== 'root') {
+        return NextResponse.json({ success: false, error: 'Nur für root' }, { status: 403 });
+      }
+      const entries = await getAllUserEntriesWithRequest(request);
+      return NextResponse.json({ success: true, entries });
+    }
 
     if (!groupId) {
       const [groups, users] = await Promise.all([

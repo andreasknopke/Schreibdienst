@@ -64,10 +64,12 @@ function notifyDictionaryChanged() {
 }
 
 export default function GroupDictionaryManager() {
-  const { getAuthHeader, getDbTokenHeader } = useAuth();
+  const { getAuthHeader, getDbTokenHeader, username } = useAuth();
+  const isRoot = username?.toLowerCase() === 'root';
   const [groups, setGroups] = useState<DictionaryGroup[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
+  const [selectedTab, setSelectedTab] = useState<'groups' | 'all-user-entries'>('groups');
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [entries, setEntries] = useState<GroupEntry[]>([]);
   const [candidates, setCandidates] = useState<ImportCandidate[]>([]);
@@ -90,9 +92,31 @@ export default function GroupDictionaryManager() {
   const [groupPromptInsert, setGroupPromptInsert] = useState('');
   const [savingGroupPromptInsert, setSavingGroupPromptInsert] = useState(false);
 
+  // Alle Benutzerwörterbucheinträge (nur root)
+  const [allUserEntries, setAllUserEntries] = useState<Array<{
+    username: string;
+    wrong: string;
+    correct: string;
+    addedAt: string;
+    useInPrompt?: boolean;
+    matchStem?: boolean;
+  }>>([]);
+  const [allUserEntriesLoading, setAllUserEntriesLoading] = useState(false);
+  const [allUserEntriesFilter, setAllUserEntriesFilter] = useState('');
+
   const selectedGroup = groups.find(group => group.id === selectedGroupId) || null;
   const selectedMemberNames = useMemo(() => new Set(members.map(member => member.username)), [members]);
   const normalizedFilter = filter.trim().toLowerCase();
+  const normalizedAllUserFilter = allUserEntriesFilter.trim().toLowerCase();
+  const visibleAllUserEntries = useMemo(
+    () => allUserEntries.filter((entry) => {
+      if (!normalizedAllUserFilter) return true;
+      return [entry.username, entry.wrong, entry.correct]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(normalizedAllUserFilter));
+    }),
+    [allUserEntries, normalizedAllUserFilter]
+  );
   const visibleEntries = useMemo(
     () => entries.filter((entry) => {
       if (!normalizedFilter) return true;
@@ -182,9 +206,35 @@ export default function GroupDictionaryManager() {
     }
   };
 
+  const fetchAllUserEntries = async () => {
+    setAllUserEntriesLoading(true);
+    try {
+      setError('');
+      const response = await fetch('/api/dictionary-groups?include=all-user-entries', {
+        headers: requestHeaders(),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.error || 'Fehler beim Laden der Benutzerwörterbücher');
+        return;
+      }
+      setAllUserEntries(data.entries || []);
+    } catch {
+      setError('Verbindungsfehler');
+    } finally {
+      setAllUserEntriesLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchOverview();
   }, []);
+
+  useEffect(() => {
+    if (selectedTab === 'all-user-entries' && isRoot) {
+      fetchAllUserEntries();
+    }
+  }, [selectedTab]);
 
   useEffect(() => {
     if (selectedGroupId) {
@@ -517,6 +567,126 @@ export default function GroupDictionaryManager() {
       {error && <div className="text-sm text-red-600 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-lg">{error}</div>}
       {success && <div className="text-sm text-green-600 bg-green-50 dark:bg-green-900/20 px-3 py-2 rounded-lg">{success}</div>}
 
+      {/* Tabs: Gruppen-Manager / Alle Benutzerwörterbücher (nur root) */}
+      {isRoot && (
+        <div className="flex gap-1 border-b dark:border-gray-700 pb-0">
+          <button
+            type="button"
+            onClick={() => { setSelectedTab('groups'); setSelectedGroupId(null); }}
+            className={`px-3 py-1.5 text-sm rounded-t-lg border border-b-0 -mb-px ${
+              selectedTab === 'groups'
+                ? 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 font-medium'
+                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 border-transparent'
+            }`}
+          >
+            Gruppen-Manager
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedTab('all-user-entries')}
+            className={`px-3 py-1.5 text-sm rounded-t-lg border border-b-0 -mb-px ${
+              selectedTab === 'all-user-entries'
+                ? 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 font-medium'
+                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 border-transparent'
+            }`}
+          >
+            Alle Benutzerwörterbücher
+          </button>
+        </div>
+      )}
+
+      {selectedTab === 'all-user-entries' && isRoot ? (
+        /* ===== ALLE BENUTZERWÖRTERBÜCHER-TABELLE ===== */
+        <div className="space-y-3">
+          {allUserEntriesLoading ? (
+            <div className="text-sm text-gray-500 p-4">Lade alle Benutzerwörterbücher...</div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <h4 className="font-semibold text-sm">Alle Benutzerwörterbucheinträge</h4>
+                  <div className="text-xs text-gray-500">
+                    {allUserEntries.length} Einträge von {
+                      new Set(allUserEntries.map(e => e.username)).size
+                    } Benutzern
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchAllUserEntries}
+                  className="btn btn-outline text-xs"
+                >
+                  Neu laden
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  className="input text-sm flex-1"
+                  value={allUserEntriesFilter}
+                  onChange={(e) => setAllUserEntriesFilter(e.target.value)}
+                  placeholder="Nach Benutzer, Begriff oder Korrektur suchen..."
+                />
+                {allUserEntriesFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setAllUserEntriesFilter('')}
+                    className="text-xs text-gray-500 hover:text-gray-700"
+                  >
+                    Filter löschen
+                  </button>
+                )}
+              </div>
+
+              {allUserEntries.length === 0 ? (
+                <div className="text-sm text-gray-500 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  Keine Benutzerwörterbucheinträge gefunden.
+                </div>
+              ) : visibleAllUserEntries.length === 0 ? (
+                <div className="text-sm text-gray-500 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  Keine Einträge für den aktuellen Suchbegriff.
+                </div>
+              ) : (
+                <div className="border dark:border-gray-700 rounded-lg overflow-hidden">
+                  <div className="max-h-[60vh] overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 bg-gray-100 dark:bg-gray-800">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Benutzer</th>
+                          <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Falsch erkannt</th>
+                          <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Korrekt</th>
+                          <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Hinzugefügt</th>
+                          <th className="text-center px-3 py-2 font-medium whitespace-nowrap w-14">Prompt</th>
+                          <th className="text-center px-3 py-2 font-medium whitespace-nowrap w-14">Stamm</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y dark:divide-gray-700">
+                        {visibleAllUserEntries.map((entry, idx) => (
+                          <tr
+                            key={`${entry.username}-${entry.wrong}-${idx}`}
+                            className="hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                          >
+                            <td className="px-3 py-1.5 font-medium whitespace-nowrap">{entry.username}</td>
+                            <td className="px-3 py-1.5 text-red-600 dark:text-red-400 line-through max-w-[200px] truncate">{entry.wrong}</td>
+                            <td className="px-3 py-1.5 text-green-600 dark:text-green-400 font-medium max-w-[200px] truncate">{entry.correct}</td>
+                            <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap text-xs">
+                              {new Date(entry.addedAt).toLocaleDateString('de-DE')}
+                            </td>
+                            <td className="px-3 py-1.5 text-center">{entry.useInPrompt ? '✓' : ''}</td>
+                            <td className="px-3 py-1.5 text-center">{entry.matchStem ? '✓' : ''}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : (
+        /* ===== GRUPPEN-MANAGER ===== */
+        <>
       <form onSubmit={handleCreateGroup} className="space-y-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
         <h4 className="font-medium text-sm">Neue Gruppe</h4>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -733,6 +903,8 @@ export default function GroupDictionaryManager() {
           <div className="text-sm text-gray-500 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">Wählen Sie eine Gruppe aus.</div>
         )}
       </div>
+    </>
+      )}
     </div>
   );
 }

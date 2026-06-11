@@ -274,7 +274,7 @@ export async function getUserGroupIds(request: NextRequest, username: string): P
   const db = await getPoolForRequest(request);
   const [rows] = await db.execute<any[]>(
     'SELECT group_id FROM dictionary_group_members WHERE username = ? ORDER BY group_id ASC',
-    [username]
+    [username.toLowerCase()]
   );
 
   return rows.map((row) => Number(row.group_id)).filter((groupId) => Number.isFinite(groupId));
@@ -352,7 +352,7 @@ export async function getEntriesForUserGroupsWithRequest(request: NextRequest, u
     JOIN dictionary_group_members m ON m.group_id = g.id
     WHERE m.username = ?
     ORDER BY e.added_at DESC
-  `, [username]);
+  `, [username.toLowerCase()]);
 
   const seen = new Set<string>();
   const entries: GroupDictionaryEntry[] = [];
@@ -404,7 +404,7 @@ export async function getPromptInsertsForUserGroupsWithRequest(request: NextRequ
       AND g.prompt_insert IS NOT NULL
       AND TRIM(g.prompt_insert) != ''
     ORDER BY g.name ASC
-  `, [username]);
+  `, [username.toLowerCase()]);
 
   return rows.map((row) => ({
     groupId: Number(row.id),

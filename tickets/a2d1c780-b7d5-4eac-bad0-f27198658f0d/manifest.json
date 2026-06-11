@@ -1,0 +1,76 @@
+{
+  "ticket_id": "a2d1c780-b7d5-4eac-bad0-f27198658f0d",
+  "title": "Schreibdienst Icon verschwindet bei windows usern",
+  "type": "bug",
+  "urgency": "normal",
+  "system": {
+    "id": 2,
+    "name": "Schreibdienst",
+    "repo": "andreasknopke/Schreibdienst"
+  },
+  "run": {
+    "id": 203,
+    "started_at": "2026-06-11 07:51:15",
+    "current_stage": "triage",
+    "recommended_executor": null
+  },
+  "steps": [
+    {
+      "id": 1134,
+      "stage": "triage",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 5,
+      "staff_name": "Triage-Bot",
+      "provider": "openai_local",
+      "model": "gemma-4",
+      "duration_ms": 2990
+    },
+    {
+      "id": 1135,
+      "stage": "security",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 7,
+      "staff_name": "Security-Bot",
+      "provider": "openai_local",
+      "model": "gemma-4",
+      "duration_ms": 3995
+    },
+    {
+      "id": 1136,
+      "stage": "planning",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 6,
+      "staff_name": "Architect-Bot",
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "duration_ms": 336
+    },
+    {
+      "id": 1137,
+      "stage": "integration",
+      "status": "done",
+      "executor_kind": "ai",
+      "staff_id": 8,
+      "staff_name": "Integration-Bot",
+      "provider": "mistral",
+      "model": "mistral-large-latest",
+      "duration_ms": 18468
+    },
+    {
+      "id": 1138,
+      "stage": "approval",
+      "status": "waiting_human",
+      "executor_kind": "human",
+      "staff_id": 2,
+      "staff_name": "Andreas",
+      "provider": null,
+      "model": null,
+      "duration_ms": null
+    }
+  ],
+  "exported_at": "2026-06-11T09:26:10.660Z",
+  "dispatch_note": null
+}

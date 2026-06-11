@@ -2032,11 +2032,8 @@ void handleClient(SOCKET client) {
     // Add to client set for hotkey broadcasts
     {
         std::lock_guard<std::mutex> lock(g_clientsMutex);
-        // Only keep the newest client to avoid stale connections
-        for (SOCKET old : g_wsClients) {
-            closesocket(old);
-        }
-        g_wsClients.clear();
+        // Erlaube mehrere parallele Clients (z. B. HID-Native + Inject-Client).
+        // Alte, getrennte Verbindungen werden ueber den recv-Loop natuerlich bereinigt.
         g_wsClients.insert(client);
     }
 
@@ -2127,6 +2124,10 @@ void handleClient(SOCKET client) {
             registerHidRawInputDevices();
             sendWsFrame(client, 0x1, makeTypedResponse("hid-listener-ready", g_hidRawInputRegistered,
                 g_hidRawInputRegistered ? "" : "HID Raw Input registration failed"));
+            // Sende zusaetzlich hid-status, damit der Frontend-Handshake
+            // (hidNativeClient.ts) die HID-Bestaetigung erhaelt.
+            // Das Frontend wartet nach start-hid auf type:"hid-status".
+            sendWsFrame(client, 0x1, makeHidStatusResponse());
             continue;
         }
 

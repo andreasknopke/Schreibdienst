@@ -494,7 +494,12 @@ export function startHidMediaControls(options: HidMediaControlsOptions = {}): vo
   // ── Native-Host-HID (primär) ──
   // Versuche zuerst die HID-Steuerung über den Native Host – kein Chrome-Dialog nötig.
   connectNativeHid().then((ok) => {
-    if (!ok) return;
+    if (!ok) {
+      // Alter Injector oder Native Host nicht erreichbar → WebHID-Fallback
+      console.info('[HID] Native Host nicht erreichbar – verwende WebHID-Fallback');
+      startWebHidFallback(target, options);
+      return;
+    }
 
     // Native HID Event → HidMediaControlEventDetail konvertieren
     const unsubEvent = onNativeHidEvent((nativeEvent) => {
@@ -531,8 +536,8 @@ export function startHidMediaControls(options: HidMediaControlsOptions = {}): vo
 
     console.info('[HID] Native-Host-HID aktiv – kein WebHID-Fallback nötig');
   }).catch(() => {
-    // Native Host nicht erreichbar → WebHID-Fallback
-    console.info('[HID] Native Host nicht erreichbar – verwende WebHID-Fallback');
+    // Unerwarteter Fehler in der then()-Kette – Fallback
+    console.info('[HID] Unerwarteter Fehler – verwende WebHID-Fallback');
     startWebHidFallback(target, options);
   });
 

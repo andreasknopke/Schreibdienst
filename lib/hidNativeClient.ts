@@ -268,8 +268,19 @@ export function getNativeHidStatus(): NativeHidDeviceStatus {
 
 /**
  * Prüft, ob der Native-Host-HID-Modus aktiv ist.
+ * Liefert true, sobald der Handshake mit dem Native Host erfolgreich war –
+ * unabhängig davon, ob aktuell ein physikalisches Gerät Daten sendet.
+ * Der Native Host hat HID Raw Input registriert und ist empfangsbereit.
  */
 export function isNativeHidConnected(): boolean {
+  return g_hidConfirmed;
+}
+
+/**
+ * Liefert true, wenn ein physikalisches HID-Gerät am Native Host
+ * erkannt wurde und aktiv Daten sendet.
+ */
+export function isNativeHidDevicePresent(): boolean {
   return g_hidConfirmed && g_deviceStatus.connected;
 }
 

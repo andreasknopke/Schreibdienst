@@ -14,6 +14,7 @@ import {
   getHidMediaControlStatus,
   HID_MEDIA_CONTROL_STATUS_EVENT,
   type HidMediaControlStatusDetail,
+  type HidMediaControlSource,
 } from '@/lib/hidMediaControls';
 
 export default function UserMenu() {
@@ -30,6 +31,7 @@ export default function UserMenu() {
   const [hidSupported, setHidSupported] = useState(false);
   const [hidConnected, setHidConnected] = useState(false);
   const [hidDeviceName, setHidDeviceName] = useState<string | null>(null);
+  const [hidSource, setHidSource] = useState<HidMediaControlSource | undefined>(undefined);
   const [hidConnecting, setHidConnecting] = useState(false);
   const [showHidConnectPrompt, setShowHidConnectPrompt] = useState(false);
   const [hidPromptDismissed, setHidPromptDismissed] = useState(false);
@@ -46,6 +48,7 @@ export default function UserMenu() {
       setHidSupported(status.supported);
       setHidConnected(status.connected);
       setHidDeviceName(status.deviceName ?? null);
+      setHidSource(status.source);
     };
 
     applyStatus(getHidMediaControlStatus());
@@ -59,12 +62,14 @@ export default function UserMenu() {
   }, []);
 
   useEffect(() => {
-    if (!mounted || !hidSupported || hidConnected || hidPromptDismissed) {
+    // Nur WebHID-Geräte benötigen den Verbinden-Dialog.
+    // Native-Host-HID ist bereits über den Injector verbunden.
+    if (!mounted || !hidSupported || hidConnected || hidPromptDismissed || hidSource === 'native-host') {
       return;
     }
 
     setShowHidConnectPrompt(true);
-  }, [mounted, hidSupported, hidConnected, hidPromptDismissed]);
+  }, [mounted, hidSupported, hidConnected, hidPromptDismissed, hidSource]);
 
   useEffect(() => {
     if (hidConnected) {
@@ -99,6 +104,10 @@ export default function UserMenu() {
   }, [showDictionaryMenu]);
 
   const handleConnectDictationMic = useCallback(async () => {
+    // Native-Host-HID benötigt keinen WebHID-Dialog
+    if (hidSource === 'native-host') {
+      return;
+    }
     setHidConnecting(true);
     try {
       const connectedCount = await connectDictationMicrophone();
@@ -112,7 +121,7 @@ export default function UserMenu() {
     } finally {
       setHidConnecting(false);
     }
-  }, []);
+  }, [hidSource]);
 
   // Öffnet das Wörterbuch und übernimmt selektierten Text
   const handleOpenDictionary = useCallback(() => {
@@ -374,32 +383,33 @@ export default function UserMenu() {
         {mounted && hidSupported && (
           <button
             onClick={() => {
-              if (!hidConnected) {
+              // Native-Host-HID ist immer verbunden – kein WebHID-Dialog nötig
+              if (!hidConnected && hidSource !== 'native-host') {
                 void handleConnectDictationMic();
               }
             }}
             className={`inline-flex items-center gap-1.5 text-xs px-1.5 sm:px-2 py-1 rounded border transition-colors ${
-              hidConnected
+              hidConnected || hidSource === 'native-host'
                 ? 'text-emerald-700 border-emerald-200 bg-emerald-50 dark:text-emerald-300 dark:border-emerald-800 dark:bg-emerald-900/20 cursor-default'
                 : 'text-amber-700 border-amber-200 bg-amber-50 hover:bg-amber-100 dark:text-amber-300 dark:border-amber-800 dark:bg-amber-900/20 dark:hover:bg-amber-900/30'
             }`}
-            title={hidConnected
-              ? `Diktiergerät verbunden${hidDeviceName ? `: ${hidDeviceName}` : ''}`
+            title={hidConnected || hidSource === 'native-host'
+              ? `Diktiergerät verbunden (via Injector)${hidDeviceName ? `: ${hidDeviceName}` : ''}`
               : 'Diktiergerät nicht verbunden. Klicken zum Verbinden.'}
-            disabled={hidConnecting || hidConnected}
-            aria-label={hidConnected
-              ? `Diktiergerät verbunden${hidDeviceName ? `: ${hidDeviceName}` : ''}`
+            disabled={hidConnecting || hidConnected || hidSource === 'native-host'}
+            aria-label={hidConnected || hidSource === 'native-host'
+              ? `Diktiergerät verbunden (via Injector)${hidDeviceName ? `: ${hidDeviceName}` : ''}`
               : 'Diktiergerät nicht verbunden. Klicken zum Verbinden.'}
           >
             <span
               className={`h-2 w-2 rounded-full ${
-                hidConnected ? 'bg-emerald-500' : 'bg-amber-500'
+                hidConnected || hidSource === 'native-host' ? 'bg-emerald-500' : 'bg-amber-500'
               }`}
               aria-hidden="true"
             />
             <span>🎙️</span>
             <span className="hidden sm:inline">
-              {hidConnecting ? 'Verbinde...' : hidConnected ? 'Verbunden' : 'Nicht verbunden'}
+              {hidConnecting ? 'Verbinde...' : (hidConnected || hidSource === 'native-host') ? 'Verbunden' : 'Nicht verbunden'}
             </span>
           </button>
         )}

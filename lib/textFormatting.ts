@@ -577,6 +577,11 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   { pattern: /[.,;\s]*\bneue\s+zeile\b[.,;\s]*/gi, replacement: '\n' },
   { pattern: /[.,;\s]*\bnächste\s+zeile\b[.,;\s]*/gi, replacement: '\n' },
   
+  // Bullet points (Aufzählungsanstriche)
+  // "nächster Anstrich" must come before "Anstrich" (multi-word first)
+  { pattern: /[.,;\s]*\bnächster\s+anstrich\b[.,;\s]*/gi, replacement: '\n- ' },
+  { pattern: /[.,;\s]*\banstrich\b[.,;\s]*/gi, replacement: '\n- ' },
+  
   // NOTE: "Punkt eins", "Punkt zwei", etc. are handled in handleEnumerationCommands()
   // which is called BEFORE these replacements
   
@@ -681,6 +686,7 @@ export interface ControlWordResult {
   stats: {
     paragraphs: number;  // "neuer Absatz", "Absatz"
     lineBreaks: number;  // "neue Zeile"
+    bulletPoints: number; // "Anstrich", "nächster Anstrich"
     punctuation: number; // "Punkt", "Komma", "Doppelpunkt" etc.
     brackets: number;    // "Klammer auf/zu"
     deletions: number;   // "lösche das letzte Wort" etc.
@@ -713,7 +719,7 @@ export function applyOnlineDictationControlWords(text: string): string {
 
   const liveOnlyReplacements: Array<{ pattern: RegExp; replacement: string }> = [
     { pattern: /\b(komma|beistrich)\b/gi, replacement: ',' },
-    { pattern: /\b(bindestrich|anstrich)\b/gi, replacement: '-' },
+    { pattern: /\bbindestrich\b/gi, replacement: '-' },
     { pattern: /\bpunkt\b/gi, replacement: '.' },
   ];
 
@@ -763,6 +769,7 @@ type OnlineCommandType =
   | 'deleteParagraph'
   | 'lineBreak'
   | 'paragraphBreak'
+  | 'bulletPoint'
   | 'comma'
   | 'period'
   | 'dash';
@@ -783,12 +790,14 @@ const ONLINE_COMMAND_PATTERNS: Array<{ type: OnlineCommandType; pattern: RegExp 
   { type: 'deleteSentence', pattern: /\bletzten\s+satz\s+löschen\b[.,;:!?]*/i },
   { type: 'deleteParagraph', pattern: /\blösche\s+(?:den\s+)?letzten\s+absatz\b[.,;:!?]*/i },
   { type: 'deleteParagraph', pattern: /\bletzten\s+absatz\s+löschen\b[.,;:!?]*/i },
-  { type: 'paragraphBreak', pattern: /\b(?:neuer|nächster)\s+absatz\b[.,;:!?]*/i },
+  { type: 'paragraphBreak', pattern: /\b(?:neuer|nächster\s+)?absatz\b[.,;:!?]*/i },
   { type: 'lineBreak', pattern: /\b(?:neue|nächste)\s+zeile\b[.,;:!?]*/i },
   { type: 'lineBreak', pattern: /\bzeilenumbruch\b[.,;:!?]*/i },
+  { type: 'bulletPoint', pattern: /\bnächster\s+anstrich\b[.,;:!?]*/i },
+  { type: 'bulletPoint', pattern: /\banstrich\b[.,;:!?]*/i },
   { type: 'comma', pattern: /\b(?:komma|beistrich)\b[.,;:!?]*/i },
   { type: 'period', pattern: /\bpunkt\b[.,;:!?]*/i },
-  { type: 'dash', pattern: /\b(?:bindestrich|anstrich)\b[.,;:!?]*/i },
+  { type: 'dash', pattern: /\bbindestrich\b[.,;:!?]*/i },
 ];
 
 function findNextOnlineCommand(text: string, startIndex: number): OnlineCommandMatch | null {
@@ -839,6 +848,8 @@ function applyOnlineCommand(currentText: string, type: OnlineCommandType): strin
       return `${currentText.replace(/[^\S\n]*$/, '')}\n`;
     case 'paragraphBreak':
       return `${currentText.replace(/[^\S\n]*$/, '')}\n\n`;
+    case 'bulletPoint':
+      return `${currentText.replace(/[^\S\n]*$/, '')}\n- `;
     case 'comma':
       return cleanupFormatting(`${currentText.replace(/[^\S\n]*$/, '')},`);
     case 'period':
@@ -978,10 +989,10 @@ export function combineFormattedText(existingText: string, incomingText: string)
  * Use this version when you need to log/display the results.
  */
 export function applyFormattingControlWordsWithStats(text: string): ControlWordResult {
-  if (!text) return { text, stats: { paragraphs: 0, lineBreaks: 0, punctuation: 0, brackets: 0, deletions: 0, enumerations: 0, total: 0 } };
+  if (!text) return { text, stats: { paragraphs: 0, lineBreaks: 0, bulletPoints: 0, punctuation: 0, brackets: 0, deletions: 0, enumerations: 0, total: 0 } };
   
   let result = text;
-  const stats = { paragraphs: 0, lineBreaks: 0, punctuation: 0, brackets: 0, deletions: 0, enumerations: 0, total: 0 };
+  const stats = { paragraphs: 0, lineBreaks: 0, bulletPoints: 0, punctuation: 0, brackets: 0, deletions: 0, enumerations: 0, total: 0 };
   
   // Step 0: Handle enumeration commands first (before other replacements)
   const enumResult = handleEnumerationCommands(result);
@@ -998,7 +1009,9 @@ export function applyFormattingControlWordsWithStats(text: string): ControlWordR
       
       // Categorize the match
       const patternStr = pattern.source.toLowerCase();
-      if (patternStr.includes('absatz') || patternStr.includes('zeile')) {
+      if (patternStr.includes('anstrich')) {
+        stats.bulletPoints += count;
+      } else if (patternStr.includes('absatz') || patternStr.includes('zeile')) {
         if (patternStr.includes('zeile')) {
           stats.lineBreaks += count;
         } else {
@@ -1034,6 +1047,7 @@ export function applyFormattingControlWordsWithStats(text: string): ControlWordR
     const details: string[] = [];
     if (stats.paragraphs > 0) details.push(`${stats.paragraphs}x Absatz`);
     if (stats.lineBreaks > 0) details.push(`${stats.lineBreaks}x Zeile`);
+    if (stats.bulletPoints > 0) details.push(`${stats.bulletPoints}x Anstrich`);
     if (stats.punctuation > 0) details.push(`${stats.punctuation}x Satzzeichen`);
     if (stats.brackets > 0) details.push(`${stats.brackets}x Klammer`);
     if (stats.deletions > 0) details.push(`${stats.deletions}x Löschung`);

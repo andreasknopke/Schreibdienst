@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAuth } from './AuthProvider';
 import { areWordsPhoneticallySimilar } from '../lib/phoneticMatch';
 
@@ -10,6 +10,9 @@ interface StandardDictEntry {
 }
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
+
+/** Maximale Anzahl gerenderter Einträge ohne aktiven Filter */
+const MAX_VISIBLE_ENTRIES_WITHOUT_FILTER = 200;
 
 function notifyStandardDictionaryChanged() {
   window.dispatchEvent(new CustomEvent(DICTIONARY_CHANGED_EVENT, {
@@ -25,8 +28,17 @@ export default function StandardDictionaryManager() {
   const [success, setSuccess] = useState('');
   const [warning, setWarning] = useState('');
   const [needsPhoneticConfirmation, setNeedsPhoneticConfirmation] = useState(false);
+  const [rawFilter, setRawFilter] = useState('');
   const [filter, setFilter] = useState('');
-  
+
+  // Debounced filter to avoid re-filtering 10k+ entries on every keystroke
+  const filterTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleFilterChange = useCallback((value: string) => {
+    setRawFilter(value);
+    if (filterTimer.current) clearTimeout(filterTimer.current);
+    filterTimer.current = setTimeout(() => setFilter(value), 250);
+  }, []);
+
   // Form state
   const [wrong, setWrong] = useState('');
   const [correct, setCorrect] = useState('');
@@ -38,7 +50,7 @@ export default function StandardDictionaryManager() {
   const [importing, setImporting] = useState(false);
   const [importingMedicalTerms, setImportingMedicalTerms] = useState(false);
 
-  const fetchEntries = async () => {
+  const fetchEntries = useCallback(async () => {
     try {
       const response = await fetch('/api/standard-dictionary', {
         headers: { 'Authorization': getAuthHeader(), ...getDbTokenHeader() }
@@ -52,9 +64,9 @@ export default function StandardDictionaryManager() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [getAuthHeader, getDbTokenHeader]);
 
-  useEffect(() => { fetchEntries(); }, []);
+  useEffect(() => { fetchEntries(); }, [fetchEntries]);
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,6 +86,9 @@ export default function StandardDictionaryManager() {
       return;
     }
 
+    const trimmedWrong = wrong.trim();
+    const trimmedCorrect = correct.trim();
+
     setAdding(true);
     setNeedsPhoneticConfirmation(false);
 
@@ -81,16 +96,20 @@ export default function StandardDictionaryManager() {
       const response = await fetch('/api/standard-dictionary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': getAuthHeader(), ...getDbTokenHeader() },
-        body: JSON.stringify({ wrong: wrong.trim(), correct: correct.trim() })
+        body: JSON.stringify({ wrong: trimmedWrong, correct: trimmedCorrect })
       });
       const data = await response.json();
       if (response.ok && data.success) {
         const autoMappingHint = data.createdSelfMapping ? ' + phonetischer Self-Mapping-Eintrag' : '';
-        setSuccess(`"${wrong}" → "${correct}" hinzugefügt${autoMappingHint}`);
+        setSuccess(`"${trimmedWrong}" → "${trimmedCorrect}" hinzugefügt${autoMappingHint}`);
         setWarning(data.warning || '');
         setWrong('');
         setCorrect('');
-        await fetchEntries();
+        // Lokal einfügen statt 10k+ Einträge neu zu laden
+        setEntries(prev => {
+          const filtered = prev.filter(e => e.wrong !== trimmedWrong);
+          return [...filtered, { wrong: trimmedWrong, correct: trimmedCorrect, category: '' }];
+        });
         notifyStandardDictionaryChanged();
       } else {
         setError(data.error || 'Fehler');
@@ -157,6 +176,7 @@ export default function StandardDictionaryManager() {
     const lines = bulkText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     let added = 0;
     let failed = 0;
+    const importedEntries: StandardDictEntry[] = [];
 
     for (const line of lines) {
       try {
@@ -167,6 +187,7 @@ export default function StandardDictionaryManager() {
         });
         if (response.ok) {
           added++;
+          importedEntries.push({ wrong: line, correct: line, category: '' });
         } else {
           failed++;
         }
@@ -179,7 +200,14 @@ export default function StandardDictionaryManager() {
     setBulkText('');
     setShowBulkImport(false);
     setImporting(false);
-    await fetchEntries();
+    // Lokal einfügen statt 10k+ Einträge neu zu laden
+    if (importedEntries.length > 0) {
+      setEntries(prev => {
+        const existingWrongs = new Set(prev.map(e => e.wrong));
+        const newEntries = importedEntries.filter(e => !existingWrongs.has(e.wrong));
+        return [...prev, ...newEntries];
+      });
+    }
     notifyStandardDictionaryChanged();
   };
 
@@ -203,6 +231,7 @@ export default function StandardDictionaryManager() {
 
       if (response.ok && data.success) {
         setSuccess(`${data.imported} MedicalTerms importiert${data.skipped > 0 ? `, ${data.skipped} bereits vorhanden` : ''}`);
+        // Große Massenimporte: komplett neu laden
         await fetchEntries();
         notifyStandardDictionaryChanged();
       } else {
@@ -215,17 +244,34 @@ export default function StandardDictionaryManager() {
     }
   };
 
-  // Gefilterte Einträge
-  const filtered = filter
-    ? entries.filter(e => 
-        e.wrong.toLowerCase().includes(filter.toLowerCase()) || 
-        e.correct.toLowerCase().includes(filter.toLowerCase())
-      )
-    : entries;
+  // Memoized filtered lists – vermeidet O(n) Filter-Durchläufe bei jedem Render
+  const { filtered, selfMappings, corrections, totalCount } = useMemo(() => {
+    const all = filter
+      ? entries.filter(e => 
+          e.wrong.toLowerCase().includes(filter.toLowerCase()) || 
+          e.correct.toLowerCase().includes(filter.toLowerCase())
+        )
+      : entries;
 
-  // Gruppierung: Einträge mit wrong===correct (Self-Mappings für Phonetik) vs. echte Korrekturen
-  const selfMappings = filtered.filter(e => e.wrong === e.correct);
-  const corrections = filtered.filter(e => e.wrong !== e.correct);
+    const self = all.filter(e => e.wrong === e.correct);
+    const corr = all.filter(e => e.wrong !== e.correct);
+
+    // Ohne Filter nur die ersten N Einträge rendern
+    const hasActiveFilter = filter.length > 0;
+    const visibleCorrections = hasActiveFilter ? corr : corr.slice(0, MAX_VISIBLE_ENTRIES_WITHOUT_FILTER);
+    const visibleSelf = hasActiveFilter ? self : self.slice(0, MAX_VISIBLE_ENTRIES_WITHOUT_FILTER);
+    const capped = [...visibleCorrections, ...visibleSelf];
+
+    return {
+      filtered: capped,
+      selfMappings: visibleSelf,
+      corrections: visibleCorrections,
+      totalCount: all.length,
+    };
+  }, [entries, filter]);
+
+  const hasActiveFilter = filter.length > 0;
+  const isCapped = !hasActiveFilter && entries.length > MAX_VISIBLE_ENTRIES_WITHOUT_FILTER;
 
   return (
     <div className="space-y-4">
@@ -340,10 +386,16 @@ export default function StandardDictionaryManager() {
         <input
           type="text"
           className="input text-sm w-full"
-          placeholder="Einträge filtern..."
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Einträge filtern (benötigt bei >200 Einträgen)..."
+          value={rawFilter}
+          onChange={(e) => handleFilterChange(e.target.value)}
         />
+        {isCapped && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+            Zeige die ersten {MAX_VISIBLE_ENTRIES_WITHOUT_FILTER} von {entries.length.toLocaleString()} Einträgen.
+            Nutze die Suche, um den gewünschten Eintrag zu finden.
+          </p>
+        )}
       </div>
 
       {/* Einträge-Liste */}
@@ -351,7 +403,7 @@ export default function StandardDictionaryManager() {
         <h4 className="font-medium text-sm flex items-center justify-between">
           <span>Standard-Wörterbuch</span>
           <span className="text-xs text-gray-500 font-normal">
-            {filtered.length} von {entries.length} Einträgen
+            {hasActiveFilter ? `${totalCount} von ${entries.length.toLocaleString()} Einträgen` : `${entries.length.toLocaleString()} Einträge`}
           </span>
         </h4>
 

@@ -718,15 +718,15 @@ void setRecordingState(bool active, const wchar_t* source, bool notify) {
 
 bool isGrundigRecordPayload(const uint8_t* data, size_t size) {
     // Grundig SonicMic Record-Payload (Raw Input, inkl. Report-ID):
-    //   Record gedrueckt:  01 01 00 00 00 00 00 40 03 00 ...
-    //   Record losgelassen: 01 01 00 00 00 00 00 00 03 00 ...
+    //   Record gedrueckt:  01 01 00 00 00 00 00 40 02 00 ...
+    //   Record losgelassen: 01 01 00 00 00 00 00 00 02 00 ...
     // Byte 0 = Report-ID (0x01)
     // Byte 1 = Header/Berichtstyp (0x01)
-    // Byte 6 = 0x40 (gedrueckt) / 0x00 (losgelassen)
+    // Byte 7 = 0x40 (gedrueckt) / 0x00 (losgelassen)
     // Alle anderen Bytes bleiben gleich.
-    if (size < 7) return false;
+    if (size < 8) return false;
     if (data[0] != 0x01) return false; // Report-ID
-    return data[6] == 0x40;           // Record-Status
+    return data[7] == 0x40;           // Record-Status (korrigiert von data[6])
 }
 
 bool isPhilipsSpeechMikeRecordPayload(const uint8_t* data, size_t size) {

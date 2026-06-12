@@ -191,16 +191,15 @@ function normalizeGrundigReportPayload(reportId: number, bytes: number[]): numbe
 }
 
 function matchesGrundigRecordPayload(payload: number[]): boolean {
+  // Grundig SonicMic über WebHID (nach normalizeGrundigReportPayload):
+  //   Record gedrueckt:  [01 00 00 00 00 00 00 40 03 00 ...]
+  //   Record losgelassen: [01 00 00 00 00 00 00 00 03 00 ...]
+  // Byte 0 = Report-ID (0x01) nach Normalisierung
+  // Byte 6 = 0x40 (gedrueckt) / 0x00 (losgelassen)
   return (
-    payload.length >= 8 &&
+    payload.length >= 7 &&
     payload[0] === 0x01 &&
-    payload[1] === 0x00 &&
-    payload[2] === 0x00 &&
-    payload[3] === 0x00 &&
-    payload[4] === 0x00 &&
-    payload[5] === 0x00 &&
-    payload[6] === 0x40 &&
-    payload[7] === 0x02
+    payload[6] === 0x40
   );
 }
 

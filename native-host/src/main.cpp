@@ -717,11 +717,16 @@ void setRecordingState(bool active, const wchar_t* source, bool notify) {
 // und Philips SpeechMike III ohne Chrome-Sandbox.
 
 bool isGrundigRecordPayload(const uint8_t* data, size_t size) {
-    // Grundig SonicMic Record-Payload: 01 00 00 00 00 00 40 02
-    if (size < 8) return false;
-    return data[0] == 0x01 && data[1] == 0x00 && data[2] == 0x00
-        && data[3] == 0x00 && data[4] == 0x00 && data[5] == 0x00
-        && data[6] == 0x40 && data[7] == 0x02;
+    // Grundig SonicMic Record-Payload (Raw Input, inkl. Report-ID):
+    //   Record gedrueckt:  01 01 00 00 00 00 00 40 03 00 ...
+    //   Record losgelassen: 01 01 00 00 00 00 00 00 03 00 ...
+    // Byte 0 = Report-ID (0x01)
+    // Byte 1 = Header/Berichtstyp (0x01)
+    // Byte 6 = 0x40 (gedrueckt) / 0x00 (losgelassen)
+    // Alle anderen Bytes bleiben gleich.
+    if (size < 7) return false;
+    if (data[0] != 0x01) return false; // Report-ID
+    return data[6] == 0x40;           // Record-Status
 }
 
 bool isPhilipsSpeechMikeRecordPayload(const uint8_t* data, size_t size) {

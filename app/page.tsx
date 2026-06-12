@@ -989,6 +989,10 @@ export default function HomePage() {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [templateMode, setTemplateMode] = useState(false);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [showNewTemplateDialog, setShowNewTemplateDialog] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [newTemplateContent, setNewTemplateContent] = useState('');
+  const [creatingTemplate, setCreatingTemplate] = useState(false);
   const [pendingTemplateInsertChoice, setPendingTemplateInsertChoice] = useState<PendingTemplateInsertChoice | null>(null);
   const [activeTemplateContext, setActiveTemplateContext] = useState<Template | null>(null);
   const [autoIntegrateTemplateAudio, setAutoIntegrateTemplateAudio] = useState(false);
@@ -1141,6 +1145,62 @@ export default function HomePage() {
 
     insertTemplateIntoField(template, 'replace');
   }, [getTextForBefundField, insertTemplateIntoField]);
+
+  // Templates laden
+  const fetchTemplates = useCallback(async () => {
+    if (!username) return;
+    setLoadingTemplates(true);
+    try {
+      const response = await fetch('/api/templates', {
+        headers: { 
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        }
+      });
+      const data = await response.json();
+      if (data.templates) {
+        setTemplates(data.templates);
+      }
+    } catch (error) {
+      console.error('[Templates] Load error:', error);
+    } finally {
+      setLoadingTemplates(false);
+    }
+  }, [username, getAuthHeader, getDbTokenHeader]);
+
+  const handleCreateNewTemplate = useCallback(async () => {
+    if (!newTemplateName.trim() || !newTemplateContent.trim()) return;
+    setCreatingTemplate(true);
+    try {
+      const field = mode === 'befund' ? activeField : 'befund';
+      const response = await fetch('/api/templates', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader(),
+        },
+        body: JSON.stringify({
+          name: newTemplateName.trim(),
+          content: newTemplateContent.trim(),
+          field,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        await fetchTemplates();
+        setShowNewTemplateDialog(false);
+        setNewTemplateName('');
+        setNewTemplateContent('');
+      } else {
+        setError(data.error || 'Fehler beim Anlegen des Bausteins');
+      }
+    } catch {
+      setError('Fehler beim Anlegen des Bausteins');
+    } finally {
+      setCreatingTemplate(false);
+    }
+  }, [newTemplateName, newTemplateContent, mode, activeField, getAuthHeader, getDbTokenHeader, fetchTemplates]);
 
   // Wörterbuch-Einträge für Echtzeit-Korrektur und Initial Prompt
   interface DictionaryEntry {
@@ -1415,28 +1475,6 @@ export default function HomePage() {
     lastTranscriptRef.current = sessionTranscript;
     queueLiveInject(preparedDelta);
   }, [prepareLiveInjectDelta, queueLiveInject]);
-
-  // Templates laden
-  const fetchTemplates = useCallback(async () => {
-    if (!username) return;
-    setLoadingTemplates(true);
-    try {
-      const response = await fetch('/api/templates', {
-        headers: { 
-          'Authorization': getAuthHeader(),
-          ...getDbTokenHeader()
-        }
-      });
-      const data = await response.json();
-      if (data.templates) {
-        setTemplates(data.templates);
-      }
-    } catch (error) {
-      console.error('[Templates] Load error:', error);
-    } finally {
-      setLoadingTemplates(false);
-    }
-  }, [username, getAuthHeader, getDbTokenHeader]);
 
   // Mode vom defaultMode des Benutzers setzen
   useEffect(() => {
@@ -4228,6 +4266,63 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      {/* Neuen Baustein anlegen Dialog */}
+      {showNewTemplateDialog && (
+        <div className="border border-orange-200 dark:border-orange-800 rounded-lg p-4 bg-orange-50 dark:bg-orange-900/30">
+          <h4 className="font-semibold text-orange-900 dark:text-orange-100 mb-3 flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="12" y1="18" x2="12" y2="12"/>
+              <line x1="9" y1="15" x2="15" y2="15"/>
+            </svg>
+            Neuen Textbaustein anlegen
+          </h4>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
+              <input
+                type="text"
+                className="w-full text-sm px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-orange-400 focus:ring-1 focus:ring-orange-300 focus:outline-none"
+                placeholder="z. B. MRT Schädel"
+                value={newTemplateName}
+                onChange={(e) => setNewTemplateName(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Inhalt</label>
+              <textarea
+                className="w-full text-sm px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-orange-400 focus:ring-1 focus:ring-orange-300 focus:outline-none"
+                placeholder="Textbaustein-Inhalt..."
+                rows={4}
+                value={newTemplateContent}
+                onChange={(e) => setNewTemplateContent(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                className="btn btn-primary text-sm"
+                onClick={handleCreateNewTemplate}
+                disabled={creatingTemplate || !newTemplateName.trim() || !newTemplateContent.trim()}
+              >
+                {creatingTemplate ? <Spinner size={14} /> : 'Baustein anlegen'}
+              </button>
+              <button
+                className="btn btn-secondary text-sm"
+                onClick={() => {
+                  setShowNewTemplateDialog(false);
+                  setNewTemplateName('');
+                  setNewTemplateContent('');
+                }}
+              >
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -4320,35 +4415,16 @@ export default function HomePage() {
   return (
     <div className="space-y-3 min-h-[calc(100vh-120px)]" onContextMenu={handleContextMenu}>
       {/* Kompakte Steuerleiste */}
-      <div className="card">
-        <div className="card-body py-3 space-y-3">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-3 flex-wrap">
-              {RecordButton}
-              {/* Raumgeräusch-Schwelle — nur anzeigen wenn nicht via non-VAD-Provider aufgenommen wird */}
-              {(!recording || !runtimeConfig || runtimeConfig.transcriptionProvider === 'voxtral_local' || runtimeConfig.transcriptionProvider === 'whisperx' || runtimeConfig.transcriptionProvider === 'mistral') && (
-                <div className="flex flex-col items-center gap-0 text-xs border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-gray-500 select-none" title="Je höher, desto lauter muss Sprache sein um erkannt zu werden">🎚️</span>
-                    <input
-                      type="range"
-                      min="0.30"
-                      max="0.75"
-                      step="0.01"
-                      value={roomNoiseThreshold}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        setRoomNoiseThreshold(val);
-                        try { localStorage.setItem('schreibdienst:vadThreshold', String(val)); } catch {}
-                      }}
-                      className="w-16 h-1 accent-blue-600 cursor-pointer"
-                      title={`VAD-Empfindlichkeit: ${roomNoiseThreshold.toFixed(2)}`}
-                    />
-                    <span className="text-gray-400 w-8 tabular-nums">{roomNoiseThreshold.toFixed(2)}</span>
-                  </div>
-                  <span className="text-[10px] text-gray-400 leading-none">Raumlautstärke</span>
-                </div>
-              )}
+      <div className="card relative">
+        <span className="absolute top-1 right-2 text-[10px] text-gray-300 dark:text-gray-600 select-none">Schreibdienst Dashboard</span>
+        <div className="card-body py-3 space-y-2">
+          {/* Erste Zeile: Record+Bereit+Live-Ü | Medizinische Fachwörter/Alltagssprache | Undo Redo New */}
+          <div className="flex items-stretch gap-3">
+            {/* Links: Record + Bereit + Live-Übertragung */}
+            <div className="flex-1 flex items-center justify-start gap-2">
+              <div className="flex flex-col items-center gap-1">
+                {RecordButton}
+              </div>
               <button
                 className={`btn h-9 w-9 p-0 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
                 onClick={() => {
@@ -4370,31 +4446,37 @@ export default function HomePage() {
                   <path d="M21 17H3" />
                 </svg>
               </button>
-              <div className="flex flex-col gap-1 items-center justify-center">
-                <button
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${
-                    dictionarySet === 'medical'
-                      ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
-                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
+            </div>
+
+            {/* Mitte: Medizinische Fachwörter / Alltagssprache */}
+            <div className="flex-1 flex items-center justify-center">
+              <button
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                  dictionarySet === 'medical'
+                    ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+                onClick={toggleDictionarySet}
+                title={
+                  dictionarySet === 'medical'
+                    ? 'Medizinische Fachwörter: alle phonetischen Wörterbücher (Standard, Abteilung, persönlich) sind aktiv. Klicken zum Umschalten auf Alltagssprache.'
+                    : 'Alltagssprache: alle Wörterbücher sind aus. Klicken zum Umschalten auf Medizinische Fachwörter.'
+                }
+                aria-pressed={dictionarySet === 'medical'}
+                aria-label={dictionarySet === 'medical' ? 'Wörterbuch-Modus: Medizinische Fachwörter (an)' : 'Wörterbuch-Modus: Alltagssprache (aus)'}
+              >
+                <span
+                  className={`inline-block w-2 h-2 rounded-full ${
+                    dictionarySet === 'medical' ? 'bg-white' : 'bg-gray-400'
                   }`}
-                  onClick={toggleDictionarySet}
-                  title={
-                    dictionarySet === 'medical'
-                      ? 'Medical-Modus: alle phonetischen Wörterbücher (Standard, Abteilung, persönlich) sind aktiv. Klicken zum Umschalten auf Alltag.'
-                      : 'Alltag-Modus: alle Wörterbücher sind aus. Klicken zum Umschalten auf Medical.'
-                  }
-                  aria-pressed={dictionarySet === 'medical'}
-                  aria-label={dictionarySet === 'medical' ? 'Wörterbuch-Modus: Medical (an)' : 'Wörterbuch-Modus: Alltag (aus)'}
-                >
-                  <span
-                    className={`inline-block w-2 h-2 rounded-full ${
-                      dictionarySet === 'medical' ? 'bg-white' : 'bg-gray-400'
-                    }`}
-                    aria-hidden="true"
-                  />
-                  {dictionarySet === 'medical' ? 'Medical' : 'Alltag'}
-                </button>
-              </div>
+                  aria-hidden="true"
+                />
+                {dictionarySet === 'medical' ? 'Medizinische Fachwörter' : 'Alltagssprache'}
+              </button>
+            </div>
+
+            {/* Rechts: Undo, Redo, New */}
+            <div className="flex-1 flex items-center justify-end">
               <div className="flex items-center gap-2">
                 <button
                   className="btn btn-outline h-9 w-9 p-0"
@@ -4433,7 +4515,39 @@ export default function HomePage() {
                 </button>
               </div>
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
+          </div>
+
+          {/* Zweite Zeile: Raumlautstärke, Korrigieren, Bausteine — links, mitte, rechts */}
+          <div className="flex items-stretch gap-3">
+            {/* Links: Raumlautstärke */}
+            <div className="flex-1 flex items-center justify-start">
+              {(!recording || !runtimeConfig || runtimeConfig.transcriptionProvider === 'voxtral_local' || runtimeConfig.transcriptionProvider === 'whisperx' || runtimeConfig.transcriptionProvider === 'mistral') && (
+                <div className="flex flex-col items-center gap-0 text-xs border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-gray-500 select-none" title="Je höher, desto lauter muss Sprache sein um erkannt zu werden">🎚️</span>
+                    <input
+                      type="range"
+                      min="0.30"
+                      max="0.75"
+                      step="0.01"
+                      value={roomNoiseThreshold}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setRoomNoiseThreshold(val);
+                        try { localStorage.setItem('schreibdienst:vadThreshold', String(val)); } catch {}
+                      }}
+                      className="w-16 h-1 accent-blue-600 cursor-pointer"
+                      title={`VAD-Empfindlichkeit: ${roomNoiseThreshold.toFixed(2)}`}
+                    />
+                    <span className="text-gray-400 w-8 tabular-nums">{roomNoiseThreshold.toFixed(2)}</span>
+                  </div>
+                  <span className="text-[10px] text-gray-400 leading-none">Raumlautstärke</span>
+                </div>
+              )}
+            </div>
+
+            {/* Mitte: Korrigieren + Revert/Diff/Neu korrigieren */}
+            <div className="flex-1 flex items-center justify-center gap-2 flex-wrap">
               {canRevert && preCorrectionState && (
                 <>
                   <button
@@ -4487,47 +4601,20 @@ export default function HomePage() {
                 {correcting ? <Spinner size={14} /> : '🤖 Korrigieren'}
               </button>
             </div>
-          </div>
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            {liveInjectEnabled ? (
-              <div className="flex items-center gap-2 flex-wrap">
-                {liveInjectStatus ? (
-                  <div className="text-[11px] text-gray-500 dark:text-gray-400" title={liveInjectStatus}>
-                    {liveInjectStatus}
-                  </div>
-                ) : (
-                  <div />
-                )}
-                <div className="flex items-center gap-1">
-                  <input
-                    type="text"
-                    className="text-[11px] px-2 py-0.5 w-36 border border-gray-200 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 placeholder-gray-400 dark:placeholder-gray-500 focus:border-purple-400 focus:ring-1 focus:ring-purple-300 dark:focus:border-purple-500 dark:focus:ring-purple-700 focus:outline-none"
-                    placeholder="Ziel-Fenster-Titel…"
-                    value={targetWindowPattern}
-                    onChange={(e) => setTargetWindowPattern(e.target.value)}
-                    title="Teil des Fenstertitels der Ziel-App (z. B. 'Radiologie'). Der Injector findet das Fenster auch nach Fokusverlust wieder."
-                  />
-                  {targetWindowPattern && (
-                    <button
-                      className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 px-1"
-                      onClick={() => setTargetWindowPattern('')}
-                      title="Fenster-Suche zurücksetzen"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div />
-            )}
-            {availableTemplates.length > 0 && (
+
+            {/* Rechts: Bausteine — breit genug zum Lesen */}
+            <div className="flex-1 flex items-center justify-end">
               <div className="flex items-center gap-1">
                 <select
-                  className={`select text-sm py-1.5 max-w-[10rem] truncate ${templateMode ? 'border-orange-400 ring-1 ring-orange-300' : ''}`}
+                  className={`select text-sm py-1.5 w-44 ${templateMode ? 'border-orange-400 ring-1 ring-orange-300' : ''}`}
                   value={selectedTemplate?.id || ''}
                   onChange={(e) => {
-                    const id = parseInt(e.target.value);
+                    const val = e.target.value;
+                    if (val === '__new__') {
+                      setShowNewTemplateDialog(true);
+                      return;
+                    }
+                    const id = parseInt(val);
                     const template = availableTemplates.find(t => t.id === id);
                     handleTemplateSelection(template || null);
                   }}
@@ -4536,7 +4623,8 @@ export default function HomePage() {
                     : 'Textbaustein für den Arztbrief auswählen - diktieren Sie nur die Änderungen'}
                   disabled={loadingTemplates}
                 >
-                  <option value="">{loadingTemplates ? 'Lade Bausteine...' : '📝 Baustein...'}</option>
+                  <option value="">{loadingTemplates ? 'Lade Bausteine...' : '📝 Bausteine'}</option>
+                  <option value="__new__" className="border-t border-gray-300 dark:border-gray-600 font-medium text-blue-600 dark:text-blue-400">➕ Neuen Baustein anlegen</option>
                   {availableTemplates.map(t => (
                     <option key={t.id} value={t.id}>
                       {t.name.length > 20 ? t.name.substring(0, 20) + '…' : t.name}
@@ -4556,8 +4644,40 @@ export default function HomePage() {
                   </button>
                 )}
               </div>
-            )}
+            </div>
           </div>
+
+          {/* Live-Inject Ziel-Fenster (nur sichtbar wenn aktiv) */}
+          {liveInjectEnabled && (
+            <div className="flex items-center gap-2 flex-wrap">
+              {liveInjectStatus ? (
+                <div className="text-[11px] text-gray-500 dark:text-gray-400" title={liveInjectStatus}>
+                  {liveInjectStatus}
+                </div>
+              ) : (
+                <div />
+              )}
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  className="text-[11px] px-2 py-0.5 w-36 border border-gray-200 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 placeholder-gray-400 dark:placeholder-gray-500 focus:border-purple-400 focus:ring-1 focus:ring-purple-300 dark:focus:border-purple-500 dark:focus:ring-purple-700 focus:outline-none"
+                  placeholder="Ziel-Fenster-Titel…"
+                  value={targetWindowPattern}
+                  onChange={(e) => setTargetWindowPattern(e.target.value)}
+                  title="Teil des Fenstertitels der Ziel-App (z. B. 'Radiologie'). Der Injector findet das Fenster auch nach Fokusverlust wieder."
+                />
+                {targetWindowPattern && (
+                  <button
+                    className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 px-1"
+                    onClick={() => setTargetWindowPattern('')}
+                    title="Fenster-Suche zurücksetzen"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

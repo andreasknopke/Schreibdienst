@@ -88,7 +88,7 @@ export default function ManualCorrectionSuggestion({
   return (
     <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm dark:border-amber-800 dark:bg-amber-950/30">
       <div className="flex items-start justify-between gap-3">
-        <div className="space-y-2">
+        <div className="flex-1 space-y-2">
           <div className="flex flex-wrap items-center gap-2 text-amber-900 dark:text-amber-100">
             <span className="rounded bg-white/70 px-2 py-1 line-through dark:bg-gray-900/40">{originalWord}</span>
             <span className="text-amber-700 dark:text-amber-300">→</span>
@@ -121,6 +121,31 @@ export default function ManualCorrectionSuggestion({
                 />
                 <span>ins Abteilungswörterbuch übernehmen</span>
               </label>
+              {/* Immer sichtbare Beispiele für gute und schlechte Wörterbuch-Einträge */}
+              <div className="flex gap-2 w-full text-[11px]">
+                <div
+                  className="flex-1 rounded border border-green-200 bg-green-50/60 px-2 py-1.5 dark:border-green-800 dark:bg-green-950/20"
+                  title="✅ Guter Eintrag: ‚Herz im Park‘ und ‚Herzinfarkt‘ klingen ähnlich (phonetische Verwechslung). Das Wörterbuch kann diese typische Hörverwechslung zuverlässig korrigieren."
+                >
+                  <span className="font-medium text-green-700 dark:text-green-300">Beispiel: Guter Eintrag</span>
+                  <div className="mt-0.5 text-green-600 dark:text-green-400">
+                    <span className="line-through">Herz im Park</span>
+                    <span className="mx-1">→</span>
+                    <span className="font-medium">Herzinfarkt</span>
+                  </div>
+                </div>
+                <div
+                  className="flex-1 rounded border border-red-200 bg-red-50/60 px-2 py-1.5 dark:border-red-800 dark:bg-red-950/20"
+                  title="❌ Schlechter Eintrag: ‚Hypertonie‘ (Bluthochdruck) und ‚Hypotonie‘ (niedriger Blutdruck) sind bedeutungsverschiedene medizinische Begriffe. Das Wörterbuch würde hier fälschlich korrigieren und einen schweren Dokumentationsfehler verursachen."
+                >
+                  <span className="font-medium text-red-700 dark:text-red-300">Beispiel: Schlechter Eintrag</span>
+                  <div className="mt-0.5 text-red-600 dark:text-red-400">
+                    <span className="line-through">Hypertonie</span>
+                    <span className="mx-1">→</span>
+                    <span className="font-medium">Hypotonie</span>
+                  </div>
+                </div>
+              </div>
             </>
           )}
           {error && (

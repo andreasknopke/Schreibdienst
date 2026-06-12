@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { diffWordsWithSpace } from 'diff';
 import { buildAnchorTimestampTable, type AnchorOriginalWord, type AnchorCorrectedWord } from '../lib/anchorMatching';
+import { areWordsPhoneticallySimilar } from '../lib/phoneticMatch';
 import ManualCorrectionSuggestion from './ManualCorrectionSuggestion';
 
 // Word with timestamp for highlighting
@@ -205,6 +206,11 @@ function extractLastManualWordChange(previousText: string, nextText: string): Ma
 
   if (!lastRemovedWord || !lastAddedWord) return null;
   if (lastRemovedWord.toLowerCase() === lastAddedWord.toLowerCase()) return null;
+
+  // Phonetisches Gate: Nur Vorschläge, wenn die Wörter phonetisch ähnlich sind.
+  // Verhindert sinnfreie Einträge wie das Matching eines gelöschten Wortes
+  // mit dem unveränderten Vorwort.
+  if (!areWordsPhoneticallySimilar(lastRemovedWord, lastAddedWord)) return null;
 
   return {
     originalWord: lastRemovedWord,

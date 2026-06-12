@@ -8,7 +8,7 @@ import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
 import { applyDeleteCommands, applyFormattingControlWords, applyMedicalAbbreviations, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, fixConcatenatedPunkt, preprocessTranscription, type OnlineUtteranceApplicationDebugStep } from '@/lib/textFormatting';
-import { buildPhoneticIndex, applyPhoneticCorrections, applyPhoneticCorrectionsDetailed, type PhoneticReplacementOperation } from '@/lib/phoneticMatch';
+import { buildPhoneticIndex, applyPhoneticCorrections, applyPhoneticCorrectionsDetailed, areWordsPhoneticallySimilar, type PhoneticReplacementOperation } from '@/lib/phoneticMatch';
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
 import CustomActionsManager from '@/components/CustomActionsManager';
@@ -135,6 +135,11 @@ function extractLastManualWordChange(previousText: string, nextText: string): Ma
 
   if (!lastRemovedWord || !lastAddedWord) return null;
   if (lastRemovedWord.toLowerCase() === lastAddedWord.toLowerCase()) return null;
+
+  // Phonetisches Gate: Nur Vorschläge, wenn die Wörter phonetisch ähnlich sind.
+  // Verhindert sinnfreie Einträge wie das Matching eines gelöschten Wortes
+  // mit dem unveränderten Vorwort.
+  if (!areWordsPhoneticallySimilar(lastRemovedWord, lastAddedWord)) return null;
 
   return {
     originalWord: lastRemovedWord,

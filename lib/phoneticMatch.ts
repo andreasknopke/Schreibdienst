@@ -701,6 +701,25 @@ export function getEntryPhoneticWarning(wrong: string, correct: string): string 
 }
 
 /**
+ * Prüft, ob zwei Wörter phonetisch ähnlich genug sind, um einen
+ * Wörterbuch-Vorschlag zu rechtfertigen.
+ *
+ * Verhindert sinnfreie Vorschläge wie das Matching eines gelöschten
+ * Wortes mit dem unveränderten Vorwort, die phonetisch nichts
+ * miteinander zu tun haben.
+ *
+ * Verwendet computeEntryPhoneticSimilarity und vergleicht gegen
+ * den unteren Warn-Schwellwert.
+ *
+ * @returns true, wenn die Wörter phonetisch ähnlich genug sind.
+ */
+export function areWordsPhoneticallySimilar(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const similarity = computeEntryPhoneticSimilarity(a, b);
+  return similarity >= PHONETIC_ENTRY_WARNING_THRESHOLD;
+}
+
+/**
  * Generiert alle phonetischen Code-Variationen mit Levenshtein-Distanz 1.
  * Erlaubt: Ersetzung einer Ziffer, Löschung einer Ziffer, Einfügung einer Ziffer.
  * Nur für Codes ≥ 4 Zeichen (kürzere haben zu viele false positives).

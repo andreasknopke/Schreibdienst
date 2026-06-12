@@ -19,6 +19,8 @@ import WordActionPopup, { type WordCorrectionInfo } from '@/components/WordActio
 import UpdatePanel from '@/components/UpdatePanel';
 import InjectorDownloadDialog from '@/components/InjectorDownloadDialog';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
+import TemplatesManager from '@/components/TemplatesManager';
+import { createPortal } from 'react-dom';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
 import { checkInjectorAvailability, injectToActiveWindow, registerGlobalHotkeys, reportInjectorRecordingState, configureTargetWindow } from '@/lib/injectClient';
@@ -1009,6 +1011,9 @@ export default function HomePage() {
   const [pendingTemplateInsertChoice, setPendingTemplateInsertChoice] = useState<PendingTemplateInsertChoice | null>(null);
   const [activeTemplateContext, setActiveTemplateContext] = useState<Template | null>(null);
   const [autoIntegrateTemplateAudio, setAutoIntegrateTemplateAudio] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  const [showTemplatesManager, setShowTemplatesManager] = useState(false);
   // Refs für den VAD-/Online-Diktatpfad: Die VAD-Callbacks werden beim Start der
   // Aufnahme einmal eingefroren, daher muss der aktuelle Baustein-Zustand über Refs
   // gelesen werden, sonst greift der Auto-Einarbeiten-Modus nicht.
@@ -4624,7 +4629,7 @@ export default function HomePage() {
                   onChange={(e) => {
                     const val = e.target.value;
                     if (val === '__new__') {
-                      setShowNewTemplateDialog(true);
+                      setShowTemplatesManager(true);
                       return;
                     }
                     const id = parseInt(val);
@@ -5400,6 +5405,40 @@ export default function HomePage() {
       {/* Custom Actions Manager Modal */}
       {showCustomActionsManager && (
         <CustomActionsManager onClose={() => setShowCustomActionsManager(false)} />
+      )}
+
+      {/* Templates-Manager Modal */}
+      {showTemplatesManager && mounted && createPortal(
+        <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl max-w-2xl w-full my-8 flex flex-col max-h-[calc(100vh-4rem)]">
+            <div className="flex items-center justify-between p-4 border-b dark:border-gray-700 flex-shrink-0">
+              <h2 className="font-semibold flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                  <polyline points="10 9 9 9 8 9"/>
+                </svg>
+                Meine Textbausteine
+              </h2>
+              <button
+                onClick={() => setShowTemplatesManager(false)}
+                className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                title="Schließen"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6L6 18"/>
+                  <path d="M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              <TemplatesManager />
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* Popup für Doppelklick auf ein Wort */}

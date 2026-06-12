@@ -353,7 +353,8 @@ export default function GroupDictionaryManager() {
       setNeedsPhoneticConfirmation(true);
       setWarning(
         `„${trimmedWrong}“ und „${trimmedCorrect}“ sind phonetisch sehr verschieden. ` +
-        `Dieser Eintrag könnte zu unerwünschten Ersetzungen führen.`
+        `Dieser Eintrag könnte zu unerwünschten Ersetzungen führen.\n` +
+        `✅ Gut: „Schole“ → „Chole“ (klingt ähnlich)  —  ❌ Schlecht: „Patient“ → „Befund“ (klingt verschieden)`
       );
       return;
     }

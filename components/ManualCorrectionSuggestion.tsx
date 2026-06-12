@@ -102,6 +102,9 @@ export default function ManualCorrectionSuggestion({
                   „{originalWord}“ und „{newWord}“ sind phonetisch sehr verschieden.
                   Dieser Eintrag könnte zu unerwünschten Ersetzungen führen.
                 </p>
+                <p className="mt-2 italic opacity-80">
+                  ✅ Gut: „Schole“ → „Chole“ (klingt ähnlich) &nbsp;—&nbsp; ❌ Schlecht: „Patient“ → „Befund“ (klingt verschieden)
+                </p>
               </div>
               <p className="text-amber-800 dark:text-amber-200">Trotzdem ins Wörterbuch übernehmen?</p>
             </div>

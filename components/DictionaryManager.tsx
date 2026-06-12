@@ -69,7 +69,8 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
       setNeedsPhoneticConfirmation(true);
       setWarning(
         `„${wrong}“ und „${correct}“ sind phonetisch sehr verschieden. ` +
-        `Dieser Eintrag könnte zu unerwünschten Ersetzungen führen.`
+        `Dieser Eintrag könnte zu unerwünschten Ersetzungen führen.\n` +
+        `✅ Gut: „Schole“ → „Chole“ (klingt ähnlich)  —  ❌ Schlecht: „Patient“ → „Befund“ (klingt verschieden)`
       );
       return;
     }

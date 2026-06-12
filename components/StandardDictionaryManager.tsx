@@ -68,7 +68,8 @@ export default function StandardDictionaryManager() {
       setNeedsPhoneticConfirmation(true);
       setWarning(
         `„${wrong.trim()}“ und „${correct.trim()}“ sind phonetisch sehr verschieden. ` +
-        `Dieser Eintrag könnte zu unerwünschten Ersetzungen führen.`
+        `Dieser Eintrag könnte zu unerwünschten Ersetzungen führen.\n` +
+        `✅ Gut: „Schole“ → „Chole“ (klingt ähnlich)  —  ❌ Schlecht: „Patient“ → „Befund“ (klingt verschieden)`
       );
       return;
     }

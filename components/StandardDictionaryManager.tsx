@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from './AuthProvider';
+import { areWordsPhoneticallySimilar } from '../lib/phoneticMatch';
 
 interface StandardDictEntry {
   wrong: string;
@@ -23,6 +24,7 @@ export default function StandardDictionaryManager() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [warning, setWarning] = useState('');
+  const [needsPhoneticConfirmation, setNeedsPhoneticConfirmation] = useState(false);
   const [filter, setFilter] = useState('');
   
   // Form state
@@ -59,8 +61,20 @@ export default function StandardDictionaryManager() {
     if (!wrong.trim() || !correct.trim()) return;
     setError('');
     setSuccess('');
-    setWarning('');
+
+    // Phonetische Vorab-Prüfung: Wenn die Wörter zu verschieden sind,
+    // muss der Benutzer explizit bestätigen.
+    if (!needsPhoneticConfirmation && !areWordsPhoneticallySimilar(wrong.trim(), correct.trim())) {
+      setNeedsPhoneticConfirmation(true);
+      setWarning(
+        `„${wrong.trim()}“ und „${correct.trim()}“ sind phonetisch sehr verschieden. ` +
+        `Dieser Eintrag könnte zu unerwünschten Ersetzungen führen.`
+      );
+      return;
+    }
+
     setAdding(true);
+    setNeedsPhoneticConfirmation(false);
 
     try {
       const response = await fetch('/api/standard-dictionary', {
@@ -242,7 +256,7 @@ export default function StandardDictionaryManager() {
               className="input text-sm"
               placeholder="z.B. Spondylolithesis"
               value={wrong}
-              onChange={(e) => setWrong(e.target.value)}
+              onChange={(e) => { setWrong(e.target.value); setNeedsPhoneticConfirmation(false); setWarning(''); }}
               required
             />
           </div>
@@ -253,7 +267,7 @@ export default function StandardDictionaryManager() {
               className="input text-sm"
               placeholder="z.B. Spondylolisthesis"
               value={correct}
-              onChange={(e) => setCorrect(e.target.value)}
+              onChange={(e) => { setCorrect(e.target.value); setNeedsPhoneticConfirmation(false); setWarning(''); }}
               required
             />
           </div>
@@ -287,7 +301,7 @@ export default function StandardDictionaryManager() {
             </button>
           </div>
           <button type="submit" className="btn btn-primary text-sm" disabled={adding}>
-            {adding ? 'Füge hinzu...' : 'Hinzufügen'}
+            {adding ? 'Füge hinzu...' : needsPhoneticConfirmation ? 'Trotzdem speichern' : 'Hinzufügen'}
           </button>
         </div>
       </form>

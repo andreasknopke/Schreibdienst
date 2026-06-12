@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useAuth } from './AuthProvider';
+import { areWordsPhoneticallySimilar } from '../lib/phoneticMatch';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 
@@ -24,9 +25,19 @@ export default function ManualCorrectionSuggestion({
   const [addToGroup, setAddToGroup] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [needsPhoneticConfirmation, setNeedsPhoneticConfirmation] = useState(false);
+
+  const isPhoneticallyWeak = !areWordsPhoneticallySimilar(originalWord, newWord);
 
   const handleConfirm = async () => {
     setError('');
+
+    // Wenn die Wörter phonetisch zu verschieden sind, erst Bestätigung einholen
+    if (isPhoneticallyWeak && !needsPhoneticConfirmation) {
+      setNeedsPhoneticConfirmation(true);
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -83,17 +94,32 @@ export default function ManualCorrectionSuggestion({
             <span className="text-amber-700 dark:text-amber-300">→</span>
             <span className="rounded bg-white px-2 py-1 font-medium dark:bg-gray-900/60">{newWord}</span>
           </div>
-          <p className="text-amber-800 dark:text-amber-200">Gleich ins Wörterbuch übernehmen?</p>
-          <label className="flex items-center gap-2 text-xs text-amber-900 dark:text-amber-100 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={addToGroup}
-              onChange={(event) => setAddToGroup(event.target.checked)}
-              className="h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
-              disabled={isSubmitting}
-            />
-            <span>ins Abteilungswörterbuch übernehmen</span>
-          </label>
+          {needsPhoneticConfirmation && isPhoneticallyWeak ? (
+            <div className="space-y-2">
+              <div className="rounded border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200">
+                <p className="font-medium">⚠️ Phonetische Distanz-Warnung</p>
+                <p className="mt-1">
+                  „{originalWord}“ und „{newWord}“ sind phonetisch sehr verschieden.
+                  Dieser Eintrag könnte zu unerwünschten Ersetzungen führen.
+                </p>
+              </div>
+              <p className="text-amber-800 dark:text-amber-200">Trotzdem ins Wörterbuch übernehmen?</p>
+            </div>
+          ) : (
+            <>
+              <p className="text-amber-800 dark:text-amber-200">Gleich ins Wörterbuch übernehmen?</p>
+              <label className="flex items-center gap-2 text-xs text-amber-900 dark:text-amber-100 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={addToGroup}
+                  onChange={(event) => setAddToGroup(event.target.checked)}
+                  className="h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                  disabled={isSubmitting}
+                />
+                <span>ins Abteilungswörterbuch übernehmen</span>
+              </label>
+            </>
+          )}
           {error && (
             <div className="text-xs text-red-700 dark:text-red-300">{error}</div>
           )}
@@ -101,7 +127,12 @@ export default function ManualCorrectionSuggestion({
         <div className="flex shrink-0 gap-2">
           <button
             type="button"
-            onClick={onCancel}
+            onClick={() => {
+              if (needsPhoneticConfirmation) {
+                setNeedsPhoneticConfirmation(false);
+              }
+              onCancel();
+            }}
             className="rounded px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-white/60 dark:text-gray-300 dark:hover:bg-gray-900/30"
             disabled={isSubmitting}
           >
@@ -113,7 +144,7 @@ export default function ManualCorrectionSuggestion({
             className="rounded bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={isSubmitting}
           >
-            {isSubmitting ? 'Speichert...' : 'Ok'}
+            {isSubmitting ? 'Speichert...' : needsPhoneticConfirmation ? 'Trotzdem speichern' : 'Ok'}
           </button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from './AuthProvider';
+import { areWordsPhoneticallySimilar } from '../lib/phoneticMatch';
 
 interface User {
   username: string;
@@ -79,6 +80,7 @@ export default function GroupDictionaryManager() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [warning, setWarning] = useState('');
+  const [needsPhoneticConfirmation, setNeedsPhoneticConfirmation] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDescription, setNewGroupDescription] = useState('');
   const [wrong, setWrong] = useState('');
@@ -341,7 +343,23 @@ export default function GroupDictionaryManager() {
     if (!selectedGroupId) return;
     setError('');
     setSuccess('');
+
+    const trimmedWrong = wrong.trim();
+    const trimmedCorrect = correct.trim();
+
+    // Phonetische Vorab-Prüfung: Wenn die Wörter zu verschieden sind,
+    // muss der Benutzer explizit bestätigen.
+    if (!needsPhoneticConfirmation && !areWordsPhoneticallySimilar(trimmedWrong, trimmedCorrect)) {
+      setNeedsPhoneticConfirmation(true);
+      setWarning(
+        `„${trimmedWrong}“ und „${trimmedCorrect}“ sind phonetisch sehr verschieden. ` +
+        `Dieser Eintrag könnte zu unerwünschten Ersetzungen führen.`
+      );
+      return;
+    }
+
     setWarning('');
+    setNeedsPhoneticConfirmation(false);
 
     try {
       const trimmedWrong = wrong.trim();
@@ -815,15 +833,15 @@ export default function GroupDictionaryManager() {
                     )}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <input className="input text-sm" value={wrong} onChange={event => setWrong(event.target.value)} placeholder="Falsch erkannt" required />
-                    <input className="input text-sm" value={correct} onChange={event => setCorrect(event.target.value)} placeholder="Korrekt" required />
+                    <input className="input text-sm" value={wrong} onChange={event => { setWrong(event.target.value); setNeedsPhoneticConfirmation(false); setWarning(''); }} placeholder="Falsch erkannt" required />
+                    <input className="input text-sm" value={correct} onChange={event => { setCorrect(event.target.value); setNeedsPhoneticConfirmation(false); setWarning(''); }} placeholder="Korrekt" required />
                   </div>
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div className="flex gap-4 text-xs">
                       <label className="flex items-center gap-2"><input type="checkbox" checked={useInPrompt} onChange={event => setUseInPrompt(event.target.checked)} /> Im Prompt</label>
                       <label className="flex items-center gap-2"><input type="checkbox" checked={matchStem} onChange={event => setMatchStem(event.target.checked)} /> Wortstamm</label>
                     </div>
-                    <button type="submit" className="btn btn-primary text-sm">{editingGroupEntry ? 'Speichern' : 'Hinzufügen'}</button>
+                    <button type="submit" className="btn btn-primary text-sm">{editingGroupEntry ? 'Speichern' : needsPhoneticConfirmation ? 'Trotzdem speichern' : 'Hinzufügen'}</button>
                   </div>
                 </form>
 

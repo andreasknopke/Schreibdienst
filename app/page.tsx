@@ -112,6 +112,12 @@ function fieldToStateKey(field: TextInsertionTarget): TextStateKey {
   return 'transcript';
 }
 
+/** Prüft, ob der Text Online-Steuerbefehle enthält, die einen Löschvorgang auslösen. */
+function hasOnlineCommand(text: string): boolean {
+  if (!text) return false;
+  return /lösche\s+(?:das\s+)?letzte(?:s)?\s+wort|letztes\s+wort\s+löschen|wort\s*streichen|streiche\s+wort|lösche\s+(?:den\s+)?letzten\s+satz|lösche\s+(?:den\s+)?letzten\s+absatz|letzten\s+satz\s+löschen|letzten\s+absatz\s+löschen/i.test(text);
+}
+
 function extractLastManualWordChange(previousText: string, nextText: string): ManualWordChange | null {
   if (!previousText || !nextText || previousText === nextText) return null;
 
@@ -688,6 +694,13 @@ export default function HomePage() {
   }, [beurteilung, methodik, transcript]);
 
   const combineTextForField = useCallback((field: TextInsertionTarget, existing: string, newText: string) => {
+    // Bei Löschbefehlen („lösche letztes Wort“) wird applyOnlineUtteranceToText genutzt,
+    // das den Befehl korrekt auf den vorhandenen Text anwendet anstatt ihn anzuhängen.
+    if (hasOnlineCommand(newText)) {
+      const resultText = applyOnlineUtteranceToText(existing, newText);
+      setStoredSelection(field, { start: resultText.length, end: resultText.length, direction: 'none' });
+      return resultText;
+    }
     const result = insertTextAtSelection(existing, newText, getStoredSelection(field, existing));
     setStoredSelection(field, result.selection);
     return result.text;

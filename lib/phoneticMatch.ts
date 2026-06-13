@@ -1051,6 +1051,11 @@ export function applyPhoneticCorrectionsDetailed(
       const positions = wordIndices.slice(wi, wi + windowSize);
       if (positions.some(p => replaced.has(p))) continue;
 
+      // Tokens mit Ziffern (z. B. Histologie-Codes wie "R004998") sind keine
+      // phonetisch korrigierbaren Wörter und dürfen nicht in ein Wort-Fenster
+      // gezogen werden – sonst entstehen Fusionen wie "Histologie R004998" → "Histologier".
+      if (positions.some(p => /\d/.test(parts[p]))) continue;
+
       // Wörter zusammenfügen (ohne Leerzeichen)
       const words = positions.map(p => parts[p]);
       const normalizedWords = words.map(word => normalizeForComparison(word));
@@ -1112,6 +1117,8 @@ export function applyPhoneticCorrectionsDetailed(
     if (replaced.has(wi)) continue;
     
     const token = parts[wi];
+    // Tokens mit Ziffern (z. B. Codes/IDs wie "R004998") nicht phonetisch korrigieren.
+    if (/\d/.test(token)) continue;
     const match = findPhoneticMatch(token, index);
     if (match && match.confidence >= minConfidence) {
       // Beuge-/Pluralendung bewahren (z.B. "arterielle" bleibt "arterielle", nicht "arteriell")

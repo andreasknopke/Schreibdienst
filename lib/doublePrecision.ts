@@ -301,22 +301,12 @@ ${contextParts.join(', ')}
 Korrigiere phonetisch ähnliche Namen zu diesen korrekten Schreibweisen.`;
   }
 
-  return `Du bist ein medizinischer Transkriptions-Experte. Zwei Whisper-Modelle haben dasselbe Diktat transkribiert. Wähle bei jedem Unterschied die KORREKTE Version.${dictionarySection}${contextSection}
+  return `Du bist ein medizinischer Transkriptions-Korrektor.${dictionarySection}${contextSection}
 
-DEINE AUFGABE - NUR DIESE KORREKTUREN:
-• Korrigiere AUSSCHLIESSLICH Whisper-Fehler (phonetische Fehler, Verhörer)
-• Korrigiere Rechtschreibung und Zeichensetzung
-• Ändere NIEMALS den Satzbau oder die Satzstruktur
-• Ersetze NIEMALS medizinische Fachbegriffe durch Synonyme
-• Füge NIEMALS neue Wörter hinzu, die in keiner der beiden Transkriptionen vorkommen
-• Wenn ein Wort in beiden Versionen unklar/unverständlich ist, markiere es mit [?]
-• BEHALTE ALLE ALPHANUMERISCHEN CODES WIE R004998-26, P12345, ICD-10-Codes, Labor- und Histologie-Nummern UNVERÄNDERT BEI – auch dann, wenn sie für dich wie Tippfehler oder kryptische Zeichenketten aussehen. Diese Codes sind medizinisch relevant und dürfen NIEMALS gekürzt, getrennt oder gelöscht werden.
+DIE GOLDENE REGEL – DARAN MUSST DU DICH UNBEDINGT HALTEN:
+DU DARFST KEIN EINZIGES WORT ENTFERNEN. Jedes Wort aus den beiden Transkriptionen muss im Ergebnis auftauchen – entweder unverändert oder innerhalb eines <<<A:...|B:...>>>-Markers durch die bessere Variante ersetzt. Codes, Zahlen und alphanumerische Kombinationen wie R004998-26 sind ebenfalls Wörter – sie dürfen NIEMALS gekürzt, getrennt, fusioniert oder gelöscht werden.
 
-INHALTSERHALT (KRITISCH - kein gesprochener Inhalt darf verloren gehen):
-• Text AUSSERHALB von <<<A: ... | B: ...>>> MUSS exakt und vollständig übernommen werden – auch dann, wenn er nur in einer der beiden Transkriptionen vorkam.
-• Alphanumerische Codes (z. B. R004998, R004998-26, C34.9, J45.0, ICD-10-Codes, Histologie- und Labor-Nummern) sind MEDIZINISCHE DATEN, keine Tippfehler. DU DARFST SIE NIEMALS verändern, kürzen, trennen oder entfernen. Wenn ein Buchstaben-Ziffern-Code in einer oder beiden Transkriptionen steht, MUSS er unverändert im finalen Text erscheinen.
-• Wenn innerhalb eines <<<A: ... | B: ...>>>-Markers eine Seite deutlich mehr medizinisch sinnvollen Inhalt enthält als die andere (z. B. ein ganzer Satz vs. ein einzelnes Wort), übernimm die längere Version VOLLSTÄNDIG. Es ist davon auszugehen, dass das andere Modell diese Passage einfach nicht verstanden hat.
-• Lasse niemals ganze Sätze, Diagnosen, Befunde oder Anweisungen weg, die in einer der beiden Versionen klar enthalten sind.
+Deine einzige Aufgabe: Bei jedem <<<A: Version1 | B: Version2>>>-Marker die bessere Version auswählen. Alles außerhalb der Marker bleibt WORTWÖRTLICH erhalten. Phonetische Fehler („Gelenkbüffel“ → „Gelenkbefall“) korrigieren. Keine neuen Wörter erfinden. Keine Wörter weglassen. Keine Codes verändern.
 
 TRANSKRIPTION A (${merged.provider1}):
 ${merged.text1}
@@ -324,34 +314,31 @@ ${merged.text1}
 TRANSKRIPTION B (${merged.provider2}):
 ${merged.text2}
 
-MARKIERTE UNTERSCHIEDE:
+MARKIERTE UNTERSCHIEDE (bearbeite NUR die <<<A:...|B:...>>>-Stellen):
 ${merged.mergedTextWithMarkers}
 
-ENTSCHEIDUNGSREGELN für <<<A: ... | B: ...>>>:
+AUSWAHLREGELN für <<<A:...|B:...>>>:
+• Wörterbuch und Diktatkontext haben Vorrang.
+• Echtes medizinisches Wort vor phonetischem Fehler: „Vaskulitis“ statt „Voskulitis“.
+• Enthält eine Seite deutlich mehr Inhalt (ganzer Satz vs. einzelnes Wort), übernimm die längere Version vollständig.
+• Codes und Zahlen NIEMALS verändern oder löschen.
 
-1. WÖRTERBUCH/KONTEXT ZUERST: Nutze Wörterbuch und Diktat-Kontext (Patientenname, Arztname).
-
-2. ECHTE WÖRTER BEVORZUGEN:
-   ✓ "Gelenkbefall" statt "Gelenkbüffel"
-   ✓ "Vaskulitis" statt "Voskulitis"
-   ✓ "Daktylitis" statt "Dachlitiden"
-   ✓ "Arthralgien" statt "Atragien"
-
-3. MEDIZINISCHE FACHBEGRIFFE (alle Fachgebiete):
-   RHEUMATOLOGIE: Psoriasis, Skyrizi, Celecoxib, MTX, IL-17, JAK-Inhibitoren, Biologika, HLA-B27
-   KARDIOLOGIE: Myokardinfarkt, Koronarangiographie, Ejektionsfraktion, Vorhofflimmern, Stent
-   CHIRURGIE: Laparoskopie, Cholezystektomie, Appendektomie, Anastomose, Drainage
-   INNERE: Gastroskopie, Koloskopie, Sonographie, Aszites, Hepatomegalie, Splenomegalie
-   GYNÄKOLOGIE: Hysterektomie, Adnexe, Zervix, Endometriose, Mammographie
+MEDIZINISCHE FACHGEBIETE (Orientierung):
+RHEUMATOLOGIE: Psoriasis, Skyrizi, Celecoxib, MTX, IL-17, Biologika, HLA-B27
+KARDIOLOGIE: Myokardinfarkt, Koronarangiographie, Ejektionsfraktion, Vorhofflimmern, Stent
+CHIRURGIE: Laparoskopie, Cholezystektomie, Appendektomie, Anastomose, Drainage
+INNERE: Gastroskopie, Koloskopie, Sonographie, Aszites, Hepatomegalie, Splenomegalie
+GYNÄKOLOGIE: Hysterektomie, Adnexe, Zervix, Endometriose, Mammographie
 
 VERBOTEN:
-• KEINE Änderung des Satzbaus oder der Wortreihenfolge
-• KEINE Ersetzung von Fachbegriffen durch Synonyme (z.B. NICHT "Arthralgien" → "Gelenkschmerzen")
-• KEINE Markdown-Formatierung (**fett**, *kursiv*, # Überschriften)
+• KEIN Markdown (**fett**, *kursiv*, # Überschriften)
 • KEINE Erklärungen oder Kommentare
-• KEINE Veränderung, Kürzung oder Löschung von alphanumerischen Codes (Buchstaben+Ziffern-Kombinationen wie R004998-26, C34.9, ICD-Codes, Histologie-/Labor-Nummern) – diese müssen BUCHSTABENGETREU und VOLLSTÄNDIG erhalten bleiben
+• KEIN Wort entfernen, kürzen oder auslassen
+• KEINE Codes, Zahlen oder Buchstaben-Ziffern-Kombinationen verändern
 
-AUSGABE: NUR den korrigierten Text. Reiner, unformatierter Fließtext.
+WIEDERHOLUNG DER GOLDENEN REGEL: Du darfst KEIN WORT entfernen. Jedes Wort muss im Ergebnis sein.
+
+AUSGABE: Nur der korrigierte Fließtext.
 
 FINALER TEXT:`;
 }

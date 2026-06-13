@@ -310,9 +310,11 @@ DEINE AUFGABE - NUR DIESE KORREKTUREN:
 • Ersetze NIEMALS medizinische Fachbegriffe durch Synonyme
 • Füge NIEMALS neue Wörter hinzu, die in keiner der beiden Transkriptionen vorkommen
 • Wenn ein Wort in beiden Versionen unklar/unverständlich ist, markiere es mit [?]
+• BEHALTE ALLE ALPHANUMERISCHEN CODES WIE R004998-26, P12345, ICD-10-Codes, Labor- und Histologie-Nummern UNVERÄNDERT BEI – auch dann, wenn sie für dich wie Tippfehler oder kryptische Zeichenketten aussehen. Diese Codes sind medizinisch relevant und dürfen NIEMALS gekürzt, getrennt oder gelöscht werden.
 
 INHALTSERHALT (KRITISCH - kein gesprochener Inhalt darf verloren gehen):
 • Text AUSSERHALB von <<<A: ... | B: ...>>> MUSS exakt und vollständig übernommen werden – auch dann, wenn er nur in einer der beiden Transkriptionen vorkam.
+• Alphanumerische Codes (z. B. R004998, R004998-26, C34.9, J45.0, ICD-10-Codes, Histologie- und Labor-Nummern) sind MEDIZINISCHE DATEN, keine Tippfehler. DU DARFST SIE NIEMALS verändern, kürzen, trennen oder entfernen. Wenn ein Buchstaben-Ziffern-Code in einer oder beiden Transkriptionen steht, MUSS er unverändert im finalen Text erscheinen.
 • Wenn innerhalb eines <<<A: ... | B: ...>>>-Markers eine Seite deutlich mehr medizinisch sinnvollen Inhalt enthält als die andere (z. B. ein ganzer Satz vs. ein einzelnes Wort), übernimm die längere Version VOLLSTÄNDIG. Es ist davon auszugehen, dass das andere Modell diese Passage einfach nicht verstanden hat.
 • Lasse niemals ganze Sätze, Diagnosen, Befunde oder Anweisungen weg, die in einer der beiden Versionen klar enthalten sind.
 
@@ -347,6 +349,7 @@ VERBOTEN:
 • KEINE Ersetzung von Fachbegriffen durch Synonyme (z.B. NICHT "Arthralgien" → "Gelenkschmerzen")
 • KEINE Markdown-Formatierung (**fett**, *kursiv*, # Überschriften)
 • KEINE Erklärungen oder Kommentare
+• KEINE Veränderung, Kürzung oder Löschung von alphanumerischen Codes (Buchstaben+Ziffern-Kombinationen wie R004998-26, C34.9, ICD-Codes, Histologie-/Labor-Nummern) – diese müssen BUCHSTABENGETREU und VOLLSTÄNDIG erhalten bleiben
 
 AUSGABE: NUR den korrigierten Text. Reiner, unformatierter Fließtext.
 
@@ -414,13 +417,15 @@ export function restoreMissingMedicalCodes(text1: string, text2: string, finalTe
     const contextWord = findCodeContextWord(text1, code) || findCodeContextWord(text2, code);
 
     if (suffix && contextWord) {
-      // Suche nach: Kontextwort + Suffix (das LLM hat ggf. das Präfix gelöscht, die Zahl aber behalten)
+      // Suche nach: Kontextwort + Whitespace + Suffix (das LLM hat ggf. das Präfix gelöscht)
+      // KEIN .test() vor .replace() – das würde bei globalem Regex den lastIndex verschieben!
       const contextRegex = new RegExp(
-        `(${escapeRegex(contextWord)})\\s+${escapeRegex(suffix)}\\b`,
-        'gi'
+        `(${escapeRegex(contextWord)})\\s+${escapeRegex(suffix)}(?=[.,;:!?\\s]|$)`,
+        'i'
       );
-      if (contextRegex.test(restored)) {
-        restored = restored.replace(contextRegex, `$1 ${prefix}-${suffix}`);
+      const prev = restored;
+      restored = restored.replace(contextRegex, `$1 ${prefix}-${suffix}`);
+      if (restored !== prev) {
         console.log(`[DoublePrecision] RestoreMissingCodes: "${code}" via Kontext "${contextWord} ${suffix}" wiederhergestellt`);
         continue;
       }
@@ -429,11 +434,12 @@ export function restoreMissingMedicalCodes(text1: string, text2: string, finalTe
     // Strategie 2: [?] + Suffix
     if (suffix) {
       const suffixRegex = new RegExp(
-        `\\[\\?\\]\\s*${escapeRegex(suffix)}\\b`,
-        'g'
+        `\\[\\?\\]\\s*${escapeRegex(suffix)}(?=[.,;:!?\\s]|$)`,
+        'i'
       );
-      if (suffixRegex.test(restored)) {
-        restored = restored.replace(suffixRegex, `${prefix}-${suffix}`);
+      const prev = restored;
+      restored = restored.replace(suffixRegex, `${prefix}-${suffix}`);
+      if (restored !== prev) {
         console.log(`[DoublePrecision] RestoreMissingCodes: "${code}" via [?] + Suffix wiederhergestellt`);
         continue;
       }
@@ -452,8 +458,8 @@ export function restoreMissingMedicalCodes(text1: string, text2: string, finalTe
       // und nicht bereits als Teil eines anderen Wortes/Codes vorkommt
       if (suffix.length >= 2) {
         const suffixOnlyRegex = new RegExp(
-          `(?<![A-Za-zÄÖÜäöüß\\d-])${escapeRegex(suffix)}(?![\\d])`,
-          'g'
+          `(?<![A-Za-zÄÖÜäöüß\\d-])${escapeRegex(suffix)}(?=[.,;:!?\\s]|$)`,
+          'i'
         );
         const matches = restored.match(suffixOnlyRegex);
         if (matches && matches.length === 1) {

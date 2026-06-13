@@ -397,6 +397,12 @@ export function restoreMissingMedicalCodes(text1: string, text2: string, finalTe
   const codes1 = new Set(text1.match(codePattern) ?? []);
   const codes2 = new Set(text2.match(codePattern) ?? []);
 
+  // Debug-Log: welche Codes wurden in den Quelltexten gefunden?
+  console.log(
+    `[DoublePrecision] RestoreMissingCodes: Quelle 1 gefundene Codes: [${[...codes1].join(', ')}], ` +
+    `Quelle 2 gefundene Codes: [${[...codes2].join(', ')}]`
+  );
+
   // Nur Codes, die in BEIDEN Transkriptionen sicher erkannt wurden
   const consensusCodes: string[] = [];
   for (const code of codes1) {
@@ -427,6 +433,10 @@ export function restoreMissingMedicalCodes(text1: string, text2: string, finalTe
     // Strategie 1: Kontextwort aus den Quelltexten extrahieren und im Output suchen.
     // Deckt den Fall ab: "Histologie 26" → "Histologie R004998-26"
     const contextWord = findCodeContextWord(text1, code) || findCodeContextWord(text2, code);
+    console.log(
+      `[DoublePrecision] RestoreMissingCodes: "${code}" → prefix="${prefix}" suffix="${suffix || 'n/a'}" ` +
+      `contextWord="${contextWord || 'n/a'}"`
+    );
 
     if (suffix && contextWord) {
       // Strategie 1a: Kontextwort + Leerzeichen + Suffix
@@ -518,9 +528,11 @@ function findCodeContextWord(text: string, code: string): string | null {
   const words = before.split(/\s+/);
   if (words.length === 0) return null;
 
-  const contextWord = words[words.length - 1];
-  // Nur zurückgeben, wenn es ein echtes Wort ist (keine Satzzeichen-Kette)
-  return /^[A-Za-zÄÖÜäöüß]+$/.test(contextWord) ? contextWord : null;
+  let contextWord = words[words.length - 1];
+  // Strippen von angehängten Satzzeichen, damit auch "Histologie," → "Histologie"
+  contextWord = contextWord.replace(/[.,;:!?]+$/, '');
+  // Nur zurückgeben, wenn es ein echtes Wort ist (keine Satzzeichen-Kette, mind. 2 Buchstaben)
+  return /^[A-Za-zÄÖÜäöüß]{2,}$/.test(contextWord) ? contextWord : null;
 }
 
 function escapeRegex(str: string): string {

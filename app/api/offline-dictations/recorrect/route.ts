@@ -357,7 +357,13 @@ async function doublePrecisionMerge(
   }
 
   // Stelle medizinische Codes/IDs wieder her, die das LLM fälschlich entfernt hat
-  const codesRestored = restoreMissingMedicalCodes(merged.text1, merged.text2, finalText);
+  // WICHTIG: Originaltexte verwenden, da das Preprocessing Codes wie R004998-26
+  // fusionieren kann.
+  const codesRestored = restoreMissingMedicalCodes(
+    result1.originalText ?? merged.text1,
+    result2.originalText ?? merged.text2,
+    finalText
+  );
   if (codesRestored !== finalText) {
     console.log(`[ReCorrect DoublePrecision] ✓ Missing medical codes restored`);
     finalText = codesRestored;

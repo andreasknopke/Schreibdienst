@@ -363,10 +363,14 @@ export function createMergeUserMessage(merged: MergedResult): string {
 /**
  * Validiert nach dem LLM-Merge, ob medizinische Codes/IDs, die in BEIDEN
  * Quelltranskriptionen vorkommen, im LLM-Output erhalten geblieben sind.
- * 
+ *
  * Typische Muster: Histologie-Nummern (R004998-26), Labornummern, ICD-Codes.
- * Wenn ein Code fehlt (z. B. weil das LLM ihn durch [?] ersetzt hat), wird
- * er anhand der noch vorhandenen Textfragmente wiederhergestellt.
+ *
+ * Strategie in absteigender Präzision:
+ * 1. Kontext aus Quelltexten extrahieren (Wort vor dem Code), dann im Output
+ *    nach Kontextwort + Suffix suchen (z. B. "Histologie 26" → "Histologie R004998-26").
+ * 2. [?] + Suffix ersetzen (z. B. "[?] 26" → "R004998-26").
+ * 3. [?] alleinstehend durch den Code ersetzen.
  */
 export function restoreMissingMedicalCodes(text1: string, text2: string, finalText: string): string {
   if (!finalText) return finalText;
@@ -402,37 +406,89 @@ export function restoreMissingMedicalCodes(text1: string, text2: string, finalTe
     const parts = code.match(/^([A-Za-zÄÖÜäöüß]\d{3,})(?:[-–](\d+))?$/);
     if (!parts) continue;
 
-    const prefix = parts[1];    // z. B. R004998
-    const suffix = parts[2];    // z. B. 26 (oder undefined)
+    const prefix = parts[1];    // z. B. R004998
+    const suffix = parts[2];    // z. B. 26 (oder undefined)
 
+    // Strategie 1: Kontextwort aus den Quelltexten extrahieren und im Output suchen.
+    // Deckt den Fall ab: "Histologie 26" → "Histologie R004998-26"
+    const contextWord = findCodeContextWord(text1, code) || findCodeContextWord(text2, code);
+
+    if (suffix && contextWord) {
+      // Suche nach: Kontextwort + Suffix (das LLM hat ggf. das Präfix gelöscht, die Zahl aber behalten)
+      const contextRegex = new RegExp(
+        `(${escapeRegex(contextWord)})\\s+${escapeRegex(suffix)}\\b`,
+        'gi'
+      );
+      if (contextRegex.test(restored)) {
+        restored = restored.replace(contextRegex, `$1 ${prefix}-${suffix}`);
+        console.log(`[DoublePrecision] RestoreMissingCodes: "${code}" via Kontext "${contextWord} ${suffix}" wiederhergestellt`);
+        continue;
+      }
+    }
+
+    // Strategie 2: [?] + Suffix
     if (suffix) {
-      // Fall 1: Die Suffix-Zahl ist noch im Text (z. B. "26"), aber das Prefix fehlt
-      // Text: "... Histologie [?] 26 ..." → "... Histologie R004998-26 ..."
       const suffixRegex = new RegExp(
         `\\[\\?\\]\\s*${escapeRegex(suffix)}\\b`,
         'g'
       );
       if (suffixRegex.test(restored)) {
         restored = restored.replace(suffixRegex, `${prefix}-${suffix}`);
-        console.log(`[DoublePrecision] RestoreMissingCodes: "${code}" wiederhergestellt ([?] + Suffix → vollständiger Code)`);
+        console.log(`[DoublePrecision] RestoreMissingCodes: "${code}" via [?] + Suffix wiederhergestellt`);
         continue;
       }
     }
 
-    // Fall 2: Der gesamte Code fehlt, aber das Pattern [?] existiert irgendwo
-    // Ersetze das erste unverbrauchte [?] durch den Code
+    // Strategie 3: [?] alleinstehend durch den kompletten Code ersetzen
     if (restored.includes('[?]')) {
       restored = restored.replace('[?]', code);
-      console.log(`[DoublePrecision] RestoreMissingCodes: "${code}" wiederhergestellt ([?] ersetzt)`);
-    } else {
-      console.warn(
-        `[DoublePrecision] RestoreMissingCodes: "${code}" fehlt im LLM-Output, ` +
-        `aber kein [?] zur Wiederherstellung gefunden. Text muss ggf. manuell geprüft werden.`
-      );
+      console.log(`[DoublePrecision] RestoreMissingCodes: "${code}" via [?]-Ersetzung wiederhergestellt`);
+      continue;
     }
+
+    // Strategie 4: Suffix ohne Kontextwort suchen (letzte Chance, unsicherer)
+    if (suffix) {
+      // Nur anwenden, wenn der Suffix eine einigermaßen eindeutige Länge hat (≥ 2 Ziffern)
+      // und nicht bereits als Teil eines anderen Wortes/Codes vorkommt
+      if (suffix.length >= 2) {
+        const suffixOnlyRegex = new RegExp(
+          `(?<![A-Za-zÄÖÜäöüß\\d-])${escapeRegex(suffix)}(?![\\d])`,
+          'g'
+        );
+        const matches = restored.match(suffixOnlyRegex);
+        if (matches && matches.length === 1) {
+          // Nur ersetzen, wenn der Suffix genau einmal im Text vorkommt
+          restored = restored.replace(suffixOnlyRegex, `${prefix}-${suffix}`);
+          console.log(`[DoublePrecision] RestoreMissingCodes: "${code}" via eindeutigem Suffix wiederhergestellt`);
+          continue;
+        }
+      }
+    }
+
+    console.warn(
+      `[DoublePrecision] RestoreMissingCodes: "${code}" fehlt im LLM-Output, ` +
+      `keine Wiederherstellung möglich. Text muss ggf. manuell geprüft werden.`
+    );
   }
 
   return restored;
+}
+
+/**
+ * Findet das Wort unmittelbar vor einem Code in einem Quelltext.
+ * Z. B. für "Histologie R004998-26" → "Histologie"
+ */
+function findCodeContextWord(text: string, code: string): string | null {
+  const idx = text.indexOf(code);
+  if (idx <= 0) return null;
+
+  const before = text.substring(0, idx).trim();
+  const words = before.split(/\s+/);
+  if (words.length === 0) return null;
+
+  const contextWord = words[words.length - 1];
+  // Nur zurückgeben, wenn es ein echtes Wort ist (keine Satzzeichen-Kette)
+  return /^[A-Za-zÄÖÜäöüß]+$/.test(contextWord) ? contextWord : null;
 }
 
 function escapeRegex(str: string): string {

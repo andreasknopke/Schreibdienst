@@ -417,16 +417,30 @@ export function restoreMissingMedicalCodes(text1: string, text2: string, finalTe
     const contextWord = findCodeContextWord(text1, code) || findCodeContextWord(text2, code);
 
     if (suffix && contextWord) {
-      // Suche nach: Kontextwort + Whitespace + Suffix (das LLM hat ggf. das Präfix gelöscht)
-      // KEIN .test() vor .replace() – das würde bei globalem Regex den lastIndex verschieben!
-      const contextRegex = new RegExp(
+      // Strategie 1a: Kontextwort + Leerzeichen + Suffix
+      // "Histologie 26" → "Histologie R004998-26"
+      const spaceRegex = new RegExp(
         `(${escapeRegex(contextWord)})\\s+${escapeRegex(suffix)}(?=[.,;:!?\\s]|$)`,
         'i'
       );
       const prev = restored;
-      restored = restored.replace(contextRegex, `$1 ${prefix}-${suffix}`);
+      restored = restored.replace(spaceRegex, `$1 ${prefix}-${suffix}`);
       if (restored !== prev) {
-        console.log(`[DoublePrecision] RestoreMissingCodes: "${code}" via Kontext "${contextWord} ${suffix}" wiederhergestellt`);
+        console.log(`[DoublePrecision] RestoreMissingCodes: "${code}" via Kontext+Whitespace "${contextWord} ${suffix}"`);
+        continue;
+      }
+
+      // Strategie 1b: Kontextwort fusioniert mit Code-Fragment + Suffix
+      // "Histologier-26" → "Histologie R004998-26"
+      // Das LLM hat Kontextwort+Fragmente+Zahl zusammengeschrieben.
+      const fusedRegex = new RegExp(
+        `(${escapeRegex(contextWord)})\\D{0,8}${escapeRegex(suffix)}(?=[.,;:!?\\s]|$)`,
+        'i'
+      );
+      const prev2 = restored;
+      restored = restored.replace(fusedRegex, `$1 ${prefix}-${suffix}`);
+      if (restored !== prev2) {
+        console.log(`[DoublePrecision] RestoreMissingCodes: "${code}" via Kontext+fused "${contextWord}…${suffix}"`);
         continue;
       }
     }

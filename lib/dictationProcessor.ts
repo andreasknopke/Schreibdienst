@@ -22,7 +22,7 @@ import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
 import { applyLLMPhoneticGuard } from '@/lib/phoneticMatch';
 import { compressAudioForSpeech, normalizeAudioForWhisper } from '@/lib/audioCompression';
-import { mergeTranscriptionsWithMarkers, createMergePrompt, stripNovelWordsFromMergeOutput, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
+import { mergeTranscriptionsWithMarkers, createMergePrompt, stripNovelWordsFromMergeOutput, restoreMissingMedicalCodes, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
 
 // LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
@@ -574,6 +574,14 @@ async function doublePrecisionMerge(
       `${guardedMergeResult.removedWords.slice(0, 5).join(', ')}`
     );
     finalText = guardedMergeResult.text;
+  }
+
+  // Stelle medizinische Codes/IDs wieder her, die das LLM fälschlich entfernt hat
+  // (z. B. Histologie-Nummern wie R004998-26, die in beiden Quell-Transkriptionen sicher erkannt wurden)
+  const codesRestored = restoreMissingMedicalCodes(merged.text1, merged.text2, finalText);
+  if (codesRestored !== finalText) {
+    console.log(`[Worker DoublePrecision] ✓ Missing medical codes restored in merge output`);
+    finalText = codesRestored;
   }
   
   console.log(`[Worker DoublePrecision] ✓ Merged text length: ${finalText.length} chars (after Markdown cleanup)`);

@@ -19,7 +19,7 @@ import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
 import { applyLLMPhoneticGuard } from '@/lib/phoneticMatch';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
-import { mergeTranscriptionsWithMarkers, createMergePrompt, stripNovelWordsFromMergeOutput, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
+import { mergeTranscriptionsWithMarkers, createMergePrompt, stripNovelWordsFromMergeOutput, restoreMissingMedicalCodes, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120; // 2 minutes max
@@ -354,6 +354,13 @@ async function doublePrecisionMerge(
       `${guardedMergeResult.removedWords.slice(0, 5).join(', ')}`
     );
     finalText = guardedMergeResult.text;
+  }
+
+  // Stelle medizinische Codes/IDs wieder her, die das LLM fälschlich entfernt hat
+  const codesRestored = restoreMissingMedicalCodes(merged.text1, merged.text2, finalText);
+  if (codesRestored !== finalText) {
+    console.log(`[ReCorrect DoublePrecision] ✓ Missing medical codes restored`);
+    finalText = codesRestored;
   }
   
   console.log(`[ReCorrect DoublePrecision] ✓ Merged text length: ${finalText.length} chars (after Markdown cleanup)`);

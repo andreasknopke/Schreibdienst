@@ -359,3 +359,82 @@ FINALER TEXT:`;
 export function createMergeUserMessage(merged: MergedResult): string {
   return merged.mergedTextWithMarkers;
 }
+
+/**
+ * Validiert nach dem LLM-Merge, ob medizinische Codes/IDs, die in BEIDEN
+ * Quelltranskriptionen vorkommen, im LLM-Output erhalten geblieben sind.
+ * 
+ * Typische Muster: Histologie-Nummern (R004998-26), Labornummern, ICD-Codes.
+ * Wenn ein Code fehlt (z. B. weil das LLM ihn durch [?] ersetzt hat), wird
+ * er anhand der noch vorhandenen Textfragmente wiederhergestellt.
+ */
+export function restoreMissingMedicalCodes(text1: string, text2: string, finalText: string): string {
+  if (!finalText) return finalText;
+
+  // Findet alphanumerische Codes: Buchstabe(n) + Ziffern, optional mit -Ziffernanhang
+  // Beispiele: R004998, R004998-26, P12345, ABC9876-3
+  const codePattern = /[A-Za-zÄÖÜäöüß]\d{3,}(?:[-–]\d+)?/g;
+
+  const codes1 = new Set(text1.match(codePattern) ?? []);
+  const codes2 = new Set(text2.match(codePattern) ?? []);
+
+  // Nur Codes, die in BEIDEN Transkriptionen sicher erkannt wurden
+  const consensusCodes: string[] = [];
+  for (const code of codes1) {
+    if (codes2.has(code)) {
+      consensusCodes.push(code);
+    }
+  }
+
+  if (consensusCodes.length === 0) return finalText;
+
+  const missingCodes = consensusCodes.filter(code => !finalText.includes(code));
+  if (missingCodes.length === 0) return finalText;
+
+  console.log(
+    `[DoublePrecision] RestoreMissingCodes: ${missingCodes.length} fehlende(r) Code(s) gefunden: ${missingCodes.join(', ')}`
+  );
+
+  let restored = finalText;
+
+  for (const code of missingCodes) {
+    // Code-Muster: R004998-26 → prefix=R004998, suffix=26
+    const parts = code.match(/^([A-Za-zÄÖÜäöüß]\d{3,})(?:[-–](\d+))?$/);
+    if (!parts) continue;
+
+    const prefix = parts[1];    // z. B. R004998
+    const suffix = parts[2];    // z. B. 26 (oder undefined)
+
+    if (suffix) {
+      // Fall 1: Die Suffix-Zahl ist noch im Text (z. B. "26"), aber das Prefix fehlt
+      // Text: "... Histologie [?] 26 ..." → "... Histologie R004998-26 ..."
+      const suffixRegex = new RegExp(
+        `\\[\\?\\]\\s*${escapeRegex(suffix)}\\b`,
+        'g'
+      );
+      if (suffixRegex.test(restored)) {
+        restored = restored.replace(suffixRegex, `${prefix}-${suffix}`);
+        console.log(`[DoublePrecision] RestoreMissingCodes: "${code}" wiederhergestellt ([?] + Suffix → vollständiger Code)`);
+        continue;
+      }
+    }
+
+    // Fall 2: Der gesamte Code fehlt, aber das Pattern [?] existiert irgendwo
+    // Ersetze das erste unverbrauchte [?] durch den Code
+    if (restored.includes('[?]')) {
+      restored = restored.replace('[?]', code);
+      console.log(`[DoublePrecision] RestoreMissingCodes: "${code}" wiederhergestellt ([?] ersetzt)`);
+    } else {
+      console.warn(
+        `[DoublePrecision] RestoreMissingCodes: "${code}" fehlt im LLM-Output, ` +
+        `aber kein [?] zur Wiederherstellung gefunden. Text muss ggf. manuell geprüft werden.`
+      );
+    }
+  }
+
+  return restored;
+}
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

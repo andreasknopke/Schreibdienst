@@ -191,6 +191,18 @@ export function mergeTranscriptionsWithMarkers(
         const versionB = addedPart.value.trim();
         
         if (versionA && versionB) {
+          // Wenn die Unterschiede NUR aus abweichender Interpunktion bestehen
+          // (z. B. R004998-26, vs. R004998-26.), wird das LLM nicht belastet.
+          // Solche reinen Satzzeichen-Varianten werden automatisch aufgelöst.
+          const strippedA = versionA.replace(/[.,;:!?]+$/, '');
+          const strippedB = versionB.replace(/[.,;:!?]+$/, '');
+          if (strippedA === strippedB && strippedA.length > 0) {
+            mergedParts.push(versionA.length >= versionB.length ? current.value : addedPart.value);
+            autoResolvedDifferences++;
+            i += 2;
+            continue;
+          }
+
           // Wenn eine Seite deutlich mehr Inhalt hat als die andere,
           // ist davon auszugehen, dass der zusätzliche Inhalt nicht verloren
           // gehen darf (z. B. eine Passage, die nur ein Modell verstanden hat).

@@ -35,6 +35,12 @@ interface WordWithDiff {
   timestamp?: { start: number; end: number; isInterpolated?: boolean };
 }
 
+// Removed text block that should be shown inline in the diff view
+interface OrphanRemovedItem {
+  text: string;
+  charPos: number; // Position in localText where this text was removed
+}
+
 // Parsed word from any text
 interface ParsedWord {
   word: string;
@@ -567,6 +573,20 @@ export default function EditableTextWithMitlesen({
     }
   }, [audioRef, isManualEditMode]);
   
+  // Restore a word/phrase that was removed by the LLM
+  // Inserts the removed text at the given character position in localText
+  const handleRestoreRemoved = useCallback((removedText: string, charPos: number) => {
+    if (disabled) return;
+    const before = localText.substring(0, charPos);
+    const after = localText.substring(charPos);
+    // Add a space before the restored text if needed for separation
+    const needsLeadingSpace = before.length > 0 && !before.endsWith(' ') && !before.endsWith('\n');
+    const needsTrailingSpace = after.length > 0 && !after.startsWith(' ') && !after.startsWith('\n');
+    const restoredText = before + (needsLeadingSpace ? ' ' : '') + removedText.trim() + (needsTrailingSpace ? ' ' : '') + after;
+    setLocalText(restoredText);
+    onChange(restoredText);
+  }, [localText, onChange, disabled]);
+  
   // Calculate match quality
   const matchQuality = useMemo(() => {
     if (timestampedWords.length === 0) return 0;
@@ -615,12 +635,31 @@ export default function EditableTextWithMitlesen({
     // Use a queue to properly pair removed words with their replacements
     let pendingRemovedWords: string[] = [];
     
+    // Orphan removed items: removed text NOT paired with added text (pure deletions)
+    // These are shown inline in the diff view as clickable red elements
+    const orphanRemovedItems: OrphanRemovedItem[] = [];
+    
     for (let partIdx = 0; partIdx < llmDiff.length; partIdx++) {
       const part = llmDiff[partIdx];
       
       if (part.removed) {
         // Collect removed words - these are the originals before LLM correction
-        const removedTokens = (part.value || '').split(/\s+/).filter(t => t.length > 0);
+        const removedText = part.value || '';
+        const removedTokens = removedText.split(/\s+/).filter(t => t.length > 0);
+        
+        // Check if this removed part is followed by an added part (replacement)
+        // or if it's a pure deletion
+        const nextPart = llmDiff[partIdx + 1];
+        const hasFollowingAdd = nextPart?.added === true;
+        
+        if (!hasFollowingAdd && removedTokens.length > 0) {
+          // Pure deletion – save for inline display at current position
+          orphanRemovedItems.push({ text: removedText, charPos: currentCharPos });
+        } else if (hasFollowingAdd && removedTokens.length > 0) {
+          // Replacement – still show removed text, the added part follows in green
+          orphanRemovedItems.push({ text: removedText, charPos: currentCharPos });
+        }
+        
         pendingRemovedWords.push(...removedTokens);
         continue;
       }
@@ -668,7 +707,7 @@ export default function EditableTextWithMitlesen({
       }
     }
     
-    return { wordsWithDiffStatus, manualAddedPositions };
+    return { wordsWithDiffStatus, manualAddedPositions, orphanRemovedItems };
   }, [originalText, localText, savedText]);
 
   // Build a map of diff status for each word based on character position
@@ -698,6 +737,37 @@ export default function EditableTextWithMitlesen({
     let wordIdx = 0;
     let charPos = 0;
     
+    // Prepare orphan removed items sorted by charPos for inline display
+    const orphanRemoved = [...diffResult.orphanRemovedItems].sort((a, b) => a.charPos - b.charPos);
+    let orphanIdx = 0;
+    
+    // Helper to flush orphan removed items before a given charPos
+    const flushOrphansBefore = (pos: number, key: string) => {
+      const items: React.ReactNode[] = [];
+      while (orphanIdx < orphanRemoved.length && orphanRemoved[orphanIdx].charPos <= pos) {
+        const item = orphanRemoved[orphanIdx];
+        orphanIdx++;
+        const trimmed = item.text.trim();
+        if (!trimmed) continue;
+        items.push(
+          <span
+            key={`removed-${key}-${orphanIdx}`}
+            onClick={() => handleRestoreRemoved(item.text, item.charPos)}
+            className="bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300
+                       line-through border border-red-300 dark:border-red-700
+                       rounded-sm px-0.5 mx-0.5 cursor-pointer
+                       hover:bg-red-200 dark:hover:bg-red-900/60
+                       transition-colors"
+            title={`Klicken zum Wiederherstellen: „${trimmed.length > 60 ? trimmed.substring(0, 57) + '…' : trimmed}“`}
+          >
+            {trimmed.length > 40 ? trimmed.substring(0, 37) + '…' : trimmed}
+            <span className="text-[10px] ml-1 opacity-70">↩</span>
+          </span>
+        );
+      }
+      return items;
+    };
+    
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i];
       if (token.length === 0) continue;
@@ -709,6 +779,12 @@ export default function EditableTextWithMitlesen({
       if (isWhitespace) {
         elements.push(<span key={i}>{token}</span>);
         continue;
+      }
+      
+      // Flush orphan removed items that appear before this token
+      if (showDiff) {
+        const orphans = flushOrphansBefore(tokenCharPos, `t${i}`);
+        elements.push(...orphans);
       }
       
       // Get timestamp for this word
@@ -760,6 +836,12 @@ export default function EditableTextWithMitlesen({
           {token}
         </span>
       );
+    }
+    
+    // Flush remaining orphan removed items at the end
+    if (showDiff) {
+      const remainingOrphans = flushOrphansBefore(Infinity, 'end');
+      elements.push(...remainingOrphans);
     }
     
     return elements;

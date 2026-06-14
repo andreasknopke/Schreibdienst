@@ -1581,6 +1581,13 @@ MINIMALE KORREKTUREN - NUR DAS NÖTIGSTE:
 - Lokale grammatische Reparaturen sind erlaubt, vollständige Umformulierungen nicht
 - Lösche NIEMALS inhaltlich korrekte Sätze oder Satzteile
 
+UNKLARE TEXTSTELLEN - NIEMALS LÖSCHEN:
+- Wenn ein Wort oder Satzteil unklar oder fehlerhaft transkribiert ist: NIEMALS löschen
+- Ersetze unklare Wörter STATTDESSEN mit [?] und behalte sie an Ort und Stelle
+- Auch wenn ein Satzteil inhaltlich unsinnig erscheint: NIEMALS entfernen, sondern [?] setzen
+- Bevor du Text löschst, frage dich: "Würde ich diesen Teil entfernen, wenn ich das Original-Audio hören würde?"
+- Im Zweifel: Originaltext beibehalten oder [?] setzen - NIEMALS löschen
+
 WICHTIG - DATUMSFORMATE NICHT ÄNDERN:
 - Datumsangaben wie "18.09.2025" sind bereits korrekt - NICHT ändern!
 - NIEMALS Punkte in Datumsangaben ändern oder Zeilenumbrüche einfügen
@@ -1640,6 +1647,12 @@ MINIMALE KORREKTUREN - NUR DAS NÖTIGSTE:
 - Behalte den Schreibstil des Diktierenden exakt bei
 - Formuliere NIEMALS ganze Sätze neu, die bereits korrekt sind
 - Lokale grammatische Reparaturen sind erlaubt, neue Inhalte nicht
+
+UNKLARE TEXTSTELLEN - NIEMALS LÖSCHEN:
+- Wenn ein Wort oder Satzteil unklar ist: NIEMALS löschen
+- Ersetze unklare Wörter STATTDESSEN mit [?] und behalte sie an Ort und Stelle
+- Auch wenn ein Satzteil inhaltlich unsinnig erscheint: NIEMALS entfernen, sondern [?] setzen
+- Im Zweifel: Originaltext beibehalten oder [?] setzen - NIEMALS löschen
 
 REGELN:
 1. Korrigiere offensichtliche Grammatik- und Rechtschreibfehler

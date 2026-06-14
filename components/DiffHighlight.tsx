@@ -88,37 +88,57 @@ function DiffSegmentView({ segment }: { segment: DiffSegment }) {
       );
       
     case 'removed':
-      // Show a marker for removed text
+      // Show removed text with visible red styling
       if (!segment.originalText) return null;
       return (
         <Tooltip content={segment.originalText} visible={showTooltip}>
           <span 
-            className="inline-block w-3 h-3 mx-0.5 align-middle cursor-help
-                       bg-red-200 dark:bg-red-900/50 rounded-full
-                       border border-red-400 dark:border-red-600
-                       text-red-600 dark:text-red-400 text-[8px] leading-3 text-center"
+            className="bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300
+                       line-through border border-red-300 dark:border-red-700
+                       rounded-sm px-0.5 mx-0.5 cursor-help
+                       transition-colors hover:bg-red-200 dark:hover:bg-red-900/60"
             onMouseEnter={() => setShowTooltip(true)}
             onMouseLeave={() => setShowTooltip(false)}
-            title="Text gelöscht - hover für Original"
+            title="Gelöschter Text - hover für Original"
           >
-            −
+            {segment.originalText.length > 30
+              ? segment.originalText.substring(0, 27) + '…'
+              : segment.originalText
+            }
           </span>
         </Tooltip>
       );
       
     case 'modified':
       return (
-        <Tooltip content={segment.originalText || ''} visible={showTooltip}>
-          <span 
-            className="bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-100
-                       border-b-2 border-amber-400 dark:border-amber-500 rounded-sm px-0.5
-                       cursor-help transition-colors hover:bg-amber-200 dark:hover:bg-amber-900/60"
-            onMouseEnter={() => setShowTooltip(true)}
-            onMouseLeave={() => setShowTooltip(false)}
-          >
-            {segment.text}
-          </span>
-        </Tooltip>
+        <span className="inline">
+          {segment.originalText && (
+            <span
+              className="bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300
+                         line-through border border-red-300 dark:border-red-700
+                         rounded-sm px-0.5 mx-0.5"
+              title="Original"
+            >
+              {segment.originalText.length > 40
+                ? segment.originalText.substring(0, 37) + '…'
+                : segment.originalText
+              }
+            </span>
+          )}
+          <Tooltip content={segment.originalText || ''} visible={showTooltip}>
+            <span 
+              className="bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-200
+                         border border-green-400 dark:border-green-600
+                         rounded-sm px-0.5 mx-0.5 cursor-help
+                         transition-colors hover:bg-green-200 dark:hover:bg-green-900/60"
+              onMouseEnter={() => setShowTooltip(true)}
+              onMouseLeave={() => setShowTooltip(false)}
+              title="Ersetzung"
+            >
+              {segment.text}
+            </span>
+          </Tooltip>
+        </span>
       );
       
     default:

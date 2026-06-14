@@ -797,12 +797,61 @@ async function transcribeAudio(
       standardDictionaryEntries,
       { targetUsername: username }
     );
+
+    // Log preprocessing (inkl. phonetischem Matching) für Transkription A
+    if (preprocessedResult1.text !== result1.text) {
+      try {
+        const changeScore1 = calculateChangeScore(result1.text, preprocessedResult1.text);
+        await logTextFormattingCorrectionWithRequest(
+          request,
+          dictationId,
+          result1.text,
+          preprocessedResult1.text,
+          changeScore1,
+          {
+            version: 1,
+            targetUsername: username,
+            dictionaryOperations: preprocessedResult1.operations,
+            phase: 'doublePrecisionPreprocess',
+            provider: result1.provider
+          }
+        );
+        console.log(`[Worker DoublePrecision] ✓ Preprocessing changes for ${result1.provider} logged (score: ${changeScore1}%)`);
+      } catch (logError: any) {
+        console.warn(`[Worker DoublePrecision] Failed to log preprocessing for ${result1.provider}: ${logError.message}`);
+      }
+    }
+
     const preprocessedResult2 = preprocessTranscriptionDetailed(
       result2.text,
       dictionaryEntries,
       standardDictionaryEntries,
       { targetUsername: username }
     );
+
+    // Log preprocessing (inkl. phonetischem Matching) für Transkription B
+    if (preprocessedResult2.text !== result2.text) {
+      try {
+        const changeScore2 = calculateChangeScore(result2.text, preprocessedResult2.text);
+        await logTextFormattingCorrectionWithRequest(
+          request,
+          dictationId,
+          result2.text,
+          preprocessedResult2.text,
+          changeScore2,
+          {
+            version: 1,
+            targetUsername: username,
+            dictionaryOperations: preprocessedResult2.operations,
+            phase: 'doublePrecisionPreprocess',
+            provider: result2.provider
+          }
+        );
+        console.log(`[Worker DoublePrecision] ✓ Preprocessing changes for ${result2.provider} logged (score: ${changeScore2}%)`);
+      } catch (logError: any) {
+        console.warn(`[Worker DoublePrecision] Failed to log preprocessing for ${result2.provider}: ${logError.message}`);
+      }
+    }
 
     if (preprocessedResult1.text !== result1.text || preprocessedResult2.text !== result2.text) {
       console.log(

@@ -675,12 +675,61 @@ export async function POST(req: NextRequest) {
           standardEntries,
           { targetUsername: dictation.username }
         );
+
+        // Log preprocessing (inkl. phonetischem Matching) für Transkription A
+        if (preprocessedResult1.text !== parsed.text1) {
+          try {
+            const changeScore1 = calculateChangeScore(parsed.text1, preprocessedResult1.text);
+            await logTextFormattingCorrectionWithRequest(
+              req,
+              dictationId,
+              parsed.text1,
+              preprocessedResult1.text,
+              changeScore1,
+              {
+                version: 1,
+                targetUsername: dictation.username,
+                dictionaryOperations: preprocessedResult1.operations,
+                phase: 'doublePrecisionPreprocess',
+                provider: parsed.provider1
+              }
+            );
+            console.log(`[ReCorrect] ✓ Preprocessing changes for ${parsed.provider1} logged (score: ${changeScore1}%)`);
+          } catch (logError: any) {
+            console.warn(`[ReCorrect] Failed to log preprocessing for ${parsed.provider1}: ${logError.message}`);
+          }
+        }
+
         const preprocessedResult2 = preprocessTranscriptionDetailed(
           parsed.text2,
           dictionaryEntries,
           standardEntries,
           { targetUsername: dictation.username }
         );
+
+        // Log preprocessing (inkl. phonetischem Matching) für Transkription B
+        if (preprocessedResult2.text !== parsed.text2) {
+          try {
+            const changeScore2 = calculateChangeScore(parsed.text2, preprocessedResult2.text);
+            await logTextFormattingCorrectionWithRequest(
+              req,
+              dictationId,
+              parsed.text2,
+              preprocessedResult2.text,
+              changeScore2,
+              {
+                version: 1,
+                targetUsername: dictation.username,
+                dictionaryOperations: preprocessedResult2.operations,
+                phase: 'doublePrecisionPreprocess',
+                provider: parsed.provider2
+              }
+            );
+            console.log(`[ReCorrect] ✓ Preprocessing changes for ${parsed.provider2} logged (score: ${changeScore2}%)`);
+          } catch (logError: any) {
+            console.warn(`[ReCorrect] Failed to log preprocessing for ${parsed.provider2}: ${logError.message}`);
+          }
+        }
 
         if (preprocessedResult1.text !== parsed.text1 || preprocessedResult2.text !== parsed.text2) {
           console.log(

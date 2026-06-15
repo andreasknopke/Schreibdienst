@@ -6,7 +6,7 @@
  */
 
 import { diffWordsWithSpace } from 'diff';
-import { colognePhonetic, levenshtein } from './phoneticMatch';
+import { colognePhonetic, levenshtein, PHONETIC_DEBUG_LOGGING } from './phoneticMatch';
 import { DictionaryEntry } from './dictionaryDb';
 
 export interface TranscriptionResult {
@@ -124,7 +124,7 @@ export function stripNovelWordsFromMergeOutput(text1: string, text2: string, fin
 
     // DEBUG: Verdächtige Medikamenten-ähnliche Wörter (groß, >5 Zeichen)
     // explizit protokollieren, damit wir sehen, ob sie hier verloren gehen.
-    if (/^[A-Z][a-zäöüß]{4,}$/.test(token)) {
+    if (PHONETIC_DEBUG_LOGGING && /^[A-Z][a-zäöüß]{4,}$/.test(token)) {
       const closestSource = sourceWords
         .map(src => ({ src, score: isPlausibleSourceDerivedWord(token, [src]) ? 1 : 0 }))
         .sort((a, b) => b.score - a.score)[0];

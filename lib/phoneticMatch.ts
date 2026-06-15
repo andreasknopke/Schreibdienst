@@ -11,6 +11,24 @@ import { diffWordsWithSpace } from 'diff';
 import { applyDictionaryReplacementCase } from './replacementCase';
 
 /**
+ * Debug-Switch für ausführliches Logging in der LLM- und Phonetic-Pipeline.
+ *
+ * Wenn aktiviert (`true`), werden verdächtige Medikamenten-ähnliche Wörter
+ * (großgeschrieben, >5 Zeichen) auf ihrem Weg durch die Pipeline verfolgt
+ * und in den Log geschrieben.
+ *
+ * Standard: `false` (aus).
+ * Zum Debuggen lokal auf `true` setzen.
+ */
+export const PHONETIC_DEBUG_LOGGING = false;
+
+function debugLog(...args: unknown[]): void {
+  if (PHONETIC_DEBUG_LOGGING) {
+    console.log(...args);
+  }
+}
+
+/**
  * Kölner Phonetik — Phonetischer Code für deutsche Wörter.
  * Basiert auf Hans Joachim Postel (1969), optimiert für medizinisches Deutsch.
  * https://de.wikipedia.org/wiki/Kölner_Phonetik
@@ -323,7 +341,7 @@ export function applyLLMPhoneticGuard(originalText: string, correctedText: strin
       const inOriginal = originalText.includes(w);
       const inCorrected = correctedText.includes(w);
       const status = inOriginal && inCorrected ? 'KEPT' : inOriginal && !inCorrected ? 'DROPPED_BY_LLM' : !inOriginal && inCorrected ? 'ADDED_BY_LLM' : 'NOT_PRESENT';
-      console.log(`[PhonGuard DEBUG] suspicious-word "${w}": ${status} (original contains=${inOriginal}, corrected contains=${inCorrected})`);
+      debugLog(`[PhonGuard DEBUG] suspicious-word "${w}": ${status} (original contains=${inOriginal}, corrected contains=${inCorrected})`);
     }
   }
 

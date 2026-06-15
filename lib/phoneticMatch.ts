@@ -302,11 +302,30 @@ export function applyLLMPhoneticGuard(originalText: string, correctedText: strin
     };
   }
 
+  // DEBUG: Sammle Medikamenten-ähnliche Wörter (großgeschrieben, >5 Zeichen),
+  // damit wir nachvollziehen können, wo sie ggf. verloren gehen.
+  // Beispiele: "Falithrom", "Zirpin", "Marcumar", "Saliver"
+  const MEDICATION_PATTERN = /\b[A-Z][a-zäöüß]{4,}\b/g;
+  const suspiciousWords = new Set<string>();
+  for (const match of originalText.match(MEDICATION_PATTERN) ?? []) {
+    suspiciousWords.add(match);
+  }
+
   const diffs = diffWordsWithSpace(originalText, correctedText);
   const guardedParts: string[] = [];
   let checkedWordReplacements = 0;
   let rejectedWordReplacements = 0;
   let revertedChunks = 0;
+
+  // DEBUG: Logge für jedes verdächtige Wort, was im Diff damit passiert
+  if (suspiciousWords.size > 0) {
+    for (const w of suspiciousWords) {
+      const inOriginal = originalText.includes(w);
+      const inCorrected = correctedText.includes(w);
+      const status = inOriginal && inCorrected ? 'KEPT' : inOriginal && !inCorrected ? 'DROPPED_BY_LLM' : !inOriginal && inCorrected ? 'ADDED_BY_LLM' : 'NOT_PRESENT';
+      console.log(`[PhonGuard DEBUG] suspicious-word "${w}": ${status} (original contains=${inOriginal}, corrected contains=${inCorrected})`);
+    }
+  }
 
   for (let index = 0; index < diffs.length; ) {
     const part = diffs[index];

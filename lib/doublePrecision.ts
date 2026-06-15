@@ -122,6 +122,19 @@ export function stripNovelWordsFromMergeOutput(text1: string, text2: string, fin
       return true;
     }
 
+    // DEBUG: Verdächtige Medikamenten-ähnliche Wörter (groß, >5 Zeichen)
+    // explizit protokollieren, damit wir sehen, ob sie hier verloren gehen.
+    if (/^[A-Z][a-zäöüß]{4,}$/.test(token)) {
+      const closestSource = sourceWords
+        .map(src => ({ src, score: isPlausibleSourceDerivedWord(token, [src]) ? 1 : 0 }))
+        .sort((a, b) => b.score - a.score)[0];
+      console.log(
+        `[DP-NovelWord DEBUG] suspicious "${token}" REMOVED from merge output. ` +
+        `Source words count: ${sourceWords.length}, closest plausible: "${closestSource?.src ?? 'NONE'}" ` +
+        `(text1 len=${text1.length}, text2 len=${text2.length})`
+      );
+    }
+
     removedWords.push(token);
     return false;
   });

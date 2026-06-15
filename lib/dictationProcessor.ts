@@ -1788,6 +1788,22 @@ KRITISCH - AUSGABEFORMAT:
   // Remove any Markdown formatting that the LLM may have added despite instructions
   cleaned = removeMarkdownFormatting(cleaned);
 
+  // DEBUG: Log LLM input/output for medication-like words (großgeschrieben, >5 Zeichen)
+  const MEDICATION_PATTERN = /\b[A-Z][a-zäöüß]{4,}\b/g;
+  const suspiciousOriginal = new Set(text.match(MEDICATION_PATTERN) ?? []);
+  const suspiciousCleaned = new Set(cleaned.match(MEDICATION_PATTERN) ?? []);
+  const allSuspicious = new Set([...suspiciousOriginal, ...suspiciousCleaned]);
+  if (allSuspicious.size > 0) {
+    console.log(`[Worker DEBUG correctText] LLM input (text, ${text.length} chars): ${text.substring(0, 200)}${text.length > 200 ? '...' : ''}`);
+    console.log(`[Worker DEBUG correctText] LLM output (cleaned, ${cleaned.length} chars): ${cleaned.substring(0, 200)}${cleaned.length > 200 ? '...' : ''}`);
+    for (const w of allSuspicious) {
+      const inInput = text.includes(w);
+      const inOutput = cleaned.includes(w);
+      const status = inInput && inOutput ? 'KEPT' : inInput && !inOutput ? 'DROPPED' : !inInput && inOutput ? 'ADDED' : 'NOT_PRESENT';
+      console.log(`[Worker DEBUG correctText] suspicious-word "${w}": ${status} (input contains=${inInput}, output contains=${inOutput})`);
+    }
+  }
+
   const phoneticGuardResult = applyLLMPhoneticGuard(text, cleaned);
   if (phoneticGuardResult.rejectedWordReplacements > 0) {
     console.log(
@@ -1796,7 +1812,15 @@ KRITISCH - AUSGABEFORMAT:
       `(checked: ${phoneticGuardResult.checkedWordReplacements})`
     );
   }
-  
+
+  // DEBUG: After guard, check which suspicious words are present
+  if (allSuspicious.size > 0) {
+    for (const w of allSuspicious) {
+      const inFinal = phoneticGuardResult.text.includes(w);
+      console.log(`[Worker DEBUG correctText] AFTER-GUARD suspicious-word "${w}": ${inFinal ? 'RESTORED' : 'STILL_MISSING'}`);
+    }
+  }
+
   // Note: Dictionary corrections are already applied in preprocessTranscription()
   // No need for cleanupText here anymore
   return phoneticGuardResult.text;

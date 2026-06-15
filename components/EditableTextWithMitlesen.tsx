@@ -4,6 +4,10 @@ import { diffWordsWithSpace } from 'diff';
 import { buildAnchorTimestampTable, type AnchorOriginalWord, type AnchorCorrectedWord } from '../lib/anchorMatching';
 import { areWordsPhoneticallySimilar } from '../lib/phoneticMatch';
 import ManualCorrectionSuggestion from './ManualCorrectionSuggestion';
+import WordActionPopup, { type WordCorrectionInfo } from './WordActionPopup';
+import { replaceAllInText } from '../lib/replaceText';
+
+const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 
 // Word with timestamp for highlighting
 interface TimestampedWord {
@@ -352,6 +356,13 @@ export default function EditableTextWithMitlesen({
   const [editModeText, setEditModeText] = useState('');
   const [lastManualChange, setLastManualChange] = useState<ManualWordChange | null>(null);
   
+  // Word popup state for double-click dictionary actions (like online mode)
+  const [wordPopup, setWordPopup] = useState<{
+    word: string;
+    position: { x: number; y: number };
+    correction: WordCorrectionInfo | null;
+  } | null>(null);
+  
   // Sync with prop changes (only when not in manual edit mode)
   useEffect(() => {
     if (!isManualEditMode) {
@@ -586,6 +597,80 @@ export default function EditableTextWithMitlesen({
     setLocalText(restoredText);
     onChange(restoredText);
   }, [localText, onChange, disabled]);
+  
+  // Double-click on a word: open WordActionPopup (like online mode)
+  const getWordAtClientPosition = useCallback((container: HTMLDivElement, clientX: number, clientY: number): { word: string; position: { x: number; y: number } } | null => {
+    // Use caret position from click to find the word
+    const range = document.caretRangeFromPoint(clientX, clientY);
+    if (!range || !container.contains(range.startContainer)) return null;
+    
+    // Expand range to cover the whole word
+    const textNode = range.startContainer;
+    if (textNode.nodeType !== Node.TEXT_NODE) return null;
+    
+    const text = textNode.textContent || '';
+    let start = range.startOffset;
+    let end = range.startOffset;
+    
+    // Expand backwards to word boundary
+    while (start > 0 && /[A-Za-zÄÖÜäöüß0-9]/.test(text[start - 1])) {
+      start--;
+    }
+    // Expand forwards to word boundary
+    while (end < text.length && /[A-Za-zÄÖÜäöüß0-9]/.test(text[end])) {
+      end++;
+    }
+    
+    if (start >= end) return null;
+    const word = text.slice(start, end).trim();
+    if (!word || /[\s]/.test(word)) return null;
+    
+    return { word, position: { x: clientX, y: clientY } };
+  }, []);
+  
+  const handleWordDoubleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (disabled || isManualEditMode) return;
+    const container = editableRef.current;
+    if (!container) return;
+    
+    const result = getWordAtClientPosition(container, event.clientX, event.clientY);
+    if (!result) return;
+    
+    // Show popup with correction=null (add-only mode, since we don't track
+    // per-field corrections in the offline editor like we do in app/page.tsx)
+    setWordPopup({
+      word: result.word,
+      position: result.position,
+      correction: null,
+    });
+  }, [disabled, isManualEditMode, getWordAtClientPosition]);
+  
+  const closeWordPopup = useCallback(() => {
+    setWordPopup(null);
+  }, []);
+  
+  // Listen for dictionary changes and apply replacements to text (like online mode)
+  useEffect(() => {
+    const handleDictionaryChanged = (event: Event) => {
+      const customEvent = event as CustomEvent<{ scope?: string; wrong?: string; correct?: string }>;
+      
+      const wrong = customEvent.detail?.wrong?.trim();
+      const correct = customEvent.detail?.correct?.trim();
+      
+      if (wrong && correct && wrong !== correct) {
+        setLocalText((currentText) => {
+          const updated = replaceAllInText(currentText, wrong, correct);
+          if (updated !== currentText) {
+            onChange(updated);
+          }
+          return updated;
+        });
+      }
+    };
+    
+    window.addEventListener(DICTIONARY_CHANGED_EVENT, handleDictionaryChanged);
+    return () => window.removeEventListener(DICTIONARY_CHANGED_EVENT, handleDictionaryChanged);
+  }, [onChange]);
   
   // Calculate match quality
   const matchQuality = useMemo(() => {
@@ -906,6 +991,7 @@ export default function EditableTextWithMitlesen({
           ref={editableRef}
           className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none min-h-[200px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 ${className}`}
           style={{ whiteSpace: 'pre-wrap' }}
+          onDoubleClick={handleWordDoubleClick}
         >
           {localText}
         </div>
@@ -916,6 +1002,16 @@ export default function EditableTextWithMitlesen({
             targetUsername={dictionaryTargetUsername}
             onConfirm={() => setLastManualChange(null)}
             onCancel={() => setLastManualChange(null)}
+          />
+        )}
+        {/* WordActionPopup for double-click (like online mode) */}
+        {wordPopup && (
+          <WordActionPopup
+            word={wordPopup.word}
+            position={wordPopup.position}
+            correction={wordPopup.correction}
+            targetUsername={dictionaryTargetUsername}
+            onClose={closeWordPopup}
           />
         )}
       </div>
@@ -967,6 +1063,7 @@ export default function EditableTextWithMitlesen({
         ref={editableRef}
         className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none overflow-auto min-h-[200px] max-h-[400px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 ${className}`}
         style={{ whiteSpace: 'pre-wrap' }}
+        onDoubleClick={handleWordDoubleClick}
       >
         {renderContent()}
       </div>
@@ -977,6 +1074,16 @@ export default function EditableTextWithMitlesen({
           targetUsername={dictionaryTargetUsername}
           onConfirm={() => setLastManualChange(null)}
           onCancel={() => setLastManualChange(null)}
+        />
+      )}
+      {/* WordActionPopup for double-click (like online mode) */}
+      {wordPopup && (
+        <WordActionPopup
+          word={wordPopup.word}
+          position={wordPopup.position}
+          correction={wordPopup.correction}
+          targetUsername={dictionaryTargetUsername}
+          onClose={closeWordPopup}
         />
       )}
     </div>

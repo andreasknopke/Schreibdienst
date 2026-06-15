@@ -447,7 +447,11 @@ REGELN:
 4. Füge NIEMALS neue Wörter, Überschriften oder Labels wie "Anamnese:" hinzu, wenn sie nicht bereits im Text stehen
 5. Wandle ausgeschriebene Zahlen in Ziffern um: "acht Millimeter" → "8 mm"
 6. Behalte den Stil des Diktierenden bei
-7. Gib AUSSCHLIESSLICH den korrigierten Text zurück - keine Erklärungen!${dictionaryPromptSection}${contextPromptSection}${groupPromptInsertSection}${promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : ''}`;
+7. Gib AUSSCHLIESSLICH den korrigierten Text zurück - keine Erklärungen!
+8. Markiere NIEMALS Wörter mit [?] oder [???], die du nicht kennst
+   (z. B. Medikamente wie "Falithrom", "Zirpin", Eigennamen, Fachbegriffe).
+   Solche Wörter sind oft korrekt - du erkennst sie nur nicht.
+   Lasse sie unverändert stehen. Nur bei echten Transkriptionsfehlern [?] setzen.${dictionaryPromptSection}${contextPromptSection}${groupPromptInsertSection}${promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : ''}`;
 
   // Helper to call a cloud LLM (OpenAI/Mistral) for a single chunk
   async function callCloudLLM(prompt: string, chunkText: string): Promise<string> {

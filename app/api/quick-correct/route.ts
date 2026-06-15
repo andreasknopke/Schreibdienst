@@ -32,6 +32,10 @@ STRENGE REGELN:
 6. Gib AUSSCHLIESSLICH den korrigierten Text zwischen den Markierungen zurück
 7. VERBOTEN: "Keine Korrekturen", "Der korrigierte Text lautet", Erklärungen, Kommentare
 8. Wenn keine Korrektur nötig: Gib den Text UNVERÄNDERT zurück
+9. Markiere NIEMALS Wörter mit [?] oder [???], die du nicht kennst
+   (z. B. Medikamente wie "Falithrom", "Zirpin", Eigennamen, Fachbegriffe).
+   Solche Wörter sind oft korrekt - du erkennst sie nur nicht.
+   Lasse sie unverändert stehen. Nur bei echten Transkriptionsfehlern [?] setzen.
 
 Beispiele:
 "Hirn Druck Zeichen" → "Hirndruckzeichen"

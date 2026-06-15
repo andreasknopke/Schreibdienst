@@ -1587,6 +1587,10 @@ UNKLARE TEXTSTELLEN - NIEMALS LÖSCHEN:
 - Auch wenn ein Satzteil inhaltlich unsinnig erscheint: NIEMALS entfernen, sondern [?] setzen
 - Bevor du Text löschst, frage dich: "Würde ich diesen Teil entfernen, wenn ich das Original-Audio hören würde?"
 - Im Zweifel: Originaltext beibehalten oder [?] setzen - NIEMALS löschen
+- WICHTIG: Markiere NIEMALS Wörter mit [?] oder [???], die du nicht verstehst oder nicht kennst
+  (z. B. Medikamentennamen wie "Falithrom", "Zirpin", Eigennamen, Fachbegriffe).
+  Solche Wörter sind oft korrekt transkribiert - du erkennst sie nur nicht.
+  Lasse sie unverändert stehen. Nur bei echten Transkriptionsfehlern [?] setzen.
 
 WICHTIG - DATUMSFORMATE NICHT ÄNDERN:
 - Datumsangaben wie "18.09.2025" sind bereits korrekt - NICHT ändern!
@@ -1653,6 +1657,10 @@ UNKLARE TEXTSTELLEN - NIEMALS LÖSCHEN:
 - Ersetze unklare Wörter STATTDESSEN mit [?] und behalte sie an Ort und Stelle
 - Auch wenn ein Satzteil inhaltlich unsinnig erscheint: NIEMALS entfernen, sondern [?] setzen
 - Im Zweifel: Originaltext beibehalten oder [?] setzen - NIEMALS löschen
+- WICHTIG: Markiere NIEMALS Wörter mit [?] oder [???], die du nicht kennst
+  (z. B. Medikamente wie "Falithrom", "Zirpin", Eigennamen, Fachbegriffe).
+  Solche Wörter sind oft korrekt - du erkennst sie nur nicht.
+  Lasse sie unverändert stehen. Nur bei echten Transkriptionsfehlern [?] setzen.
 
 REGELN:
 1. Korrigiere offensichtliche Grammatik- und Rechtschreibfehler

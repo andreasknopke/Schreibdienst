@@ -401,12 +401,83 @@ export function applyLLMPhoneticGuard(originalText: string, correctedText: strin
     guardedParts.push(guardedChunk);
   }
 
+  // Post-pass: LLM fügt oft defensive [???]-Marker an Wörter an, die es im
+  // Output gar nicht verändert hat (z. B. unbekannte Medikamentennamen wie
+  // "Falithrom" oder "Zirpin"). Diese Marker würden den Lesefluss zerstören,
+  // obwohl das LLM das Wort selbst als unverändert beibehalten hat.
+  // Wenn das Originalwort identisch im korrigierten Text vorkommt und das LLM
+  // nur einen [???]-Marker angehängt hat, wird der Marker entfernt.
+  const strippedText = stripDefensiveUncertaintyMarkers(originalText, guardedParts.join(''));
+
   return {
-    text: guardedParts.join(''),
+    text: strippedText,
     checkedWordReplacements,
     rejectedWordReplacements,
     revertedChunks,
   };
+}
+
+/**
+ * Erkennt und entfernt defensive Unsicherheits-Marker wie " [???]" oder
+ * " [?]", die das LLM an Wörter angehängt hat, die es nicht angerührt hat
+ * (z. B. unbekannte Medikamentennamen).
+ *
+ * Vorgehen:
+ * 1. Tokenisiere das LLM-Output in Wort- und Separator-Tokens
+ * 2. Wenn ein Wort-Token identisch zu einem Wort im Original vorkommt und
+ *    das folgende Separator-Token mit "[???]" / "[?]" beginnt, wird der
+ *    Marker entfernt (das Wort bleibt stehen)
+ *
+ * @returns Bereinigter Text
+ */
+export function stripDefensiveUncertaintyMarkers(originalText: string, correctedText: string): string {
+  if (!originalText || !correctedText || originalText === correctedText) {
+    return correctedText;
+  }
+
+  // Erzeuge ein Set aller normalisierten Original-Wörter
+  const originalWords = new Set<string>();
+  for (const match of originalText.match(/[A-Za-zÄÖÜäöüß0-9]+/g) ?? []) {
+    originalWords.add(normalizeForComparison(match));
+  }
+  if (originalWords.size === 0) {
+    return correctedText;
+  }
+
+  // Suche Unsicherheits-Marker im korrigierten Text. Diese können sein:
+  //   " [???]", " [?]", " [??]", " ??? ", " ?? " usw.
+  // Wir entfernen den Marker NUR, wenn das davorstehende Wort bereits im
+  // Original vorkommt (d.h. LLM hat das Wort nicht verändert).
+  //
+  // Strategie: Regex-Suche nach Markern, dann für jeden Fund prüfen, ob
+  // das vorhergehende Wort im Original enthalten ist. Wenn ja, Marker
+  // entfernen (inkl. umgebende Leerzeichen normalisieren).
+  const MARKER_REGEX = /\s*(\[\?{2,}\]|\?{2,})/g;
+
+  return correctedText.replace(MARKER_REGEX, (match, marker, offset) => {
+    // Suche rückwärts nach dem letzten Wort-Token vor diesem Marker.
+    // Wir erlauben beliebige Nicht-Wort-Zeichen (z. B. ".", ",", ";")
+    // zwischen dem Wort und dem Marker, da "Falithrom. [???]" üblich ist.
+    const beforeText = correctedText.slice(0, offset);
+
+    const wordMatch = beforeText.match(/([A-Za-zÄÖÜäöüß0-9]+)[^A-Za-zÄÖÜäöüß0-9]*$/);
+    if (!wordMatch) {
+      // Kein Wort davor → Marker behalten (sicherheitshalber)
+      return match;
+    }
+
+    const precedingWord = wordMatch[1];
+    const normalized = normalizeForComparison(precedingWord);
+
+    // Wenn das vorhergehende Wort im Original vorkommt, ist der Marker
+    // defensiv → entfernen. Das Leerzeichen vor dem Marker wird mit entfernt,
+    // damit kein doppeltes Leerzeichen entsteht.
+    if (originalWords.has(normalized)) {
+      return '';
+    }
+
+    return match;
+  });
 }
 
 // Deutsche Beuge-/Pluralendungen, längste zuerst (wichtig für korrektes Strippen).

@@ -727,6 +727,10 @@ export function applyOnlineDictationControlWords(text: string): string {
     result = result.replace(pattern, replacement);
   }
 
+  // Cleanup: Entferne überflüssige Kommas, die nach Doppelpunkt, Semikolon, Frage- oder
+  // Ausrufezeichen stehen (z.B. "Doppelpunkt Komma" → ":,", bereinigt zu ":").
+  result = result.replace(/([:;?!])\s*,/g, '$1');
+
   return cleanupFormattingPreserveTrailingBreaks(result);
 }
 

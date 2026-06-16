@@ -17,7 +17,7 @@ import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { formatGroupPromptInsertSection, getPromptInsertsForUserGroupsWithRequest } from '@/lib/groupDictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
-import { applyLLMPhoneticGuard } from '@/lib/phoneticMatch';
+import { applyLLMPhoneticGuard, buildProtectedWordsFromOperations } from '@/lib/phoneticMatch';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
 import { mergeTranscriptionsWithMarkers, createMergePrompt, stripNovelWordsFromMergeOutput, restoreMissingMedicalCodes, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 
@@ -406,7 +406,8 @@ async function correctText(
   username: string,
   patientName?: string,
   patientDob?: string,
-  dictionaryEntries?: DictionaryEntry[]
+  dictionaryEntries?: DictionaryEntry[],
+  protectedWords?: Set<string>
 ): Promise<string> {
   const runtimeConfig = await getRuntimeConfigWithRequest(request);
   const llmConfig = await getLLMConfig(request);
@@ -570,7 +571,7 @@ REGELN:
   // Remove any Markdown formatting that the LLM may have added despite instructions
   correctedText = removeMarkdownFormatting(correctedText);
 
-  const phoneticGuardResult = applyLLMPhoneticGuard(text, correctedText);
+  const phoneticGuardResult = applyLLMPhoneticGuard(text, correctedText, protectedWords);
   if (phoneticGuardResult.rejectedWordReplacements > 0) {
     console.log(
       `[ReCorrect] LLM phonetic guard rejected ${phoneticGuardResult.rejectedWordReplacements} ` +
@@ -808,13 +809,21 @@ export async function POST(req: NextRequest) {
     
     // Step 2: Final LLM correction
     const textBeforeLLM = preprocessedText;
+    
+    // Baue geschützte Wörter aus Preprocessing
+    const protectedWords = buildProtectedWordsFromOperations(preprocessingResult.operations);
+    if (protectedWords.size > 0) {
+      console.log(`[ReCorrect] Protected words from preprocessing: ${protectedWords.size} unique words`);
+    }
+    
     const correctedText = await correctText(
       req,
       preprocessedText,
       dictation.username,
       patientName,
       patientDob,
-      dictionaryEntries
+      dictionaryEntries,
+      protectedWords
     );
     
     // Log LLM correction if changed

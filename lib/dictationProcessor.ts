@@ -20,7 +20,7 @@ import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { formatGroupPromptInsertSection, getPromptInsertsForUserGroupsWithRequest } from '@/lib/groupDictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
-import { applyLLMPhoneticGuard, PHONETIC_DEBUG_LOGGING } from '@/lib/phoneticMatch';
+import { applyLLMPhoneticGuard, PHONETIC_DEBUG_LOGGING, buildProtectedWordsFromOperations } from '@/lib/phoneticMatch';
 import { compressAudioForSpeech, normalizeAudioForWhisper } from '@/lib/audioCompression';
 import { mergeTranscriptionsWithMarkers, createMergePrompt, stripNovelWordsFromMergeOutput, restoreMissingMedicalCodes, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
@@ -240,13 +240,23 @@ export async function processDictation(request: NextRequest, dictationId: number
     
     // Always use Arztbrief mode - no field parsing
     const textBeforeLLM = preprocessedText;
+    
+    // Baue ein Set geschützter Wörter aus den Preprocessing-Operationen.
+    // Diese Wörter wurden durch TextFormatting/Wörterbuch/Abkürzungen erzeugt
+    // und dürfen vom LLM nicht gelöscht werden (z.B. "Antikoagulation" → "AK").
+    const protectedWords = buildProtectedWordsFromOperations(preprocessingResult.operations);
+    if (protectedWords.size > 0) {
+      console.log(`[Worker] Protected words from preprocessing: ${protectedWords.size} unique words`);
+    }
+    
     const correctedText = await correctText(
       request, 
       preprocessedText, 
       dictation.username, 
       dictation.patient_name, 
       dictation.patient_dob,
-      dictionaryEntries
+      dictionaryEntries,
+      protectedWords
     );
     
     // Log LLM correction
@@ -1439,7 +1449,8 @@ async function correctText(
   username: string, 
   patientName?: string, 
   patientDob?: string,
-  dictionaryEntries?: DictionaryEntry[]
+  dictionaryEntries?: DictionaryEntry[],
+  protectedWords?: Set<string>
 ): Promise<string> {
   const llmConfig = await getLLMConfig(request);
   
@@ -1753,7 +1764,7 @@ KRITISCH - AUSGABEFORMAT:
     }
   }
 
-  const phoneticGuardResult = applyLLMPhoneticGuard(text, cleaned);
+  const phoneticGuardResult = applyLLMPhoneticGuard(text, cleaned, protectedWords);
   if (phoneticGuardResult.rejectedWordReplacements > 0) {
     console.log(
       `[Worker] LLM phonetic guard rejected ${phoneticGuardResult.rejectedWordReplacements} ` +

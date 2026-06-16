@@ -29,6 +29,48 @@ function debugLog(...args: unknown[]): void {
 }
 
 /**
+ * Extrahiert geschützte Wörter aus Preprocessing-Operationen (DictionaryCorrectionOperation).
+ * 
+ * Diese Wörter wurden durch TextFormatting/Wörterbuch/Abkürzungsregeln bewusst
+ * erzeugt (z.B. "Antikoagulation" → "AK", "milligramm" → "mg") und dürfen vom
+ * LLM NIEMALS gelöscht werden.
+ *
+ * @param operations - Liste der Preprocessing-Operationen
+ * @returns Set von normalisierten (lowercase, Umlaute aufgelöst) geschützten Wörtern
+ */
+export function buildProtectedWordsFromOperations(
+  operations: Array<{
+    replacementText: string;
+    dictionaryCorrect?: string;
+  }>
+): Set<string> {
+  const words = new Set<string>();
+  
+  for (const op of operations) {
+    if (!op.replacementText) continue;
+    
+    // Extrahiere alle Wort-Tokens aus dem replacementText
+    for (const token of op.replacementText.match(/[A-Za-zÄÖÜäöüß0-9]+/g) ?? []) {
+      // Nur Wörter mit ≥2 Zeichen (filtert einzelne Punktuations-Zeichen)
+      if (token.length >= 2) {
+        words.add(normalizeForComparison(token));
+      }
+    }
+    
+    // Auch das dictionaryCorrect-Wort schützen (falls unterschiedlich)
+    if (op.dictionaryCorrect && op.dictionaryCorrect !== op.replacementText) {
+      for (const token of op.dictionaryCorrect.match(/[A-Za-zÄÖÜäöüß0-9]+/g) ?? []) {
+        if (token.length >= 2) {
+          words.add(normalizeForComparison(token));
+        }
+      }
+    }
+  }
+  
+  return words;
+}
+
+/**
  * Kölner Phonetik — Phonetischer Code für deutsche Wörter.
  * Basiert auf Hans Joachim Postel (1969), optimiert für medizinisches Deutsch.
  * https://de.wikipedia.org/wiki/Kölner_Phonetik
@@ -309,8 +351,17 @@ function keepOnlyNonWordTokens(text: string): string {
 /**
  * Verhindert, dass das LLM einzelne Wörter oder ganze Wortgruppen durch
  * phonetisch unplausible Alternativen ersetzt.
+ *
+ * @param protectedWords - Optionales Set von Wörtern (normalisiert, lowercase),
+ *   die explizit vor dem LLM geschützt werden. Diese Wörter wurden durch
+ *   TextFormatting / Wörterbuch gezielt erzeugt (z.B. "Antikoagulation" → "AK")
+ *   und dürfen vom LLM NIEMALS gelöscht oder ersetzt werden.
  */
-export function applyLLMPhoneticGuard(originalText: string, correctedText: string): LLMPhoneticGuardResult {
+export function applyLLMPhoneticGuard(
+  originalText: string,
+  correctedText: string,
+  protectedWords?: Set<string>
+): LLMPhoneticGuardResult {
   if (!originalText || !correctedText || originalText === correctedText) {
     return {
       text: correctedText,
@@ -380,6 +431,21 @@ export function applyLLMPhoneticGuard(originalText: string, correctedText: strin
     }
 
     if (!addedText) {
+      // LLM hat Text komplett gelöscht ohne Ersatz → Original wiederherstellen
+      guardedParts.push(markTextAsUncertain(removedText));
+      revertedChunks++;
+      continue;
+    }
+
+    // PRÜFEN: Enthält der entfernte Text geschützte Wörter (aus TextFormatting)?
+    // Wenn ja, den gesamten Chunk blocken und Original behalten.
+    const removedWordsForProtection = tokenizeWordsAndSeparators(removedText).filter(isWordToken);
+    const hasProtectedWord = removedWordsForProtection.some(
+      w => protectedWords?.has(normalizeForComparison(w))
+    );
+    if (hasProtectedWord) {
+      const protectedList = removedWordsForProtection.filter(w => protectedWords!.has(normalizeForComparison(w)));
+      debugLog(`[PhonGuard PROTECTED] Protected word(s) found in removed text: ${protectedList.join(', ')} — restoring original`);
       guardedParts.push(markTextAsUncertain(removedText));
       revertedChunks++;
       continue;
@@ -444,7 +510,22 @@ export function applyLLMPhoneticGuard(originalText: string, correctedText: strin
   // obwohl das LLM das Wort selbst als unverändert beibehalten hat.
   // Wenn das Originalwort identisch im korrigierten Text vorkommt und das LLM
   // nur einen [???]-Marker angehängt hat, wird der Marker entfernt.
-  const strippedText = stripDefensiveUncertaintyMarkers(originalText, guardedParts.join(''));
+  const preStrippedText = guardedParts.join('');
+  const strippedText = stripDefensiveUncertaintyMarkers(originalText, preStrippedText);
+
+  // Post-pass: Geschützte Wörter (aus TextFormatting/Wörterbuch) verifizieren.
+  // Diese Wörter wurden durch Vorverarbeitung bewusst erzeugt und dürfen nicht
+  // vom LLM gelöscht werden. Falls sie im finalen Text fehlen, werden sie
+  // aus dem Original wiederhergestellt.
+  if (protectedWords && protectedWords.size > 0) {
+    const verified = verifyProtectedWords(originalText, strippedText, protectedWords);
+    return {
+      text: verified,
+      checkedWordReplacements,
+      rejectedWordReplacements,
+      revertedChunks,
+    };
+  }
 
   return {
     text: strippedText,
@@ -452,6 +533,76 @@ export function applyLLMPhoneticGuard(originalText: string, correctedText: strin
     rejectedWordReplacements,
     revertedChunks,
   };
+}
+
+/**
+ * Stellt sicher, dass geschützte Wörter (aus TextFormatting/Wörterbuch)
+ * im finalen Guard-Output vorhanden sind. Falls das LLM sie gelöscht hat,
+ * werden sie aus dem Originaltext wiederhergestellt.
+ *
+ * Strategie: Für jedes fehlende geschützte Wort wird sein umgebender
+ * Kontext (einige Wörter vorher/nachher) im Original extrahiert.
+ * Dieser Kontext wird dann im Guard-Output gesucht und das fehlende Wort
+ * an der passenden Stelle eingefügt.
+ */
+function verifyProtectedWords(
+  originalText: string,
+  guardedText: string,
+  protectedWords: Set<string>
+): string {
+  const missingWords: Array<{ word: string; originalPos: number }> = [];
+  const wordRegex = /[A-Za-zÄÖÜäöüß0-9]+/g;
+  
+  for (const match of originalText.matchAll(wordRegex)) {
+    const word = match[0];
+    const normalized = normalizeForComparison(word);
+    if (!protectedWords.has(normalized)) continue;
+    if (guardedText.includes(word)) continue;
+    missingWords.push({ word, originalPos: match.index! });
+  }
+  
+  if (missingWords.length === 0) return guardedText;
+  
+  console.log(
+    `[PhonGuard] Protected-word verification: ${missingWords.length} word(s) ` +
+    `missing from LLM output — restoring from original`
+  );
+  
+  let result = guardedText;
+  for (const mw of missingWords) {
+    // Suche 2 Wörter vor und nach dem fehlenden Wort als Kontext-Anker
+    const before = originalText.slice(Math.max(0, mw.originalPos - 50), mw.originalPos);
+    const after = originalText.slice(mw.originalPos + mw.word.length, mw.originalPos + mw.word.length + 50);
+    const anchorBefore = (before.match(/(\S+)\s*(\S+)\s*$/) || []).slice(1).filter(Boolean).join(' ');
+    const anchorAfter = (after.match(/^\s*(\S+)\s*(\S+)/) || []).slice(1).filter(Boolean).join(' ');
+    
+    // Anker im guardedText suchen
+    let insertPos = -1;
+    if (anchorBefore) {
+      const idx = result.toLowerCase().indexOf(anchorBefore.toLowerCase());
+      if (idx !== -1) insertPos = idx + anchorBefore.length;
+    }
+    if (insertPos === -1 && anchorAfter) {
+      const idx = result.toLowerCase().indexOf(anchorAfter.toLowerCase());
+      if (idx !== -1) insertPos = idx;
+    }
+    
+    if (insertPos !== -1) {
+      const beforePart = result.slice(0, insertPos);
+      const afterPart = result.slice(insertPos);
+      const spaceB = beforePart && !beforePart.endsWith(' ') && !beforePart.endsWith('\n');
+      const spaceA = afterPart && !afterPart.startsWith(' ') && !afterPart.startsWith('\n');
+      result = beforePart + (spaceB ? ' ' : '') + mw.word + (spaceA ? ' ' : '') + afterPart;
+      console.log(`[PhonGuard] ✓ Restored protected word "${mw.word}" (anchor: "${anchorBefore || anchorAfter}")`);
+    } else {
+      // Fallback: ans Ende
+      const t = result.trimEnd();
+      result = t + (t ? '. ' : '') + mw.word + '.';
+      console.log(`[PhonGuard] ⚠️ No context for "${mw.word}" — appended at end`);
+    }
+  }
+  
+  return result;
 }
 
 /**

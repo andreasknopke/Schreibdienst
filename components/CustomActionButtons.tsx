@@ -18,6 +18,7 @@ interface CustomActionButtonsProps {
   onResult: (result: string, isAppend?: boolean) => void;
   disabled?: boolean;
   onManageClick: () => void;
+  layout?: 'vertical' | 'horizontal';
 }
 
 export default function CustomActionButtons({
@@ -26,7 +27,8 @@ export default function CustomActionButtons({
   getAllTexts,
   onResult,
   disabled,
-  onManageClick
+  onManageClick,
+  layout = 'vertical'
 }: CustomActionButtonsProps) {
   const { getAuthHeader, getDbTokenHeader, username } = useAuth();
   const [actions, setActions] = useState<CustomAction[]>([]);
@@ -147,9 +149,11 @@ export default function CustomActionButtons({
 
   if (!username) return null;
 
+  const isHorizontal = layout === 'horizontal';
+
   return (
     <>
-      <div className="flex flex-col gap-1">
+      <div className={isHorizontal ? 'flex items-center gap-1 flex-wrap' : 'flex flex-col gap-1'}>
         {/* Action buttons */}
         {!loading && relevantActions.map(action => (
           <button
@@ -178,7 +182,7 @@ export default function CustomActionButtons({
         
         {/* Loading state */}
         {loading && (
-          <div className="flex items-center justify-center py-2">
+          <div className={`flex items-center justify-center ${isHorizontal ? '' : 'py-2'}`}>
             <Spinner size={14} />
           </div>
         )}
@@ -195,12 +199,12 @@ export default function CustomActionButtons({
           title="Aktionen verwalten"
         >
           <span>⚙️</span>
-          <span>{actions.length === 0 ? 'Aktionen' : ''}</span>
+          <span>Aktionen</span>
         </button>
         
         {/* Error display */}
         {error && (
-          <div className="text-xs text-red-500 px-1 mt-1">
+          <div className={`text-xs text-red-500 px-1 ${isHorizontal ? '' : 'mt-1'}`}>
             {error}
           </div>
         )}

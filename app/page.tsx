@@ -28,7 +28,10 @@ import { replaceAllInText } from '@/lib/replaceText';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
+const LIVE_EDITOR_WIDTH_STORAGE_KEY = 'schreibdienst:live-editor-width';
+const LIVE_EDITOR_WIDTH_CHANGED_EVENT = 'schreibdienst:live-editor-width-changed';
 type GlobalHotkeyAction = 'toggle-recording' | 'stop-recording' | 'transfer-text' | 'cancel-recording';
+type LiveEditorWidth = 'small' | 'a4' | 'full';
 
 // Hilfsfunktion zum Kopieren in die Zwischenablage
 async function copyToClipboard(text: string): Promise<void> {
@@ -94,6 +97,12 @@ interface TextHistorySnapshot {
   methodik: string;
   beurteilung: string;
 }
+
+const LIVE_EDITOR_WIDTH_OPTIONS: Array<{ value: LiveEditorWidth; label: string }> = [
+  { value: 'small', label: 'Schmal' },
+  { value: 'a4', label: 'A4' },
+  { value: 'full', label: 'Breit' },
+];
 
 const EMPTY_MANUAL_WORD_CHANGES: Record<TextInsertionTarget, ManualWordChange | null> = {
   transcript: null,
@@ -441,6 +450,7 @@ export default function HomePage() {
     beurteilung: hiddenCaretOverlay(),
   });
   const [mode, setMode] = useState<'arztbrief' | 'befund'>('befund');
+  const [liveEditorWidth, setLiveEditorWidth] = useState<LiveEditorWidth>('small');
   const modeRef = useRef<'arztbrief' | 'befund'>('befund');
   useEffect(() => { modeRef.current = mode; }, [mode]);
   const [busy, setBusy] = useState(false);
@@ -742,6 +752,17 @@ export default function HomePage() {
       }
     } catch {
       // localStorage nicht verfügbar (z. B. SSR)
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LIVE_EDITOR_WIDTH_STORAGE_KEY);
+      if (saved === 'small' || saved === 'a4' || saved === 'full') {
+        setLiveEditorWidth(saved);
+      }
+    } catch {
+      // localStorage nicht verfügbar
     }
   }, []);
 
@@ -4052,6 +4073,36 @@ export default function HomePage() {
 
   const Aufnahme = (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/40">
+        <div>
+          <div className="text-xs font-medium text-gray-700 dark:text-gray-200">Textfeld-Breite</div>
+          <div className="text-[11px] text-gray-500 dark:text-gray-400">Nur fuer den Live-Modus</div>
+        </div>
+        <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+          {LIVE_EDITOR_WIDTH_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                liveEditorWidth === option.value
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+              }`}
+              onClick={() => {
+                setLiveEditorWidth(option.value);
+                try {
+                  localStorage.setItem(LIVE_EDITOR_WIDTH_STORAGE_KEY, option.value);
+                } catch {}
+                window.dispatchEvent(new Event(LIVE_EDITOR_WIDTH_CHANGED_EVENT));
+              }}
+              aria-pressed={liveEditorWidth === option.value}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="flex items-center gap-3">
         {recording ? (
           <div className="flex items-center gap-3 flex-1">
@@ -4402,8 +4453,9 @@ export default function HomePage() {
           )}
         </button>
       )}
-      <div className="text-xs">
-        {recording ? (
+      {(recording || correcting || busy) && (
+        <div className="text-xs">
+          {recording ? (
           <div className="flex flex-col">
             <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400">
               <span className="pulse-dot" style={{ width: 8, height: 8 }} /> 
@@ -4415,18 +4467,17 @@ export default function HomePage() {
               </span>
             )}
           </div>
-        ) : correcting ? (
-          <span className="flex items-center gap-1.5 text-purple-600 dark:text-purple-400">
-            <Spinner size={10} /> KI-Korrektur
-          </span>
-        ) : busy ? (
-          <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
-            <Spinner size={10} /> Verarbeitung
-          </span>
-        ) : (
-          <span className="text-gray-500">Bereit</span>
-        )}
-      </div>
+          ) : correcting ? (
+            <span className="flex items-center gap-1.5 text-purple-600 dark:text-purple-400">
+              <Spinner size={10} /> KI-Korrektur
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
+              <Spinner size={10} /> Verarbeitung
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 
@@ -4466,10 +4517,34 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* Mitte: Medizinische Fachwörter / Alltagssprache */}
-            <div className="flex-1 flex items-center justify-center">
+            {/* Mitte: Medizinische Fachwörter / Alltagssprache + Textbreite */}
+            <div className="flex-1 flex items-center justify-center gap-3">
+              <div className="inline-flex h-9 items-center rounded-md bg-gray-100 p-0.5 dark:bg-gray-800">
+                {LIVE_EDITOR_WIDTH_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`h-8 min-w-[3.5rem] rounded px-2.5 text-[10px] font-medium transition-colors ${
+                      liveEditorWidth === option.value
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-gray-600 hover:bg-white dark:text-gray-300 dark:hover:bg-gray-700'
+                    }`}
+                    onClick={() => {
+                      setLiveEditorWidth(option.value);
+                      try {
+                        localStorage.setItem(LIVE_EDITOR_WIDTH_STORAGE_KEY, option.value);
+                      } catch {}
+                      window.dispatchEvent(new Event(LIVE_EDITOR_WIDTH_CHANGED_EVENT));
+                    }}
+                    aria-pressed={liveEditorWidth === option.value}
+                    title={`Textbreite auf ${option.label} setzen`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
               <button
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                className={`inline-flex h-9 min-w-[11rem] items-center justify-center gap-1.5 px-3 text-xs font-medium rounded-md border transition-colors ${
                   dictionarySet === 'medical'
                     ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
                     : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
@@ -4489,7 +4564,7 @@ export default function HomePage() {
                   }`}
                   aria-hidden="true"
                 />
-                {dictionarySet === 'medical' ? 'Medizinische Fachwörter' : 'Alltagssprache'}
+                {dictionarySet === 'medical' ? 'Medizinisch' : 'Alltagssprache'}
               </button>
             </div>
 
@@ -4540,7 +4615,7 @@ export default function HomePage() {
             {/* Links: Raumlautstärke */}
             <div className="flex-1 flex items-center justify-start">
               {(!recording || !runtimeConfig || runtimeConfig.transcriptionProvider === 'voxtral_local' || runtimeConfig.transcriptionProvider === 'whisperx' || runtimeConfig.transcriptionProvider === 'mistral') && (
-                <div className="flex flex-col items-center gap-0 text-xs border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1">
+                <div className="flex h-9 flex-col items-center justify-center gap-0 text-xs border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1">
                   <div className="flex items-center gap-1.5">
                     <span className="text-gray-500 select-none" title="Je höher, desto lauter muss Sprache sein um erkannt zu werden">🎚️</span>
                     <input
@@ -4569,7 +4644,7 @@ export default function HomePage() {
               {canRevert && preCorrectionState && (
                 <>
                   <button
-                    className="btn btn-outline text-sm py-1.5 px-3 text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-600 dark:hover:bg-amber-900/20"
+                    className="btn btn-outline h-9 text-sm px-3 text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-600 dark:hover:bg-amber-900/20"
                     onClick={handleRevert}
                     title="Korrektur rückgängig machen - zeigt den Originaltext"
                     disabled={correcting}
@@ -4577,7 +4652,7 @@ export default function HomePage() {
                     ↩ Revert
                   </button>
                   <button
-                    className={`btn text-sm py-1.5 px-3 ${showDiffView ? 'btn-primary' : 'btn-outline'}`}
+                    className={`btn h-9 text-sm px-3 ${showDiffView ? 'btn-primary' : 'btn-outline'}`}
                     onClick={() => setShowDiffView(!showDiffView)}
                     title="Zeigt Unterschiede zwischen Original und KI-Korrektur"
                     disabled={correcting || isReverted}
@@ -4589,7 +4664,7 @@ export default function HomePage() {
               {isReverted && preCorrectionState && (
                 <>
                   <button
-                    className="btn btn-outline text-sm py-1.5 px-3 text-purple-600 border-purple-300 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-600 dark:hover:bg-purple-900/20"
+                    className="btn btn-outline h-9 text-sm px-3 text-purple-600 border-purple-300 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-600 dark:hover:bg-purple-900/20"
                     onClick={handleReCorrect}
                     title="Korrektur erneut durchführen"
                     disabled={correcting}
@@ -4597,7 +4672,7 @@ export default function HomePage() {
                     {correcting ? <Spinner size={14} /> : '🔄 Neu korrigieren'}
                   </button>
                   <label
-                    className="flex items-center gap-1.5 text-xs cursor-pointer select-none px-2 py-1 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    className="flex h-9 items-center gap-1.5 text-xs cursor-pointer select-none px-2 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
                     title="Sprachbefehle wie 'Punkt eins', 'Nächster Punkt', 'Absatz' anwenden"
                   >
                     <input
@@ -4611,7 +4686,7 @@ export default function HomePage() {
                 </>
               )}
               <button
-                className={`btn text-sm py-1.5 px-3 ${pendingCorrection && !correctionButtonDisabled ? 'btn-primary animate-pulse' : 'btn-outline'}`}
+                className={`btn h-9 text-sm px-3 ${pendingCorrection && !correctionButtonDisabled ? 'btn-primary animate-pulse' : 'btn-outline'}`}
                 onClick={mode === 'befund' ? handleFormatBefund : handleManualCorrect}
                 title={hasCorrectionText ? 'KI-Korrektur durchführen' : 'Text eingeben, um die KI-Korrektur zu aktivieren'}
                 disabled={correctionButtonDisabled}
@@ -4624,7 +4699,7 @@ export default function HomePage() {
             <div className="flex-1 flex items-center justify-end">
               <div className="flex items-center gap-1">
                 <select
-                  className={`select text-sm py-1.5 w-44 ${templateMode ? 'border-orange-400 ring-1 ring-orange-300' : ''}`}
+                  className={`select h-9 text-sm w-44 ${templateMode ? 'border-orange-400 ring-1 ring-orange-300' : ''}`}
                   value={selectedTemplate?.id || ''}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -4661,6 +4736,7 @@ export default function HomePage() {
                     ✕
                   </button>
                 )}
+
               </div>
             </div>
           </div>
@@ -4890,8 +4966,7 @@ export default function HomePage() {
       {mode === 'befund' ? (
         <div className="space-y-3">
           {/* Methodik-Feld mit Action-Buttons */}
-          <div className="flex gap-2">
-            <div className="card flex-1">
+          <div className="card">
               <div className="card-body py-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium flex items-center gap-2">
@@ -4915,6 +4990,15 @@ export default function HomePage() {
                     >
                       📋
                     </button>
+                    <CustomActionButtons
+                      currentField="methodik"
+                      getText={() => methodik}
+                      getAllTexts={() => ({ methodik, befund: transcript, beurteilung })}
+                      onResult={(result) => setMethodik(result)}
+                      disabled={isProcessing}
+                      onManageClick={() => setShowCustomActionsManager(true)}
+                      layout="horizontal"
+                    />
                   </div>
                 </div>
                 {/* Diff View für Methodik */}
@@ -4965,23 +5049,10 @@ export default function HomePage() {
                   />
                 )}
               </div>
-            </div>
-            {/* Action Buttons für Methodik */}
-            <div className="w-24 flex-shrink-0">
-              <CustomActionButtons
-                currentField="methodik"
-                getText={() => methodik}
-                getAllTexts={() => ({ methodik, befund: transcript, beurteilung })}
-                onResult={(result) => setMethodik(result)}
-                disabled={isProcessing}
-                onManageClick={() => setShowCustomActionsManager(true)}
-              />
-            </div>
           </div>
 
           {/* Befund-Feld (Hauptfeld) mit Action-Buttons */}
-          <div className="flex gap-2">
-            <div className="card flex-1">
+          <div className="card">
               <div className="card-body py-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium flex items-center gap-2">
@@ -5005,6 +5076,15 @@ export default function HomePage() {
                     >
                       📋
                     </button>
+                    <CustomActionButtons
+                      currentField="befund"
+                      getText={() => transcript}
+                      getAllTexts={() => ({ methodik, befund: transcript, beurteilung })}
+                      onResult={(result) => setTranscript(result)}
+                      disabled={isProcessing}
+                      onManageClick={() => setShowCustomActionsManager(true)}
+                      layout="horizontal"
+                    />
                   </div>
                 </div>
                 {/* Diff View für Befund */}
@@ -5060,18 +5140,6 @@ export default function HomePage() {
                   </div>
                 )}
               </div>
-            </div>
-            {/* Action Buttons für Befund */}
-            <div className="w-24 flex-shrink-0">
-              <CustomActionButtons
-                currentField="befund"
-                getText={() => transcript}
-                getAllTexts={() => ({ methodik, befund: transcript, beurteilung })}
-                onResult={(result) => setTranscript(result)}
-                disabled={isProcessing}
-                onManageClick={() => setShowCustomActionsManager(true)}
-              />
-            </div>
           </div>
 
           {/* Warnbanner bei signifikanten Änderungen */}
@@ -5080,8 +5148,7 @@ export default function HomePage() {
           )}
 
           {/* Beurteilung-Feld mit Action-Buttons */}
-          <div className="flex gap-2">
-            <div className="card flex-1">
+          <div className="card">
               <div className="card-body py-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -5110,6 +5177,15 @@ export default function HomePage() {
                     >
                       📋
                     </button>
+                    <CustomActionButtons
+                      currentField="beurteilung"
+                      getText={() => beurteilung}
+                      getAllTexts={() => ({ methodik, befund: transcript, beurteilung })}
+                      onResult={(result) => setBeurteilung(result)}
+                      disabled={isProcessing}
+                      onManageClick={() => setShowCustomActionsManager(true)}
+                      layout="horizontal"
+                    />
                   </div>
                 </div>
                 {/* Diff View für Beurteilung */}
@@ -5171,18 +5247,6 @@ export default function HomePage() {
                   )}
                 </button>
               </div>
-            </div>
-            {/* Action Buttons für Beurteilung */}
-            <div className="w-24 flex-shrink-0">
-              <CustomActionButtons
-                currentField="beurteilung"
-                getText={() => beurteilung}
-                getAllTexts={() => ({ methodik, befund: transcript, beurteilung })}
-                onResult={(result) => setBeurteilung(result)}
-                disabled={isProcessing}
-                onManageClick={() => setShowCustomActionsManager(true)}
-              />
-            </div>
           </div>
         </div>
       ) : (
@@ -5209,6 +5273,14 @@ export default function HomePage() {
                 >
                   📋
                 </button>
+                <CustomActionButtons
+                  currentField="transcript"
+                  getText={() => transcript}
+                  onResult={(result) => setTranscript(result)}
+                  disabled={isProcessing}
+                  onManageClick={() => setShowCustomActionsManager(true)}
+                  layout="horizontal"
+                />
               </div>
             </div>
             
@@ -5226,8 +5298,8 @@ export default function HomePage() {
               </div>
             )}
             
-            <div className="flex gap-2">
-              <div className="flex-1">
+            <div>
+              <div>
                 <div className="relative">
                   <textarea
                     ref={transcriptTextareaRef}
@@ -5273,16 +5345,6 @@ export default function HomePage() {
                 <div className="mt-2">
                   <button className="btn btn-outline text-sm py-2 w-full" onClick={handleExportDocx} disabled={!transcript}>.docx</button>
                 </div>
-              </div>
-              {/* Action Buttons für Arztbrief */}
-              <div className="w-24 flex-shrink-0">
-                <CustomActionButtons
-                  currentField="transcript"
-                  getText={() => transcript}
-                  onResult={(result) => setTranscript(result)}
-                  disabled={isProcessing}
-                  onManageClick={() => setShowCustomActionsManager(true)}
-                />
               </div>
             </div>
           </div>

@@ -1,5 +1,5 @@
 "use client";
-import { ReactNode, useEffect } from 'react';
+import React, { ReactNode, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { AuthProvider, useAuth } from '@/components/AuthProvider';
@@ -9,12 +9,57 @@ import UserMenu from '@/components/UserMenu';
 import LoginForm from '@/components/LoginForm';
 import { startHidMediaControls, stopHidMediaControls } from '@/lib/hidMediaControls';
 
+const LIVE_EDITOR_WIDTH_CHANGED_EVENT = 'schreibdienst:live-editor-width-changed';
+const LIVE_EDITOR_WIDTH_STORAGE_KEY = 'schreibdienst:live-editor-width';
+
+type LiveEditorWidth = 'small' | 'a4' | 'full';
+
+function getLiveEditorWidthClass(width: LiveEditorWidth): string {
+  switch (width) {
+    case 'full':
+      return 'w-full';
+    case 'a4':
+      return 'max-w-5xl';
+    case 'small':
+    default:
+      return 'max-w-2xl';
+  }
+}
+
 function LayoutContent({ children }: { children: ReactNode }) {
   const { isLoggedIn, canViewAllDictations, username, isAdmin } = useAuth();
   const pathname = usePathname();
-  
-  // Offline- und Statistik-Seiten bekommen volle Breite (Tabellen/Dashboards)
-  const isFullWidth = pathname === '/offline' || pathname === '/stats';
+  const [liveEditorWidth, setLiveEditorWidth] = React.useState<LiveEditorWidth>('small');
+
+  useEffect(() => {
+    if (pathname !== '/') {
+      return;
+    }
+
+    const readSetting = () => {
+      try {
+        const saved = window.localStorage.getItem(LIVE_EDITOR_WIDTH_STORAGE_KEY);
+        if (saved === 'small' || saved === 'a4' || saved === 'full') {
+          setLiveEditorWidth(saved);
+          return;
+        }
+      } catch {
+        // localStorage nicht verfügbar
+      }
+
+      setLiveEditorWidth('small');
+    };
+
+    readSetting();
+    window.addEventListener(LIVE_EDITOR_WIDTH_CHANGED_EVENT, readSetting);
+    return () => window.removeEventListener(LIVE_EDITOR_WIDTH_CHANGED_EVENT, readSetting);
+  }, [pathname]);
+
+  const pageWidthClass = pathname === '/'
+    ? getLiveEditorWidthClass(liveEditorWidth)
+    : pathname === '/offline' || pathname === '/stats'
+      ? 'w-full'
+      : 'max-w-2xl';
 
   if (!isLoggedIn) {
     return (
@@ -45,7 +90,7 @@ function LayoutContent({ children }: { children: ReactNode }) {
   return (
     <>
       <header className="border-b bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:bg-zinc-900/80 sticky top-0 z-40">
-        <div className={`${isFullWidth ? 'w-full' : 'max-w-2xl'} mx-auto px-3 py-2 flex items-center justify-between`}>
+        <div className={`${pageWidthClass} mx-auto px-3 py-2 flex items-center justify-between`}>
           <div className="flex items-center gap-2 min-w-0">
             <div className="h-7 w-7 rounded-lg bg-[rgb(var(--primary-600))] flex items-center justify-center">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="white">
@@ -68,7 +113,7 @@ function LayoutContent({ children }: { children: ReactNode }) {
           </nav>
         </div>
         {/* Mode Navigation Tabs */}
-        <div className={`${isFullWidth ? 'w-full' : 'max-w-2xl'} mx-auto px-3 pb-2`}>
+        <div className={`${pageWidthClass} mx-auto px-3 pb-2`}>
           <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
             <Link
               href="/"
@@ -105,7 +150,7 @@ function LayoutContent({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      <main className={`${isFullWidth ? 'w-full' : 'max-w-2xl'} mx-auto px-3 py-4`}>{children}</main>
+      <main className={`${pageWidthClass} mx-auto px-3 py-4`}>{children}</main>
     </>
   );
 }

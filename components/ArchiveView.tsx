@@ -64,7 +64,6 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
   const [showAllLayers, setShowAllLayers] = useState(false);
   const [detailData, setDetailData] = useState<ArchivedDictation | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   
   // Audio player state
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -444,27 +443,20 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
         </div>
       )}
       
-      {/* Detail View */}
+      {/* Detail View — always as fixed overlay (like Queue fullscreen) */}
       {selectedDictation && (
-        <div className={`card ${isFullscreen ? 'fixed inset-4 z-50 overflow-hidden' : ''}`}>
-          {isFullscreen && <div className="fixed inset-0 bg-black/50 -z-10" onClick={() => setIsFullscreen(false)} />}
-          <div className={`card-body ${isFullscreen ? 'flex h-full min-h-0 flex-col gap-4 overflow-y-auto' : 'space-y-3'}`}>
+        <div className="fixed inset-4 z-50 card overflow-hidden">
+          {/* Backdrop */}
+          <div className="fixed inset-0 bg-black/50 -z-10" onClick={() => setSelectedId(null)} />
+          <div className="card-body flex h-full min-h-0 flex-col gap-4 overflow-y-auto">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between shrink-0">
               <h4 className="font-medium">Diktat #{selectedDictation.order_number}</h4>
-              <div className="flex items-center gap-2">
-                {!isFullscreen && (
-                  <button className="btn btn-xs btn-ghost" onClick={() => { setIsFullscreen(true); showMitlesen && parsedSegments.length > 0 && loadAudio(selectedDictation.id); }} title="Vollbild mit Audio & Mitlesen">🗖 Vollbild</button>
-                )}
-                {isFullscreen && (
-                  <button className="btn btn-xs btn-ghost" onClick={() => setIsFullscreen(false)} title="Vollbild beenden">🗗 Verkleinern</button>
-                )}
-                <button className="text-gray-500 hover:text-gray-700 text-xl" onClick={() => { setSelectedId(null); setIsFullscreen(false); }}>✕</button>
-              </div>
+              <button className="text-gray-500 hover:text-gray-700 text-xl" onClick={() => setSelectedId(null)}>✕</button>
             </div>
 
             {/* Metadata */}
-            <div className={`text-sm grid ${isFullscreen ? 'grid-cols-3 gap-2' : 'grid-cols-2 gap-2'}`}>
+            <div className="text-sm grid grid-cols-2 md:grid-cols-3 gap-2 shrink-0">
               <div><span className="text-gray-500">Erstellt:</span> {formatDate(selectedDictation.created_at)}</div>
               {selectedDictation.completed_at && <div><span className="text-gray-500">Fertig:</span> {formatDate(selectedDictation.completed_at)}</div>}
               <div><span className="text-gray-500">Archiviert:</span> {selectedDictation.archived_at ? formatDate(selectedDictation.archived_at) : '-'}</div>
@@ -548,7 +540,7 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
                     showMitlesen={showMitlesen}
                     showDiff={showAllLayers}
                     disabled={true}
-                    className={isFullscreen ? 'min-h-[50vh]' : 'min-h-[200px] max-h-[400px]'}
+                    className="min-h-[40vh]"
                     dictionaryTargetUsername={selectedDictation.username}
                     onChange={() => {}}
                   />

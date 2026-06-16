@@ -577,6 +577,15 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   { pattern: /[.,;\s]*\bneue\s+zeile\b[.,;\s]*/gi, replacement: '\n' },
   { pattern: /[.,;\s]*\bnächste\s+zeile\b[.,;\s]*/gi, replacement: '\n' },
   
+  // Indent control:
+  //   "eingerückt" → new line + indent (e.g. 2 spaces)
+  //   "rücke ein" → same (common dictation variant)
+  //   "nächster Punkt eingerückt" → new line with bullet + indent
+  { pattern: /[.,;\s]*\bnächster\s+punkt\s+eingerückt\b[.,;\s]*/gi, replacement: '\n  - ' },
+  { pattern: /[.,;\s]*\beingerückt\b[.,;\s]*/gi, replacement: '\n  ' },
+  { pattern: /[.,;\s]*\brücke\s+ein\b[.,;\s]*/gi, replacement: '\n  ' },
+  { pattern: /[.,;\s]*\beinrücken\b[.,;\s]*/gi, replacement: '\n  ' },
+  
   // Bullet points (Aufzählungsanstriche)
   // "nächster Anstrich" must come before "Anstrich" (multi-word first)
   { pattern: /[.,;\s]*\bnächster\s+anstrich\b[.,;\s]*/gi, replacement: '\n- ' },
@@ -1015,11 +1024,13 @@ export function applyFormattingControlWordsWithStats(text: string): ControlWordR
       const patternStr = pattern.source.toLowerCase();
       if (patternStr.includes('anstrich')) {
         stats.bulletPoints += count;
-      } else if (patternStr.includes('absatz') || patternStr.includes('zeile')) {
+      } else if (patternStr.includes('absatz') || patternStr.includes('zeile') || patternStr.includes('eingerückt') || patternStr.includes('einrücken') || patternStr.includes('rücke')) {
         if (patternStr.includes('zeile')) {
           stats.lineBreaks += count;
-        } else {
+        } else if (patternStr.includes('absatz')) {
           stats.paragraphs += count;
+        } else {
+          stats.lineBreaks += count; // eingerückt/rücke ein/einrücken zählen als Zeilenumbruch
         }
       } else if (patternStr.includes('klammer')) {
         stats.brackets += count;

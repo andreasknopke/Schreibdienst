@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUserWithRequest, listUsersWithRequest } from '@/lib/usersDb';
+import { parseBasicAuth } from '@/lib/apiHelpers';
 import {
   createDictionaryGroupWithRequest,
   deleteDictionaryGroupWithRequest,
@@ -20,9 +21,9 @@ async function getAdmin(request: NextRequest): Promise<{ valid: boolean; usernam
   if (!authHeader || !authHeader.startsWith('Basic ')) return { valid: false };
 
   try {
-    const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
-    const [username, password] = credentials.split(':');
-    const result = await authenticateUserWithRequest(request, username, password);
+    const parsed = parseBasicAuth(authHeader);
+    if (!parsed) return { valid: false };
+    const result = await authenticateUserWithRequest(request, parsed.username, parsed.password);
     if (result.success && result.user?.isAdmin) {
       return { valid: true, username: result.user.username };
     }

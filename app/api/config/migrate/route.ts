@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPoolForRequest } from '@/lib/db';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
+import { parseBasicAuth } from '@/lib/apiHelpers';
 
 // Prüft ob der User root ist
 async function isRootUser(request: NextRequest): Promise<boolean> {
@@ -10,9 +11,9 @@ async function isRootUser(request: NextRequest): Promise<boolean> {
   }
   
   try {
-    const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
-    const [username, password] = credentials.split(':');
-    const result = await authenticateUserWithRequest(request, username, password);
+    const parsed = parseBasicAuth(authHeader);
+    if (!parsed) return false;
+    const result = await authenticateUserWithRequest(request, parsed.username, parsed.password);
     return result.success && result.user?.username.toLowerCase() === 'root';
   } catch {
     return false;

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
+import { parseBasicAuth } from '@/lib/apiHelpers';
 import { removeEntryWithRequest, increaseEntryPhoneticMinSimilarityWithRequest } from '@/lib/dictionaryDb';
 import { increaseDictionaryGroupEntryPhoneticMinSimilarityWithRequest, removeDictionaryGroupEntryWithRequest } from '@/lib/groupDictionaryDb';
 import { removeStandardDictEntry, increaseStandardDictPhoneticMinSimilarity } from '@/lib/standardDictionaryDb';
@@ -14,9 +15,9 @@ async function getAuthenticatedRoot(request: NextRequest): Promise<{ username: s
   }
 
   try {
-    const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
-    const [username, password] = credentials.split(':');
-    const result = await authenticateUserWithRequest(request, username, password);
+    const parsed = parseBasicAuth(authHeader);
+    if (!parsed) return null;
+    const result = await authenticateUserWithRequest(request, parsed.username, parsed.password);
 
     if (result.success && result.user && result.user.username.toLowerCase() === 'root') {
       return { username: result.user.username };

@@ -8,6 +8,7 @@ import {
   updateUserPermissionsWithRequest,
   renameUserWithRequest
 } from '@/lib/usersDb';
+import { parseBasicAuth } from '@/lib/apiHelpers';
 
 // Middleware to check if request is from admin
 async function isAdmin(request: NextRequest): Promise<{ valid: boolean; username?: string }> {
@@ -17,9 +18,9 @@ async function isAdmin(request: NextRequest): Promise<{ valid: boolean; username
   }
   
   try {
-    const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
-    const [username, password] = credentials.split(':');
-    const result = await authenticateUserWithRequest(request, username, password);
+    const parsed = parseBasicAuth(authHeader);
+    if (!parsed) return { valid: false };
+    const result = await authenticateUserWithRequest(request, parsed.username, parsed.password);
     
     if (result.success && result.user?.isAdmin) {
       return { valid: true, username: result.user.username };

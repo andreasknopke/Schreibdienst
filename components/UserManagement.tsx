@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from './AuthProvider';
 
+
 interface User {
   username: string;
   isAdmin: boolean;
@@ -72,6 +73,7 @@ export default function UserManagement() {
     e.preventDefault();
     setError('');
     setSuccess('');
+
     setCreating(true);
 
     try {

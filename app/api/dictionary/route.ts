@@ -4,6 +4,7 @@ import { removeDictionaryGroupEntryWithRequest, increaseDictionaryGroupEntryPhon
 import { removeStandardDictEntry, increaseStandardDictPhoneticMinSimilarity } from '@/lib/standardDictionaryDb';
 import { getUserGroupIds, upsertDictionaryGroupEntryWithRequest } from '@/lib/groupDictionaryDb';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
+import { parseBasicAuth } from '@/lib/apiHelpers';
 
 interface AuthResult {
   username: string;
@@ -18,8 +19,9 @@ async function getAuthenticatedUser(request: NextRequest): Promise<AuthResult | 
   }
   
   try {
-    const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
-    const [username, password] = credentials.split(':');
+    const parsed = parseBasicAuth(authHeader);
+    if (!parsed) return null;
+    const { username, password } = parsed;
     const result = await authenticateUserWithRequest(request, username, password);
     
     if (result.success && result.user) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
+import { parseBasicAuth } from '@/lib/apiHelpers';
 import { getRuntimeConfigWithRequest, saveRuntimeConfigWithRequest, WHISPER_OFFLINE_MODELS, TRANSCRIPTION_SERVICES, parseServiceId, buildServiceId, type RuntimeConfig } from '@/lib/configDb';
 
 // Authenticate root user only
@@ -10,15 +11,15 @@ async function getAuthenticatedRoot(request: NextRequest): Promise<boolean> {
   }
   
   try {
-    const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
-    const [username, password] = credentials.split(':');
+    const parsed = parseBasicAuth(authHeader);
+    if (!parsed) return false;
     
     // Only root user can change system config
-    if (username.toLowerCase() !== 'root') {
+    if (parsed.username.toLowerCase() !== 'root') {
       return false;
     }
     
-    const result = await authenticateUserWithRequest(request, username, password);
+    const result = await authenticateUserWithRequest(request, parsed.username, parsed.password);
     return result.success;
   } catch {
     // Invalid auth header

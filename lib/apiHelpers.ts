@@ -7,6 +7,29 @@ import mysql from 'mysql2/promise';
 
 export { decodeDbTokenServer as decodeDbToken };
 
+/**
+ * Parst einen Basic-Auth-Header und extrahiert Username und Passwort.
+ * Verwendet indexOf(':') statt split(':'), damit Passwörter mit
+ * Doppelpunkten korrekt verarbeitet werden (Security-Fix).
+ *
+ * @returns { username, password } oder null bei ungültigem Header
+ */
+export function parseBasicAuth(authHeader: string | null): { username: string; password: string } | null {
+  if (!authHeader || !authHeader.startsWith('Basic ')) return null;
+  try {
+    const base64 = authHeader.slice(6);
+    const credentials = Buffer.from(base64, 'base64').toString('utf8');
+    const colonIndex = credentials.indexOf(':');
+    if (colonIndex === -1) return null;
+    return {
+      username: credentials.slice(0, colonIndex),
+      password: credentials.slice(colonIndex + 1),
+    };
+  } catch {
+    return null;
+  }
+}
+
 // Führt eine Query mit Request-Context aus
 export async function queryWithRequest<T = any>(
   request: NextRequest, 

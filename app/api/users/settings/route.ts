@@ -4,6 +4,7 @@ import {
   getUserSettingsWithRequest,
   updateUserSettingsWithRequest
 } from '@/lib/usersDb';
+import { parseBasicAuth } from '@/lib/apiHelpers';
 
 // Authenticate request and return username
 async function authenticateRequest(request: NextRequest): Promise<{ valid: boolean; username?: string }> {
@@ -13,9 +14,9 @@ async function authenticateRequest(request: NextRequest): Promise<{ valid: boole
   }
   
   try {
-    const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
-    const [username, password] = credentials.split(':');
-    const result = await authenticateUserWithRequest(request, username, password);
+    const parsed = parseBasicAuth(authHeader);
+    if (!parsed) return { valid: false };
+    const result = await authenticateUserWithRequest(request, parsed.username, parsed.password);
     
     if (result.success && result.user) {
       return { valid: true, username: result.user.username };

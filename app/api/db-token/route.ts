@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { encryptToken } from '@/lib/crypto';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
+import { parseBasicAuth } from '@/lib/apiHelpers';
 
 /**
  * API-Endpunkt für DB-Token-Generierung
@@ -20,12 +21,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Basic Auth dekodieren
-    const base64Credentials = authHeader.split(' ')[1];
-    const credentials = Buffer.from(base64Credentials, 'base64').toString('utf8');
-    const [username, password] = credentials.split(':');
+    const parsed = parseBasicAuth(authHeader);
+    if (!parsed) {
+      return NextResponse.json(
+        { error: 'Authentifizierung erforderlich' },
+        { status: 401 }
+      );
+    }
 
     // User authentifizieren
-    const authResult = await authenticateUserWithRequest(request, username, password);
+    const authResult = await authenticateUserWithRequest(request, parsed.username, parsed.password);
     if (!authResult.success || !authResult.user) {
       return NextResponse.json(
         { error: 'Ungültige Anmeldedaten' },

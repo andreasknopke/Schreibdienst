@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
+import { parseBasicAuth } from '@/lib/apiHelpers';
 
 export const runtime = 'nodejs';
 
@@ -112,9 +113,9 @@ async function getAuthenticatedUser(request: NextRequest): Promise<AuthResult | 
   }
   
   try {
-    const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
-    const [username, password] = credentials.split(':');
-    const result = await authenticateUserWithRequest(request, username, password);
+    const parsed = parseBasicAuth(authHeader);
+    if (!parsed) return null;
+    const result = await authenticateUserWithRequest(request, parsed.username, parsed.password);
     
     if (result.success && result.user) {
       return { username: result.user.username };

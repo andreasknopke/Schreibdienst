@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
+import { parseBasicAuth } from '@/lib/apiHelpers';
 import { getStandardDictEntries, addStandardDictEntry, removeStandardDictEntry, resetStandardDict, importGlutanimateMedicalTerms } from '@/lib/standardDictionaryDb';
 
 // Auth-Prüfung: nur Admins dürfen das Standard-Wörterbuch bearbeiten
@@ -8,9 +9,9 @@ async function getAuthenticatedAdmin(request: NextRequest): Promise<{ username: 
   if (!authHeader || !authHeader.startsWith('Basic ')) return null;
 
   try {
-    const credentials = Buffer.from(authHeader.slice(6), 'base64').toString();
-    const [username, password] = credentials.split(':');
-    const result = await authenticateUserWithRequest(request, username, password);
+    const parsed = parseBasicAuth(authHeader);
+    if (!parsed) return null;
+    const result = await authenticateUserWithRequest(request, parsed.username, parsed.password);
 
     if (result.success && result.user) {
       return { username: result.user.username, isAdmin: result.user.isAdmin };

@@ -169,7 +169,7 @@ async function sendToHost(
 
 export async function injectToActiveWindow({
   text,
-  mode = 'sendinput',
+  mode = 'clipboard',
   restorePreviousWindow = true,
   delayMs = 120,
   charDelayMs = 2,
@@ -347,5 +347,49 @@ export async function reportInjectorRecordingState(active: boolean, frontendVisi
     ws.send(JSON.stringify({ type: 'recording-status', active, frontendVisible }));
   } catch {
     // Injector not available — ignore silently.
+  }
+}
+
+/**
+ * Teilt dem nativen Injector mit, ob das Frontend im "Ziel-App"-Modus ist.
+ * Im Ziel-App-Modus zeigt der Injector das REC-Overlay bei HID-Record,
+ * andernfalls unterdrückt er es.
+ *
+ * @param mode - 'normal' wenn die Webapp normal genutzt wird,
+ *               'target-app' wenn die Live-Übertragung an die Ziel-App aktiv ist
+ */
+export async function setFrontendMode(mode: 'normal' | 'target-app'): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    const ws = await getWs();
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        resolve(false);
+      }, RESPONSE_TIMEOUT_MS);
+
+      function handleMessage(event: MessageEvent) {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type !== 'frontend-mode-set') return;
+
+          clearTimeout(timeout);
+          ws.removeEventListener('message', handleMessage);
+          resolve(data.ok === true);
+        } catch {
+          // Not JSON — ignore
+        }
+      }
+
+      ws.addEventListener('message', handleMessage);
+
+      ws.send(JSON.stringify({
+        type: 'set-frontend-mode',
+        mode,
+      }));
+    });
+  } catch {
+    return false;
   }
 }

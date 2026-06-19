@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cwctype>
 #include <future>
 #include <mutex>
 #include <optional>
@@ -174,7 +175,7 @@ std::string base64Encode(const std::string& input) {
 
 struct InjectPayload {
     std::wstring text;
-    std::wstring mode = L"sendinput";
+    std::wstring mode = L"clipboard";
     bool restorePreviousWindow = true;
     std::uint32_t delayMs = 120;
     std::uint32_t charDelayMs = 0;
@@ -451,6 +452,7 @@ HWND g_hiddenWnd = nullptr;
 HANDLE g_hiddenWndReady = nullptr;
 DWORD g_hiddenWndThreadId = 0;
 HWND g_recordingOverlayWnd = nullptr;
+std::atomic<bool> g_frontendTargetMode{false};
 
 LRESULT CALLBACK RecordingOverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_PAINT) {
@@ -599,6 +601,163 @@ std::wstring getExecutableDirectory() {
         return L"";
     }
     return executablePath.substr(0, separator);
+}
+
+// ─── Injector-Konfiguration (injector-config.json) ─────────────
+
+std::vector<std::wstring> g_blockedProcesses;
+std::once_flag g_configLoadedFlag;
+
+std::wstring getConfigDirectory() {
+    wchar_t path[MAX_PATH] = {};
+    if (SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, path) != S_OK) {
+        return L"";
+    }
+    std::wstring dir = std::wstring(path) + L"\\Schreibdienst";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    return dir;
+}
+
+std::wstring getConfigFilePath() {
+    return getConfigDirectory() + L"\\injector-config.json";
+}
+
+std::wstring getProcessNameFromPid(DWORD pid) {
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return L"";
+
+    PROCESSENTRY32W pe;
+    pe.dwSize = sizeof(pe);
+
+    if (Process32FirstW(snapshot, &pe)) {
+        do {
+            if (pe.th32ProcessID == pid) {
+                std::wstring name = pe.szExeFile;
+                for (auto& c : name) c = towlower(c);
+                CloseHandle(snapshot);
+                return name;
+            }
+        } while (Process32NextW(snapshot, &pe));
+    }
+
+    CloseHandle(snapshot);
+    return L"";
+}
+
+std::wstring getWindowProcessName(HWND hwnd) {
+    if (hwnd == nullptr) return L"";
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid == 0) return L"";
+    return getProcessNameFromPid(pid);
+}
+
+void ensureDefaultConfigFile() {
+    const std::wstring configPath = getConfigFilePath();
+    if (configPath.empty()) return;
+
+    if (GetFileAttributesW(configPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        return;
+    }
+
+    HANDLE hFile = CreateFileW(configPath.c_str(), GENERIC_WRITE, 0, nullptr,
+                               CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) return;
+
+    const char* defaultConfig =
+        "{\n"
+        "  \"clipboardBlockedProcesses\": [\"ccpnet.exe\"]\n"
+        "}\n";
+
+    DWORD written = 0;
+    WriteFile(hFile, defaultConfig, static_cast<DWORD>(strlen(defaultConfig)), &written, nullptr);
+    CloseHandle(hFile);
+
+    logLine("[CONFIG] Default config created: %ls\n", configPath.c_str());
+    fflush(stdout);
+}
+
+void loadInjectorConfig() {
+    g_blockedProcesses.clear();
+
+    const std::wstring configPath = getConfigFilePath();
+    if (configPath.empty()) return;
+
+    HANDLE hFile = CreateFileW(configPath.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) return;
+
+    DWORD fileSize = GetFileSize(hFile, nullptr);
+    if (fileSize == 0 || fileSize > 65536) {
+        CloseHandle(hFile);
+        return;
+    }
+
+    std::vector<char> buf(fileSize + 1, 0);
+    DWORD read = 0;
+    if (!ReadFile(hFile, buf.data(), fileSize, &read, nullptr)) {
+        CloseHandle(hFile);
+        return;
+    }
+    CloseHandle(hFile);
+
+    std::string content(buf.data());
+
+    // "clipboardBlockedProcesses"-Array per einfacher String-Suche parsen
+    auto keyPos = content.find("\"clipboardBlockedProcesses\"");
+    if (keyPos == std::string::npos) return;
+
+    auto arrayStart = content.find('[', keyPos);
+    if (arrayStart == std::string::npos) return;
+
+    auto arrayEnd = content.find(']', arrayStart);
+    if (arrayEnd == std::string::npos) return;
+
+    std::string arrayContent = content.substr(arrayStart + 1, arrayEnd - arrayStart - 1);
+
+    size_t pos = 0;
+    while ((pos = arrayContent.find('"', pos)) != std::string::npos) {
+        auto endQuote = arrayContent.find('"', pos + 1);
+        if (endQuote == std::string::npos) break;
+
+        std::string name = arrayContent.substr(pos + 1, endQuote - pos - 1);
+        if (!name.empty()) {
+            std::wstring wname;
+            for (char c : name) wname.push_back(towlower(static_cast<unsigned char>(c)));
+            g_blockedProcesses.push_back(wname);
+        }
+        pos = endQuote + 1;
+    }
+
+    logLine("[CONFIG] %zu clipboard-blocked process(es) from %ls\n",
+            g_blockedProcesses.size(), configPath.c_str());
+    for (const auto& p : g_blockedProcesses) {
+        logLine("[CONFIG]   - %ls\n", p.c_str());
+    }
+    fflush(stdout);
+}
+
+void initInjectorConfig() {
+    ensureDefaultConfigFile();
+    loadInjectorConfig();
+}
+
+bool isClipboardBlockedForTarget(HWND targetWindow) {
+    if (targetWindow == nullptr || g_blockedProcesses.empty()) return false;
+
+    std::wstring processName = getWindowProcessName(targetWindow);
+    if (processName.empty()) return false;
+
+    for (const auto& blocked : g_blockedProcesses) {
+        if (processName == blocked) {
+            logLine("[INJECT] Target process \"%ls\" is clipboard-blocked → use sendinput\n",
+                    processName.c_str());
+            fflush(stdout);
+            return true;
+        }
+    }
+
+    return false;
 }
 
 #ifndef __MINGW32__
@@ -1217,7 +1376,7 @@ NativeRequest parseRequest(const std::string& json) {
     request.type = getStringValue(json, "type");
     request.requestId = getStringValue(json, "requestId");
     request.payload.text = getStringValue(json, "text");
-    request.payload.mode = getStringValue(json, "mode", L"sendinput");
+    request.payload.mode = getStringValue(json, "mode", L"clipboard");
     request.payload.restorePreviousWindow = getBoolValue(json, "restorePreviousWindow", true);
     request.payload.delayMs = getUIntValue(json, "delayMs", 120);
     request.payload.charDelayMs = getUIntValue(json, "charDelayMs", 2);
@@ -1249,7 +1408,7 @@ std::string jsonEscape(const std::string& value) {
     return escaped;
 }
 
-std::string makeResponse(bool ok, const std::string& error = "", const std::string& mode = "sendinput", const std::string& requestId = "") {
+std::string makeResponse(bool ok, const std::string& error = "", const std::string& mode = "clipboard", const std::string& requestId = "") {
     std::string response = "{\"type\":\"inject-result\",\"ok\":";
     response += ok ? "true" : "false";
     if (!requestId.empty()) {
@@ -1548,7 +1707,9 @@ void handleHidRecordEvent(uint16_t vendorId, uint16_t productId,
     if (pressed) {
         // Record-Taste gedrückt → toggle recording state
         const bool nowRecording = !g_recordingState.load();
-        setRecordingState(nowRecording, L"hid-mic", true);
+        // Overlay nur zeigen, wenn das Frontend im "Ziel-App"-Modus ist.
+        const bool showOverlay = g_frontendTargetMode.load();
+        setRecordingState(nowRecording, L"hid-mic", showOverlay);
 
         // Broadcast als hid-event. Das Frontend hoert auf HID_MEDIA_CONTROL_EVENT
         // und toggelt die Aufnahme. Kein zusaetzliches hotkey-event mehr noetig
@@ -1930,9 +2091,9 @@ PasteOutcome pasteClipboardText(const std::wstring& text) {
 
     // 2) Neuen Text in die Zwischenablage schreiben
     if (!writeClipboardText(text)) {
-        logLine("[INJECT] pasteClipboardText FAILED: writeClipboardText\n");
+        logLine("[INJECT] pasteClipboardText FAILED: writeClipboardText → ClipboardBlocked\n");
         fflush(stdout);
-        return PasteOutcome::Failed;
+        return PasteOutcome::ClipboardBlocked;
     }
 
     // Kurz warten, bis die Zwischenablage aktualisiert ist
@@ -1940,10 +2101,10 @@ PasteOutcome pasteClipboardText(const std::wstring& text) {
 
     // 3) Ctrl+V senden
     if (!sendPasteShortcut()) {
-        logLine("[INJECT] pasteClipboardText FAILED: sendPasteShortcut\n");
+        logLine("[INJECT] pasteClipboardText FAILED: sendPasteShortcut → ClipboardBlocked\n");
         fflush(stdout);
         restoreClipboardText(snapshot);
-        return PasteOutcome::Failed;
+        return PasteOutcome::ClipboardBlocked;
     }
 
     // Kurz warten, damit die Ziel-App den Paste-Vorgang abschließen kann
@@ -1953,9 +2114,11 @@ PasteOutcome pasteClipboardText(const std::wstring& text) {
     if (!restoreClipboardText(snapshot)) {
         logLine("[INJECT] pasteClipboardText WARNING: clipboard restore failed\n");
         fflush(stdout);
-        // Nicht fatal – Text wurde bereits eingefügt
     }
 
+    // 5) Hinweis: Ob die Ziel-App den Paste angenommen oder ignoriert hat,
+    //    können wir hier nicht sicher erkennen, weil der Clipboard-Text
+    //    auch nach erfolgreichem Paste erhalten bleibt.
     logLine("[INJECT] pasteClipboardText SUCCESS\n");
     fflush(stdout);
     return PasteOutcome::Success;
@@ -2153,6 +2316,10 @@ std::string handleRequest(const std::string& message) {
         return makeResponse(false, "No text to inject", "", requestId);
     }
 
+    // Immer clipboard als primären Modus erzwingen – das Frontend könnte
+    // veraltetes JavaScript ausgeliefert haben, das "sendinput" sendet.
+    request.payload.mode = L"clipboard";
+
     std::lock_guard<std::mutex> injectLock(g_injectMutex);
 
     // Deduplizierung: Derselbe Text darf nicht innerhalb INJECT_DEDUP_WINDOW
@@ -2190,6 +2357,30 @@ std::string handleRequest(const std::string& message) {
         logLine("[INJECT] handleRequest FAILED: Alt-Tab failed\n");
         fflush(stdout);
         return makeResponse(false, "Alt-Tab focus handover failed", "", requestId);
+    }
+
+    // Prüfen, ob die Ziel-App in der Blockliste für Clipboard steht
+    // (z. B. ccpnet.exe). Wenn ja, direkt SendInput statt Clipboard.
+    // GetForegroundWindow() verwenden – activatePreviousWindow() hat die
+    // Ziel-App bereits in den Vordergrund geholt, und g_targetWindow zeigt
+    // noch auf die vorherige App.
+    {
+        HWND targetWnd = GetForegroundWindow();
+        if (isClipboardBlockedForTarget(targetWnd)) {
+            // Clipboard überspringen, direkt SendInput
+            if (request.payload.delayMs > 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(request.payload.delayMs));
+            }
+            if (sendUnicodeText(request.payload.text, request.payload.charDelayMs)) {
+                logLine("[INJECT] handleRequest SUCCESS (sendinput, clipboard blocked by target)\n");
+                fflush(stdout);
+                saveTargetWindow();
+                return makeResponse(true, "", "sendinput", requestId);
+            }
+            logLine("[INJECT] handleRequest FAILED: SendInput (clipboard blocked by target)\n");
+            fflush(stdout);
+            return makeResponse(false, "SendInput failed (clipboard blocked by target app)", "", requestId);
+        }
     }
 
     if (request.payload.mode != L"clipboard" && request.payload.delayMs > 0) {
@@ -2355,6 +2546,19 @@ void handleClient(SOCKET client) {
             continue;
         }
 
+        if (nr.type == L"set-frontend-mode") {
+            // Mitteilung vom Frontend, ob es sich im "Ziel-App"-Modus befindet.
+            // Im Ziel-App-Modus zeigt der Injector das "REC"-Overlay bei HID-Record;
+            // im Normal-Modus (oder wenn kein Frontend verbunden) unterdrückt er es.
+            const std::wstring mode = getStringValue(request, "mode");
+            g_frontendTargetMode.store(mode == L"target-app");
+            logLine("[WS] set-frontend-mode mode=\"%ls\" → targetMode=%d\n",
+                   mode.c_str(), g_frontendTargetMode.load());
+            fflush(stdout);
+            sendWsFrame(client, 0x1, makeTypedResponse("frontend-mode-set", true, ""));
+            continue;
+        }
+
         if (nr.type == L"start-hid") {
             hidDiagnostic("=== HID-Start angefordert vom Frontend ===");
             hidDiagnostic("HiddenWindow: hwnd=0x%p threadId=%lu", g_hiddenWnd, g_hiddenWndThreadId);
@@ -2412,6 +2616,9 @@ void handleClient(SOCKET client) {
         std::lock_guard<std::mutex> lock(g_clientsMutex);
         g_wsClients.erase(client);
     }
+    // Frontend hat die Verbindung getrennt → Ziel-App-Modus zurücksetzen,
+    // damit das REC-Overlay nicht mehr angezeigt wird.
+    g_frontendTargetMode.store(false);
     closesocket(client);
 }
 
@@ -2642,6 +2849,11 @@ int WINAPI WinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/,
         freopen_s(&dummy, "CONOUT$", "w", stdout);
         freopen_s(&dummy, "CONOUT$", "w", stderr);
         std::printf("Schreibdienst Injector (Logging an)\n");
+    }
+
+    // Injector-Konfiguration laden (injector-config.json in %LOCALAPPDATA%\Schreibdienst)
+    if (!options.showHelp) {
+        initInjectorConfig();
     }
 
     // Initialize Winsock

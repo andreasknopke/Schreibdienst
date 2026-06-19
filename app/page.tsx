@@ -23,7 +23,7 @@ import TemplatesManager from '@/components/TemplatesManager';
 import { createPortal } from 'react-dom';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
-import { checkInjectorAvailability, injectToActiveWindow, registerGlobalHotkeys, reportInjectorRecordingState, configureTargetWindow } from '@/lib/injectClient';
+import { checkInjectorAvailability, injectToActiveWindow, registerGlobalHotkeys, reportInjectorRecordingState, configureTargetWindow, setFrontendMode } from '@/lib/injectClient';
 import { replaceAllInText } from '@/lib/replaceText';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
@@ -806,6 +806,7 @@ export default function HomePage() {
     if (liveInjectEnabled) {
       setLiveInjectEnabled(false);
       setLiveInjectStatus(null);
+      setFrontendMode('normal').catch(() => {});
       return;
     }
 
@@ -827,6 +828,7 @@ export default function HomePage() {
       }
 
       setLiveInjectEnabled(true);
+      setFrontendMode('target-app').catch(() => {});
     } finally {
       setInjectorCheckInProgress(false);
     }
@@ -877,7 +879,7 @@ export default function HomePage() {
 
         const request = {
           text: normalizedText,
-          mode: 'sendinput' as const,
+          mode: 'clipboard' as const,
           restorePreviousWindow: shouldRestorePreviousWindow,
           delayMs: shouldRestorePreviousWindow ? 35 : 0,
           // Eine kleine Pause zwischen den Unicode-Events gibt langsamen
@@ -2490,7 +2492,7 @@ export default function HomePage() {
 
     void injectToActiveWindow({
       text: textToTransfer,
-      mode: 'sendinput',
+      mode: 'clipboard',
       restorePreviousWindow: false,
       delayMs: 0,
       charDelayMs: 0,

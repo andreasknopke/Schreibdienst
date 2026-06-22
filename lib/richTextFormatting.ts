@@ -96,7 +96,7 @@ function escapeHtml(text: string): string {
 
 export function buildRichTextHtml(text: string, formats: RichTextFormatRange[]): string {
   return buildRichTextSegments(text, formats).map((segment) => {
-    let escapedText = escapeHtml(segment.text).replace(/\n/g, '<br>');
+    let escapedText = escapeHtml(segment.text);
 
     if (segment.underline) {
       escapedText = `<u>${escapedText}</u>`;

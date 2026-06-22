@@ -18,6 +18,7 @@ import HelpPanel from '@/components/HelpPanel';
 import WordActionPopup, { type WordCorrectionInfo } from '@/components/WordActionPopup';
 import UpdatePanel from '@/components/UpdatePanel';
 import InjectorDownloadDialog from '@/components/InjectorDownloadDialog';
+import RichTextDictationEditor, { getRichTextSelection } from '@/components/RichTextDictationEditor';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import TemplatesManager from '@/components/TemplatesManager';
 import { createPortal } from 'react-dom';
@@ -25,6 +26,7 @@ import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/
 import { useVadChunking } from '@/lib/useVadChunking';
 import { checkInjectorAvailability, injectToActiveWindow, registerGlobalHotkeys, reportInjectorRecordingState, configureTargetWindow, setFrontendMode } from '@/lib/injectClient';
 import { replaceAllInText } from '@/lib/replaceText';
+import { normalizeRichTextRanges, remapRichTextRanges, type RichTextFormatRange } from '@/lib/richTextFormatting';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
@@ -77,8 +79,14 @@ interface ManualWordChange {
 interface CaretSelection {
   start: number;
   end: number;
-  direction: HTMLTextAreaElement['selectionDirection'];
+  direction: 'forward' | 'backward' | 'none';
 }
+
+type RichTextFormatKey = 'bold' | 'italic' | 'underline';
+
+type RichTextState = Record<TextStateKey, RichTextFormatRange[]>;
+
+type RichTextToggleState = Record<TextStateKey, Record<RichTextFormatKey, boolean>>;
 
 interface CaretOverlayPosition {
   top: number;
@@ -112,6 +120,18 @@ const EMPTY_MANUAL_WORD_CHANGES: Record<TextInsertionTarget, ManualWordChange | 
 };
 
 const TEXT_HISTORY_LIMIT = 50;
+
+const EMPTY_RICH_TEXT_RANGES: RichTextState = {
+  transcript: [],
+  methodik: [],
+  beurteilung: [],
+};
+
+const EMPTY_RICH_TEXT_TOGGLES: RichTextToggleState = {
+  transcript: { bold: false, italic: false, underline: false },
+  methodik: { bold: false, italic: false, underline: false },
+  beurteilung: { bold: false, italic: false, underline: false },
+};
 
 function extractSuggestionTokens(text: string): string[] {
   return text.match(/[A-Za-zÄÖÜäöüß0-9]+(?:[-'][A-Za-zÄÖÜäöüß0-9]+)*/g) || [];
@@ -301,6 +321,99 @@ function hiddenCaretOverlay(): CaretOverlayPosition {
   return { top: 0, left: 0, height: 0, visible: false };
 }
 
+function getSelectionBounds(selection: CaretSelection | null | undefined): { start: number; end: number } {
+  if (!selection) {
+    return { start: 0, end: 0 };
+  }
+
+  return {
+    start: Math.min(selection.start, selection.end),
+    end: Math.max(selection.start, selection.end),
+  };
+}
+
+function isFormatEnabledAt(ranges: RichTextFormatRange[], offset: number, key: RichTextFormatKey): boolean {
+  return ranges.some((range) => range.start <= offset && range.end > offset && Boolean(range[key]));
+}
+
+function isFormatActiveAcrossSelection(
+  ranges: RichTextFormatRange[],
+  start: number,
+  end: number,
+  key: RichTextFormatKey,
+): boolean {
+  if (end <= start) {
+    return false;
+  }
+
+  const breakpoints = new Set<number>([start, end]);
+  for (const range of ranges) {
+    if (range.end <= start || range.start >= end) continue;
+    breakpoints.add(Math.max(start, range.start));
+    breakpoints.add(Math.min(end, range.end));
+  }
+
+  const sortedBreakpoints = Array.from(breakpoints).sort((left, right) => left - right);
+  for (let index = 0; index < sortedBreakpoints.length - 1; index += 1) {
+    const segmentStart = sortedBreakpoints[index];
+    const segmentEnd = sortedBreakpoints[index + 1];
+    if (segmentEnd <= segmentStart) continue;
+    if (!isFormatEnabledAt(ranges, segmentStart, key)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function setFormatForSelection(
+  ranges: RichTextFormatRange[],
+  textLength: number,
+  start: number,
+  end: number,
+  key: RichTextFormatKey,
+  enabled: boolean,
+): RichTextFormatRange[] {
+  const normalizedStart = Math.max(0, Math.min(start, textLength));
+  const normalizedEnd = Math.max(normalizedStart, Math.min(end, textLength));
+  if (normalizedEnd <= normalizedStart) {
+    return normalizeRichTextRanges(ranges, textLength);
+  }
+
+  const normalizedRanges = normalizeRichTextRanges(ranges, textLength);
+  const breakpoints = new Set<number>([0, textLength, normalizedStart, normalizedEnd]);
+
+  for (const range of normalizedRanges) {
+    breakpoints.add(range.start);
+    breakpoints.add(range.end);
+  }
+
+  const sortedBreakpoints = Array.from(breakpoints).sort((left, right) => left - right);
+  const nextRanges: RichTextFormatRange[] = [];
+
+  for (let index = 0; index < sortedBreakpoints.length - 1; index += 1) {
+    const segmentStart = sortedBreakpoints[index];
+    const segmentEnd = sortedBreakpoints[index + 1];
+    if (segmentEnd <= segmentStart) continue;
+
+    const segment: RichTextFormatRange = {
+      start: segmentStart,
+      end: segmentEnd,
+      bold: isFormatEnabledAt(normalizedRanges, segmentStart, 'bold'),
+      italic: isFormatEnabledAt(normalizedRanges, segmentStart, 'italic'),
+      underline: isFormatEnabledAt(normalizedRanges, segmentStart, 'underline'),
+    };
+
+    if (segmentEnd > normalizedStart && segmentStart < normalizedEnd) {
+      segment[key] = enabled;
+    }
+
+    nextRanges.push(segment);
+  }
+
+  return normalizeRichTextRanges(nextRanges, textLength);
+}
+
 function getTextareaCaretOverlay(
   textarea: HTMLTextAreaElement | null,
   selection?: CaretSelection | null
@@ -436,12 +549,17 @@ export default function HomePage() {
   const [vadFailedUtterances, setVadFailedUtterances] = useState<Array<{ seq: number; blob: Blob; error: string }>>([]);
   
   const [transcript, setTranscript] = useState("");
-  const methodikTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const befundTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const beurteilungTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const transcriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const methodikTextareaRef = useRef<HTMLDivElement | null>(null);
+  const befundTextareaRef = useRef<HTMLDivElement | null>(null);
+  const beurteilungTextareaRef = useRef<HTMLDivElement | null>(null);
+  const transcriptTextareaRef = useRef<HTMLDivElement | null>(null);
   const [textSelections, setTextSelections] = useState<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
   const textSelectionsRef = useRef<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
+  const [richTextFormats, setRichTextFormats] = useState<RichTextState>(EMPTY_RICH_TEXT_RANGES);
+  const [richTextToggles, setRichTextToggles] = useState<RichTextToggleState>(EMPTY_RICH_TEXT_TOGGLES);
+  const richTextTogglesRef = useRef<RichTextToggleState>(EMPTY_RICH_TEXT_TOGGLES);
+  richTextTogglesRef.current = richTextToggles;
+  const lastRichTextSyncedTextRef = useRef<Record<TextStateKey, string>>({ transcript: '', methodik: '', beurteilung: '' });
   const [focusedTextField, setFocusedTextField] = useState<TextInsertionTarget | null>(null);
   const [caretOverlays, setCaretOverlays] = useState<Record<TextInsertionTarget, CaretOverlayPosition>>({
     transcript: hiddenCaretOverlay(),
@@ -630,13 +748,7 @@ export default function HomePage() {
     field: TextInsertionTarget;
   } | null>(null);
 
-  const syncTextSelection = useCallback((field: TextInsertionTarget, textarea: HTMLTextAreaElement) => {
-    const nextSelection: CaretSelection = {
-      start: textarea.selectionStart ?? 0,
-      end: textarea.selectionEnd ?? 0,
-      direction: textarea.selectionDirection ?? 'none',
-    };
-
+  const syncSelectionState = useCallback((field: TextInsertionTarget, nextSelection: CaretSelection) => {
     textSelectionsRef.current = {
       ...textSelectionsRef.current,
       [field]: nextSelection,
@@ -660,6 +772,16 @@ export default function HomePage() {
     });
   }, []);
 
+  const syncTextSelection = useCallback((field: TextInsertionTarget, textarea: HTMLTextAreaElement) => {
+    const nextSelection: CaretSelection = {
+      start: textarea.selectionStart ?? 0,
+      end: textarea.selectionEnd ?? 0,
+      direction: textarea.selectionDirection ?? 'none',
+    };
+
+    syncSelectionState(field, nextSelection);
+  }, [syncSelectionState]);
+
   const setStoredSelection = useCallback((field: TextInsertionTarget, selection: CaretSelection) => {
     textSelectionsRef.current = {
       ...textSelectionsRef.current,
@@ -675,6 +797,16 @@ export default function HomePage() {
   const getStoredSelection = useCallback((field: TextInsertionTarget, currentText: string) => {
     return textSelectionsRef.current[field] ?? getDefaultSelection(currentText);
   }, []);
+
+  const getRichTextStateKey = useCallback((field: TextInsertionTarget): TextStateKey => fieldToStateKey(field), []);
+
+  const getFieldRichTextFormats = useCallback((field: TextInsertionTarget) => {
+    return richTextFormats[getRichTextStateKey(field)];
+  }, [getRichTextStateKey, richTextFormats]);
+
+  const getFieldRichTextToggles = useCallback((field: TextInsertionTarget) => {
+    return richTextToggles[getRichTextStateKey(field)];
+  }, [getRichTextStateKey, richTextToggles]);
 
   const setFieldText = useCallback((field: TextInsertionTarget, value: SetStateAction<string>) => {
     switch (field) {
@@ -711,12 +843,51 @@ export default function HomePage() {
     if (hasOnlineCommand(newText)) {
       const resultText = applyOnlineUtteranceToText(existing, newText);
       setStoredSelection(field, { start: resultText.length, end: resultText.length, direction: 'none' });
+      const stateKey = getRichTextStateKey(field);
+      setRichTextFormats((current) => ({
+        ...current,
+        [stateKey]: remapRichTextRanges(existing, resultText, current[stateKey]),
+      }));
+      lastRichTextSyncedTextRef.current[stateKey] = resultText;
       return resultText;
     }
+
+    const stateKey = getRichTextStateKey(field);
+    const toggleState = richTextTogglesRef.current[stateKey];
+    const selection = getStoredSelection(field, existing);
+    const normalizedIncomingText = normalizeChunkLeadingWhitespace(newText);
+    const selectionStart = Math.max(0, Math.min(selection.start, existing.length));
+    const selectionEnd = Math.max(selectionStart, Math.min(selection.end, existing.length));
+    const before = existing.slice(0, selectionStart);
+    const needsPrefixSeparator = before.length > 0 && !before.endsWith('\n') && !before.endsWith(' ');
+    const prefixLength = normalizedIncomingText ? (needsPrefixSeparator ? 1 : 0) : 0;
     const result = insertTextAtSelection(existing, newText, getStoredSelection(field, existing));
     setStoredSelection(field, result.selection);
+
+    if (normalizedIncomingText) {
+      const insertedStart = selectionStart + prefixLength;
+      const insertedEnd = insertedStart + normalizedIncomingText.length;
+      setRichTextFormats((current) => {
+        let nextRanges = remapRichTextRanges(existing, result.text, current[stateKey]);
+        (Object.keys(toggleState) as RichTextFormatKey[]).forEach((key) => {
+          if (!toggleState[key]) return;
+          nextRanges = setFormatForSelection(nextRanges, result.text.length, insertedStart, insertedEnd, key, true);
+        });
+        return {
+          ...current,
+          [stateKey]: nextRanges,
+        };
+      });
+    } else {
+      setRichTextFormats((current) => ({
+        ...current,
+        [stateKey]: remapRichTextRanges(existing, result.text, current[stateKey]),
+      }));
+    }
+
+    lastRichTextSyncedTextRef.current[stateKey] = result.text;
     return result.text;
-  }, [getStoredSelection, setStoredSelection]);
+  }, [getRichTextStateKey, getStoredSelection, setStoredSelection]);
 
   useEffect(() => {
     liveInjectEnabledRef.current = liveInjectEnabled;
@@ -996,26 +1167,34 @@ export default function HomePage() {
     }
 
     setCaretOverlays({
-      transcript: getTextareaCaretOverlay(transcriptTextareaRef.current, getStoredSelection('transcript', transcript)),
-      methodik: getTextareaCaretOverlay(methodikTextareaRef.current, getStoredSelection('methodik', methodik)),
-      befund: getTextareaCaretOverlay(befundTextareaRef.current, getStoredSelection('befund', transcript)),
-      beurteilung: getTextareaCaretOverlay(beurteilungTextareaRef.current, getStoredSelection('beurteilung', beurteilung)),
+      transcript: hiddenCaretOverlay(),
+      methodik: hiddenCaretOverlay(),
+      befund: hiddenCaretOverlay(),
+      beurteilung: hiddenCaretOverlay(),
     });
   }, [transcript, methodik, beurteilung, textSelections, showPersistentCaret, getStoredSelection]);
 
-  // Textfelder automatisch an ihren Inhalt anpassen, damit ein eingefügter Baustein
-  // (oder langer diktierter Text) nicht im Feld scrollen muss, sondern das Feld wächst.
   useEffect(() => {
-    const autoGrow = (el: HTMLTextAreaElement | null) => {
-      if (!el) return;
-      el.style.height = 'auto';
-      el.style.height = `${el.scrollHeight}px`;
+    const nextTexts: Record<TextStateKey, string> = {
+      transcript,
+      methodik,
+      beurteilung,
     };
-    autoGrow(methodikTextareaRef.current);
-    autoGrow(befundTextareaRef.current);
-    autoGrow(beurteilungTextareaRef.current);
-    autoGrow(transcriptTextareaRef.current);
-  }, [transcript, methodik, beurteilung, mode]);
+
+    (Object.keys(nextTexts) as TextStateKey[]).forEach((stateKey) => {
+      const previousText = lastRichTextSyncedTextRef.current[stateKey];
+      const nextText = nextTexts[stateKey];
+      if (previousText === nextText) {
+        return;
+      }
+
+      setRichTextFormats((current) => ({
+        ...current,
+        [stateKey]: remapRichTextRanges(previousText, nextText, current[stateKey]),
+      }));
+      lastRichTextSyncedTextRef.current[stateKey] = nextText;
+    });
+  }, [beurteilung, methodik, transcript]);
 
   // SpeaKING Import State
   const [speakingMetadata, setSpeakingMetadata] = useState<SpeaKINGMetadata | null>(null);
@@ -1726,13 +1905,37 @@ export default function HomePage() {
     field: TextInsertionTarget,
     value: string,
     setter: (nextValue: string) => void,
-    textarea: HTMLTextAreaElement
+    selection: CaretSelection | null
   ) => {
     const stateKey = fieldToStateKey(field);
+    const previousText = getFieldTextValue(field);
+    const previousSelection = getStoredSelection(field, previousText);
+    const nextSelection = selection ?? getDefaultSelection(value);
+    const replacedLength = Math.max(0, previousSelection.end - previousSelection.start);
+    const insertedLength = Math.max(0, value.length - (previousText.length - replacedLength));
+    const insertedStart = Math.max(0, Math.min(previousSelection.start, value.length));
+    const insertedEnd = Math.max(insertedStart, Math.min(insertedStart + insertedLength, value.length));
+
     pendingManualStateRef.current[stateKey] = true;
     setter(value);
     setPendingCorrection(true);
-    syncTextSelection(field, textarea);
+    syncSelectionState(field, nextSelection);
+    const toggleState = richTextTogglesRef.current[stateKey];
+    setRichTextFormats((current) => {
+      let nextRanges = remapRichTextRanges(previousText, value, current[stateKey]);
+      if (insertedEnd > insertedStart) {
+        (Object.keys(toggleState) as RichTextFormatKey[]).forEach((key) => {
+          if (!toggleState[key]) return;
+          nextRanges = setFormatForSelection(nextRanges, value.length, insertedStart, insertedEnd, key, true);
+        });
+      }
+
+      return {
+        ...current,
+        [stateKey]: nextRanges,
+      };
+    });
+    lastRichTextSyncedTextRef.current[stateKey] = value;
     logManualCorrection(field);
 
     const existingDebounce = manualSuggestDebounceRef.current[field];
@@ -1746,7 +1949,133 @@ export default function HomePage() {
       }));
       delete manualSuggestDebounceRef.current[field];
     }, 900);
-  }, [logManualCorrection, syncTextSelection]);
+  }, [getFieldTextValue, getStoredSelection, logManualCorrection, syncSelectionState]);
+
+  const handleRichTextSelectionChange = useCallback((field: TextInsertionTarget, editor: HTMLDivElement) => {
+    const nextSelection = getRichTextSelection(editor) ?? getDefaultSelection(getFieldTextValue(field));
+    syncSelectionState(field, nextSelection);
+  }, [getFieldTextValue, syncSelectionState]);
+
+  const handleRichTextEditorChange = useCallback((
+    field: TextInsertionTarget,
+    value: string,
+    setter: (nextValue: string) => void,
+    editor: HTMLDivElement,
+  ) => {
+    handleManualTextChange(field, value, setter, getRichTextSelection(editor));
+  }, [handleManualTextChange]);
+
+  const handleRichTextWordDoubleClick = useCallback((
+    field: TextInsertionTarget,
+    info: { word: string; start: number; end: number; clientX: number; clientY: number },
+  ) => {
+    const corrections = fieldCorrections[field] ?? [];
+    const matched = corrections.find(
+      (correction) => correction.correctedWord.localeCompare(info.word, undefined, { sensitivity: 'accent' }) === 0
+        && correction.originalWord.localeCompare(correction.correctedWord, undefined, { sensitivity: 'accent' }) !== 0
+    ) ?? null;
+
+    if (!matched) {
+      const dictEntry = mergedEntriesRef.current.find(
+        (entry) => entry.correct.localeCompare(info.word, undefined, { sensitivity: 'accent' }) === 0
+      );
+      if (dictEntry) {
+        setWordPopup({
+          word: info.word,
+          position: { x: info.clientX, y: info.clientY },
+          correction: {
+            originalWord: dictEntry.wrong,
+            correctedWord: dictEntry.correct,
+            dictionaryWrong: dictEntry.wrong,
+            dictionaryCorrect: dictEntry.correct,
+            source: dictEntry.source,
+            matchType: 'exact',
+          },
+          field,
+        });
+        return;
+      }
+    }
+
+    setWordPopup({
+      word: info.word,
+      position: { x: info.clientX, y: info.clientY },
+      correction: matched,
+      field,
+    });
+  }, [fieldCorrections]);
+
+  const handleRichTextToolbarAction = useCallback((field: TextInsertionTarget, key: RichTextFormatKey) => {
+    const text = getFieldTextValue(field);
+    const selection = getStoredSelection(field, text);
+    const { start, end } = getSelectionBounds(selection);
+    const stateKey = getRichTextStateKey(field);
+
+    if (end > start) {
+      setRichTextFormats((current) => {
+        const enabled = !isFormatActiveAcrossSelection(current[stateKey], start, end, key);
+        return {
+          ...current,
+          [stateKey]: setFormatForSelection(current[stateKey], text.length, start, end, key, enabled),
+        };
+      });
+      return;
+    }
+
+    setRichTextToggles((current) => ({
+      ...current,
+      [stateKey]: {
+        ...current[stateKey],
+        [key]: !current[stateKey][key],
+      },
+    }));
+  }, [getFieldTextValue, getRichTextStateKey, getStoredSelection]);
+
+  const isToolbarButtonActive = useCallback((field: TextInsertionTarget, key: RichTextFormatKey) => {
+    const text = getFieldTextValue(field);
+    const selection = getStoredSelection(field, text);
+    const { start, end } = getSelectionBounds(selection);
+    const stateKey = getRichTextStateKey(field);
+
+    if (end > start) {
+      return isFormatActiveAcrossSelection(richTextFormats[stateKey], start, end, key);
+    }
+
+    return richTextToggles[stateKey][key];
+  }, [getFieldTextValue, getRichTextStateKey, getStoredSelection, richTextFormats, richTextToggles]);
+
+  const renderRichTextToolbar = useCallback((field: TextInsertionTarget) => {
+    const buttons: Array<{ key: RichTextFormatKey; label: string; className: string }> = [
+      { key: 'bold', label: 'B', className: 'font-bold' },
+      { key: 'italic', label: 'I', className: 'italic' },
+      { key: 'underline', label: 'U', className: 'underline' },
+    ];
+
+    return (
+      <div className="flex items-center gap-1">
+        {buttons.map((button) => {
+          const active = isToolbarButtonActive(field, button.key);
+          return (
+            <button
+              key={button.key}
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                handleRichTextToolbarAction(field, button.key);
+              }}
+              className={`inline-flex h-7 w-7 items-center justify-center rounded border text-xs transition ${active
+                ? 'border-blue-500 bg-blue-100 text-blue-700 dark:border-blue-400 dark:bg-blue-900/40 dark:text-blue-200'
+                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'}`}
+              title={button.key === 'bold' ? 'Fett' : button.key === 'italic' ? 'Kursiv' : 'Unterstrichen'}
+              aria-pressed={active}
+            >
+              <span className={button.className}>{button.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }, [handleRichTextToolbarAction, isToolbarButtonActive]);
 
   useEffect(() => {
     const states: Record<TextStateKey, string> = { transcript, methodik, beurteilung };
@@ -4984,6 +5313,7 @@ export default function HomePage() {
                       <DiffStats originalText={preCorrectionState.methodik} correctedText={methodik} />
                     )}
                     <span className="text-xs text-gray-400">{methodik ? `${methodik.length}` : ''}</span>
+                    {renderRichTextToolbar('methodik')}
                     <button 
                       className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
                       onClick={() => copyToClipboard(methodik)}
@@ -5014,20 +5344,18 @@ export default function HomePage() {
                   </div>
                 )}
                 <div className="relative">
-                  <textarea
-                    ref={methodikTextareaRef}
-                    className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  <RichTextDictationEditor
+                    editorRef={methodikTextareaRef}
                     value={methodik}
-                    onChange={(e) => handleManualTextChange('methodik', e.target.value, setMethodik, e.currentTarget)}
-                    onFocus={(e) => { setActiveField('methodik'); setFocusedTextField('methodik'); syncTextSelection('methodik', e.currentTarget); }}
+                    formats={getFieldRichTextFormats('methodik')}
+                    selection={textSelections.methodik ?? null}
+                    className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    onChange={(value, editor) => handleRichTextEditorChange('methodik', value, setMethodik, editor)}
+                    onFocus={(editor) => { setActiveField('methodik'); setFocusedTextField('methodik'); handleRichTextSelectionChange('methodik', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'methodik' ? null : current)}
-                    onSelect={(e) => syncTextSelection('methodik', e.currentTarget)}
-                    onClick={(e) => syncTextSelection('methodik', e.currentTarget)}
-                    onKeyUp={(e) => syncTextSelection('methodik', e.currentTarget)}
-                    onMouseUp={(e) => syncTextSelection('methodik', e.currentTarget)}
-                    onDoubleClick={(e) => handleWordDoubleClick('methodik', e.currentTarget, e.clientX, e.clientY)}
+                    onSelectionChange={(editor) => handleRichTextSelectionChange('methodik', editor)}
+                    onWordDoubleClick={(info) => handleRichTextWordDoubleClick('methodik', info)}
                     placeholder="Methodik..."
-                    rows={2}
                     readOnly={isProcessing}
                   />
                   {showPersistentCaret && focusedTextField !== 'methodik' && caretOverlays.methodik.visible && (
@@ -5070,6 +5398,7 @@ export default function HomePage() {
                       <DiffStats originalText={preCorrectionState.befund} correctedText={transcript} />
                     )}
                     <span className="text-xs text-gray-400">{transcript ? `${transcript.length}` : ''}</span>
+                    {renderRichTextToolbar('befund')}
                     <button 
                       className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
                       onClick={() => copyToClipboard(transcript)}
@@ -5100,18 +5429,17 @@ export default function HomePage() {
                   </div>
                 )}
                 <div className="relative">
-                  <textarea
-                    ref={befundTextareaRef}
-                    className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  <RichTextDictationEditor
+                    editorRef={befundTextareaRef}
                     value={transcript}
-                    onChange={(e) => handleManualTextChange('befund', e.target.value, setTranscript, e.currentTarget)}
-                    onFocus={(e) => { setActiveField('befund'); setFocusedTextField('befund'); syncTextSelection('befund', e.currentTarget); }}
+                    formats={getFieldRichTextFormats('befund')}
+                    selection={textSelections.befund ?? null}
+                    className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    onChange={(value, editor) => handleRichTextEditorChange('befund', value, setTranscript, editor)}
+                    onFocus={(editor) => { setActiveField('befund'); setFocusedTextField('befund'); handleRichTextSelectionChange('befund', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'befund' ? null : current)}
-                    onSelect={(e) => syncTextSelection('befund', e.currentTarget)}
-                    onClick={(e) => syncTextSelection('befund', e.currentTarget)}
-                    onKeyUp={(e) => syncTextSelection('befund', e.currentTarget)}
-                    onMouseUp={(e) => syncTextSelection('befund', e.currentTarget)}
-                    onDoubleClick={(e) => handleWordDoubleClick('befund', e.currentTarget, e.clientX, e.clientY)}
+                    onSelectionChange={(editor) => handleRichTextSelectionChange('befund', editor)}
+                    onWordDoubleClick={(info) => handleRichTextWordDoubleClick('befund', info)}
                     placeholder="Befund..."
                     readOnly={isProcessing}
                   />
@@ -5171,6 +5499,7 @@ export default function HomePage() {
                       <DiffStats originalText={preCorrectionState.beurteilung} correctedText={beurteilung} />
                     )}
                     <span className="text-xs text-gray-400">{beurteilung ? `${beurteilung.length}` : ''}</span>
+                    {renderRichTextToolbar('beurteilung')}
                     <button 
                       className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
                       onClick={() => copyToClipboard(beurteilung)}
@@ -5201,20 +5530,18 @@ export default function HomePage() {
                   </div>
                 )}
                 <div className="relative">
-                  <textarea
-                    ref={beurteilungTextareaRef}
-                    className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  <RichTextDictationEditor
+                    editorRef={beurteilungTextareaRef}
                     value={beurteilung}
-                    onChange={(e) => handleManualTextChange('beurteilung', e.target.value, setBeurteilung, e.currentTarget)}
-                    onFocus={(e) => { setActiveField('beurteilung'); setFocusedTextField('beurteilung'); syncTextSelection('beurteilung', e.currentTarget); }}
+                    formats={getFieldRichTextFormats('beurteilung')}
+                    selection={textSelections.beurteilung ?? null}
+                    className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    onChange={(value, editor) => handleRichTextEditorChange('beurteilung', value, setBeurteilung, editor)}
+                    onFocus={(editor) => { setActiveField('beurteilung'); setFocusedTextField('beurteilung'); handleRichTextSelectionChange('beurteilung', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'beurteilung' ? null : current)}
-                    onSelect={(e) => syncTextSelection('beurteilung', e.currentTarget)}
-                    onClick={(e) => syncTextSelection('beurteilung', e.currentTarget)}
-                    onKeyUp={(e) => syncTextSelection('beurteilung', e.currentTarget)}
-                    onMouseUp={(e) => syncTextSelection('beurteilung', e.currentTarget)}
-                    onDoubleClick={(e) => handleWordDoubleClick('beurteilung', e.currentTarget, e.clientX, e.clientY)}
+                    onSelectionChange={(editor) => handleRichTextSelectionChange('beurteilung', editor)}
+                    onWordDoubleClick={(info) => handleRichTextWordDoubleClick('beurteilung', info)}
                     placeholder="Zusammenfassung..."
-                    rows={2}
                     readOnly={isProcessing}
                   />
                   {showPersistentCaret && focusedTextField !== 'beurteilung' && caretOverlays.beurteilung.visible && (
@@ -5267,6 +5594,7 @@ export default function HomePage() {
                   <DiffStats originalText={preCorrectionState.transcript} correctedText={transcript} />
                 )}
                 <span className="text-xs text-gray-400">{transcript ? `${transcript.length}` : ''}</span>
+                {renderRichTextToolbar('transcript')}
                 <button 
                   className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
                   onClick={handleCopy}
@@ -5303,18 +5631,17 @@ export default function HomePage() {
             <div>
               <div>
                 <div className="relative">
-                  <textarea
-                    ref={transcriptTextareaRef}
-                    className={`textarea font-mono text-sm min-h-40 w-full ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  <RichTextDictationEditor
+                    editorRef={transcriptTextareaRef}
                     value={transcript}
-                    onChange={(e) => handleManualTextChange('transcript', e.target.value, setTranscript, e.currentTarget)}
-                    onFocus={(e) => { setFocusedTextField('transcript'); syncTextSelection('transcript', e.currentTarget); }}
+                    formats={getFieldRichTextFormats('transcript')}
+                    selection={textSelections.transcript ?? null}
+                    className={`textarea font-mono text-sm min-h-40 w-full ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    onChange={(value, editor) => handleRichTextEditorChange('transcript', value, setTranscript, editor)}
+                    onFocus={(editor) => { setFocusedTextField('transcript'); handleRichTextSelectionChange('transcript', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'transcript' ? null : current)}
-                    onSelect={(e) => syncTextSelection('transcript', e.currentTarget)}
-                    onClick={(e) => syncTextSelection('transcript', e.currentTarget)}
-                    onKeyUp={(e) => syncTextSelection('transcript', e.currentTarget)}
-                    onMouseUp={(e) => syncTextSelection('transcript', e.currentTarget)}
-                    onDoubleClick={(e) => handleWordDoubleClick('transcript', e.currentTarget, e.clientX, e.clientY)}
+                    onSelectionChange={(editor) => handleRichTextSelectionChange('transcript', editor)}
+                    onWordDoubleClick={(info) => handleRichTextWordDoubleClick('transcript', info)}
                     placeholder="Text erscheint hier..."
                     readOnly={isProcessing}
                   />

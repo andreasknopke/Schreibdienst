@@ -2553,10 +2553,19 @@ export default function HomePage() {
         continue;
       }
 
-      // Zusätzliche Text-Vorverarbeitung: Auch wenn `neuer Absatz` am Chunk-Anfang
-      // vom STT/VAD nicht als separater Command erkannt wird, wird er hier auf
-      // Textebene durch applyOnlineDictationControlWords in \n\n umgewandelt.
-      const preprocessedText = applyOnlineDictationControlWords(entry.text);
+      // Zusätzliche Text-Vorverarbeitung: Statt applyFormattingControlWords
+      // (das auch delete-commands löscht) nutzen wir eine schmale Funktion,
+      // die nur Absatz/Zeilen-Steuerwörter vor-übersetzt, damit Befehle wie
+      // "Neuer Absatz, ..." am Chunk-Anfang nicht verloren gehen.
+      // Delete-Befehle ("lösche das letzte Wort") bleiben intakt und werden
+      // später von applyOnlineUtteranceToText korrekt verarbeitet.
+      const cmdText = entry.text
+        .replace(/[.,;\s]*\bneuer\s+absatz\b[.,;\s]*/gi, '\n\n')
+        .replace(/[.,;\s]*\bnächster\s+absatz\b[.,;\s]*/gi, '\n\n')
+        .replace(/[.,;\s]*\babsatz\b[.,;\s]*/gi, '\n\n')
+        .replace(/[.,;\s]*\bneue\s+zeile\b[.,;\s]*/gi, '\n')
+        .replace(/[.,;\s]*\bnächste\s+zeile\b[.,;\s]*/gi, '\n');
+      const preprocessedText = cmdText;
       appendAdminConsoleEntry('pipeline', `VAD #${seq}: Rohtext`, formatPipelineDetails({ original: entry.text, preprocessed: preprocessedText }));
       appendAdminConsoleEntry('pipeline', `VAD #${seq}: Eingabe`, formatPipelineDetails({ combinedText: combinedCommittedText }));
       const debugSteps: OnlineUtteranceApplicationDebugStep[] = [];

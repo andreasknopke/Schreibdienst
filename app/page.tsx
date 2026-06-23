@@ -460,9 +460,10 @@ function detectInlineFormattingToggleCommand(text: string): { key: RichTextForma
 function normalizeInlineFormattingSpacing(text: string): string {
   return text
     .replace(/[ \t]{2,}/g, ' ')
-    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/[^\S\n]+([,.;:!?])/g, '$1')
     .replace(/([,.;:!?])(?!\s|$)/g, '$1 ')
-    .trim();
+    .replace(/^[^\S\n]+/, '')
+    .replace(/[^\S\n]+$/, '');
 }
 
 function parseInlineFormattingText(text: string, initialState: VoiceFormattingState): VoiceFormattingParseResult {
@@ -4789,18 +4790,12 @@ export default function HomePage() {
 
       <div className="flex items-center gap-3">
         {recording ? (
-          <div className="flex items-start gap-3 flex-1">
-            <div className="relative min-w-[12rem] pt-5">
-              <span className="absolute left-0 top-0 whitespace-nowrap text-xs font-medium text-red-600 dark:text-red-400">
-                Aufnahme läuft
-                {transcribing && <span className="ml-2 opacity-70">(transkribiert...)</span>}
-                {correcting && <span className="ml-2 opacity-70">(korrigiert...)</span>}
-              </span>
-              <span className="badge inline-flex min-w-[7rem] items-center justify-center gap-2">
-                <span className="pulse-dot" />
-                Aufnahme
-              </span>
-            </div>
+          <div className="flex items-center gap-3 flex-1">
+            <span className="inline-flex items-center gap-2 text-xs text-red-600 dark:text-red-400">
+              <span className="pulse-dot" />
+              {transcribing && <span className="opacity-70">(transkribiert...)</span>}
+              {correcting && <span className="opacity-70">(korrigiert...)</span>}
+            </span>
             {/* Mikrofonpegel-Anzeige */}
             <div className="flex items-center gap-2 flex-1">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-400">
@@ -4817,7 +4812,7 @@ export default function HomePage() {
             </div>
           </div>
         ) : (
-          <span className="badge inline-flex min-w-[7rem] justify-center">Bereit</span>
+          <span className="inline-flex min-w-[7rem] items-center justify-center text-xs text-gray-500 dark:text-gray-400">Bereit</span>
         )}
       </div>
       
@@ -5142,29 +5137,6 @@ export default function HomePage() {
           )}
         </button>
       )}
-      <div className="relative h-9 w-24 text-xs">
-        {recording ? (
-          <div className="absolute inset-0 flex flex-col justify-center">
-            <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400 whitespace-nowrap">
-              <span className="pulse-dot" style={{ width: 8, height: 8 }} />
-              Aufnahme
-            </span>
-            {transcribing && (
-              <span className="text-blue-600 dark:text-blue-400 flex items-center gap-1 whitespace-nowrap">
-                <Spinner size={10} /> Live
-              </span>
-            )}
-          </div>
-        ) : correcting ? (
-          <span className="absolute inset-y-0 left-0 flex items-center gap-1.5 text-purple-600 dark:text-purple-400 whitespace-nowrap">
-            <Spinner size={10} /> KI-Korrektur
-          </span>
-        ) : busy ? (
-          <span className="absolute inset-y-0 left-0 flex items-center gap-1.5 text-blue-600 dark:text-blue-400 whitespace-nowrap">
-            <Spinner size={10} /> Verarbeitung
-          </span>
-        ) : null}
-      </div>
     </div>
   );
 

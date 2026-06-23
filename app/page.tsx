@@ -88,6 +88,16 @@ type RichTextState = Record<TextStateKey, RichTextFormatRange[]>;
 
 type RichTextToggleState = Record<TextStateKey, Record<RichTextFormatKey, boolean>>;
 
+type AdminConsoleEntrySource = 'keyboard' | 'injector-hotkey' | 'hid';
+
+interface AdminConsoleEntry {
+  id: number;
+  timestamp: string;
+  source: AdminConsoleEntrySource;
+  message: string;
+  details: string;
+}
+
 interface CaretOverlayPosition {
   top: number;
   left: number;
@@ -120,6 +130,14 @@ const EMPTY_MANUAL_WORD_CHANGES: Record<TextInsertionTarget, ManualWordChange | 
 };
 
 const TEXT_HISTORY_LIMIT = 50;
+const ADMIN_CONSOLE_LIMIT = 200;
+
+const KEYBOARD_HOTKEY_ACTIONS: Partial<Record<string, GlobalHotkeyAction>> = {
+  F9: 'toggle-recording',
+  F10: 'stop-recording',
+  F11: 'transfer-text',
+  Escape: 'cancel-recording',
+};
 
 const EMPTY_RICH_TEXT_RANGES: RichTextState = {
   transcript: [],
@@ -202,6 +220,105 @@ function getDefaultSelection(text: string): CaretSelection {
 
 function normalizeChunkLeadingWhitespace(text: string): string {
   return text.replace(/^\s+/, '');
+}
+
+function formatHotkeyActionLabel(action: GlobalHotkeyAction): string {
+  switch (action) {
+    case 'toggle-recording':
+      return 'Aufnahme umschalten';
+    case 'stop-recording':
+      return 'Aufnahme stoppen';
+    case 'transfer-text':
+      return 'Text übertragen';
+    case 'cancel-recording':
+      return 'Aufnahme abbrechen';
+  }
+}
+
+function formatAdminConsoleTimestamp(): string {
+  return new Date().toLocaleTimeString('de-DE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function formatHidConsoleDetails(detail: HidMediaControlEventDetail): string {
+  const parts = [
+    `Quelle: ${detail.source}`,
+    `Phase: ${detail.phase}`,
+    `Aktion: ${detail.action}`,
+  ];
+
+  if (detail.key) {
+    parts.push(`Key: ${detail.key}`);
+  }
+
+  if (detail.code) {
+    parts.push(`Code: ${detail.code}`);
+  }
+
+  if (detail.hidUsage) {
+    parts.push(`Usage: ${detail.hidUsage}`);
+  }
+
+  if (detail.deviceName) {
+    parts.push(`Gerät: ${detail.deviceName}`);
+  }
+
+  return parts.join(' | ');
+}
+
+function isEditableKeyboardTarget(target: EventTarget | null): target is HTMLElement {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (target.isContentEditable) {
+    return true;
+  }
+
+  const closestEditable = target.closest('input, textarea, [contenteditable="true"], [role="textbox"]');
+  return closestEditable instanceof HTMLElement;
+}
+
+function formatKeyboardKeyLabel(key: string): string {
+  if (key === ' ') {
+    return 'Space';
+  }
+
+  return key;
+}
+
+function formatKeyboardConsoleDetails(event: KeyboardEvent): string {
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  const targetLabel = target?.getAttribute('aria-label')
+    || target?.getAttribute('placeholder')
+    || target?.getAttribute('role')
+    || target?.tagName.toLowerCase()
+    || 'unbekannt';
+
+  const parts = [
+    `Key: ${formatKeyboardKeyLabel(event.key)}`,
+    `Code: ${event.code}`,
+    `Ziel: ${targetLabel}`,
+  ];
+
+  if (event.repeat) {
+    parts.push('Repeat: ja');
+  }
+
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+    const modifiers = [
+      event.ctrlKey ? 'Ctrl' : null,
+      event.metaKey ? 'Meta' : null,
+      event.altKey ? 'Alt' : null,
+      event.shiftKey ? 'Shift' : null,
+    ].filter(Boolean).join('+');
+    parts.push(`Modifier: ${modifiers}`);
+  }
+
+  return parts.join(' | ');
 }
 
 const LIVE_INJECT_DUPLICATE_WINDOW_MS = 3000;
@@ -472,7 +589,7 @@ function getTextareaCaretOverlay(
 }
 
 export default function HomePage() {
-  const { username, autoCorrect, defaultMode, getAuthHeader, getDbTokenHeader } = useAuth();
+  const { username, isAdmin, autoCorrect, defaultMode, getAuthHeader, getDbTokenHeader } = useAuth();
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [correcting, setCorrecting] = useState(false);
@@ -583,6 +700,9 @@ export default function HomePage() {
   const [targetWindowPattern, setTargetWindowPattern] = useState<string>('');
   const targetWindowPatternLoadedRef = useRef(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [adminConsoleOpen, setAdminConsoleOpen] = useState(false);
+  const [adminConsoleEntries, setAdminConsoleEntries] = useState<AdminConsoleEntry[]>([]);
+  const adminConsoleEntryIdRef = useRef(0);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Status tracking for UI indicators
@@ -629,6 +749,22 @@ export default function HomePage() {
       canRedo: textHistoryFutureRef.current.length > 0,
     });
   }, []);
+
+  const appendAdminConsoleEntry = useCallback((source: AdminConsoleEntrySource, message: string, details: string) => {
+    if (!isAdmin) {
+      return;
+    }
+
+    const nextEntry: AdminConsoleEntry = {
+      id: adminConsoleEntryIdRef.current += 1,
+      timestamp: formatAdminConsoleTimestamp(),
+      source,
+      message,
+      details,
+    };
+
+    setAdminConsoleEntries((current) => [nextEntry, ...current].slice(0, ADMIN_CONSOLE_LIMIT));
+  }, [isAdmin]);
 
   const applyTextHistorySnapshot = useCallback((snapshot: TextHistorySnapshot) => {
     setTranscript(snapshot.transcript);
@@ -2865,37 +3001,44 @@ export default function HomePage() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      switch (e.key) {
-        case 'F9':
-          e.preventDefault();
-          handleGlobalHotkeyAction('toggle-recording');
-          break;
-        case 'F10':
-          e.preventDefault();
-          handleGlobalHotkeyAction('stop-recording');
-          break;
-        case 'F11':
-          e.preventDefault();
-          handleGlobalHotkeyAction('transfer-text');
-          break;
-        case 'Escape':
-          e.preventDefault();
-          handleGlobalHotkeyAction('cancel-recording');
-          break;
+      if (isEditableKeyboardTarget(e.target)) {
+        appendAdminConsoleEntry(
+          'keyboard',
+          `Editor-Taste ${formatKeyboardKeyLabel(e.key)}`,
+          formatKeyboardConsoleDetails(e),
+        );
       }
+
+      const action = KEYBOARD_HOTKEY_ACTIONS[e.key];
+      if (!action) {
+        return;
+      }
+
+      e.preventDefault();
+      appendAdminConsoleEntry(
+        'keyboard',
+        `Tastatur-Hotkey ${e.key}`,
+        `Aktion: ${formatHotkeyActionLabel(action)} | Key: ${e.key} | Code: ${e.code}`,
+      );
+      handleGlobalHotkeyAction(action);
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [handleGlobalHotkeyAction]);
+  }, [appendAdminConsoleEntry, handleGlobalHotkeyAction]);
 
   useEffect(() => {
     registerGlobalHotkeys((action) => {
+      appendAdminConsoleEntry(
+        'injector-hotkey',
+        `Injector-Hotkey ${action}`,
+        `Aktion: ${formatHotkeyActionLabel(action as GlobalHotkeyAction)}`,
+      );
       handleGlobalHotkeyAction(action as GlobalHotkeyAction);
     }).catch(() => {
       // Hotkey registration via WebSocket failed — non-fatal
     });
-  }, [handleGlobalHotkeyAction]);
+  }, [appendAdminConsoleEntry, handleGlobalHotkeyAction]);
 
   useEffect(() => {
     const previous = injectorRecordingStateRef.current;
@@ -2956,6 +3099,14 @@ export default function HomePage() {
   useEffect(() => {
     const handleHidMediaControl = (event: Event) => {
       const detail = (event as CustomEvent<HidMediaControlEventDetail>).detail;
+      if (detail) {
+        appendAdminConsoleEntry(
+          'hid',
+          `HID ${detail.phase} ${detail.action}`,
+          formatHidConsoleDetails(detail),
+        );
+      }
+
       if (!detail || detail.phase !== 'keydown' || detail.action !== 'record') {
         return;
       }
@@ -2969,7 +3120,7 @@ export default function HomePage() {
 
     window.addEventListener(HID_MEDIA_CONTROL_EVENT, handleHidMediaControl as EventListener);
     return () => window.removeEventListener(HID_MEDIA_CONTROL_EVENT, handleHidMediaControl as EventListener);
-  }, [startRecording, stopRecording]);
+  }, [appendAdminConsoleEntry, startRecording, stopRecording]);
 
   // Schnelle LLM-Fachwort-Korrektur
   // Schnelle LLM-Fachwort-Korrektur (mit Halluzinations-Filter auf Server-Seite)
@@ -5860,6 +6011,57 @@ export default function HomePage() {
           void handleToggleLiveInject();
         }}
       />
+
+      {isAdmin && (
+        <div className="fixed inset-x-0 bottom-0 z-50 pointer-events-none flex justify-center px-3 pb-3">
+          <div className="pointer-events-auto w-full max-w-6xl overflow-hidden rounded-xl border border-gray-200 bg-white/95 shadow-2xl backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95">
+            <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-2 dark:border-gray-700">
+              <div>
+                <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Admin-Konsole</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">Registrierte Tastatur-Hotkeys und HID-Befehle</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 dark:text-gray-400">{adminConsoleEntries.length} Einträge</span>
+                <button
+                  type="button"
+                  className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                  onClick={() => setAdminConsoleEntries([])}
+                >
+                  Leeren
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                  onClick={() => setAdminConsoleOpen((current) => !current)}
+                  aria-expanded={adminConsoleOpen}
+                >
+                  {adminConsoleOpen ? 'Einklappen' : 'Ausklappen'}
+                </button>
+              </div>
+            </div>
+            {adminConsoleOpen && (
+              <div className="max-h-64 overflow-y-auto bg-gray-950 px-4 py-3 font-mono text-xs text-gray-100">
+                {adminConsoleEntries.length === 0 ? (
+                  <div className="text-gray-400">Noch keine registrierten Tastatur- oder HID-Ereignisse.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {adminConsoleEntries.map((entry) => (
+                      <div key={entry.id} className="rounded border border-gray-800 bg-gray-900/80 px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-2 text-gray-300">
+                          <span className="text-cyan-300">[{entry.timestamp}]</span>
+                          <span className="uppercase tracking-wide text-amber-300">{entry.source}</span>
+                          <span>{entry.message}</span>
+                        </div>
+                        <div className="mt-1 break-all text-gray-400">{entry.details}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

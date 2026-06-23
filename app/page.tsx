@@ -236,7 +236,7 @@ function getDefaultSelection(text: string): CaretSelection {
 }
 
 function normalizeChunkLeadingWhitespace(text: string): string {
-  return text.replace(/^\s+/, '');
+  return text.replace(/^[^\S\n]+/, '');
 }
 
 function formatHotkeyActionLabel(action: GlobalHotkeyAction): string {

@@ -2344,7 +2344,16 @@ export default function HomePage() {
 
   const handleRichTextToolbarAction = useCallback((field: TextInsertionTarget, key: RichTextFormatKey) => {
     const text = getFieldTextValue(field);
-    const selection = getStoredSelection(field, text);
+    // Live-Selection aus dem DOM holen (genauer als gespeicherter State,
+    // insbesondere bei Edge Cases wie Selection ab Position 0)
+    const editorRefMap: Record<TextInsertionTarget, React.RefObject<HTMLDivElement | null>> = {
+      transcript: transcriptTextareaRef,
+      methodik: methodikTextareaRef,
+      befund: befundTextareaRef,
+      beurteilung: beurteilungTextareaRef,
+    };
+    const liveSelection = editorRefMap[field]?.current ? getRichTextSelection(editorRefMap[field].current) : null;
+    const selection = liveSelection ?? getStoredSelection(field, text);
     const { start, end } = getSelectionBounds(selection);
     const stateKey = getRichTextStateKey(field);
 
@@ -4794,6 +4803,7 @@ export default function HomePage() {
 
   function handleCopy() {
     copyRichTextToClipboard(transcript, buildRichTextHtml(transcript, richTextFormats.transcript ?? []));
+    showToast('✅ Kopiert!');
   }
 
   async function handleExportDocx() {
@@ -5640,7 +5650,7 @@ export default function HomePage() {
 
       {toastMessage && (
         <div className="fixed bottom-4 right-4 z-[70] pointer-events-none">
-          <div className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white shadow-xl">
+          <div className="rounded-lg bg-green-600 px-4 py-2 text-sm text-white shadow-xl">
             {toastMessage}
           </div>
         </div>
@@ -5689,7 +5699,7 @@ export default function HomePage() {
                     {renderRichTextToolbar('methodik')}
                     <button 
                       className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => copyRichTextToClipboard(methodik, buildRichTextHtml(methodik, getFieldRichTextFormats('methodik')))}
+                      onClick={() => { copyRichTextToClipboard(methodik, buildRichTextHtml(methodik, getFieldRichTextFormats('methodik'))); showToast('✅ Kopiert!'); }}
                       disabled={!methodik}
                       title="Kopieren"
                     >
@@ -5774,7 +5784,7 @@ export default function HomePage() {
                     {renderRichTextToolbar('befund')}
                     <button 
                       className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => copyRichTextToClipboard(transcript, buildRichTextHtml(transcript, getFieldRichTextFormats('befund')))}
+                      onClick={() => { copyRichTextToClipboard(transcript, buildRichTextHtml(transcript, getFieldRichTextFormats('befund'))); showToast('✅ Kopiert!'); }}
                       disabled={!transcript}
                       title="Kopieren"
                     >
@@ -5875,7 +5885,7 @@ export default function HomePage() {
                     {renderRichTextToolbar('beurteilung')}
                     <button 
                       className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => copyRichTextToClipboard(beurteilung, buildRichTextHtml(beurteilung, getFieldRichTextFormats('beurteilung')))}
+                      onClick={() => { copyRichTextToClipboard(beurteilung, buildRichTextHtml(beurteilung, getFieldRichTextFormats('beurteilung'))); showToast('✅ Kopiert!'); }}
                       disabled={!beurteilung}
                       title="Kopieren"
                     >

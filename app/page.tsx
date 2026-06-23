@@ -4762,13 +4762,18 @@ export default function HomePage() {
 
       <div className="flex items-center gap-3">
         {recording ? (
-          <div className="flex items-center gap-3 flex-1">
-            <span className="badge inline-flex items-center gap-2">
-              <span className="pulse-dot" /> 
-              Aufnahme läuft
-              {transcribing && <span className="ml-2 text-xs opacity-70">(transkribiert...)</span>}
-              {correcting && <span className="ml-2 text-xs opacity-70">(korrigiert...)</span>}
-            </span>
+          <div className="flex items-start gap-3 flex-1">
+            <div className="relative min-w-[12rem] pt-5">
+              <span className="absolute left-0 top-0 whitespace-nowrap text-xs font-medium text-red-600 dark:text-red-400">
+                Aufnahme läuft
+                {transcribing && <span className="ml-2 opacity-70">(transkribiert...)</span>}
+                {correcting && <span className="ml-2 opacity-70">(korrigiert...)</span>}
+              </span>
+              <span className="badge inline-flex min-w-[7rem] items-center justify-center gap-2">
+                <span className="pulse-dot" />
+                Aufnahme
+              </span>
+            </div>
             {/* Mikrofonpegel-Anzeige */}
             <div className="flex items-center gap-2 flex-1">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-gray-400">
@@ -4785,7 +4790,7 @@ export default function HomePage() {
             </div>
           </div>
         ) : (
-          <span className="badge">Bereit</span>
+          <span className="badge inline-flex min-w-[7rem] justify-center">Bereit</span>
         )}
       </div>
       
@@ -5253,7 +5258,7 @@ export default function HomePage() {
                   </svg>
                 </button>
                 <button
-                  className="btn btn-outline h-9 w-9 p-0"
+                  className="btn btn-outline h-9 w-9 p-0 border-red-200 text-red-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700 dark:border-red-900/40 dark:text-red-400 dark:hover:border-red-800 dark:hover:bg-red-900/20 dark:hover:text-red-300"
                   onClick={handleReset}
                   title="Alle Felder löschen"
                   aria-label="Alle Felder löschen"

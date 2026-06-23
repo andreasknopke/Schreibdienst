@@ -1275,7 +1275,7 @@ function cleanupFormatting(text: string): string {
     // Remove multiple spaces (but keep newlines)
     .replace(/[^\S\n]+/g, ' ')
     // Remove space before punctuation
-    .replace(/\s+([.,;:!?)])/g, '$1')
+    .replace(/[^\S\n]+([.,;:!?)])/g, '$1')
     // Add space after punctuation if missing (but not before newline or opening bracket)
     .replace(/([.,;:!?])(?=[A-ZÄÖÜa-zäöüß])/g, '$1 ')
     // Remove space after opening parenthesis

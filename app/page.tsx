@@ -5649,8 +5649,8 @@ export default function HomePage() {
       {error && <div className="alert alert-error text-sm">{error}</div>}
 
       {toastMessage && (
-        <div className="fixed bottom-4 right-4 z-[70] pointer-events-none">
-          <div className="rounded-lg bg-green-600 px-4 py-2 text-sm text-white shadow-xl">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[70] pointer-events-none">
+          <div className="rounded-lg bg-green-600 px-4 py-2 text-sm text-white shadow-xl whitespace-nowrap">
             {toastMessage}
           </div>
         </div>

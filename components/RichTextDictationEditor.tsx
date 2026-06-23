@@ -227,7 +227,7 @@ export default function RichTextDictationEditor({
         role="textbox"
         aria-multiline="true"
         spellCheck={false}
-        style={{ whiteSpace: 'pre-wrap', resize: 'vertical', overflow: 'auto' }}
+        style={{ whiteSpace: 'break-spaces', resize: 'vertical', overflow: 'auto' }}
       />
     </div>
   );

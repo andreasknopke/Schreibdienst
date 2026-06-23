@@ -347,7 +347,8 @@ function formatKeyboardConsoleDetails(event: KeyboardEvent): string {
 const LIVE_INJECT_DUPLICATE_WINDOW_MS = 3000;
 
 function insertTextAtSelection(existing: string, incomingText: string, selection?: CaretSelection | null): TextInsertionResult {
-  const normalizedIncomingText = normalizeChunkLeadingWhitespace(incomingText);
+  // Führende horizontale Leerzeichen entfernen, aber Zeilenumbrüche bewahren
+  const normalizedIncomingText = incomingText.replace(/^[^\S\n]+/, '');
   const baseSelection = selection ?? getDefaultSelection(existing);
   const start = Math.max(0, Math.min(baseSelection.start, existing.length));
   const end = Math.max(start, Math.min(baseSelection.end, existing.length));

@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * VAD-basiertes Utterance-Chunking für Online-Diktat.
@@ -74,6 +74,21 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
   const vadThresholdRef = useRef(vadThreshold);
   vadThresholdRef.current = vadThreshold;
   
+  // Aktualisiert den laufenden MicVAD-FrameProcessor, wenn der Schieberegler
+  // für die Raumlautstärke (vadThreshold) während einer aktiven Aufnahme
+  // verändert wird. Dadurch wirkt sich die Änderung sofort aus, ohne dass
+  // die VAD neugestartet werden muss.
+  useEffect(() => {
+    if (vadRef.current?.frameProcessor?.setOptions) {
+      const pos = vadThresholdRef.current;
+      const neg = Math.max(0.1, pos - 0.07);
+      vadRef.current.frameProcessor.setOptions({
+        positiveSpeechThreshold: pos,
+        negativeSpeechThreshold: neg,
+      });
+    }
+  }, [vadThreshold]);
+
   // Auto-Chunk: Sammelt Frames seit Sprechbeginn für forced flush
   const speechFramesRef = useRef<Float32Array[]>([]);
   const preSpeechFramesRef = useRef<Float32Array[]>([]);

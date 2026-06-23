@@ -178,7 +178,8 @@ export default function RichTextDictationEditor({
 
     const currentText = getEditorText(editor);
     const currentSignature = editor.dataset.formatSignature ?? '[]';
-    if (currentText === value && currentSignature === formatSignature) {
+    const currentHtml = editor.innerHTML;
+    if (currentText === value && currentSignature === formatSignature && currentHtml === html) {
       return;
     }
 

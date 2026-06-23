@@ -740,7 +740,7 @@ export function applyOnlineDictationControlWords(text: string): string {
   // Ausrufezeichen stehen (z.B. "Doppelpunkt Komma" → ":,", bereinigt zu ":").
   result = result.replace(/([:;?!])\s*,/g, '$1');
 
-  return cleanupFormattingPreserveTrailingBreaks(result);
+  return cleanupFormattingPreserveEdgeBreaks(result);
 }
 
 /**
@@ -883,6 +883,23 @@ function cleanupFormattingPreserveTrailingBreaks(text: string): string {
   return `${cleaned}${trailingBreaks}`;
 }
 
+function cleanupFormattingPreserveEdgeBreaks(text: string): string {
+  if (!text) return text;
+
+  const leadingBreaks = text.match(/^\n+/)?.[0] ?? '';
+  const trailingBreaks = text.match(/\n+$/)?.[0] ?? '';
+  const cleaned = cleanupFormatting(text);
+  const normalizedLeadingBreaks = leadingBreaks.replace(/\n{3,}/g, '\n\n');
+  const normalizedTrailingBreaks = trailingBreaks.replace(/\n{3,}/g, '\n\n');
+
+  if (!cleaned) {
+    const edgeBreaks = `${normalizedLeadingBreaks}${normalizedTrailingBreaks}`.replace(/\n{3,}/g, '\n\n');
+    return edgeBreaks;
+  }
+
+  return `${normalizedLeadingBreaks}${cleaned}${normalizedTrailingBreaks}`;
+}
+
 function deleteLastWordFromText(text: string): string {
   return cleanupFormatting(text.replace(/\s*\S+\s*$/, ''));
 }
@@ -983,7 +1000,7 @@ export function applyOnlineUtteranceToText(
     cursor = nextCommand.index + nextCommand.length;
   }
 
-  return cleanupFormattingPreserveTrailingBreaks(result);
+  return cleanupFormattingPreserveEdgeBreaks(result);
 }
 
 /**
@@ -991,10 +1008,10 @@ export function applyOnlineUtteranceToText(
  * Satzzeichen an der Fuge. Das verhindert Artefakte wie "Text ," oder "Text \n\n".
  */
 export function combineFormattedText(existingText: string, incomingText: string): string {
-  if (!existingText) return cleanupFormattingPreserveTrailingBreaks(incomingText);
-  if (!incomingText) return cleanupFormattingPreserveTrailingBreaks(existingText);
+  if (!existingText) return cleanupFormattingPreserveEdgeBreaks(incomingText);
+  if (!incomingText) return cleanupFormattingPreserveEdgeBreaks(existingText);
   const separator = existingText.endsWith(' ') || existingText.endsWith('\n') ? '' : ' ';
-  return cleanupFormattingPreserveTrailingBreaks(`${existingText}${separator}${incomingText}`);
+  return cleanupFormattingPreserveEdgeBreaks(`${existingText}${separator}${incomingText}`);
 }
 
 /**
@@ -1055,7 +1072,7 @@ export function applyFormattingControlWordsWithStats(text: string): ControlWordR
   }
   
   // Step 3: Clean up formatting
-  result = cleanupFormatting(result);
+  result = cleanupFormattingPreserveEdgeBreaks(result);
   
   // Log if any control words were applied
   if (stats.total > 0) {

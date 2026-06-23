@@ -239,6 +239,12 @@ function normalizeChunkLeadingWhitespace(text: string): string {
   return text.replace(/^[^\S\n]+/, '');
 }
 
+function trimHorizontalWhitespace(text: string): string {
+  return text
+    .replace(/^[^\S\n]+/, '')
+    .replace(/[^\S\n]+$/, '');
+}
+
 function formatHotkeyActionLabel(action: GlobalHotkeyAction): string {
   switch (action) {
     case 'toggle-recording':
@@ -2717,7 +2723,7 @@ export default function HomePage() {
     };
     
     // Text VOR dem ersten Match gehört zum aktuellen aktiven Feld (wird separat behandelt)
-    const textBeforeFirst = text.substring(0, matches[0].index).trim();
+    const textBeforeFirst = trimHorizontalWhitespace(text.substring(0, matches[0].index));
     
     // Verarbeite jeden Match
     for (let i = 0; i < matches.length; i++) {
@@ -2727,7 +2733,7 @@ export default function HomePage() {
       // Text nach diesem Match bis zum nächsten Match (oder Ende)
       const startPos = current.index + current.length;
       const endPos = next ? next.index : text.length;
-      const fieldText = text.substring(startPos, endPos).trim();
+      const fieldText = trimHorizontalWhitespace(text.substring(startPos, endPos));
       
       // Füge zum entsprechenden Feld hinzu
       if (fieldText) {
@@ -5115,31 +5121,29 @@ export default function HomePage() {
           )}
         </button>
       )}
-      {(recording || correcting || busy) && (
-        <div className="text-xs">
-          {recording ? (
-          <div className="flex flex-col">
-            <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400">
-              <span className="pulse-dot" style={{ width: 8, height: 8 }} /> 
+      <div className="relative h-9 w-24 text-xs">
+        {recording ? (
+          <div className="absolute inset-0 flex flex-col justify-center">
+            <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400 whitespace-nowrap">
+              <span className="pulse-dot" style={{ width: 8, height: 8 }} />
               Aufnahme
             </span>
             {transcribing && (
-              <span className="text-blue-600 dark:text-blue-400 flex items-center gap-1">
+              <span className="text-blue-600 dark:text-blue-400 flex items-center gap-1 whitespace-nowrap">
                 <Spinner size={10} /> Live
               </span>
             )}
           </div>
-          ) : correcting ? (
-            <span className="flex items-center gap-1.5 text-purple-600 dark:text-purple-400">
-              <Spinner size={10} /> KI-Korrektur
-            </span>
-          ) : (
-            <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
-              <Spinner size={10} /> Verarbeitung
-            </span>
-          )}
-        </div>
-      )}
+        ) : correcting ? (
+          <span className="absolute inset-y-0 left-0 flex items-center gap-1.5 text-purple-600 dark:text-purple-400 whitespace-nowrap">
+            <Spinner size={10} /> KI-Korrektur
+          </span>
+        ) : busy ? (
+          <span className="absolute inset-y-0 left-0 flex items-center gap-1.5 text-blue-600 dark:text-blue-400 whitespace-nowrap">
+            <Spinner size={10} /> Verarbeitung
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 

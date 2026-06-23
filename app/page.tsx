@@ -108,6 +108,17 @@ interface CaretOverlayPosition {
 interface TextInsertionResult {
   text: string;
   selection: CaretSelection;
+  insertedStart: number;
+  insertedEnd: number;
+}
+
+type VoiceFormattingState = Record<RichTextFormatKey, boolean>;
+
+interface VoiceFormattingParseResult {
+  text: string;
+  ranges: RichTextFormatRange[];
+  nextState: VoiceFormattingState;
+  consumedCommand: boolean;
 }
 
 interface TextHistorySnapshot {
@@ -149,6 +160,12 @@ const EMPTY_RICH_TEXT_TOGGLES: RichTextToggleState = {
   transcript: { bold: false, italic: false, underline: false },
   methodik: { bold: false, italic: false, underline: false },
   beurteilung: { bold: false, italic: false, underline: false },
+};
+
+const EMPTY_VOICE_FORMATTING_STATE: VoiceFormattingState = {
+  bold: false,
+  italic: false,
+  underline: false,
 };
 
 function extractSuggestionTokens(text: string): string[] {
@@ -325,22 +342,26 @@ const LIVE_INJECT_DUPLICATE_WINDOW_MS = 3000;
 
 function insertTextAtSelection(existing: string, incomingText: string, selection?: CaretSelection | null): TextInsertionResult {
   const normalizedIncomingText = normalizeChunkLeadingWhitespace(incomingText);
+  const baseSelection = selection ?? getDefaultSelection(existing);
+  const start = Math.max(0, Math.min(baseSelection.start, existing.length));
+  const end = Math.max(start, Math.min(baseSelection.end, existing.length));
 
   if (!normalizedIncomingText) {
     return {
       text: existing,
-      selection: selection ?? getDefaultSelection(existing),
+      selection: baseSelection,
+      insertedStart: start,
+      insertedEnd: end,
     };
   }
 
-  const baseSelection = selection ?? getDefaultSelection(existing);
-  const start = Math.max(0, Math.min(baseSelection.start, existing.length));
-  const end = Math.max(start, Math.min(baseSelection.end, existing.length));
   const before = existing.slice(0, start);
   const after = existing.slice(end);
   const needsPrefixSeparator = before.length > 0 && !before.endsWith('\n') && !before.endsWith(' ');
   const prefix = needsPrefixSeparator ? ' ' : '';
   const inserted = `${before}${prefix}${normalizedIncomingText}`;
+  const insertedStart = before.length + prefix.length;
+  const insertedEnd = insertedStart + normalizedIncomingText.length;
   const caretIndex = inserted.length;
 
   if (!after) {
@@ -351,6 +372,8 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
         end: caretIndex,
         direction: 'none',
       },
+      insertedStart,
+      insertedEnd,
     };
   }
 
@@ -367,6 +390,130 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
       end: caretIndex,
       direction: 'none',
     },
+    insertedStart,
+    insertedEnd,
+  };
+}
+
+function cloneVoiceFormattingState(state: VoiceFormattingState): VoiceFormattingState {
+  return {
+    bold: Boolean(state.bold),
+    italic: Boolean(state.italic),
+    underline: Boolean(state.underline),
+  };
+}
+
+function areVoiceFormattingStatesEqual(left: VoiceFormattingState, right: VoiceFormattingState): boolean {
+  return left.bold === right.bold && left.italic === right.italic && left.underline === right.underline;
+}
+
+function normalizeVoiceFormattingCommand(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[.,;:!?]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function detectSelectionFormattingCommand(text: string): RichTextFormatKey | null {
+  const normalized = normalizeVoiceFormattingCommand(text);
+
+  if (normalized === 'auswahl fett') return 'bold';
+  if (normalized === 'auswahl kursiv') return 'italic';
+  if (normalized === 'auswahl unterstrichen') return 'underline';
+  return null;
+}
+
+function detectInlineFormattingToggleCommand(text: string): { key: RichTextFormatKey; enabled: boolean } | null {
+  const normalized = normalizeVoiceFormattingCommand(text);
+  if (!normalized) {
+    return null;
+  }
+
+  const tokens = normalized.split(' ');
+  let key: RichTextFormatKey | null = null;
+
+  if (tokens.includes('fett')) key = 'bold';
+  else if (tokens.includes('kursiv')) key = 'italic';
+  else if (tokens.includes('unterstrichen') || tokens.includes('unterstreichen')) key = 'underline';
+
+  if (!key) {
+    return null;
+  }
+
+  const isBegin = tokens.includes('beginn') || tokens.includes('beginnen') || tokens.includes('beginnt') || tokens.includes('anfang') || tokens.includes('start');
+  const isEnd = tokens.includes('ende') || tokens.includes('beenden') || tokens.includes('beendet') || tokens.includes('stop') || tokens.includes('stopp');
+
+  if (isBegin === isEnd) {
+    return null;
+  }
+
+  return { key, enabled: isBegin };
+}
+
+function normalizeInlineFormattingSpacing(text: string): string {
+  return text
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/([,.;:!?])(?!\s|$)/g, '$1 ')
+    .trim();
+}
+
+function parseInlineFormattingText(text: string, initialState: VoiceFormattingState): VoiceFormattingParseResult {
+  const commandPattern = /\b(fett|kursiv|unterstrichen|unterstreichen)\s+(beginn|beginnen|beginnt|anfang|start|ende|beenden|beendet|stop|stopp)\b[.,;:!?]*/gi;
+  const nextState = cloneVoiceFormattingState(initialState);
+  const ranges: RichTextFormatRange[] = [];
+  const outputParts: string[] = [];
+  let outputLength = 0;
+  let consumedCommand = false;
+  let lastIndex = 0;
+
+  const appendChunk = (rawChunk: string) => {
+    if (!rawChunk) {
+      return;
+    }
+
+    const chunk = outputParts.length === 0 ? rawChunk.replace(/^\s+/, '') : rawChunk;
+    if (!chunk) {
+      return;
+    }
+
+    const start = outputLength;
+    outputParts.push(chunk);
+    outputLength += chunk.length;
+
+    if (nextState.bold || nextState.italic || nextState.underline) {
+      ranges.push({
+        start,
+        end: outputLength,
+        bold: nextState.bold,
+        italic: nextState.italic,
+        underline: nextState.underline,
+      });
+    }
+  };
+
+  for (const match of text.matchAll(commandPattern)) {
+    const matchIndex = match.index ?? 0;
+    appendChunk(text.slice(lastIndex, matchIndex));
+
+    const toggleCommand = detectInlineFormattingToggleCommand(`${match[1] ?? ''} ${match[2] ?? ''}`.trim());
+    if (toggleCommand) {
+      nextState[toggleCommand.key] = toggleCommand.enabled;
+      consumedCommand = true;
+    }
+
+    lastIndex = matchIndex + match[0].length;
+  }
+
+  appendChunk(text.slice(lastIndex));
+
+  const normalizedText = normalizeInlineFormattingSpacing(outputParts.join(''));
+  return {
+    text: normalizedText,
+    ranges: normalizeRichTextRanges(ranges, normalizedText.length),
+    nextState,
+    consumedCommand,
   };
 }
 
@@ -974,12 +1121,42 @@ export default function HomePage() {
   }, [beurteilung, methodik, transcript]);
 
   const combineTextForField = useCallback((field: TextInsertionTarget, existing: string, newText: string) => {
+    const stateKey = getRichTextStateKey(field);
+    const selectionFormattingCommand = detectSelectionFormattingCommand(newText);
+
+    if (selectionFormattingCommand) {
+      const selection = getStoredSelection(field, existing);
+      const { start, end } = getSelectionBounds(selection);
+
+      if (end <= start) {
+        setError('Bitte zuerst einen Textbereich markieren.');
+        return existing;
+      }
+
+      setRichTextFormats((current) => ({
+        ...current,
+        [stateKey]: setFormatForSelection(current[stateKey], existing.length, start, end, selectionFormattingCommand, true),
+      }));
+      setError(null);
+      lastRichTextSyncedTextRef.current[stateKey] = existing;
+      return existing;
+    }
+
+    const currentVoiceFormattingState = richTextTogglesRef.current[stateKey] ?? EMPTY_VOICE_FORMATTING_STATE;
+    const parsedFormatting = parseInlineFormattingText(newText, currentVoiceFormattingState);
+
+    if (!areVoiceFormattingStatesEqual(currentVoiceFormattingState, parsedFormatting.nextState)) {
+      setRichTextToggles((current) => ({
+        ...current,
+        [stateKey]: parsedFormatting.nextState,
+      }));
+    }
+
     // Bei Löschbefehlen („lösche letztes Wort“) wird applyOnlineUtteranceToText genutzt,
     // das den Befehl korrekt auf den vorhandenen Text anwendet anstatt ihn anzuhängen.
-    if (hasOnlineCommand(newText)) {
-      const resultText = applyOnlineUtteranceToText(existing, newText);
+    if (hasOnlineCommand(parsedFormatting.text)) {
+      const resultText = applyOnlineUtteranceToText(existing, parsedFormatting.text);
       setStoredSelection(field, { start: resultText.length, end: resultText.length, direction: 'none' });
-      const stateKey = getRichTextStateKey(field);
       setRichTextFormats((current) => ({
         ...current,
         [stateKey]: remapRichTextRanges(existing, resultText, current[stateKey]),
@@ -988,27 +1165,23 @@ export default function HomePage() {
       return resultText;
     }
 
-    const stateKey = getRichTextStateKey(field);
-    const toggleState = richTextTogglesRef.current[stateKey];
     const selection = getStoredSelection(field, existing);
-    const normalizedIncomingText = normalizeChunkLeadingWhitespace(newText);
-    const selectionStart = Math.max(0, Math.min(selection.start, existing.length));
-    const selectionEnd = Math.max(selectionStart, Math.min(selection.end, existing.length));
-    const before = existing.slice(0, selectionStart);
-    const needsPrefixSeparator = before.length > 0 && !before.endsWith('\n') && !before.endsWith(' ');
-    const prefixLength = normalizedIncomingText ? (needsPrefixSeparator ? 1 : 0) : 0;
-    const result = insertTextAtSelection(existing, newText, getStoredSelection(field, existing));
+    const result = insertTextAtSelection(existing, parsedFormatting.text, selection);
     setStoredSelection(field, result.selection);
 
-    if (normalizedIncomingText) {
-      const insertedStart = selectionStart + prefixLength;
-      const insertedEnd = insertedStart + normalizedIncomingText.length;
+    if (parsedFormatting.text) {
       setRichTextFormats((current) => {
         let nextRanges = remapRichTextRanges(existing, result.text, current[stateKey]);
-        (Object.keys(toggleState) as RichTextFormatKey[]).forEach((key) => {
-          if (!toggleState[key]) return;
-          nextRanges = setFormatForSelection(nextRanges, result.text.length, insertedStart, insertedEnd, key, true);
-        });
+        if (parsedFormatting.ranges.length > 0 && result.insertedEnd > result.insertedStart) {
+          nextRanges = normalizeRichTextRanges([
+            ...nextRanges,
+            ...parsedFormatting.ranges.map((range) => ({
+              ...range,
+              start: result.insertedStart + range.start,
+              end: result.insertedStart + range.end,
+            })),
+          ], result.text.length);
+        }
         return {
           ...current,
           [stateKey]: nextRanges,
@@ -4639,7 +4812,7 @@ export default function HomePage() {
       {/* Hinweis zu Sprachbefehlen */}
       {recording && (
         <div className="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/30 p-2 rounded">
-          💡 <strong>Sprachbefehle:</strong> "Punkt", "Komma", "neuer Absatz", "lösche den letzten Satz", "lösche das letzte Wort"
+          💡 <strong>Sprachbefehle:</strong> "Punkt", "Komma", "neuer Absatz", "lösche den letzten Satz", "lösche das letzte Wort", "Auswahl fett", "fett beginnen", "fett ende"
           {mode === 'befund' && (
             <>
               <br />

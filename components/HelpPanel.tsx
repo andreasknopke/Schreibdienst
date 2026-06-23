@@ -40,6 +40,12 @@ export default function HelpPanel() {
               <div className="grid grid-cols-1 gap-1 text-xs">
                 <div><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">"neuer Absatz"</code> → Absatzumbruch</div>
                 <div><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">"neue Zeile"</code> → Zeilenumbruch</div>
+                <div><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">"Auswahl fett"</code> → markierten Text fett formatieren</div>
+                <div><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">"Auswahl kursiv"</code> → markierten Text kursiv formatieren</div>
+                <div><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">"Auswahl unterstrichen"</code> → markierten Text unterstreichen</div>
+                <div><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">"fett beginnen"</code> / <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">"fett ende"</code> → laufende Formatierung an/aus</div>
+                <div><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">"kursiv beginnen"</code> / <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">"kursiv ende"</code> → laufende Formatierung an/aus</div>
+                <div><code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">"unterstrichen beginnen"</code> / <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">"unterstrichen ende"</code> → laufende Formatierung an/aus</div>
               </div>
             </div>
 

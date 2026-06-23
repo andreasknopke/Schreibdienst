@@ -49,25 +49,80 @@ interface LastAppliedState {
   formatSignature: string;
 }
 
+const lexicalTheme = {
+  text: {
+    bold: 'font-bold',
+    italic: 'italic',
+    underline: 'underline',
+    strikethrough: 'line-through',
+    underlineStrikethrough: 'underline line-through',
+  },
+};
+
 function getEditorText(editor: HTMLDivElement): string {
   return editor.textContent ?? '';
 }
 
-function getNodeOffset(root: HTMLDivElement, targetNode: Node, targetOffset: number): number {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let offset = 0;
-  let currentNode = walker.nextNode();
+function isLineBreakDomNode(node: Node): node is HTMLBRElement {
+  return node instanceof HTMLBRElement;
+}
 
-  while (currentNode) {
-    const textLength = currentNode.textContent?.length ?? 0;
-    if (currentNode === targetNode) {
-      return offset + Math.min(targetOffset, textLength);
+function getLogicalNodeLength(node: Node): number {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent?.length ?? 0;
+  }
+
+  if (isLineBreakDomNode(node)) {
+    return 1;
+  }
+
+  let total = 0;
+  node.childNodes.forEach((childNode) => {
+    total += getLogicalNodeLength(childNode);
+  });
+  return total;
+}
+
+function getOffsetBeforeNode(root: HTMLDivElement, targetNode: Node): number {
+  let offset = 0;
+  let currentNode: Node | null = targetNode;
+
+  while (currentNode && currentNode !== root) {
+    let sibling = currentNode.previousSibling;
+    while (sibling) {
+      offset += getLogicalNodeLength(sibling);
+      sibling = sibling.previousSibling;
     }
-    offset += textLength;
-    currentNode = walker.nextNode();
+    currentNode = currentNode.parentNode;
   }
 
   return offset;
+}
+
+function getOffsetWithinElement(targetNode: Node, targetOffset: number): number {
+  let offset = 0;
+  const childNodes = Array.from(targetNode.childNodes);
+
+  for (let index = 0; index < Math.min(targetOffset, childNodes.length); index += 1) {
+    offset += getLogicalNodeLength(childNodes[index]);
+  }
+
+  return offset;
+}
+
+function getNodeOffset(root: HTMLDivElement, targetNode: Node, targetOffset: number): number {
+  if (targetNode === root) {
+    return getOffsetWithinElement(root, targetOffset);
+  }
+
+  const baseOffset = getOffsetBeforeNode(root, targetNode);
+
+  if (targetNode.nodeType === Node.TEXT_NODE) {
+    const textLength = targetNode.textContent?.length ?? 0;
+    return baseOffset + Math.min(targetOffset, textLength);
+  }
+
+  return baseOffset + getOffsetWithinElement(targetNode, targetOffset);
 }
 
 function resolveSelection(root: HTMLDivElement): RichTextSelection | null {
@@ -89,24 +144,61 @@ function resolveSelection(root: HTMLDivElement): RichTextSelection | null {
 }
 
 function findTextPosition(root: HTMLDivElement, targetOffset: number): { node: Node; offset: number } | null {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let traversed = 0;
-  let currentNode = walker.nextNode();
+  function visit(node: Node, traversed: number): { node: Node; offset: number; traversed: number } | null {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const textLength = node.textContent?.length ?? 0;
+      if (targetOffset <= traversed + textLength) {
+        return {
+          node,
+          offset: Math.max(0, Math.min(targetOffset - traversed, textLength)),
+          traversed,
+        };
+      }
 
-  while (currentNode) {
-    const textLength = currentNode.textContent?.length ?? 0;
-    if (targetOffset <= traversed + textLength) {
-      return {
-        node: currentNode,
-        offset: Math.max(0, Math.min(targetOffset - traversed, textLength)),
-      };
+      return null;
     }
-    traversed += textLength;
-    currentNode = walker.nextNode();
+
+    if (isLineBreakDomNode(node)) {
+      if (targetOffset <= traversed + 1) {
+        const parentNode = node.parentNode;
+        if (!parentNode) {
+          return null;
+        }
+
+        const siblingIndex = Array.from(parentNode.childNodes).indexOf(node);
+        return {
+          node: parentNode,
+          offset: siblingIndex + 1,
+          traversed,
+        };
+      }
+
+      return null;
+    }
+
+    let childTraversed = traversed;
+    for (const childNode of Array.from(node.childNodes)) {
+      const result = visit(childNode, childTraversed);
+      if (result) {
+        return result;
+      }
+      childTraversed += getLogicalNodeLength(childNode);
+    }
+
+    return null;
+  }
+
+  const result = visit(root, 0);
+  if (result) {
+    return { node: result.node, offset: result.offset };
   }
 
   if (root.lastChild) {
     const lastNode = root.lastChild;
+    if (isLineBreakDomNode(lastNode) && lastNode.parentNode) {
+      const siblingIndex = Array.from(lastNode.parentNode.childNodes).indexOf(lastNode);
+      return { node: lastNode.parentNode, offset: siblingIndex + 1 };
+    }
     const textLength = lastNode.textContent?.length ?? 0;
     return { node: lastNode, offset: textLength };
   }
@@ -377,6 +469,7 @@ export default function RichTextDictationEditor({
     onError: (error: Error) => {
       throw error;
     },
+    theme: lexicalTheme,
     editable: !readOnly,
     nodes: [ParagraphNode, TextNode, LineBreakNode],
     editorState: () => {

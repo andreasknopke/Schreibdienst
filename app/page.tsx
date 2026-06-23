@@ -2552,8 +2552,14 @@ export default function HomePage() {
         continue;
       }
 
+      // Zusätzliche Text-Vorverarbeitung: Auch wenn `neuer Absatz` am Chunk-Anfang
+      // vom STT/VAD nicht als separater Command erkannt wird, wird er hier auf
+      // Textebene durch applyOnlineDictationControlWords in \n\n umgewandelt.
+      const preprocessedText = applyOnlineDictationControlWords(entry.text);
+      appendAdminConsoleEntry('pipeline', `VAD #${seq}: Rohtext`, formatPipelineDetails({ original: entry.text, preprocessed: preprocessedText }));
+      appendAdminConsoleEntry('pipeline', `VAD #${seq}: Eingabe`, formatPipelineDetails({ combinedText: combinedCommittedText }));
       const debugSteps: OnlineUtteranceApplicationDebugStep[] = [];
-      const nextCombinedText = applyOnlineUtteranceToText(combinedCommittedText, entry.text, step => {
+      const nextCombinedText = applyOnlineUtteranceToText(combinedCommittedText, preprocessedText, step => {
         debugSteps.push(step);
       });
       if (nextCombinedText !== combinedCommittedText) {
@@ -5644,7 +5650,7 @@ export default function HomePage() {
                     <span className="text-xs text-gray-400">{methodik ? `${methodik.length}` : ''}</span>
                     {renderRichTextToolbar('methodik')}
                     <button 
-                      className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
+                      className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
                       onClick={() => copyToClipboard(methodik)}
                       disabled={!methodik}
                       title="Kopieren"
@@ -5729,7 +5735,7 @@ export default function HomePage() {
                     <span className="text-xs text-gray-400">{transcript ? `${transcript.length}` : ''}</span>
                     {renderRichTextToolbar('befund')}
                     <button 
-                      className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
+                      className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
                       onClick={() => copyToClipboard(transcript)}
                       disabled={!transcript}
                       title="Kopieren"
@@ -5830,7 +5836,7 @@ export default function HomePage() {
                     <span className="text-xs text-gray-400">{beurteilung ? `${beurteilung.length}` : ''}</span>
                     {renderRichTextToolbar('beurteilung')}
                     <button 
-                      className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
+                      className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
                       onClick={() => copyToClipboard(beurteilung)}
                       disabled={!beurteilung}
                       title="Kopieren"
@@ -5925,7 +5931,7 @@ export default function HomePage() {
                 <span className="text-xs text-gray-400">{transcript ? `${transcript.length}` : ''}</span>
                 {renderRichTextToolbar('transcript')}
                 <button 
-                  className="text-xs text-gray-500 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
+                  className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
                   onClick={handleCopy}
                   disabled={!transcript}
                   title="Kopieren"

@@ -803,7 +803,7 @@ const ONLINE_COMMAND_PATTERNS: Array<{ type: OnlineCommandType; pattern: RegExp 
   { type: 'deleteSentence', pattern: /\bletzten\s+satz\s+löschen\b[.,;:!?]*/i },
   { type: 'deleteParagraph', pattern: /\blösche\s+(?:den\s+)?letzten\s+absatz\b[.,;:!?]*/i },
   { type: 'deleteParagraph', pattern: /\bletzten\s+absatz\s+löschen\b[.,;:!?]*/i },
-  { type: 'paragraphBreak', pattern: /\b(?:neuer|nächster\s+)?absatz\b[.,;:!?]*/i },
+  { type: 'paragraphBreak', pattern: /\b(?:neuer\s+|nächster\s+)?absatz\b[.,;:!?]*/i },
   { type: 'lineBreak', pattern: /\b(?:neue|nächste)\s+zeile\b[.,;:!?]*/i },
   { type: 'lineBreak', pattern: /\bzeilenumbruch\b[.,;:!?]*/i },
   { type: 'bulletPoint', pattern: /\bnächster\s+anstrich\b[.,;:!?]*/i },

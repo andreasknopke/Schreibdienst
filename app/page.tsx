@@ -26,7 +26,7 @@ import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/
 import { useVadChunking } from '@/lib/useVadChunking';
 import { checkInjectorAvailability, injectToActiveWindow, registerGlobalHotkeys, reportInjectorRecordingState, configureTargetWindow, setFrontendMode } from '@/lib/injectClient';
 import { replaceAllInText } from '@/lib/replaceText';
-import { normalizeRichTextRanges, remapRichTextRanges, type RichTextFormatRange } from '@/lib/richTextFormatting';
+import { normalizeRichTextRanges, remapRichTextRanges, buildRichTextHtml, type RichTextFormatRange } from '@/lib/richTextFormatting';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
@@ -38,6 +38,19 @@ type LiveEditorWidth = 'small' | 'a4' | 'full';
 // Hilfsfunktion zum Kopieren in die Zwischenablage
 async function copyToClipboard(text: string): Promise<void> {
   await navigator.clipboard.writeText(text);
+}
+
+async function copyRichTextToClipboard(text: string, html: string): Promise<void> {
+  if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
+    await copyToClipboard(text);
+    return;
+  }
+
+  const item = new ClipboardItem({
+    'text/plain': new Blob([text], { type: 'text/plain' }),
+    'text/html': new Blob([html], { type: 'text/html' }),
+  });
+  await navigator.clipboard.write([item]);
 }
 
 // Intervall für kontinuierliche Transkription (in ms)
@@ -4713,12 +4726,27 @@ export default function HomePage() {
   }
 
   function handleCopyBefund() {
-    const combinedText = [
-      methodik ? `Methodik:\n${methodik}` : '',
-      transcript ? `Befund:\n${transcript}` : '',
-      beurteilung ? `Beurteilung:\n${beurteilung}` : ''
-    ].filter(Boolean).join('\n\n');
-    copyToClipboard(combinedText);
+    const parts = [];
+    const htmlParts = [];
+    const allFormats = richTextFormats;
+
+    if (methodik) {
+      parts.push(`Methodik:\n${methodik}`);
+      htmlParts.push(`<p><strong>Methodik:</strong></p><p>${buildRichTextHtml(methodik, allFormats.methodik ?? [])}</p>`);
+    }
+    if (transcript) {
+      parts.push(`Befund:\n${transcript}`);
+      htmlParts.push(`<p><strong>Befund:</strong></p><p>${buildRichTextHtml(transcript, allFormats.transcript ?? [])}</p>`);
+    }
+    if (beurteilung) {
+      parts.push(`Beurteilung:\n${beurteilung}`);
+      htmlParts.push(`<p><strong>Beurteilung:</strong></p><p>${buildRichTextHtml(beurteilung, allFormats.beurteilung ?? [])}</p>`);
+    }
+
+    copyRichTextToClipboard(
+      parts.filter(Boolean).join('\n\n'),
+      htmlParts.filter(Boolean).join('')
+    );
   }
 
   async function handleExportDocxBefund() {
@@ -4765,7 +4793,7 @@ export default function HomePage() {
   }
 
   function handleCopy() {
-    copyToClipboard(transcript);
+    copyRichTextToClipboard(transcript, buildRichTextHtml(transcript, richTextFormats.transcript ?? []));
   }
 
   async function handleExportDocx() {
@@ -5661,7 +5689,7 @@ export default function HomePage() {
                     {renderRichTextToolbar('methodik')}
                     <button 
                       className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => copyToClipboard(methodik)}
+                      onClick={() => copyRichTextToClipboard(methodik, buildRichTextHtml(methodik, getFieldRichTextFormats('methodik')))}
                       disabled={!methodik}
                       title="Kopieren"
                     >
@@ -5746,7 +5774,7 @@ export default function HomePage() {
                     {renderRichTextToolbar('befund')}
                     <button 
                       className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => copyToClipboard(transcript)}
+                      onClick={() => copyRichTextToClipboard(transcript, buildRichTextHtml(transcript, getFieldRichTextFormats('befund')))}
                       disabled={!transcript}
                       title="Kopieren"
                     >
@@ -5847,7 +5875,7 @@ export default function HomePage() {
                     {renderRichTextToolbar('beurteilung')}
                     <button 
                       className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => copyToClipboard(beurteilung)}
+                      onClick={() => copyRichTextToClipboard(beurteilung, buildRichTextHtml(beurteilung, getFieldRichTextFormats('beurteilung')))}
                       disabled={!beurteilung}
                       title="Kopieren"
                     >

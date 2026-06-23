@@ -573,7 +573,9 @@ function getIncrementalTranscript(previousText: string, currentText: string): st
 
 function isUnstableLiveInjectText(text: string): boolean {
   const trimmed = text.trim();
-  if (!trimmed) return true;
+  if (!trimmed) {
+    return !/\n/.test(text);
+  }
   if (trimmed.includes(UNRECOGNIZED_UTTERANCE_PLACEHOLDER)) return true;
   if (/(?:…\s*){2,}|\.{3,}|(?:\.\s*){3,}/u.test(trimmed)) return true;
   if (!/[\p{L}\p{N}]/u.test(trimmed)) return !/^[.,;:!?)]$/u.test(trimmed);

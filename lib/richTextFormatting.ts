@@ -1,5 +1,7 @@
 import { diffChars } from 'diff';
 
+export const RICH_TEXT_RENDER_MARKER = '\u200B';
+
 export interface RichTextSelection {
   start: number;
   end: number;
@@ -95,8 +97,14 @@ function escapeHtml(text: string): string {
 }
 
 export function buildRichTextHtml(text: string, formats: RichTextFormatRange[]): string {
-  return buildRichTextSegments(text, formats).map((segment) => {
+  const segments = buildRichTextSegments(text, formats);
+
+  return segments.map((segment, index) => {
     let escapedText = escapeHtml(segment.text);
+
+    if (index === segments.length - 1 && segment.text.endsWith('\n')) {
+      escapedText += RICH_TEXT_RENDER_MARKER;
+    }
 
     if (segment.underline) {
       escapedText = `<u>${escapedText}</u>`;

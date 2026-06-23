@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from 'react';
-import { buildRichTextHtml, type RichTextFormatRange, type RichTextSelection } from '@/lib/richTextFormatting';
+import { buildRichTextHtml, RICH_TEXT_RENDER_MARKER, type RichTextFormatRange, type RichTextSelection } from '@/lib/richTextFormatting';
 
 interface RichTextDictationEditorProps {
   editorRef: React.RefObject<HTMLDivElement | null>;
@@ -20,7 +20,35 @@ interface RichTextDictationEditorProps {
 
 
 function getEditorText(editor: HTMLDivElement): string {
-  return editor.textContent?.replace(/\u200B/g, '') ?? '';
+  return editor.textContent?.split(RICH_TEXT_RENDER_MARKER).join('') ?? '';
+}
+
+function getLogicalTextLength(text: string): number {
+  return text.split(RICH_TEXT_RENDER_MARKER).join('').length;
+}
+
+function getLogicalOffsetFromRaw(text: string, rawOffset: number): number {
+  let logicalOffset = 0;
+  for (let index = 0; index < Math.min(rawOffset, text.length); index += 1) {
+    if (text[index] === RICH_TEXT_RENDER_MARKER) continue;
+    logicalOffset += 1;
+  }
+  return logicalOffset;
+}
+
+function getRawOffsetFromLogical(text: string, logicalOffset: number): number {
+  if (logicalOffset <= 0) return 0;
+
+  let visibleCount = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === RICH_TEXT_RENDER_MARKER) continue;
+    visibleCount += 1;
+    if (visibleCount >= logicalOffset) {
+      return index + 1;
+    }
+  }
+
+  return text.length;
 }
 
 function getNodeOffset(root: HTMLDivElement, targetNode: Node, targetOffset: number): number {
@@ -29,9 +57,10 @@ function getNodeOffset(root: HTMLDivElement, targetNode: Node, targetOffset: num
   let currentNode = walker.nextNode();
 
   while (currentNode) {
-    const textLength = currentNode.textContent?.length ?? 0;
+    const nodeText = currentNode.textContent ?? '';
+    const textLength = getLogicalTextLength(nodeText);
     if (currentNode === targetNode) {
-      return offset + Math.min(targetOffset, textLength);
+      return offset + getLogicalOffsetFromRaw(nodeText, targetOffset);
     }
     offset += textLength;
     currentNode = walker.nextNode();
@@ -64,11 +93,12 @@ function findTextPosition(root: HTMLDivElement, targetOffset: number): { node: N
   let currentNode = walker.nextNode();
 
   while (currentNode) {
-    const textLength = currentNode.textContent?.length ?? 0;
+    const nodeText = currentNode.textContent ?? '';
+    const textLength = getLogicalTextLength(nodeText);
     if (targetOffset <= traversed + textLength) {
       return {
         node: currentNode,
-        offset: Math.max(0, Math.min(targetOffset - traversed, textLength)),
+        offset: getRawOffsetFromLogical(nodeText, Math.max(0, Math.min(targetOffset - traversed, textLength))),
       };
     }
     traversed += textLength;
@@ -77,8 +107,8 @@ function findTextPosition(root: HTMLDivElement, targetOffset: number): { node: N
 
   if (root.lastChild) {
     const lastNode = root.lastChild;
-    const textLength = lastNode.textContent?.length ?? 0;
-    return { node: lastNode, offset: textLength };
+    const nodeText = lastNode.textContent ?? '';
+    return { node: lastNode, offset: nodeText.length };
   }
 
   return null;

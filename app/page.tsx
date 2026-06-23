@@ -481,7 +481,7 @@ function parseInlineFormattingText(text: string, initialState: VoiceFormattingSt
       return;
     }
 
-    const chunk = outputParts.length === 0 ? rawChunk.replace(/^\s+/, '') : rawChunk;
+    const chunk = outputParts.length === 0 ? rawChunk.replace(/^[^\S\n]+/, '') : rawChunk;
     if (!chunk) {
       return;
     }

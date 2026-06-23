@@ -88,7 +88,7 @@ type RichTextState = Record<TextStateKey, RichTextFormatRange[]>;
 
 type RichTextToggleState = Record<TextStateKey, Record<RichTextFormatKey, boolean>>;
 
-type AdminConsoleEntrySource = 'keyboard' | 'injector-hotkey' | 'hid';
+type AdminConsoleEntrySource = 'keyboard' | 'injector-hotkey' | 'hid' | 'pipeline';
 
 interface AdminConsoleEntry {
   id: number;
@@ -1130,6 +1130,7 @@ export default function HomePage() {
 
   const combineTextForField = useCallback((field: TextInsertionTarget, existing: string, newText: string) => {
     const stateKey = getRichTextStateKey(field);
+    appendAdminConsoleEntry('pipeline', `combineTextForField (${field}) EINGANG`, formatPipelineDetails({ newText, existingLänge: existing.length }));
     const selectionFormattingCommand = detectSelectionFormattingCommand(newText);
 
     if (selectionFormattingCommand) {
@@ -1164,6 +1165,7 @@ export default function HomePage() {
     // das den Befehl korrekt auf den vorhandenen Text anwendet anstatt ihn anzuhängen.
     if (hasOnlineCommand(parsedFormatting.text)) {
       const resultText = applyOnlineUtteranceToText(existing, parsedFormatting.text);
+      appendAdminConsoleEntry('pipeline', `combineTextForField (${field}) Löschbefehl`, formatPipelineDetails({ result: resultText, resultLänge: resultText.length }));
       setStoredSelection(field, { start: resultText.length, end: resultText.length, direction: 'none' });
       setRichTextFormats((current) => ({
         ...current,
@@ -1175,6 +1177,7 @@ export default function HomePage() {
 
     const selection = getStoredSelection(field, existing);
     const result = insertTextAtSelection(existing, parsedFormatting.text, selection);
+    appendAdminConsoleEntry('pipeline', `combineTextForField (${field}) AUSGANG`, formatPipelineDetails({ resultText: result.text, resultLänge: result.text.length, insertedStart: result.insertedStart, insertedEnd: result.insertedEnd }));
     setStoredSelection(field, result.selection);
 
     if (parsedFormatting.text) {
@@ -1440,6 +1443,8 @@ export default function HomePage() {
     if (incomingDelta && incomingDelta.trim()) {
       queueLiveInject(incomingDelta);
     }
+
+    appendAdminConsoleEntry('pipeline', `replaceTextAtEndOrInsertDelta (${field})`, formatPipelineDetails({ fullText: fullText.slice(0, 300), delta: incomingDelta, liveInject: liveInjectEnabledRef.current }));
 
     if (liveInjectEnabledRef.current) {
       applyLiveChunkPreview(field, incomingDelta && incomingDelta.trim() ? incomingDelta : fullText);
@@ -2508,6 +2513,12 @@ export default function HomePage() {
     return text.replace(/\s+/g, ' ').trim().slice(0, 120);
   }, []);
 
+  const formatPipelineDetails = useCallback((obj: Record<string, unknown>): string => {
+    return Object.entries(obj)
+      .map(([k, v]) => `${k}=${typeof v === 'string' ? JSON.stringify(v.slice(0, 200)) : String(v)}`)
+      .join(' | ');
+  }, []);
+
   const getVadPromptContext = useCallback((text: string): string => {
     const trimmed = text.trim();
     if (!trimmed) return '';
@@ -2545,19 +2556,19 @@ export default function HomePage() {
         debugSteps.push(step);
       });
       if (nextCombinedText !== combinedCommittedText) {
-        console.log(
-          `[VAD] Commit utterance #${seq}: text applied (input="${getVadLogPreview(entry.text)}", steps=${debugSteps
-            .map(step => `${step.kind}:${step.commandType ?? getVadLogPreview(step.input)}:${step.changed ? 'changed' : 'noop'}`)
-            .join(', ')})`
-        );
+        const stepsStr = debugSteps
+          .map(step => `${step.kind}:${step.commandType ?? getVadLogPreview(step.input)}:${step.changed ? 'changed' : 'noop'}`)
+          .join(', ');
+        console.log(`[VAD] Commit utterance #${seq}: text applied (input="${getVadLogPreview(entry.text)}", steps=${stepsStr})`);
+        appendAdminConsoleEntry('pipeline', `VAD #${seq}: Text verarbeitet`, formatPipelineDetails({ input: entry.text, nach: getVadLogPreview(nextCombinedText), schritte: stepsStr }));
         combinedCommittedText = nextCombinedText;
         didCommit = true;
       } else {
-        console.warn(
-          `[VAD] Commit utterance #${seq}: no visible text change (input="${getVadLogPreview(entry.text)}", steps=${debugSteps
-            .map(step => `${step.kind}:${step.commandType ?? getVadLogPreview(step.input)}:${step.changed ? 'changed' : 'noop'}`)
-            .join(', ')})`
-        );
+        const stepsStr = debugSteps
+          .map(step => `${step.kind}:${step.commandType ?? getVadLogPreview(step.input)}:${step.changed ? 'changed' : 'noop'}`)
+          .join(', ');
+        console.warn(`[VAD] Commit utterance #${seq}: no visible text change (input="${getVadLogPreview(entry.text)}", steps=${stepsStr})`);
+        appendAdminConsoleEntry('pipeline', `VAD #${seq}: KEINE Änderung`, formatPipelineDetails({ input: entry.text, schritte: stepsStr }));
       }
     }
 
@@ -2585,6 +2596,7 @@ export default function HomePage() {
           : 'transcript';
         const fullText = committed[0] || '';
         const incomingDelta = getIncrementalTranscript(previousCommittedText, fullText);
+        appendAdminConsoleEntry('pipeline', `VAD → Feld (${targetField})`, formatPipelineDetails({ delta: incomingDelta, fullTextLänge: fullText.length, previousLength: previousCommittedText.length }));
         replaceTextAtEndOrInsertDelta(targetField, fullText, incomingDelta);
       }
     }
@@ -2822,6 +2834,7 @@ export default function HomePage() {
         }
 
         const preparedDelta = prepareLiveInjectDelta(transcriptDelta);
+        appendAdminConsoleEntry('pipeline', `Live: Roh-Chunk`, formatPipelineDetails({ delta: transcriptDelta, vorbereitet: preparedDelta }));
 
         if (isUnstableLiveInjectText(preparedDelta)) {
           setLiveInjectStatus('Live-Übertragung wartet auf stabiles Transkript');
@@ -2844,6 +2857,7 @@ export default function HomePage() {
         if (mode === 'befund') {
           // Im Befund-Modus: Parse Steuerbefehle und verteile auf Felder
           const parsed = parseFieldCommands(preparedDelta);
+          appendAdminConsoleEntry('pipeline', `Live: parseFieldCommands`, formatPipelineDetails({ methodik: parsed.methodik, befund: parsed.befund, beurteilung: parsed.beurteilung, lastField: parsed.lastField }));
           
           if (parsed.lastField) {
             setActiveField(parsed.lastField);
@@ -2854,6 +2868,7 @@ export default function HomePage() {
               if (liveInjectEnabledRef.current) {
                 applyLiveChunkPreview('methodik', parsed.methodik);
               } else {
+                appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (methodik)', formatPipelineDetails({ newText: parsed.methodik }));
                 setMethodik(combineTextForField('methodik', methodik, parsed.methodik));
               }
             }
@@ -2861,6 +2876,7 @@ export default function HomePage() {
               if (liveInjectEnabledRef.current) {
                 applyLiveChunkPreview('befund', parsed.befund);
               } else {
+                appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (befund)', formatPipelineDetails({ newText: parsed.befund }));
                 setTranscript(combineTextForField('befund', transcript, parsed.befund));
               }
             }
@@ -2869,6 +2885,7 @@ export default function HomePage() {
               if (liveInjectEnabledRef.current) {
                 applyLiveChunkPreview('beurteilung', parsed.beurteilung);
               } else {
+                appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (beurteilung)', formatPipelineDetails({ newText: parsed.beurteilung }));
                 setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung));
               }
             }
@@ -2880,6 +2897,7 @@ export default function HomePage() {
                 if (liveInjectEnabledRef.current) {
                   applyLiveChunkPreview('methodik', preparedDelta);
                 } else {
+                  appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (methodik, kein Feldbefehl)', formatPipelineDetails({ delta: preparedDelta }));
                   setMethodik(combineTextForField('methodik', methodik, preparedDelta));
                 }
                 break;
@@ -2888,6 +2906,7 @@ export default function HomePage() {
                 if (liveInjectEnabledRef.current) {
                   applyLiveChunkPreview('beurteilung', preparedDelta);
                 } else {
+                  appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (beurteilung, kein Feldbefehl)', formatPipelineDetails({ delta: preparedDelta }));
                   setBeurteilung(combineTextForField('beurteilung', beurteilung, preparedDelta));
                 }
                 break;
@@ -2896,6 +2915,7 @@ export default function HomePage() {
                 if (liveInjectEnabledRef.current) {
                   applyLiveChunkPreview('befund', preparedDelta);
                 } else {
+                  appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (befund, kein Feldbefehl)', formatPipelineDetails({ delta: preparedDelta }));
                   setTranscript(combineTextForField('befund', transcript, preparedDelta));
                 }
                 break;
@@ -2906,6 +2926,7 @@ export default function HomePage() {
           if (liveInjectEnabledRef.current) {
             applyLiveChunkPreview('transcript', preparedDelta);
           } else {
+            appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (arztbrief)', formatPipelineDetails({ delta: preparedDelta }));
             const fullText = combineTextForField('transcript', transcript, preparedDelta);
             setTranscript(fullText);
           }

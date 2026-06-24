@@ -99,7 +99,7 @@ function escapeHtml(text: string): string {
 export function buildRichTextHtml(text: string, formats: RichTextFormatRange[]): string {
   const segments = buildRichTextSegments(text, formats);
 
-  return segments.map((segment, index) => {
+  let html = segments.map((segment, index) => {
     let escapedText = escapeHtml(segment.text);
 
     if (index === segments.length - 1 && segment.text.endsWith('\n')) {
@@ -120,6 +120,17 @@ export function buildRichTextHtml(text: string, formats: RichTextFormatRange[]):
 
     return escapedText;
   }).join('');
+
+  // Convert line breaks to HTML: double newlines become <p> blocks,
+  // single newlines become <br> to preserve layout in target apps.
+  const paragraphs = html.split(/\n\n+/).filter(Boolean);
+  if (paragraphs.length > 1) {
+    html = paragraphs.map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+  } else {
+    html = html.replace(/\n/g, '<br>');
+  }
+
+  return html;
 }
 
 function remapOffset(oldOffset: number, diffs: ReturnType<typeof diffChars>): number {

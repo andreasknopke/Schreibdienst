@@ -46,9 +46,13 @@ async function copyRichTextToClipboard(text: string, html: string): Promise<void
     return;
   }
 
+  // Vollständiges HTML-Dokument, damit Word/Outlook etc. Absätze,
+  // Tabs und Formatierungen korrekt übernehmen.
+  const fullHtml = `<!doctype html><html><head><meta charset="utf-8"></head><body><div style="white-space:pre-wrap">${html}</div></body></html>`;
+
   const item = new ClipboardItem({
     'text/plain': new Blob([text], { type: 'text/plain' }),
-    'text/html': new Blob([html], { type: 'text/html' }),
+    'text/html': new Blob([fullHtml], { type: 'text/html' }),
   });
   await navigator.clipboard.write([item]);
 }

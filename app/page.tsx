@@ -381,7 +381,10 @@ function insertTextAtSelection(existing: string, incomingText: string, selection
 
   const before = existing.slice(0, start);
   const after = existing.slice(end);
-  const needsPrefixSeparator = before.length > 0 && !before.endsWith('\n') && !before.endsWith(' ');
+  const needsPrefixSeparator = before.length > 0
+    && !before.endsWith('\n')
+    && !before.endsWith(' ')
+    && !normalizedIncomingText.startsWith('\n');
   const prefix = needsPrefixSeparator ? ' ' : '';
   const inserted = `${before}${prefix}${normalizedIncomingText}`;
   const insertedStart = before.length + prefix.length;
@@ -577,6 +580,19 @@ function getIncrementalTranscript(previousText: string, currentText: string): st
     }
 
     if (overlap === currentWords.length) {
+      if (currentText.length > previousText.length) {
+        let prefixLength = 0;
+        const maxPrefixLength = Math.min(previousText.length, currentText.length);
+        while (prefixLength < maxPrefixLength && previousText[prefixLength] === currentText[prefixLength]) {
+          prefixLength += 1;
+        }
+
+        const structuralDelta = currentText.slice(prefixLength);
+        if (structuralDelta && !/[\p{L}\p{N}]/u.test(structuralDelta)) {
+          return structuralDelta;
+        }
+      }
+
       return '';
     }
 
@@ -2586,11 +2602,11 @@ export default function HomePage() {
       // Delete-Befehle ("lösche das letzte Wort") bleiben intakt und werden
       // später von applyOnlineUtteranceToText korrekt verarbeitet.
       const cmdText = entry.text
-        .replace(/[.,;\s]*\bneuer\s+absatz\b[.,;\s]*/gi, '\n\n')
-        .replace(/[.,;\s]*\bnächster\s+absatz\b[.,;\s]*/gi, '\n\n')
-        .replace(/[.,;\s]*\babsatz\b[.,;\s]*/gi, '\n\n')
-        .replace(/[.,;\s]*\bneue\s+zeile\b[.,;\s]*/gi, '\n')
-        .replace(/[.,;\s]*\bnächste\s+zeile\b[.,;\s]*/gi, '\n');
+        .replace(/[.,;:!?\s]*\bneuer\s+absatz\b[.,;:!?\s]*/gi, '\n\n')
+        .replace(/[.,;:!?\s]*\bnächster\s+absatz\b[.,;:!?\s]*/gi, '\n\n')
+        .replace(/[.,;:!?\s]*\babsatz\b[.,;:!?\s]*/gi, '\n\n')
+        .replace(/[.,;:!?\s]*\bneue\s+zeile\b[.,;:!?\s]*/gi, '\n')
+        .replace(/[.,;:!?\s]*\bnächste\s+zeile\b[.,;:!?\s]*/gi, '\n');
       const preprocessedText = cmdText;
       appendAdminConsoleEntry('pipeline', `VAD #${seq}: Rohtext`, formatPipelineDetails({ original: entry.text, preprocessed: preprocessedText }));
       appendAdminConsoleEntry('pipeline', `VAD #${seq}: Eingabe`, formatPipelineDetails({ combinedText: combinedCommittedText }));

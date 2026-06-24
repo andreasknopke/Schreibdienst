@@ -958,7 +958,16 @@ export function applyOnlineUtteranceToText(
   utteranceText: string,
   onDebugStep?: (step: OnlineUtteranceApplicationDebugStep) => void
 ): string {
-  if (!utteranceText.trim()) return cleanupFormatting(currentText);
+  if (!utteranceText.trim()) {
+    if (/\n/.test(utteranceText)) {
+      const trailingBreaks = (utteranceText.match(/\n+/g) || []).join('').replace(/\n{3,}/g, '\n\n');
+      if (trailingBreaks) {
+        return cleanupFormattingPreserveEdgeBreaks(`${currentText.replace(/[^\S\n]*$/, '')}${trailingBreaks}`);
+      }
+    }
+
+    return cleanupFormatting(currentText);
+  }
 
   let result = currentText;
   let cursor = 0;

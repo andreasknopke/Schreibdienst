@@ -451,6 +451,79 @@ function detectSelectionFormattingCommand(text: string): RichTextFormatKey | nul
   return null;
 }
 
+function detectRelativeFormattingCommand(text: string): { key: RichTextFormatKey; target: 'word' | 'sentence' } | null {
+  const normalized = normalizeVoiceFormattingCommand(text);
+  if (!normalized) {
+    return null;
+  }
+
+  let key: RichTextFormatKey | null = null;
+  if (normalized.endsWith(' fett')) key = 'bold';
+  else if (normalized.endsWith(' kursiv')) key = 'italic';
+  else if (normalized.endsWith(' unterstrichen') || normalized.endsWith(' unterstreichen')) key = 'underline';
+
+  if (!key) {
+    return null;
+  }
+
+  const commandWithoutFormat = normalized
+    .replace(/ unterstreichen$/, '')
+    .replace(/ unterstrichen$/, '')
+    .replace(/ kursiv$/, '')
+    .replace(/ fett$/, '')
+    .trim();
+
+  if (commandWithoutFormat === 'wort' || commandWithoutFormat === 'letztes wort') {
+    return { key, target: 'word' };
+  }
+
+  if (commandWithoutFormat === 'satz' || commandWithoutFormat === 'letzter satz') {
+    return { key, target: 'sentence' };
+  }
+
+  return null;
+}
+
+function getLastWordSelection(text: string): { start: number; end: number } | null {
+  const wordPattern = /[\p{L}\p{N}]+(?:[-'][\p{L}\p{N}]+)*/gu;
+  const matches = Array.from(text.matchAll(wordPattern));
+  const lastMatch = matches.at(-1);
+  if (!lastMatch || lastMatch.index === undefined) {
+    return null;
+  }
+
+  return {
+    start: lastMatch.index,
+    end: lastMatch.index + lastMatch[0].length,
+  };
+}
+
+function getLastSentenceSelection(text: string): { start: number; end: number } | null {
+  const trimmedText = text.replace(/\s+$/u, '');
+  if (!trimmedText) {
+    return null;
+  }
+
+  const trimmedEnd = trimmedText.length;
+  let start = 0;
+  for (let index = trimmedEnd - 1; index >= 0; index -= 1) {
+    if (/[.!?]/.test(trimmedText[index])) {
+      start = index + 1;
+      break;
+    }
+  }
+
+  while (start < trimmedEnd && /\s/u.test(trimmedText[start])) {
+    start += 1;
+  }
+
+  if (start >= trimmedEnd) {
+    return null;
+  }
+
+  return { start, end: trimmedEnd };
+}
+
 function detectInlineFormattingToggleCommand(text: string): { key: RichTextFormatKey; enabled: boolean } | null {
   const normalized = normalizeVoiceFormattingCommand(text);
   if (!normalized) {
@@ -1167,6 +1240,7 @@ export default function HomePage() {
     const stateKey = getRichTextStateKey(field);
     appendAdminConsoleEntry('pipeline', `combineTextForField (${field}) EINGANG`, formatPipelineDetails({ newText, existingLänge: existing.length }));
     const selectionFormattingCommand = detectSelectionFormattingCommand(newText);
+    const relativeFormattingCommand = detectRelativeFormattingCommand(newText);
 
     if (selectionFormattingCommand) {
       const selection = getStoredSelection(field, existing);
@@ -1181,6 +1255,26 @@ export default function HomePage() {
         ...current,
         [stateKey]: setFormatForSelection(current[stateKey], existing.length, start, end, selectionFormattingCommand, true),
       }));
+      setError(null);
+      lastRichTextSyncedTextRef.current[stateKey] = existing;
+      return existing;
+    }
+
+    if (relativeFormattingCommand) {
+      const selection = relativeFormattingCommand.target === 'word'
+        ? getLastWordSelection(existing)
+        : getLastSentenceSelection(existing);
+
+      if (!selection || selection.end <= selection.start) {
+        setError(relativeFormattingCommand.target === 'word' ? 'Kein Wort zum Formatieren gefunden.' : 'Kein Satz zum Formatieren gefunden.');
+        return existing;
+      }
+
+      setRichTextFormats((current) => ({
+        ...current,
+        [stateKey]: setFormatForSelection(current[stateKey], existing.length, selection.start, selection.end, relativeFormattingCommand.key, true),
+      }));
+      setStoredSelection(field, { start: selection.end, end: selection.end, direction: 'none' });
       setError(null);
       lastRichTextSyncedTextRef.current[stateKey] = existing;
       return existing;
@@ -4928,7 +5022,7 @@ export default function HomePage() {
       {/* Hinweis zu Sprachbefehlen */}
       {recording && (
         <div className="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/30 p-2 rounded">
-          💡 <strong>Sprachbefehle:</strong> "Punkt", "Komma", "neuer Absatz", "lösche den letzten Satz", "lösche das letzte Wort", "Auswahl fett", "fett beginnen", "fett ende"
+          💡 <strong>Sprachbefehle:</strong> "Punkt", "Komma", "neuer Absatz", "lösche den letzten Satz", "lösche das letzte Wort", "Wort fett", "Satz kursiv", "Auswahl fett", "fett beginnen", "fett ende"
           {mode === 'befund' && (
             <>
               <br />

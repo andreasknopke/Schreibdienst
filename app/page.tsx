@@ -1475,6 +1475,8 @@ export default function HomePage() {
     fullText: string,
     incomingDelta: string
   ) => {
+    const stateKey = getRichTextStateKey(field);
+
     if (incomingDelta && incomingDelta.trim()) {
       queueLiveInject(incomingDelta);
     }
@@ -1506,9 +1508,20 @@ export default function HomePage() {
         }
       }
 
+      if (fullText !== currentText) {
+        appendAdminConsoleEntry('pipeline', `replaceTextAtEndOrInsertDelta (${field}) Vollersetzung`, formatPipelineDetails({ vorher: currentText.slice(0, 300), nachher: fullText.slice(0, 300) }));
+        setStoredSelection(field, { start: fullText.length, end: fullText.length, direction: 'none' });
+        setRichTextFormats((current) => ({
+          ...current,
+          [stateKey]: remapRichTextRanges(currentText, fullText, current[stateKey]),
+        }));
+        lastRichTextSyncedTextRef.current[stateKey] = fullText;
+        return fullText;
+      }
+
       return currentText;
     });
-  }, [setFieldText, combineTextForField, queueLiveInject, applyLiveChunkPreview]);
+  }, [setFieldText, combineTextForField, queueLiveInject, applyLiveChunkPreview, getRichTextStateKey, setStoredSelection]);
 
   const showPersistentCaret = recording || transcribing || busy || correcting;
 

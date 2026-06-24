@@ -2454,7 +2454,8 @@ export default function HomePage() {
     field: TextInsertionTarget,
     value: string,
     setter: (nextValue: string) => void,
-    selection: CaretSelection | null
+    selection: CaretSelection | null,
+    explicitFormats?: RichTextFormatRange[],
   ) => {
     const stateKey = fieldToStateKey(field);
     const previousText = getFieldTextValue(field);
@@ -2472,6 +2473,13 @@ export default function HomePage() {
     syncSelectionState(field, nextSelection);
     const toggleState = richTextTogglesRef.current[stateKey];
     setRichTextFormats((current) => {
+      if (explicitFormats) {
+        return {
+          ...current,
+          [stateKey]: normalizeRichTextRanges(explicitFormats, value.length),
+        };
+      }
+
       let nextRanges = remapRichTextRanges(previousText, value, current[stateKey]);
       if (insertedEnd > insertedStart) {
         (Object.keys(toggleState) as RichTextFormatKey[]).forEach((key) => {
@@ -2510,8 +2518,9 @@ export default function HomePage() {
     value: string,
     setter: (nextValue: string) => void,
     editor: HTMLDivElement,
+    formats?: RichTextFormatRange[],
   ) => {
-    handleManualTextChange(field, value, setter, getRichTextSelection(editor));
+    handleManualTextChange(field, value, setter, getRichTextSelection(editor), formats);
   }, [handleManualTextChange]);
 
   const handleRichTextWordDoubleClick = useCallback((

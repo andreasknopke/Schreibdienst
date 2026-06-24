@@ -18,6 +18,7 @@ import {
   COMMAND_PRIORITY_LOW,
   INSERT_LINE_BREAK_COMMAND,
   KEY_ENTER_COMMAND,
+  type LexicalNode,
   LineBreakNode,
   ParagraphNode,
   TextNode,
@@ -37,7 +38,7 @@ interface RichTextDictationEditorProps {
   className?: string;
   placeholder?: string;
   readOnly?: boolean;
-  onChange: (value: string, editor: HTMLDivElement) => void;
+  onChange: (value: string, editor: HTMLDivElement, formats?: RichTextFormatRange[]) => void;
   onSelectionChange: (editor: HTMLDivElement) => void;
   onFocus?: (editor: HTMLDivElement) => void;
   onBlur?: () => void;
@@ -266,6 +267,63 @@ function writeContentToEditor(value: string, formats: RichTextFormatRange[]) {
   root.append(paragraph);
 }
 
+function extractTextAndFormatsFromLexicalNode(
+  node: LexicalNode,
+  state: { text: string; formats: RichTextFormatRange[] },
+) {
+  if (node instanceof TextNode) {
+    const text = node.getTextContent();
+    if (!text) {
+      return;
+    }
+
+    const start = state.text.length;
+    state.text += text;
+    const end = state.text.length;
+
+    if (node.hasFormat('bold') || node.hasFormat('italic') || node.hasFormat('underline')) {
+      state.formats.push({
+        start,
+        end,
+        bold: node.hasFormat('bold') || undefined,
+        italic: node.hasFormat('italic') || undefined,
+        underline: node.hasFormat('underline') || undefined,
+      });
+    }
+    return;
+  }
+
+  if (node instanceof LineBreakNode) {
+    state.text += '\n';
+    return;
+  }
+
+  const children = 'getChildren' in node ? node.getChildren() : [];
+  children.forEach((child) => extractTextAndFormatsFromLexicalNode(child, state));
+
+  if (node instanceof ParagraphNode) {
+    state.text += '\n';
+  }
+}
+
+function extractTextAndFormatsFromEditor(): { text: string; formats: RichTextFormatRange[] } {
+  const root = $getRoot();
+  const state = { text: '', formats: [] as RichTextFormatRange[] };
+  const children = root.getChildren();
+
+  children.forEach((child, index) => {
+    extractTextAndFormatsFromLexicalNode(child, state);
+    if (child instanceof ParagraphNode && index === children.length - 1 && state.text.endsWith('\n')) {
+      state.text = state.text.slice(0, -1);
+    }
+  });
+
+  return {
+    text: state.text,
+    formats: state.formats,
+  };
+}
+
 function getFormatsForSelection(formats: RichTextFormatRange[], start: number, end: number): RichTextFormatRange[] {
   return formats
     .filter((range) => range.end > start && range.start < end)
@@ -391,17 +449,6 @@ function EditorSurface({
           className={className}
           onFocus={(event) => onFocus?.(event.currentTarget)}
           onBlur={onBlur}
-          onKeyDown={(event) => {
-            if (event.key === 'Tab') {
-              event.preventDefault();
-              editor.update(() => {
-                const selection = $getSelection();
-                if ($isRangeSelection(selection)) {
-                  selection.insertText('    ');
-                }
-              });
-            }
-          }}
           onKeyUp={(event) => onSelectionChange(event.currentTarget)}
           onMouseUp={(event) => onSelectionChange(event.currentTarget)}
           onClick={(event) => onSelectionChange(event.currentTarget)}
@@ -417,16 +464,6 @@ function EditorSurface({
             const start = getNodeOffset(rootElement, range.startContainer, range.startOffset);
             const end = getNodeOffset(rootElement, range.endContainer, range.endOffset);
             onWordDoubleClick({ word, start, end, clientX: event.clientX, clientY: event.clientY }, rootElement);
-          }}
-          onPaste={(event) => {
-            event.preventDefault();
-            const pastedText = event.clipboardData.getData('text/plain');
-            editor.update(() => {
-              const selection = $getSelection();
-              if ($isRangeSelection(selection)) {
-                selection.insertText(pastedText);
-              }
-            });
           }}
           onCopy={(event) => {
             const resolvedSelection = resolveSelection(event.currentTarget);
@@ -521,9 +558,9 @@ export default function RichTextDictationEditor({
               return;
             }
 
-            const nextText = editorState.read(() => $getRoot().getTextContent());
-            lastAppliedRef.current = { value: nextText, formatSignature };
-            onChange(nextText, rootElement);
+            const nextState = editorState.read(() => extractTextAndFormatsFromEditor());
+            lastAppliedRef.current = { value: nextState.text, formatSignature: JSON.stringify(nextState.formats) };
+            onChange(nextState.text, rootElement, nextState.formats);
           }}
         />
         <EditorSurface

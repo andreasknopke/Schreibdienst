@@ -72,7 +72,7 @@ export default function TemplateRichTextEditor({
     syncSelection(getRichTextSelection(editor) ?? getDefaultSelection(valueRef.current));
   }, [syncSelection]);
 
-  const handleEditorChange = useCallback((nextValue: string, editor: HTMLDivElement) => {
+  const handleEditorChange = useCallback((nextValue: string, editor: HTMLDivElement, explicitFormats?: RichTextFormatRange[]) => {
     const previousText = valueRef.current;
     const previousFormats = formatsRef.current;
     const previousSelection = selectionRef.current ?? getDefaultSelection(previousText);
@@ -82,9 +82,11 @@ export default function TemplateRichTextEditor({
     const insertedStart = Math.max(0, Math.min(previousSelection.start, nextValue.length));
     const insertedEnd = Math.max(insertedStart, Math.min(insertedStart + insertedLength, nextValue.length));
 
-    let nextFormats = remapRichTextRanges(previousText, nextValue, previousFormats);
+    let nextFormats = explicitFormats
+      ? normalizeRichTextRanges(explicitFormats, nextValue.length)
+      : remapRichTextRanges(previousText, nextValue, previousFormats);
 
-    if (insertedEnd > insertedStart) {
+    if (!explicitFormats && insertedEnd > insertedStart) {
       (Object.keys(togglesRef.current) as RichTextFormatKey[]).forEach((key) => {
         if (!togglesRef.current[key]) return;
         nextFormats = setRichTextFormatForSelection(nextFormats, nextValue.length, insertedStart, insertedEnd, key, true);

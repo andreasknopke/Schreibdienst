@@ -9,6 +9,7 @@ import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
 import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import {
+  $isElementNode,
   $createLineBreakNode,
   $createParagraphNode,
   $createTextNode,
@@ -298,7 +299,7 @@ function extractTextAndFormatsFromLexicalNode(
     return;
   }
 
-  const children = 'getChildren' in node ? node.getChildren() : [];
+  const children = $isElementNode(node) ? node.getChildren() : [];
   children.forEach((child) => extractTextAndFormatsFromLexicalNode(child, state));
 
   if (node instanceof ParagraphNode) {

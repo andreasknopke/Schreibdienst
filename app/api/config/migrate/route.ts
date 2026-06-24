@@ -132,11 +132,21 @@ export async function POST(request: NextRequest) {
           name VARCHAR(200) NOT NULL,
           content TEXT NOT NULL,
           field ENUM('methodik', 'befund', 'beurteilung') DEFAULT 'befund',
+          format_ranges TEXT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           UNIQUE KEY unique_user_template (username, name)
         )
       `);
+      try {
+        await pool.execute(`
+          ALTER TABLE templates ADD COLUMN format_ranges TEXT NULL
+        `);
+      } catch (alterError: any) {
+        if (!String(alterError?.message || '').includes('Duplicate column')) {
+          throw alterError;
+        }
+      }
       status.templates = true;
       console.log('[Migration] templates table: OK');
     } catch (error: any) {

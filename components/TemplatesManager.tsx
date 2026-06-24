@@ -1,12 +1,15 @@
 "use client";
 import { useState, useEffect } from 'react';
 import { useAuth } from './AuthProvider';
+import TemplateRichTextEditor from './TemplateRichTextEditor';
+import { normalizeRichTextRanges, type RichTextFormatRange } from '@/lib/richTextFormatting';
 
 interface Template {
   id: number;
   name: string;
   content: string;
   field: 'methodik' | 'befund' | 'beurteilung';
+  formatRanges?: RichTextFormatRange[];
   createdAt: string;
   updatedAt: string;
 }
@@ -21,6 +24,7 @@ export default function TemplatesManager() {
   // Form state
   const [name, setName] = useState('');
   const [content, setContent] = useState('');
+  const [contentFormats, setContentFormats] = useState<RichTextFormatRange[]>([]);
   const [field, setField] = useState<'methodik' | 'befund' | 'beurteilung'>('befund');
   const [adding, setAdding] = useState(false);
   
@@ -28,6 +32,7 @@ export default function TemplatesManager() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
   const [editContent, setEditContent] = useState('');
+  const [editContentFormats, setEditContentFormats] = useState<RichTextFormatRange[]>([]);
   const [editField, setEditField] = useState<'methodik' | 'befund' | 'beurteilung'>('befund');
 
   const fetchTemplates = async () => {
@@ -67,7 +72,12 @@ export default function TemplatesManager() {
           'Authorization': getAuthHeader(),
           ...getDbTokenHeader()
         },
-        body: JSON.stringify({ name, content, field })
+        body: JSON.stringify({
+          name,
+          content,
+          field,
+          formatRanges: normalizeRichTextRanges(contentFormats, content.length),
+        })
       });
 
       const data = await response.json();
@@ -86,6 +96,7 @@ export default function TemplatesManager() {
         setSuccess('Textbaustein hinzugefügt');
         setName('');
         setContent('');
+        setContentFormats([]);
         setField('befund');
         await fetchTemplates();
         // Event senden um andere Komponenten zu aktualisieren
@@ -103,6 +114,7 @@ export default function TemplatesManager() {
     setEditingId(template.id);
     setEditName(template.name);
     setEditContent(template.content);
+    setEditContentFormats(template.formatRanges ?? []);
     setEditField(template.field);
   };
 
@@ -110,6 +122,7 @@ export default function TemplatesManager() {
     setEditingId(null);
     setEditName('');
     setEditContent('');
+    setEditContentFormats([]);
     setEditField('befund');
   };
 
@@ -131,7 +144,8 @@ export default function TemplatesManager() {
           id: editingId, 
           name: editName, 
           content: editContent,
-          field: editField 
+          field: editField,
+          formatRanges: normalizeRichTextRanges(editContentFormats, editContent.length),
         })
       });
 
@@ -227,12 +241,16 @@ export default function TemplatesManager() {
             <option value="beurteilung">Beurteilung</option>
           </select>
         </div>
-        <textarea
+        <TemplateRichTextEditor
           value={content}
-          onChange={(e) => setContent(e.target.value)}
+          formats={contentFormats}
+          onChange={(value, formats) => {
+            setContent(value);
+            setContentFormats(formats);
+          }}
           placeholder="Textbaustein-Inhalt..."
-          className="w-full px-3 py-2 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 min-h-[100px]"
-          required
+          className="textarea w-full px-3 py-2 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 min-h-[100px]"
+          disabled={adding}
         />
         <button
           type="submit"
@@ -290,10 +308,14 @@ export default function TemplatesManager() {
                         <option value="beurteilung">Beurteilung</option>
                       </select>
                     </div>
-                    <textarea
+                    <TemplateRichTextEditor
                       value={editContent}
-                      onChange={(e) => setEditContent(e.target.value)}
-                      className="w-full px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 min-h-[80px]"
+                      formats={editContentFormats}
+                      onChange={(value, formats) => {
+                        setEditContent(value);
+                        setEditContentFormats(formats);
+                      }}
+                      className="textarea w-full px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 min-h-[80px]"
                     />
                     <div className="flex gap-2">
                       <button

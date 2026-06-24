@@ -19,6 +19,7 @@ import WordActionPopup, { type WordCorrectionInfo } from '@/components/WordActio
 import UpdatePanel from '@/components/UpdatePanel';
 import InjectorDownloadDialog from '@/components/InjectorDownloadDialog';
 import RichTextDictationEditor, { getRichTextSelection } from '@/components/RichTextDictationEditor';
+import TemplateRichTextEditor from '@/components/TemplateRichTextEditor';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import TemplatesManager from '@/components/TemplatesManager';
 import { createPortal } from 'react-dom';
@@ -70,6 +71,7 @@ interface Template {
   name: string;
   content: string;
   field: BefundField;
+  formatRanges?: RichTextFormatRange[];
 }
 
 interface PendingTemplateInsertChoice {
@@ -1275,6 +1277,10 @@ export default function HomePage() {
     return richTextFormats[getRichTextStateKey(field)];
   }, [getRichTextStateKey, richTextFormats]);
 
+  const cloneRichTextRanges = useCallback((ranges: RichTextFormatRange[]) => {
+    return ranges.map((range) => ({ ...range }));
+  }, []);
+
   const getFieldRichTextToggles = useCallback((field: TextInsertionTarget) => {
     return richTextToggles[getRichTextStateKey(field)];
   }, [getRichTextStateKey, richTextToggles]);
@@ -1294,6 +1300,16 @@ export default function HomePage() {
         break;
     }
   }, []);
+
+  const setFieldTextWithFormats = useCallback((field: TextInsertionTarget, nextText: string, nextFormats: RichTextFormatRange[]) => {
+    const stateKey = getRichTextStateKey(field);
+    markRichTextHandledForNextTextChange(stateKey);
+    setRichTextFormats((current) => ({
+      ...current,
+      [stateKey]: normalizeRichTextRanges(cloneRichTextRanges(nextFormats), nextText.length),
+    }));
+    setFieldText(field, nextText);
+  }, [cloneRichTextRanges, getRichTextStateKey, markRichTextHandledForNextTextChange, setFieldText]);
 
   const getFieldTextValue = useCallback((field: TextInsertionTarget): string => {
     switch (field) {
@@ -1721,6 +1737,7 @@ export default function HomePage() {
   const [showNewTemplateDialog, setShowNewTemplateDialog] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState('');
   const [newTemplateContent, setNewTemplateContent] = useState('');
+  const [newTemplateFormats, setNewTemplateFormats] = useState<RichTextFormatRange[]>([]);
   const [creatingTemplate, setCreatingTemplate] = useState(false);
   const [pendingTemplateInsertChoice, setPendingTemplateInsertChoice] = useState<PendingTemplateInsertChoice | null>(null);
   const [activeTemplateContext, setActiveTemplateContext] = useState<Template | null>(null);
@@ -1808,12 +1825,19 @@ export default function HomePage() {
         nextText = data.adaptedText;
       }
 
-      setFieldText(template.field, nextText);
+      const baseFormats = autoIntegrateTemplateAudioRef.current && currentFieldText
+        ? getFieldRichTextFormats(template.field)
+        : (template.formatRanges ?? []);
+      const nextFormats = changesText
+        ? remapRichTextRanges(baseText, nextText, baseFormats)
+        : cloneRichTextRanges(baseFormats);
+
+      setFieldTextWithFormats(template.field, nextText, nextFormats);
       setPendingCorrection(false);
       // Den aktiven Baustein-Kontext auf den bereits ausgefüllten Stand aktualisieren,
       // damit weitere Diktat-Runden inkrementell darauf aufbauen statt vorherige
       // Eintragungen zu überschreiben.
-      const updatedContext: Template = { ...template, content: nextText };
+      const updatedContext: Template = { ...template, content: nextText, formatRanges: nextFormats };
       activeTemplateContextRef.current = updatedContext;
       setActiveTemplateContext(updatedContext);
       return true;
@@ -1824,7 +1848,7 @@ export default function HomePage() {
     } finally {
       setCorrecting(false);
     }
-  }, [getTextForBefundField, getAuthHeader, getDbTokenHeader, username, methodik, transcript, beurteilung, setFieldText]);
+  }, [cloneRichTextRanges, getFieldRichTextFormats, getTextForBefundField, getAuthHeader, getDbTokenHeader, username, methodik, transcript, beurteilung, setFieldTextWithFormats]);
   applyTemplateChangesRef.current = applyTemplateChanges;
 
   const applySelectedTemplate = useCallback(async (changesOverride?: string) => {
@@ -1843,21 +1867,32 @@ export default function HomePage() {
   const insertTemplateIntoField = useCallback((template: Template, insertMode: 'append' | 'replace') => {
     const existingText = getTextForBefundField(template.field);
     let nextText = template.content;
+    let nextFormats = cloneRichTextRanges(template.formatRanges ?? []);
 
     if (insertMode === 'append' && existingText.trim()) {
       const separator = existingText.endsWith('\n') ? '\n' : '\n\n';
       nextText = `${existingText}${separator}${template.content}`;
+      nextFormats = normalizeRichTextRanges([
+        ...cloneRichTextRanges(getFieldRichTextFormats(template.field)),
+        ...cloneRichTextRanges(template.formatRanges ?? []).map((range) => ({
+          ...range,
+          start: range.start + existingText.length + separator.length,
+          end: range.end + existingText.length + separator.length,
+        })),
+      ], nextText.length);
     }
 
-    setFieldText(template.field, nextText);
+    setFieldTextWithFormats(template.field, nextText, nextFormats);
     setStoredSelection(template.field, getDefaultSelection(nextText));
     setPendingCorrection(false);
-    setActiveTemplateContext(template);
+    const updatedTemplate: Template = { ...template, content: nextText, formatRanges: nextFormats };
+    activeTemplateContextRef.current = updatedTemplate;
+    setActiveTemplateContext(updatedTemplate);
     setAutoIntegrateTemplateAudio(true);
     setPendingTemplateInsertChoice(null);
     setSelectedTemplate(null);
     setTemplateMode(false);
-  }, [getTextForBefundField, setFieldText, setStoredSelection]);
+  }, [cloneRichTextRanges, getFieldRichTextFormats, getTextForBefundField, setFieldTextWithFormats, setStoredSelection]);
 
   const handleTemplateSelection = useCallback((template: Template | null) => {
     if (!template) {
@@ -1915,6 +1950,7 @@ export default function HomePage() {
         body: JSON.stringify({
           name: newTemplateName.trim(),
           content: newTemplateContent.trim(),
+          formatRanges: normalizeRichTextRanges(newTemplateFormats, newTemplateContent.trim().length),
           field,
         }),
       });
@@ -1924,6 +1960,7 @@ export default function HomePage() {
         setShowNewTemplateDialog(false);
         setNewTemplateName('');
         setNewTemplateContent('');
+        setNewTemplateFormats([]);
       } else {
         setError(data.error || 'Fehler beim Anlegen des Bausteins');
       }
@@ -1932,7 +1969,7 @@ export default function HomePage() {
     } finally {
       setCreatingTemplate(false);
     }
-  }, [newTemplateName, newTemplateContent, mode, activeField, getAuthHeader, getDbTokenHeader, fetchTemplates]);
+  }, [newTemplateName, newTemplateContent, newTemplateFormats, mode, activeField, getAuthHeader, getDbTokenHeader, fetchTemplates]);
 
   // Wörterbuch-Einträge für Echtzeit-Korrektur und Initial Prompt
   interface DictionaryEntry {
@@ -5279,12 +5316,16 @@ export default function HomePage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Inhalt</label>
-              <textarea
-                className="w-full text-sm px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-orange-400 focus:ring-1 focus:ring-orange-300 focus:outline-none"
-                placeholder="Textbaustein-Inhalt..."
-                rows={4}
+              <TemplateRichTextEditor
                 value={newTemplateContent}
-                onChange={(e) => setNewTemplateContent(e.target.value)}
+                formats={newTemplateFormats}
+                onChange={(value, nextFormats) => {
+                  setNewTemplateContent(value);
+                  setNewTemplateFormats(nextFormats);
+                }}
+                placeholder="Textbaustein-Inhalt..."
+                className="textarea w-full text-sm min-h-[120px] border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-orange-400 focus:ring-1 focus:ring-orange-300 focus:outline-none"
+                disabled={creatingTemplate}
               />
             </div>
             <div className="flex items-center gap-2">
@@ -5301,6 +5342,7 @@ export default function HomePage() {
                   setShowNewTemplateDialog(false);
                   setNewTemplateName('');
                   setNewTemplateContent('');
+                  setNewTemplateFormats([]);
                 }}
               >
                 Abbrechen

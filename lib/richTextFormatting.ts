@@ -20,6 +20,11 @@ export interface RichTextSegment extends RichTextFormatRange {
   text: string;
 }
 
+export interface RichTextSelectionBounds {
+  start: number;
+  end: number;
+}
+
 export function normalizeRichTextRanges(ranges: RichTextFormatRange[], textLength: number): RichTextFormatRange[] {
   const cleaned = ranges
     .map((range) => ({
@@ -47,6 +52,101 @@ export function normalizeRichTextRanges(ranges: RichTextFormatRange[], textLengt
   }
 
   return merged;
+}
+
+export function getRichTextSelectionBounds(
+  selection: RichTextSelection | null | undefined,
+): RichTextSelectionBounds {
+  if (!selection) {
+    return { start: 0, end: 0 };
+  }
+
+  return {
+    start: Math.min(selection.start, selection.end),
+    end: Math.max(selection.start, selection.end),
+  };
+}
+
+function isFormatEnabledAt(ranges: RichTextFormatRange[], offset: number, key: keyof Pick<RichTextFormatRange, 'bold' | 'italic' | 'underline'>): boolean {
+  return ranges.some((range) => range.start <= offset && range.end > offset && Boolean(range[key]));
+}
+
+export function isRichTextFormatActiveAcrossSelection(
+  ranges: RichTextFormatRange[],
+  start: number,
+  end: number,
+  key: keyof Pick<RichTextFormatRange, 'bold' | 'italic' | 'underline'>,
+): boolean {
+  if (end <= start) {
+    return false;
+  }
+
+  const breakpoints = new Set<number>([start, end]);
+  for (const range of ranges) {
+    if (range.end <= start || range.start >= end) continue;
+    breakpoints.add(Math.max(start, range.start));
+    breakpoints.add(Math.min(end, range.end));
+  }
+
+  const sortedBreakpoints = Array.from(breakpoints).sort((left, right) => left - right);
+  for (let index = 0; index < sortedBreakpoints.length - 1; index += 1) {
+    const segmentStart = sortedBreakpoints[index];
+    const segmentEnd = sortedBreakpoints[index + 1];
+    if (segmentEnd <= segmentStart) continue;
+    if (!isFormatEnabledAt(ranges, segmentStart, key)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export function setRichTextFormatForSelection(
+  ranges: RichTextFormatRange[],
+  textLength: number,
+  start: number,
+  end: number,
+  key: keyof Pick<RichTextFormatRange, 'bold' | 'italic' | 'underline'>,
+  enabled: boolean,
+): RichTextFormatRange[] {
+  const normalizedStart = Math.max(0, Math.min(start, textLength));
+  const normalizedEnd = Math.max(normalizedStart, Math.min(end, textLength));
+  if (normalizedEnd <= normalizedStart) {
+    return normalizeRichTextRanges(ranges, textLength);
+  }
+
+  const normalizedRanges = normalizeRichTextRanges(ranges, textLength);
+  const breakpoints = new Set<number>([0, textLength, normalizedStart, normalizedEnd]);
+
+  for (const range of normalizedRanges) {
+    breakpoints.add(range.start);
+    breakpoints.add(range.end);
+  }
+
+  const sortedBreakpoints = Array.from(breakpoints).sort((left, right) => left - right);
+  const nextRanges: RichTextFormatRange[] = [];
+
+  for (let index = 0; index < sortedBreakpoints.length - 1; index += 1) {
+    const segmentStart = sortedBreakpoints[index];
+    const segmentEnd = sortedBreakpoints[index + 1];
+    if (segmentEnd <= segmentStart) continue;
+
+    const segment: RichTextFormatRange = {
+      start: segmentStart,
+      end: segmentEnd,
+      bold: isFormatEnabledAt(normalizedRanges, segmentStart, 'bold'),
+      italic: isFormatEnabledAt(normalizedRanges, segmentStart, 'italic'),
+      underline: isFormatEnabledAt(normalizedRanges, segmentStart, 'underline'),
+    };
+
+    if (segmentEnd > normalizedStart && segmentStart < normalizedEnd) {
+      segment[key] = enabled;
+    }
+
+    nextRanges.push(segment);
+  }
+
+  return normalizeRichTextRanges(nextRanges, textLength);
 }
 
 export function buildRichTextSegments(text: string, formats: RichTextFormatRange[]): RichTextSegment[] {

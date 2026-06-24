@@ -1,11 +1,13 @@
 import { NextRequest } from 'next/server';
 import { query, execute, getPoolForRequest } from './db';
+import { normalizeRichTextRanges, type RichTextFormatRange } from './richTextFormatting';
 
 export interface Template {
   id: number;
   name: string;
   content: string;
   field: 'methodik' | 'befund' | 'beurteilung';
+  formatRanges: RichTextFormatRange[];
   createdAt: string;
   updatedAt: string;
 }
@@ -16,8 +18,29 @@ interface DbTemplate {
   name: string;
   content: string;
   field: 'methodik' | 'befund' | 'beurteilung';
+  format_ranges?: string | null;
   created_at: Date;
   updated_at: Date;
+}
+
+function parseFormatRanges(content: string, raw: string | null | undefined): RichTextFormatRange[] {
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return normalizeRichTextRanges(parsed, content.length);
+  } catch {
+    return [];
+  }
+}
+
+function serializeFormatRanges(content: string, ranges: RichTextFormatRange[]): string {
+  return JSON.stringify(normalizeRichTextRanges(ranges, content.length));
 }
 
 // Get all templates for a user
@@ -33,6 +56,7 @@ export async function getTemplates(username: string): Promise<Template[]> {
       name: t.name,
       content: t.content,
       field: t.field || 'befund',
+      formatRanges: parseFormatRanges(t.content, t.format_ranges),
       createdAt: t.created_at?.toISOString() || new Date().toISOString(),
       updatedAt: t.updated_at?.toISOString() || new Date().toISOString()
     }));
@@ -47,7 +71,7 @@ export async function getTemplatesWithRequest(request: NextRequest, username: st
   try {
     const pool = await getPoolForRequest(request);
     const [rows] = await pool.query<any[]>(
-      'SELECT id, name, content, field, created_at, updated_at FROM templates WHERE username = ? ORDER BY name ASC',
+      'SELECT id, name, content, field, format_ranges, created_at, updated_at FROM templates WHERE username = ? ORDER BY name ASC',
       [username]
     );
     
@@ -56,6 +80,7 @@ export async function getTemplatesWithRequest(request: NextRequest, username: st
       name: t.name,
       content: t.content,
       field: t.field || 'befund',
+      formatRanges: parseFormatRanges(t.content, t.format_ranges),
       createdAt: t.created_at?.toISOString() || new Date().toISOString(),
       updatedAt: t.updated_at?.toISOString() || new Date().toISOString()
     }));
@@ -71,7 +96,8 @@ export async function addTemplateWithRequest(
   username: string, 
   name: string, 
   content: string,
-  field: 'methodik' | 'befund' | 'beurteilung' = 'befund'
+  field: 'methodik' | 'befund' | 'beurteilung' = 'befund',
+  formatRanges: RichTextFormatRange[] = [],
 ): Promise<{ success: boolean; error?: string; id?: number }> {
   if (!name?.trim() || !content?.trim()) {
     return { success: false, error: 'Name und Inhalt müssen ausgefüllt sein' };
@@ -94,8 +120,8 @@ export async function addTemplateWithRequest(
     }
     
     const [result] = await pool.execute<any>(
-      'INSERT INTO templates (username, name, content, field) VALUES (?, ?, ?, ?)',
-      [username.toLowerCase(), nameTrimmed, contentTrimmed, field]
+      'INSERT INTO templates (username, name, content, field, format_ranges) VALUES (?, ?, ?, ?, ?)',
+      [username.toLowerCase(), nameTrimmed, contentTrimmed, field, serializeFormatRanges(contentTrimmed, formatRanges)]
     );
     
     console.log('[Templates] Added template for', username, ':', nameTrimmed);
@@ -113,7 +139,8 @@ export async function updateTemplateWithRequest(
   id: number,
   name: string, 
   content: string,
-  field: 'methodik' | 'befund' | 'beurteilung' = 'befund'
+  field: 'methodik' | 'befund' | 'beurteilung' = 'befund',
+  formatRanges: RichTextFormatRange[] = [],
 ): Promise<{ success: boolean; error?: string }> {
   if (!name?.trim() || !content?.trim()) {
     return { success: false, error: 'Name und Inhalt müssen ausgefüllt sein' };
@@ -143,8 +170,8 @@ export async function updateTemplateWithRequest(
     }
     
     await pool.execute(
-      'UPDATE templates SET name = ?, content = ?, field = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [name.trim(), content.trim(), field, id]
+      'UPDATE templates SET name = ?, content = ?, field = ?, format_ranges = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [name.trim(), content.trim(), field, serializeFormatRanges(content.trim(), formatRanges), id]
     );
     
     console.log('[Templates] Updated template', id, 'for', username);
@@ -192,11 +219,19 @@ export async function ensureTemplatesTable(request: NextRequest): Promise<void> 
         name VARCHAR(200) NOT NULL,
         content TEXT NOT NULL,
         field ENUM('methodik', 'befund', 'beurteilung') DEFAULT 'befund',
+        format_ranges TEXT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY unique_user_template (username, name)
       )
     `);
+    try {
+      await pool.execute('ALTER TABLE templates ADD COLUMN format_ranges TEXT NULL');
+    } catch (alterError: any) {
+      if (!String(alterError?.message || '').includes('Duplicate column')) {
+        throw alterError;
+      }
+    }
     console.log('[Templates] Table ensured');
   } catch (error) {
     console.error('[Templates] Ensure table error:', error);

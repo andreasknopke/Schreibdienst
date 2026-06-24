@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, content, field, username: targetUsername } = body;
+    const { name, content, field, formatRanges, username: targetUsername } = body;
     
     if (!name || !content) {
       return NextResponse.json({ success: false, error: 'Name und Inhalt müssen ausgefüllt sein' }, { status: 400 });
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
     // Secretariat users can add to other users' templates
     const username = (auth.canViewAllDictations && targetUsername) ? targetUsername : auth.username;
     
-    const result = await addTemplateWithRequest(request, username, name, content, field || 'befund');
+    const result = await addTemplateWithRequest(request, username, name, content, field || 'befund', formatRanges || []);
     
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Textbaustein hinzugefügt', id: result.id });
@@ -110,7 +110,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { id, name, content, field, username: targetUsername } = body;
+    const { id, name, content, field, formatRanges, username: targetUsername } = body;
     
     if (!id || !name || !content) {
       return NextResponse.json({ success: false, error: 'ID, Name und Inhalt erforderlich' }, { status: 400 });
@@ -118,7 +118,7 @@ export async function PUT(request: NextRequest) {
     
     const username = (auth.canViewAllDictations && targetUsername) ? targetUsername : auth.username;
     
-    const result = await updateTemplateWithRequest(request, username, id, name, content, field || 'befund');
+    const result = await updateTemplateWithRequest(request, username, id, name, content, field || 'befund', formatRanges || []);
     
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Textbaustein aktualisiert' });

@@ -142,6 +142,7 @@ interface TextHistorySnapshot {
   transcript: string;
   methodik: string;
   beurteilung: string;
+  richTextFormats: RichTextState;
 }
 
 const LIVE_EDITOR_WIDTH_OPTIONS: Array<{ value: LiveEditorWidth; label: string }> = [
@@ -241,7 +242,30 @@ function areTextHistorySnapshotsEqual(a: TextHistorySnapshot, b: TextHistorySnap
     a.transcript === b.transcript
     && a.methodik === b.methodik
     && a.beurteilung === b.beurteilung
+    && JSON.stringify(a.richTextFormats) === JSON.stringify(b.richTextFormats)
   );
+}
+
+function cloneRichTextState(state: RichTextState): RichTextState {
+  return {
+    transcript: [...state.transcript],
+    methodik: [...state.methodik],
+    beurteilung: [...state.beurteilung],
+  };
+}
+
+function createTextHistorySnapshot(
+  transcript: string,
+  methodik: string,
+  beurteilung: string,
+  richTextFormats: RichTextState,
+): TextHistorySnapshot {
+  return {
+    transcript,
+    methodik,
+    beurteilung,
+    richTextFormats: cloneRichTextState(richTextFormats),
+  };
 }
 
 function getDefaultSelection(text: string): CaretSelection {
@@ -928,7 +952,7 @@ export default function HomePage() {
   // Audio-Blobs deren Transkription dauerhaft fehlgeschlagen ist (für manuelle Wiederholung)
   const [vadFailedUtterances, setVadFailedUtterances] = useState<Array<{ seq: number; blob: Blob; error: string }>>([]);
   
-  const [transcript, setTranscript] = useState("");
+  const [transcript, setTranscriptState] = useState("");
   const methodikTextareaRef = useRef<HTMLDivElement | null>(null);
   const befundTextareaRef = useRef<HTMLDivElement | null>(null);
   const beurteilungTextareaRef = useRef<HTMLDivElement | null>(null);
@@ -939,7 +963,8 @@ export default function HomePage() {
   const [richTextToggles, setRichTextToggles] = useState<RichTextToggleState>(EMPTY_RICH_TEXT_TOGGLES);
   const richTextTogglesRef = useRef<RichTextToggleState>(EMPTY_RICH_TEXT_TOGGLES);
   richTextTogglesRef.current = richTextToggles;
-  const lastRichTextSyncedTextRef = useRef<Record<TextStateKey, string>>({ transcript: '', methodik: '', beurteilung: '' });
+  const textValueRefs = useRef<Record<TextStateKey, string>>({ transcript: '', methodik: '', beurteilung: '' });
+  const skipAutoRichTextSyncRef = useRef<Partial<Record<TextStateKey, boolean>>>({});
   const [focusedTextField, setFocusedTextField] = useState<TextInsertionTarget | null>(null);
   const [caretOverlays, setCaretOverlays] = useState<Record<TextInsertionTarget, CaretOverlayPosition>>({
     transcript: hiddenCaretOverlay(),
@@ -982,8 +1007,8 @@ export default function HomePage() {
           : null;
   
   // Befund-spezifische Felder
-  const [methodik, setMethodik] = useState("");
-  const [beurteilung, setBeurteilung] = useState("");
+  const [methodik, setMethodikState] = useState("");
+  const [beurteilung, setBeurteilungState] = useState("");
   // Aktuelles aktives Feld für Befund-Modus
   const [activeField, setActiveField] = useState<BefundField>('befund');
   // Spiegel von activeField als Ref, damit asynchrone VAD-Commits (Voxtral online)
@@ -991,6 +1016,53 @@ export default function HomePage() {
   // erzeugt werden muss.
   const activeFieldRef = useRef<BefundField>('befund');
   useEffect(() => { activeFieldRef.current = activeField; }, [activeField]);
+  useEffect(() => { textValueRefs.current.transcript = transcript; }, [transcript]);
+  useEffect(() => { textValueRefs.current.methodik = methodik; }, [methodik]);
+  useEffect(() => { textValueRefs.current.beurteilung = beurteilung; }, [beurteilung]);
+
+  const markRichTextHandledForNextTextChange = useCallback((stateKey: TextStateKey) => {
+    skipAutoRichTextSyncRef.current[stateKey] = true;
+  }, []);
+
+  const applyTextFieldUpdate = useCallback((
+    stateKey: TextStateKey,
+    value: SetStateAction<string>,
+    setState: (nextValue: string) => void,
+  ) => {
+    const currentText = textValueRefs.current[stateKey];
+    const nextText = typeof value === 'function'
+      ? (value as (currentValue: string) => string)(currentText)
+      : value;
+    const richTextAlreadyHandled = Boolean(skipAutoRichTextSyncRef.current[stateKey]);
+
+    if (nextText === currentText) {
+      skipAutoRichTextSyncRef.current[stateKey] = false;
+      return;
+    }
+
+    if (!richTextAlreadyHandled) {
+      setRichTextFormats((current) => ({
+        ...current,
+        [stateKey]: remapRichTextRanges(currentText, nextText, current[stateKey]),
+      }));
+    }
+
+    skipAutoRichTextSyncRef.current[stateKey] = false;
+    textValueRefs.current[stateKey] = nextText;
+    setState(nextText);
+  }, []);
+
+  const setTranscript = useCallback((value: SetStateAction<string>) => {
+    applyTextFieldUpdate('transcript', value, setTranscriptState);
+  }, [applyTextFieldUpdate]);
+
+  const setMethodik = useCallback((value: SetStateAction<string>) => {
+    applyTextFieldUpdate('methodik', value, setMethodikState);
+  }, [applyTextFieldUpdate]);
+
+  const setBeurteilung = useCallback((value: SetStateAction<string>) => {
+    applyTextFieldUpdate('beurteilung', value, setBeurteilungState);
+  }, [applyTextFieldUpdate]);
   // Refs für existierenden Text pro Feld
   const existingMethodikRef = useRef<string>("");
   const existingBeurteilungRef = useRef<string>("");
@@ -998,11 +1070,9 @@ export default function HomePage() {
   const lastBeurteilungRef = useRef<string>("");
   const textHistoryPastRef = useRef<TextHistorySnapshot[]>([]);
   const textHistoryFutureRef = useRef<TextHistorySnapshot[]>([]);
-  const currentTextHistorySnapshotRef = useRef<TextHistorySnapshot>({
-    transcript: '',
-    methodik: '',
-    beurteilung: '',
-  });
+  const currentTextHistorySnapshotRef = useRef<TextHistorySnapshot>(
+    createTextHistorySnapshot('', '', '', EMPTY_RICH_TEXT_RANGES)
+  );
   const restoringTextHistoryRef = useRef(false);
   const [textHistoryAvailability, setTextHistoryAvailability] = useState({ canUndo: false, canRedo: false });
 
@@ -1030,17 +1100,19 @@ export default function HomePage() {
   }, [isAdmin]);
 
   const applyTextHistorySnapshot = useCallback((snapshot: TextHistorySnapshot) => {
-    setTranscript(snapshot.transcript);
-    setMethodik(snapshot.methodik);
-    setBeurteilung(snapshot.beurteilung);
+    textValueRefs.current = {
+      transcript: snapshot.transcript,
+      methodik: snapshot.methodik,
+      beurteilung: snapshot.beurteilung,
+    };
+    setTranscriptState(snapshot.transcript);
+    setMethodikState(snapshot.methodik);
+    setBeurteilungState(snapshot.beurteilung);
+    setRichTextFormats(cloneRichTextState(snapshot.richTextFormats));
   }, []);
 
   useEffect(() => {
-    const nextSnapshot: TextHistorySnapshot = {
-      transcript,
-      methodik,
-      beurteilung,
-    };
+    const nextSnapshot = createTextHistorySnapshot(transcript, methodik, beurteilung, richTextFormats);
     const currentSnapshot = currentTextHistorySnapshotRef.current;
 
     if (areTextHistorySnapshotsEqual(currentSnapshot, nextSnapshot)) {
@@ -1058,7 +1130,7 @@ export default function HomePage() {
     textHistoryFutureRef.current = [];
     currentTextHistorySnapshotRef.current = nextSnapshot;
     updateTextHistoryAvailability();
-  }, [beurteilung, methodik, transcript, updateTextHistoryAvailability]);
+  }, [beurteilung, methodik, richTextFormats, transcript, updateTextHistoryAvailability]);
 
   const handleUndoTextHistory = useCallback(() => {
     if (isProcessing) {
@@ -1256,7 +1328,6 @@ export default function HomePage() {
         [stateKey]: setFormatForSelection(current[stateKey], existing.length, start, end, selectionFormattingCommand, true),
       }));
       setError(null);
-      lastRichTextSyncedTextRef.current[stateKey] = existing;
       return existing;
     }
 
@@ -1276,7 +1347,6 @@ export default function HomePage() {
       }));
       setStoredSelection(field, { start: selection.end, end: selection.end, direction: 'none' });
       setError(null);
-      lastRichTextSyncedTextRef.current[stateKey] = existing;
       return existing;
     }
 
@@ -1300,7 +1370,7 @@ export default function HomePage() {
         ...current,
         [stateKey]: remapRichTextRanges(existing, resultText, current[stateKey]),
       }));
-      lastRichTextSyncedTextRef.current[stateKey] = resultText;
+      markRichTextHandledForNextTextChange(stateKey);
       return resultText;
     }
 
@@ -1327,16 +1397,16 @@ export default function HomePage() {
           [stateKey]: nextRanges,
         };
       });
+      markRichTextHandledForNextTextChange(stateKey);
     } else {
       setRichTextFormats((current) => ({
         ...current,
         [stateKey]: remapRichTextRanges(existing, result.text, current[stateKey]),
       }));
+      markRichTextHandledForNextTextChange(stateKey);
     }
-
-    lastRichTextSyncedTextRef.current[stateKey] = result.text;
     return result.text;
-  }, [getRichTextStateKey, getStoredSelection, setStoredSelection]);
+  }, [getRichTextStateKey, getStoredSelection, markRichTextHandledForNextTextChange, setStoredSelection]);
 
   useEffect(() => {
     liveInjectEnabledRef.current = liveInjectEnabled;
@@ -1609,13 +1679,13 @@ export default function HomePage() {
           ...current,
           [stateKey]: remapRichTextRanges(currentText, fullText, current[stateKey]),
         }));
-        lastRichTextSyncedTextRef.current[stateKey] = fullText;
+        markRichTextHandledForNextTextChange(stateKey);
         return fullText;
       }
 
       return currentText;
     });
-  }, [setFieldText, combineTextForField, queueLiveInject, applyLiveChunkPreview, getRichTextStateKey, setStoredSelection]);
+  }, [setFieldText, combineTextForField, queueLiveInject, applyLiveChunkPreview, getRichTextStateKey, markRichTextHandledForNextTextChange, setStoredSelection]);
 
   const showPersistentCaret = recording || transcribing || busy || correcting;
 
@@ -1637,28 +1707,6 @@ export default function HomePage() {
       beurteilung: hiddenCaretOverlay(),
     });
   }, [transcript, methodik, beurteilung, textSelections, showPersistentCaret, getStoredSelection]);
-
-  useEffect(() => {
-    const nextTexts: Record<TextStateKey, string> = {
-      transcript,
-      methodik,
-      beurteilung,
-    };
-
-    (Object.keys(nextTexts) as TextStateKey[]).forEach((stateKey) => {
-      const previousText = lastRichTextSyncedTextRef.current[stateKey];
-      const nextText = nextTexts[stateKey];
-      if (previousText === nextText) {
-        return;
-      }
-
-      setRichTextFormats((current) => ({
-        ...current,
-        [stateKey]: remapRichTextRanges(previousText, nextText, current[stateKey]),
-      }));
-      lastRichTextSyncedTextRef.current[stateKey] = nextText;
-    });
-  }, [beurteilung, methodik, transcript]);
 
   // SpeaKING Import State
   const [speakingMetadata, setSpeakingMetadata] = useState<SpeaKINGMetadata | null>(null);
@@ -2381,6 +2429,7 @@ export default function HomePage() {
     const insertedEnd = Math.max(insertedStart, Math.min(insertedStart + insertedLength, value.length));
 
     pendingManualStateRef.current[stateKey] = true;
+    markRichTextHandledForNextTextChange(stateKey);
     setter(value);
     setPendingCorrection(true);
     syncSelectionState(field, nextSelection);
@@ -2399,7 +2448,6 @@ export default function HomePage() {
         [stateKey]: nextRanges,
       };
     });
-    lastRichTextSyncedTextRef.current[stateKey] = value;
     logManualCorrection(field);
 
     const existingDebounce = manualSuggestDebounceRef.current[field];
@@ -2413,7 +2461,7 @@ export default function HomePage() {
       }));
       delete manualSuggestDebounceRef.current[field];
     }, 900);
-  }, [getFieldTextValue, getStoredSelection, logManualCorrection, syncSelectionState]);
+  }, [getFieldTextValue, getStoredSelection, logManualCorrection, markRichTextHandledForNextTextChange, syncSelectionState]);
 
   const handleRichTextSelectionChange = useCallback((field: TextInsertionTarget, editor: HTMLDivElement) => {
     const nextSelection = getRichTextSelection(editor) ?? getDefaultSelection(getFieldTextValue(field));
@@ -3128,15 +3176,17 @@ export default function HomePage() {
 
   // Funktion zum Zurücksetzen aller Felder (New-Button) - hier oben für Hotkey-Unterstützung
   const handleReset = useCallback(() => {
-    textHistoryPastRef.current = [];
+    const currentSnapshot = createTextHistorySnapshot(transcript, methodik, beurteilung, richTextFormats);
+    const emptySnapshot = createTextHistorySnapshot('', '', '', EMPTY_RICH_TEXT_RANGES);
+    const resettingNonEmptyDocument = !areTextHistorySnapshotsEqual(currentSnapshot, emptySnapshot);
+
+    textHistoryPastRef.current = resettingNonEmptyDocument
+      ? [...textHistoryPastRef.current, currentSnapshot].slice(-TEXT_HISTORY_LIMIT)
+      : textHistoryPastRef.current;
     textHistoryFutureRef.current = [];
-    currentTextHistorySnapshotRef.current = {
-      transcript: '',
-      methodik: '',
-      beurteilung: '',
-    };
-    restoringTextHistoryRef.current = true;
-    setTextHistoryAvailability({ canUndo: false, canRedo: false });
+    currentTextHistorySnapshotRef.current = resettingNonEmptyDocument ? currentSnapshot : emptySnapshot;
+    restoringTextHistoryRef.current = resettingNonEmptyDocument;
+    setTextHistoryAvailability({ canUndo: textHistoryPastRef.current.length > 0, canRedo: false });
     Object.values(manualSuggestDebounceRef.current).forEach((timer) => {
       if (timer) clearTimeout(timer);
     });
@@ -3147,6 +3197,8 @@ export default function HomePage() {
     setTranscript('');
     setMethodik('');
     setBeurteilung('');
+    setRichTextFormats(cloneRichTextState(EMPTY_RICH_TEXT_RANGES));
+    setRichTextToggles(EMPTY_RICH_TEXT_TOGGLES);
     setActiveField('befund');
     setError(null);
     setPreCorrectionState(null);
@@ -3172,7 +3224,7 @@ export default function HomePage() {
     vadInFlightCountRef.current = 0;
     vadPendingResultsRef.current.clear();
     setVadFailedUtterances([]);
-  }, []);
+  }, [beurteilung, methodik, richTextFormats, transcript]);
 
   // Revert-Funktion: Stellt den Text vor der letzten Korrektur wieder her
   const handleRevert = useCallback(() => {
@@ -6197,7 +6249,7 @@ export default function HomePage() {
       {/* Seitliches Panel: Hilfe */}
       <div className="pointer-events-none fixed right-0 top-[18vh] z-40 hidden md:flex items-start">
         <aside
-          className={`overflow-y-auto rounded-l-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 -mt-[4.25rem] ${
+          className={`overflow-y-auto rounded-l-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
             showHelpPanel
               ? 'mr-2 translate-x-0 opacity-100 pointer-events-auto'
               : 'mr-0 translate-x-full opacity-0 pointer-events-none'

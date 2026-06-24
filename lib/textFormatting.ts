@@ -656,9 +656,11 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
 const DELETE_PATTERNS = [
   { pattern: /\bwort\s*streichen\b/gi, type: 'word' as const },  // "Wort streichen" or "Wortstreichen"
   { pattern: /\bstreiche\s+wort\b/gi, type: 'word' as const },   // "streiche Wort"
+  { pattern: /\bwort\s+löschen\b/gi, type: 'word' as const },
   { pattern: /lösche\s+(?:das\s+)?letzte(?:s)?\s+wort\b/gi, type: 'word' as const },
   { pattern: /letztes\s+wort\s+löschen\b/gi, type: 'word' as const },
   { pattern: /lösche\s+(?:den\s+)?letzten\s+satz\b/gi, type: 'sentence' as const },
+  { pattern: /\bsatz\s+löschen\b/gi, type: 'sentence' as const },
   { pattern: /letzten\s+satz\s+löschen\b/gi, type: 'sentence' as const },
   { pattern: /lösche\s+(?:den\s+)?letzten\s+absatz\b/gi, type: 'paragraph' as const },
   { pattern: /letzten\s+absatz\s+löschen\b/gi, type: 'paragraph' as const },
@@ -765,10 +767,12 @@ function isStandaloneDeleteCommand(text: string): boolean {
   const standaloneDeletePatterns = [
     /^lösche (?:das )?letzte(?:s)? wort$/,
     /^letztes wort löschen$/,
+    /^wort löschen$/,
     /^wort streichen$/,
     /^streiche wort$/,
     /^lösche (?:den )?letzten satz$/,
     /^letzten satz löschen$/,
+    /^satz löschen$/,
     /^lösche (?:den )?letzten absatz$/,
     /^letzten absatz löschen$/,
   ];
@@ -796,9 +800,11 @@ interface OnlineCommandMatch {
 const ONLINE_COMMAND_PATTERNS: Array<{ type: OnlineCommandType; pattern: RegExp }> = [
   { type: 'deleteWord', pattern: /\blösche\s+(?:das\s+)?letzte(?:s)?\s+wort\b[.,;:!?]*/i },
   { type: 'deleteWord', pattern: /\bletztes\s+wort\s+löschen\b[.,;:!?]*/i },
+  { type: 'deleteWord', pattern: /\bwort\s+löschen\b[.,;:!?]*/i },
   { type: 'deleteWord', pattern: /\bwort\s*streichen\b[.,;:!?]*/i },
   { type: 'deleteWord', pattern: /\bstreiche\s+wort\b[.,;:!?]*/i },
   { type: 'deleteSentence', pattern: /\blösche\s+(?:den\s+)?letzten\s+satz\b[.,;:!?]*/i },
+  { type: 'deleteSentence', pattern: /\bsatz\s+löschen\b[.,;:!?]*/i },
   { type: 'deleteSentence', pattern: /\bletzen\s+satz\s+löschen\b[.,;:!?]*/i },
   { type: 'deleteSentence', pattern: /\bletzten\s+satz\s+löschen\b[.,;:!?]*/i },
   { type: 'deleteParagraph', pattern: /\blösche\s+(?:den\s+)?letzten\s+absatz\b[.,;:!?]*/i },
@@ -927,10 +933,10 @@ function applyStandaloneDeleteCommand(currentText: string, commandText: string):
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (/wort streichen|streiche wort|lösche (?:das )?letzte(?:s)? wort|letztes wort löschen/.test(normalized)) {
+  if (/wort streichen|streiche wort|wort löschen|lösche (?:das )?letzte(?:s)? wort|letztes wort löschen/.test(normalized)) {
     return deleteLastWordFromText(currentText);
   }
-  if (/lösche (?:den )?letzten satz|letzten satz löschen/.test(normalized)) {
+  if (/lösche (?:den )?letzten satz|letzten satz löschen|satz löschen/.test(normalized)) {
     return deleteLastSentenceFromText(currentText);
   }
   if (/lösche (?:den )?letzten absatz|letzten absatz löschen/.test(normalized)) {

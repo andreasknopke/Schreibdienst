@@ -198,7 +198,7 @@ function fieldToStateKey(field: TextInsertionTarget): TextStateKey {
 /** Prüft, ob der Text Online-Steuerbefehle enthält, die einen Löschvorgang auslösen. */
 function hasOnlineCommand(text: string): boolean {
   if (!text) return false;
-  return /lösche\s+(?:das\s+)?letzte(?:s)?\s+wort|letztes\s+wort\s+löschen|wort\s*streichen|streiche\s+wort|lösche\s+(?:den\s+)?letzten\s+satz|lösche\s+(?:den\s+)?letzten\s+absatz|letzten\s+satz\s+löschen|letzten\s+absatz\s+löschen/i.test(text);
+  return /lösche\s+(?:das\s+)?letzte(?:s)?\s+wort|letztes\s+wort\s+löschen|wort\s+löschen|wort\s*streichen|streiche\s+wort|lösche\s+(?:den\s+)?letzten\s+satz|letzten\s+satz\s+löschen|satz\s+löschen|lösche\s+(?:den\s+)?letzten\s+absatz|letzten\s+absatz\s+löschen/i.test(text);
 }
 
 function extractLastManualWordChange(previousText: string, nextText: string): ManualWordChange | null {
@@ -5227,6 +5227,10 @@ export default function HomePage() {
     </div>
   );
 
+  const helpPanelWidth = liveEditorWidth === 'small'
+    ? 'max(0px, calc((100vw - min(42rem, 100vw)) / 2 - 3rem))'
+    : 'min(42rem, calc(100vw - 4.5rem))';
+
   return (
     <div className="space-y-3 min-h-[calc(100vh-120px)]" onContextMenu={handleContextMenu}>
       {/* Kompakte Steuerleiste */}
@@ -6105,8 +6109,8 @@ export default function HomePage() {
               : 'mr-0 translate-x-full opacity-0 pointer-events-none'
           }`}
           style={{
-            width: 'min(42rem, calc(100vw - 4.5rem))',
-            maxWidth: 'calc(100vw - 4.5rem)',
+            width: helpPanelWidth,
+            maxWidth: helpPanelWidth,
             maxHeight: '82vh',
           }}
           aria-hidden={!showHelpPanel}

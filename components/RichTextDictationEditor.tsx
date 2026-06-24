@@ -397,7 +397,7 @@ function EditorSurface({
               editor.update(() => {
                 const selection = $getSelection();
                 if ($isRangeSelection(selection)) {
-                  selection.insertText('\t');
+                  selection.insertText('    ');
                 }
               });
             }

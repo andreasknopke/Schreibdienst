@@ -391,6 +391,17 @@ function EditorSurface({
           className={className}
           onFocus={(event) => onFocus?.(event.currentTarget)}
           onBlur={onBlur}
+          onKeyDown={(event) => {
+            if (event.key === 'Tab') {
+              event.preventDefault();
+              editor.update(() => {
+                const selection = $getSelection();
+                if ($isRangeSelection(selection)) {
+                  selection.insertText('\t');
+                }
+              });
+            }
+          }}
           onKeyUp={(event) => onSelectionChange(event.currentTarget)}
           onMouseUp={(event) => onSelectionChange(event.currentTarget)}
           onClick={(event) => onSelectionChange(event.currentTarget)}

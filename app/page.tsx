@@ -1913,6 +1913,18 @@ export default function HomePage() {
     insertTemplateIntoField(template, 'replace');
   }, [getTextForBefundField, insertTemplateIntoField]);
 
+  const integrateExistingTextIntoTemplate = useCallback(async (template: Template) => {
+    const existingText = getTextForBefundField(template.field).trim();
+    setPendingTemplateInsertChoice(null);
+
+    if (!existingText) {
+      insertTemplateIntoField(template, 'replace');
+      return;
+    }
+
+    await applyTemplateChanges(template, existingText);
+  }, [applyTemplateChanges, getTextForBefundField, insertTemplateIntoField]);
+
   // Templates laden
   const fetchTemplates = useCallback(async () => {
     if (!username) return;
@@ -5841,22 +5853,33 @@ export default function HomePage() {
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
               Im Zielfeld ist bereits Text vorhanden. Wie soll der Baustein <strong>{pendingTemplateInsertChoice.template.name}</strong> eingefügt werden?
             </p>
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
               <button
                 className="btn btn-outline text-sm py-1.5 px-3"
                 onClick={() => setPendingTemplateInsertChoice(null)}
+                disabled={correcting || busy}
               >
                 Abbrechen
               </button>
               <button
                 className="btn btn-outline text-sm py-1.5 px-3"
                 onClick={() => insertTemplateIntoField(pendingTemplateInsertChoice.template, 'replace')}
+                disabled={correcting || busy}
               >
                 Ersetzen
               </button>
               <button
+                className="btn btn-outline text-sm py-1.5 px-3"
+                onClick={() => { void integrateExistingTextIntoTemplate(pendingTemplateInsertChoice.template); }}
+                disabled={correcting || busy}
+                title="Vorhandenen Text per LLM in die Baustein-Vorlage einarbeiten"
+              >
+                In Vorlage einbauen
+              </button>
+              <button
                 className="btn btn-primary text-sm py-1.5 px-3"
                 onClick={() => insertTemplateIntoField(pendingTemplateInsertChoice.template, 'append')}
+                disabled={correcting || busy}
               >
                 Anhängen
               </button>

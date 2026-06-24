@@ -6197,7 +6197,7 @@ export default function HomePage() {
       {/* Seitliches Panel: Hilfe */}
       <div className="pointer-events-none fixed right-0 top-[18vh] z-40 hidden md:flex items-start">
         <aside
-          className={`overflow-y-auto rounded-l-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 ${
+          className={`overflow-y-auto rounded-l-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 shadow-2xl backdrop-blur-sm transition-all duration-300 -mt-[4.25rem] ${
             showHelpPanel
               ? 'mr-2 translate-x-0 opacity-100 pointer-events-auto'
               : 'mr-0 translate-x-full opacity-0 pointer-events-none'

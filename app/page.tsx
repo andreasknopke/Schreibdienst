@@ -6224,6 +6224,22 @@ export default function HomePage() {
                 </button>
               </div>
           </div>
+
+        {templateUnusedText && (templateMode || activeTemplateContext) && mode === 'befund' && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+            <label className="mb-1 block text-xs font-medium text-amber-800 dark:text-amber-200">
+              Nicht verwendete Textteile
+            </label>
+            <textarea
+              className="textarea min-h-24 w-full resize-y border-amber-200 bg-white/80 text-sm text-amber-900 dark:border-amber-700 dark:bg-gray-900/60 dark:text-amber-100"
+              value={templateUnusedText}
+              readOnly
+            />
+            <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+              Diese Inhalte konnten nicht sinnvoll in die aktive Baustein-Vorlage eingebaut werden.
+            </p>
+          </div>
+        )}
         </div>
       ) : (
         /* Arztbrief-Modus: Ein einzelnes Feld */

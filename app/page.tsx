@@ -1739,6 +1739,7 @@ export default function HomePage() {
   const [newTemplateContent, setNewTemplateContent] = useState('');
   const [newTemplateFormats, setNewTemplateFormats] = useState<RichTextFormatRange[]>([]);
   const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [templateUnusedText, setTemplateUnusedText] = useState('');
   const [pendingTemplateInsertChoice, setPendingTemplateInsertChoice] = useState<PendingTemplateInsertChoice | null>(null);
   const [activeTemplateContext, setActiveTemplateContext] = useState<Template | null>(null);
   const [autoIntegrateTemplateAudio, setAutoIntegrateTemplateAudio] = useState(false);
@@ -1823,6 +1824,9 @@ export default function HomePage() {
         }
 
         nextText = data.adaptedText;
+        setTemplateUnusedText((data.unusedText || '').trim());
+      } else {
+        setTemplateUnusedText('');
       }
 
       const baseFormats = autoIntegrateTemplateAudioRef.current && currentFieldText
@@ -1889,6 +1893,7 @@ export default function HomePage() {
     activeTemplateContextRef.current = updatedTemplate;
     setActiveTemplateContext(updatedTemplate);
     setAutoIntegrateTemplateAudio(true);
+    setTemplateUnusedText('');
     setPendingTemplateInsertChoice(null);
     setSelectedTemplate(null);
     setTemplateMode(false);
@@ -3265,6 +3270,7 @@ export default function HomePage() {
     setPendingCorrection(false);
     setActiveTemplateContext(null);
     setAutoIntegrateTemplateAudio(false);
+    setTemplateUnusedText('');
     setPendingTemplateInsertChoice(null);
     templateAudioBufferRef.current = '';
     pendingTemplateIntegrationRef.current = false;
@@ -5831,6 +5837,7 @@ export default function HomePage() {
                 onClick={() => {
                   setActiveTemplateContext(null);
                   setAutoIntegrateTemplateAudio(false);
+                  setTemplateUnusedText('');
                 }}
                 title="Baustein-Kontext beenden"
               >
@@ -6296,6 +6303,21 @@ export default function HomePage() {
                     />
                   )}
                 </div>
+                {templateUnusedText && (templateMode || activeTemplateContext) && (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+                    <label className="mb-1 block text-xs font-medium text-amber-800 dark:text-amber-200">
+                      Nicht verwendete Textteile
+                    </label>
+                    <textarea
+                      className="textarea min-h-24 w-full resize-y border-amber-200 bg-white/80 text-sm text-amber-900 dark:border-amber-700 dark:bg-gray-900/60 dark:text-amber-100"
+                      value={templateUnusedText}
+                      readOnly
+                    />
+                    <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                      Diese Inhalte konnten nicht sinnvoll in die aktive Baustein-Vorlage eingebaut werden.
+                    </p>
+                  </div>
+                )}
                 {manualCorrectionSuggestions.transcript && (
                   <ManualCorrectionSuggestion
                     originalWord={manualCorrectionSuggestions.transcript.originalWord}

@@ -193,10 +193,52 @@ KRITISCH - NIEMALS:
 - Einen Satz aufspalten und die Änderung dazwischen setzen
 
 AUSGABEFORMAT:
-- Gib NUR den angepassten Text zurück
+- Gib AUSSCHLIESSLICH JSON im folgenden Format zurück:
+  {"adaptedText":"...","unusedText":"..."}
+- adaptedText enthält den vollständigen angepassten Textbaustein
+- unusedText enthält nur die diktierten Textteile, die inhaltlich NICHT sinnvoll in den Baustein eingebaut werden konnten
+- Wenn alles sinnvoll eingebaut wurde, setze unusedText auf einen leeren String
 - KEINE Einleitungen wie "Der angepasste Text lautet:"
 - KEINE Erklärungen oder Kommentare
-- KEINE Markierungen oder Tags`;
+- KEINE Markdown-Codeblöcke oder zusätzlichen Markierungen`;
+
+function tryParseTemplateAdaptJson(raw: string): { adaptedText: string; unusedText: string } | null {
+  const trimmed = raw.trim();
+  const withoutFence = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+
+  const candidates = [trimmed, withoutFence];
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed.adaptedText === 'string') {
+        return {
+          adaptedText: parsed.adaptedText,
+          unusedText: typeof parsed.unusedText === 'string' ? parsed.unusedText : '',
+        };
+      }
+    } catch {
+      // continue
+    }
+  }
+
+  const jsonStart = withoutFence.indexOf('{');
+  const jsonEnd = withoutFence.lastIndexOf('}');
+  if (jsonStart >= 0 && jsonEnd > jsonStart) {
+    try {
+      const parsed = JSON.parse(withoutFence.slice(jsonStart, jsonEnd + 1));
+      if (parsed && typeof parsed.adaptedText === 'string') {
+        return {
+          adaptedText: parsed.adaptedText,
+          unusedText: typeof parsed.unusedText === 'string' ? parsed.unusedText : '',
+        };
+      }
+    } catch {
+      // continue
+    }
+  }
+
+  return null;
+}
 
 // Entfernt Markdown-Auszeichnungen aus dem LLM-Ergebnis, die im Original-Baustein
 // nicht vorkamen. So bleibt das Layout des Bausteins erhalten, falls das Modell
@@ -290,7 +332,9 @@ Gib den vollständigen angepassten Text zurück:`;
       { temperature: 0.2, maxTokens: 4000 }  // Lower temperature for more precise edits, higher token limit for complete templates
     );
     
-    let adaptedText = result.content || template;
+    const parsedResult = tryParseTemplateAdaptJson(result.content || '');
+    let adaptedText = parsedResult?.adaptedText || result.content || template;
+    let unusedText = parsedResult?.unusedText || '';
     
     // Clean up common LLM artifacts
     adaptedText = adaptedText
@@ -304,6 +348,7 @@ Gib den vollständigen angepassten Text zurück:`;
     // wieder entfernen, damit das ursprüngliche Layout des Bausteins erhalten bleibt
     // (z. B. "**Teil 1**" -> "Teil 1").
     adaptedText = stripIntroducedMarkdown(template, adaptedText);
+    unusedText = unusedText.trim();
     
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     const tokens = result.tokens ? `${result.tokens.input}/${result.tokens.output}` : 'unknown';
@@ -316,6 +361,7 @@ Gib den vollständigen angepassten Text zurück:`;
     return NextResponse.json({ 
       success: true, 
       adaptedText,
+      unusedText,
       field: field || 'befund'
     });
     

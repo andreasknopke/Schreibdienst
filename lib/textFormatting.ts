@@ -571,24 +571,24 @@ type ReplacementFn = (match: string, p1: string) => string;
 const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | ReplacementFn }> = [
   // Paragraph/line breaks (must come before simpler patterns)
   // Capture surrounding punctuation (. , ;) and whitespace that Whisper often adds
-  { pattern: /[.,;\s]*\bneuer\s+absatz\b[.,;\s]*/gi, replacement: '\n\n' },
-  { pattern: /[.,;\s]*\bnächster\s+absatz\b[.,;\s]*/gi, replacement: '\n\n' },
+  { pattern: /[.,;\s]*\bneuer\s*absatz\b[.,;\s]*/gi, replacement: '\n\n' },
+  { pattern: /[.,;\s]*\bnächster\s*absatz\b[.,;\s]*/gi, replacement: '\n\n' },
   { pattern: /[.,;\s]*\babsatz\b[.,;\s]*/gi, replacement: '\n\n' },
-  { pattern: /[.,;\s]*\bneue\s+zeile\b[.,;\s]*/gi, replacement: '\n' },
-  { pattern: /[.,;\s]*\bnächste\s+zeile\b[.,;\s]*/gi, replacement: '\n' },
+  { pattern: /[.,;\s]*\bneue\s*zeile\b[.,;\s]*/gi, replacement: '\n' },
+  { pattern: /[.,;\s]*\bnächste\s*zeile\b[.,;\s]*/gi, replacement: '\n' },
   
   // Indent control:
   //   "eingerückt" → new line + indent (e.g. 2 spaces)
   //   "rücke ein" → same (common dictation variant)
   //   "nächster Punkt eingerückt" → new line with bullet + indent
-  { pattern: /[.,;\s]*\bnächster\s+punkt\s+eingerückt\b[.,;\s]*/gi, replacement: '\n  - ' },
+  { pattern: /[.,;\s]*\bnächster\s*punkt\s*eingerückt\b[.,;\s]*/gi, replacement: '\n  - ' },
   { pattern: /[.,;\s]*\beingerückt\b[.,;\s]*/gi, replacement: '\n  ' },
-  { pattern: /[.,;\s]*\brücke\s+ein\b[.,;\s]*/gi, replacement: '\n  ' },
+  { pattern: /[.,;\s]*\brücke\s*ein\b[.,;\s]*/gi, replacement: '\n  ' },
   { pattern: /[.,;\s]*\beinrücken\b[.,;\s]*/gi, replacement: '\n  ' },
   
   // Bullet points (Aufzählungsanstriche)
   // "nächster Anstrich" must come before "Anstrich" (multi-word first)
-  { pattern: /[.,;\s]*\bnächster\s+anstrich\b[.,;\s]*/gi, replacement: '\n- ' },
+  { pattern: /[.,;\s]*\bnächster\s*anstrich\b[.,;\s]*/gi, replacement: '\n- ' },
   { pattern: /[.,;\s]*\banstrich\b[.,;\s]*/gi, replacement: '\n- ' },
   
   // NOTE: "Punkt eins", "Punkt zwei", etc. are handled in handleEnumerationCommands()
@@ -596,13 +596,13 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   
   // Brackets/parentheses - capture surrounding commas/spaces that Whisper often adds
   // ", Klammer auf, " → " ("  and  ", Klammer zu, " → ") "
-  { pattern: /[,\s]*\bklammer\s+auf\b[,\s]*/gi, replacement: ' (' },
-  { pattern: /[,\s]*\bklammer\s+zu\b[,\s]*/gi, replacement: ') ' },
+  { pattern: /[,\s]*\bklammer\s*auf\b[,\s]*/gi, replacement: ' (' },
+  { pattern: /[,\s]*\bklammer\s*zu\b[,\s]*/gi, replacement: ') ' },
   // "klammern" alleine (ohne "auf") = Klammer auf (umgangssprachlich)
   { pattern: /[,\s]*\bklammern\b(?!\s*(auf|zu))[,\s]*/gi, replacement: ' (' },
   // "Xklammer zu" - Whisper schreibt manchmal zusammen, z.B. "Histoklammer zu" → "Histo)"
-  { pattern: /(\w+)klammer\s+zu\b[,\s]*/gi, replacement: '$1) ' },
-  { pattern: /\bin\s+klammern\s+/gi, replacement: '(' }, // "in Klammern XYZ" - opening only, closing handled separately
+  { pattern: /(\w+)klammer\s*zu\b[,\s]*/gi, replacement: '$1) ' },
+  { pattern: /\bin\s*klammern\s+/gi, replacement: '(' }, // "in Klammern XYZ" - opening only, closing handled separately
   
   // Punctuation with preceding comma removal - ",[ ]Doppelpunkt" → ":"
   // Handle cases like "Hauptdiagnose, Doppelpunkt" → "Hauptdiagnose:"
@@ -643,10 +643,10 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   { pattern: /\bausrufezeichen\b/gi, replacement: '!' },
   
   // Quotes
-  { pattern: /\banführungszeichen\s+auf\b/gi, replacement: '„' },
-  { pattern: /\banführungszeichen\s+zu\b/gi, replacement: '"' },
-  { pattern: /\banführungszeichen\s+oben\b/gi, replacement: '"' },
-  { pattern: /\banführungszeichen\s+unten\b/gi, replacement: '„' },
+  { pattern: /\banführungszeichen\s*auf\b/gi, replacement: '„' },
+  { pattern: /\banführungszeichen\s*zu\b/gi, replacement: '"' },
+  { pattern: /\banführungszeichen\s*oben\b/gi, replacement: '"' },
+  { pattern: /\banführungszeichen\s*unten\b/gi, replacement: '„' },
   
   // Delete commands - these need special handling after replacement
   // Mark them for post-processing
@@ -655,15 +655,15 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
 // Delete command patterns
 const DELETE_PATTERNS = [
   { pattern: /\bwort\s*streichen\b/gi, type: 'word' as const },  // "Wort streichen" or "Wortstreichen"
-  { pattern: /\bstreiche\s+wort\b/gi, type: 'word' as const },   // "streiche Wort"
-  { pattern: /\bwort\s+löschen\b/gi, type: 'word' as const },
-  { pattern: /lösche\s+(?:das\s+)?letzte(?:s)?\s+wort\b/gi, type: 'word' as const },
-  { pattern: /letztes\s+wort\s+löschen\b/gi, type: 'word' as const },
-  { pattern: /lösche\s+(?:den\s+)?letzten\s+satz\b/gi, type: 'sentence' as const },
-  { pattern: /\bsatz\s+löschen\b/gi, type: 'sentence' as const },
-  { pattern: /letzten\s+satz\s+löschen\b/gi, type: 'sentence' as const },
-  { pattern: /lösche\s+(?:den\s+)?letzten\s+absatz\b/gi, type: 'paragraph' as const },
-  { pattern: /letzten\s+absatz\s+löschen\b/gi, type: 'paragraph' as const },
+  { pattern: /\bstreiche\s*wort\b/gi, type: 'word' as const },   // "streiche Wort" or "streichewort"
+  { pattern: /\bwort\s*löschen\b/gi, type: 'word' as const },
+  { pattern: /lösche\s*(?:das\s*)?letzte(?:s)?\s*wort\b/gi, type: 'word' as const },
+  { pattern: /letztes\s*wort\s*löschen\b/gi, type: 'word' as const },
+  { pattern: /lösche\s*(?:den\s*)?letzten\s*satz\b/gi, type: 'sentence' as const },
+  { pattern: /\bsatz\s*löschen\b/gi, type: 'sentence' as const },
+  { pattern: /letzten\s*satz\s*löschen\b/gi, type: 'sentence' as const },
+  { pattern: /lösche\s*(?:den\s*)?letzten\s*absatz\b/gi, type: 'paragraph' as const },
+  { pattern: /letzten\s*absatz\s*löschen\b/gi, type: 'paragraph' as const },
 ];
 
 // Number word to digit mapping for enumeration
@@ -765,16 +765,16 @@ function isStandaloneDeleteCommand(text: string): boolean {
     .trim();
 
   const standaloneDeletePatterns = [
-    /^lösche (?:das )?letzte(?:s)? wort$/,
-    /^letztes wort löschen$/,
-    /^wort löschen$/,
-    /^wort streichen$/,
-    /^streiche wort$/,
-    /^lösche (?:den )?letzten satz$/,
-    /^letzten satz löschen$/,
-    /^satz löschen$/,
-    /^lösche (?:den )?letzten absatz$/,
-    /^letzten absatz löschen$/,
+    /^lösche\s*(?:das\s*)?letzte(?:s)?\s*wort$/,
+    /^letztes\s*wort\s*löschen$/,
+    /^wort\s*löschen$/,
+    /^wort\s*streichen$/,
+    /^streiche\s*wort$/,
+    /^lösche\s*(?:den\s*)?letzten\s*satz$/,
+    /^letzten\s*satz\s*löschen$/,
+    /^satz\s*löschen$/,
+    /^lösche\s*(?:den\s*)?letzten\s*absatz$/,
+    /^letzten\s*absatz\s*löschen$/,
   ];
 
   return standaloneDeletePatterns.some((pattern) => pattern.test(normalized));
@@ -798,21 +798,21 @@ interface OnlineCommandMatch {
 }
 
 const ONLINE_COMMAND_PATTERNS: Array<{ type: OnlineCommandType; pattern: RegExp }> = [
-  { type: 'deleteWord', pattern: /\blösche\s+(?:das\s+)?letzte(?:s)?\s+wort\b[.,;:!?]*/i },
-  { type: 'deleteWord', pattern: /\bletztes\s+wort\s+löschen\b[.,;:!?]*/i },
-  { type: 'deleteWord', pattern: /\bwort\s+löschen\b[.,;:!?]*/i },
+  { type: 'deleteWord', pattern: /\blösche\s*(?:das\s*)?letzte(?:s)?\s*wort\b[.,;:!?]*/i },
+  { type: 'deleteWord', pattern: /\bletztes\s*wort\s*löschen\b[.,;:!?]*/i },
+  { type: 'deleteWord', pattern: /\bwort\s*löschen\b[.,;:!?]*/i },
   { type: 'deleteWord', pattern: /\bwort\s*streichen\b[.,;:!?]*/i },
-  { type: 'deleteWord', pattern: /\bstreiche\s+wort\b[.,;:!?]*/i },
-  { type: 'deleteSentence', pattern: /\blösche\s+(?:den\s+)?letzten\s+satz\b[.,;:!?]*/i },
-  { type: 'deleteSentence', pattern: /\bsatz\s+löschen\b[.,;:!?]*/i },
-  { type: 'deleteSentence', pattern: /\bletzen\s+satz\s+löschen\b[.,;:!?]*/i },
-  { type: 'deleteSentence', pattern: /\bletzten\s+satz\s+löschen\b[.,;:!?]*/i },
-  { type: 'deleteParagraph', pattern: /\blösche\s+(?:den\s+)?letzten\s+absatz\b[.,;:!?]*/i },
-  { type: 'deleteParagraph', pattern: /\bletzten\s+absatz\s+löschen\b[.,;:!?]*/i },
-  { type: 'paragraphBreak', pattern: /\b(?:neuer\s+|nächster\s+)?absatz\b[.,;:!?]*/i },
-  { type: 'lineBreak', pattern: /\b(?:neue|nächste)\s+zeile\b[.,;:!?]*/i },
+  { type: 'deleteWord', pattern: /\bstreiche\s*wort\b[.,;:!?]*/i },
+  { type: 'deleteSentence', pattern: /\blösche\s*(?:den\s*)?letzten\s*satz\b[.,;:!?]*/i },
+  { type: 'deleteSentence', pattern: /\bsatz\s*löschen\b[.,;:!?]*/i },
+  { type: 'deleteSentence', pattern: /\bletzen\s*satz\s*löschen\b[.,;:!?]*/i },
+  { type: 'deleteSentence', pattern: /\bletzten\s*satz\s*löschen\b[.,;:!?]*/i },
+  { type: 'deleteParagraph', pattern: /\blösche\s*(?:den\s*)?letzten\s*absatz\b[.,;:!?]*/i },
+  { type: 'deleteParagraph', pattern: /\bletzten\s*absatz\s*löschen\b[.,;:!?]*/i },
+  { type: 'paragraphBreak', pattern: /\b(?:neuer\s*|nächster\s*)?absatz\b[.,;:!?]*/i },
+  { type: 'lineBreak', pattern: /\b(?:neue|nächste)\s*zeile\b[.,;:!?]*/i },
   { type: 'lineBreak', pattern: /\bzeilenumbruch\b[.,;:!?]*/i },
-  { type: 'bulletPoint', pattern: /\bnächster\s+anstrich\b[.,;:!?]*/i },
+  { type: 'bulletPoint', pattern: /\bnächster\s*anstrich\b[.,;:!?]*/i },
   { type: 'bulletPoint', pattern: /\banstrich\b[.,;:!?]*/i },
   { type: 'comma', pattern: /\b(?:komma|beistrich)\b[.,;:!?]*/i },
   { type: 'period', pattern: /\bpunkt\b[.,;:!?]*/i },
@@ -933,13 +933,13 @@ function applyStandaloneDeleteCommand(currentText: string, commandText: string):
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (/wort streichen|streiche wort|wort löschen|lösche (?:das )?letzte(?:s)? wort|letztes wort löschen/.test(normalized)) {
+  if (/wort\s*streichen|streiche\s*wort|wort\s*löschen|lösche\s*(?:das\s*)?letzte(?:s)?\s*wort|letztes\s*wort\s*löschen/.test(normalized)) {
     return deleteLastWordFromText(currentText);
   }
-  if (/lösche (?:den )?letzten satz|letzten satz löschen|satz löschen/.test(normalized)) {
+  if (/lösche\s*(?:den\s*)?letzten\s*satz|letzten\s*satz\s*löschen|satz\s*löschen/.test(normalized)) {
     return deleteLastSentenceFromText(currentText);
   }
-  if (/lösche (?:den )?letzten absatz|letzten absatz löschen/.test(normalized)) {
+  if (/lösche\s*(?:den\s*)?letzten\s*absatz|letzten\s*absatz\s*löschen/.test(normalized)) {
     return deleteLastParagraphFromText(currentText);
   }
 
@@ -1121,10 +1121,10 @@ function handleEnumerationCommands(text: string): { text: string; count: number 
   
   // Step 1: Remove optional start markers
   const startPatterns = [
-    /\baufzählung\s+beginnen\b[.,;:\s]*/gi,
-    /\baufzählung\s+starten\b[.,;:\s]*/gi,
-    /\bliste\s+beginnen\b[.,;:\s]*/gi,
-    /\bliste\s+starten\b[.,;:\s]*/gi,
+    /\baufzählung\s*beginnen\b[.,;:\s]*/gi,
+    /\baufzählung\s*starten\b[.,;:\s]*/gi,
+    /\bliste\s*beginnen\b[.,;:\s]*/gi,
+    /\bliste\s*starten\b[.,;:\s]*/gi,
   ];
   
   for (const pattern of startPatterns) {
@@ -1136,10 +1136,10 @@ function handleEnumerationCommands(text: string): { text: string; count: number 
   
   // Step 2: Remove end markers
   const endPatterns = [
-    /\baufzählung\s+beenden\b[.,;:\s]*/gi,
-    /\baufzählung\s+ende\b[.,;:\s]*/gi,
-    /\bliste\s+beenden\b[.,;:\s]*/gi,
-    /\bliste\s+ende\b[.,;:\s]*/gi,
+    /\baufzählung\s*beenden\b[.,;:\s]*/gi,
+    /\baufzählung\s*ende\b[.,;:\s]*/gi,
+    /\bliste\s*beenden\b[.,;:\s]*/gi,
+    /\bliste\s*ende\b[.,;:\s]*/gi,
   ];
   
   for (const pattern of endPatterns) {
@@ -1158,10 +1158,10 @@ function handleEnumerationCommands(text: string): { text: string; count: number 
   // Pattern for "Punkt [number word]" or "Punkt [digit]" or "Nächster Punkt" etc.
   // Using 'gi' flags for global case-insensitive matching
   const allEnumPatterns = new RegExp(
-    `\\bpunkt\\s+(${numberWordPattern}|\\d+)\\b[.,;:\\s]*` +
-    `|\\bnächster\\s+punkt\\b[.,;:\\s]*` +
-    `|\\bnächster\\s+listenpunkt\\b[.,;:\\s]*` +
-    `|\\bweiterer\\s+punkt\\b[.,;:\\s]*` +
+    `\\bpunkt\\s*(${numberWordPattern}|\\d+)\\b[.,;:\\s]*` +
+    `|\\bnächster\\s*punkt\\b[.,;:\\s]*` +
+    `|\\bnächster\\s*listenpunkt\\b[.,;:\\s]*` +
+    `|\\bweiterer\\s*punkt\\b[.,;:\\s]*` +
     `|\\berstens\\b[.,;:\\s]*` +
     `|\\bzweitens\\b[.,;:\\s]*` +
     `|\\bdrittens\\b[.,;:\\s]*` +
@@ -1190,7 +1190,7 @@ function handleEnumerationCommands(text: string): { text: string; count: number 
     
     // Check if it's "Punkt [number]"
     // Use \w+ instead of \S+ to avoid capturing trailing punctuation like commas
-    const punktMatch = match.match(/\bpunkt\s+(\w+)/i);
+    const punktMatch = match.match(/\bpunkt\s*(\w+)/i);
     if (punktMatch) {
       const numPart = punktMatch[1].toLowerCase();
       // Try as number word

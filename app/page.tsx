@@ -471,9 +471,9 @@ function normalizeVoiceFormattingCommand(text: string): string {
 function detectSelectionFormattingCommand(text: string): RichTextFormatKey | null {
   const normalized = normalizeVoiceFormattingCommand(text);
 
-  if (normalized === 'auswahl fett') return 'bold';
-  if (normalized === 'auswahl kursiv') return 'italic';
-  if (normalized === 'auswahl unterstrichen') return 'underline';
+  if (/^auswahl\s*fett$/.test(normalized)) return 'bold';
+  if (/^auswahl\s*kursiv$/.test(normalized)) return 'italic';
+  if (/^auswahl\s*unterstrichen$/.test(normalized)) return 'underline';
   return null;
 }
 
@@ -483,31 +483,25 @@ function detectRelativeFormattingCommand(text: string): { key: RichTextFormatKey
     return null;
   }
 
-  let key: RichTextFormatKey | null = null;
-  if (normalized.endsWith(' fett')) key = 'bold';
-  else if (normalized.endsWith(' kursiv')) key = 'italic';
-  else if (normalized.endsWith(' unterstrichen') || normalized.endsWith(' unterstreichen')) key = 'underline';
-
-  if (!key) {
+  // Match patterns like "wortfett", "wort fett", "letztes wort kursiv", "satzunterstrichen", etc.
+  // Allows optional whitespace between target word and format command for ASR concatenation errors.
+  const match = normalized.match(/^(wort|letztes wort|satz|letzter satz)\s*(fett|kursiv|unterstrichen|unterstreichen)$/);
+  if (!match) {
     return null;
   }
 
-  const commandWithoutFormat = normalized
-    .replace(/ unterstreichen$/, '')
-    .replace(/ unterstrichen$/, '')
-    .replace(/ kursiv$/, '')
-    .replace(/ fett$/, '')
-    .trim();
+  const targetWord = match[1];
+  const formatType = match[2];
 
-  if (commandWithoutFormat === 'wort' || commandWithoutFormat === 'letztes wort') {
-    return { key, target: 'word' };
-  }
+  let key: RichTextFormatKey;
+  if (formatType === 'fett') key = 'bold';
+  else if (formatType === 'kursiv') key = 'italic';
+  else key = 'underline';
 
-  if (commandWithoutFormat === 'satz' || commandWithoutFormat === 'letzter satz') {
-    return { key, target: 'sentence' };
-  }
+  const target: 'word' | 'sentence' =
+    (targetWord === 'wort' || targetWord === 'letztes wort') ? 'word' : 'sentence';
 
-  return null;
+  return { key, target };
 }
 
 function getLastWordSelection(text: string): { start: number; end: number } | null {
@@ -556,19 +550,22 @@ function detectInlineFormattingToggleCommand(text: string): { key: RichTextForma
     return null;
   }
 
-  const tokens = normalized.split(' ');
-  let key: RichTextFormatKey | null = null;
-
-  if (tokens.includes('fett')) key = 'bold';
-  else if (tokens.includes('kursiv')) key = 'italic';
-  else if (tokens.includes('unterstrichen') || tokens.includes('unterstreichen')) key = 'underline';
-
-  if (!key) {
+  // Match concatenated (e.g. "fettbeginnen") or spaced (e.g. "fett beginnen") forms
+  const match = normalized.match(/^(fett|kursiv|unterstrichen|unterstreichen)\s*(beginn|beginnen|beginnt|anfang|start|ende|beenden|beendet|stop|stopp)$/);
+  if (!match) {
     return null;
   }
 
-  const isBegin = tokens.includes('beginn') || tokens.includes('beginnen') || tokens.includes('beginnt') || tokens.includes('anfang') || tokens.includes('start');
-  const isEnd = tokens.includes('ende') || tokens.includes('beenden') || tokens.includes('beendet') || tokens.includes('stop') || tokens.includes('stopp');
+  const formatType = match[1];
+  const action = match[2];
+
+  let key: RichTextFormatKey;
+  if (formatType === 'fett') key = 'bold';
+  else if (formatType === 'kursiv') key = 'italic';
+  else key = 'underline';
+
+  const isBegin = ['beginn', 'beginnen', 'beginnt', 'anfang', 'start'].includes(action);
+  const isEnd = ['ende', 'beenden', 'beendet', 'stop', 'stopp'].includes(action);
 
   if (isBegin === isEnd) {
     return null;
@@ -587,7 +584,7 @@ function normalizeInlineFormattingSpacing(text: string): string {
 }
 
 function parseInlineFormattingText(text: string, initialState: VoiceFormattingState): VoiceFormattingParseResult {
-  const commandPattern = /\b(fett|kursiv|unterstrichen|unterstreichen)\s+(beginn|beginnen|beginnt|anfang|start|ende|beenden|beendet|stop|stopp)\b[.,;:!?]*/gi;
+  const commandPattern = /\b(fett|kursiv|unterstrichen|unterstreichen)\s*(beginn|beginnen|beginnt|anfang|start|ende|beenden|beendet|stop|stopp)\b[.,;:!?]*/gi;
   const nextState = cloneVoiceFormattingState(initialState);
   const ranges: RichTextFormatRange[] = [];
   const outputParts: string[] = [];

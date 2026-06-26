@@ -1,11 +1,34 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
 import { useMicrophone } from '@/lib/MicrophoneContext';
+import {
+  getHidMediaControlStatus,
+  HID_MEDIA_CONTROL_STATUS_EVENT,
+  type HidMediaControlStatusDetail,
+} from '@/lib/hidMediaControls';
 
 export default function MicrophoneSelector() {
   const { deviceId, deviceLabel, available, selectDevice } = useMicrophone();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const [hidConnected, setHidConnected] = useState(false);
+  const [hidDeviceName, setHidDeviceName] = useState<string | null>(null);
+  const [hidSource, setHidSource] = useState<HidMediaControlStatusDetail['source']>(undefined);
+
+  // HID-Status verfolgen
+  useEffect(() => {
+    const applyStatus = (status: HidMediaControlStatusDetail) => {
+      setHidConnected(status.connected);
+      setHidDeviceName(status.deviceName ?? null);
+      setHidSource(status.source);
+    };
+    applyStatus(getHidMediaControlStatus());
+    const handler = (event: Event) => {
+      applyStatus((event as CustomEvent<HidMediaControlStatusDetail>).detail);
+    };
+    window.addEventListener(HID_MEDIA_CONTROL_STATUS_EVENT, handler as EventListener);
+    return () => window.removeEventListener(HID_MEDIA_CONTROL_STATUS_EVENT, handler as EventListener);
+  }, []);
 
   // Schliesst Dropdown bei Klick ausserhalb
   useEffect(() => {
@@ -90,6 +113,22 @@ export default function MicrophoneSelector() {
               Bitte Mikrofon-Zugriff erlauben, um Gerätenamen zu sehen.
             </div>
           )}
+
+          {/* HID-Diktiergerät-Status */}
+          <div className="border-t border-gray-100 dark:border-zinc-700 mt-1 pt-1 px-3 py-2">
+            <div className="flex items-center gap-2 text-xs">
+              <span>🎙️</span>
+              <span className={hidConnected || hidSource === 'native-host' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
+                <span className={`inline-block h-2 w-2 rounded-full mr-1.5 ${hidConnected || hidSource === 'native-host' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                Diktiergerät {hidConnected || hidSource === 'native-host' ? 'verbunden' : 'nicht verbunden'}
+              </span>
+            </div>
+            {hidDeviceName && (
+              <div className="text-xs text-gray-400 dark:text-gray-500 truncate pl-6 mt-0.5">
+                {hidDeviceName}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

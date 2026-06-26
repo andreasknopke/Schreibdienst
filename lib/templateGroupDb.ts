@@ -62,26 +62,9 @@ async function ensureTemplateGroupTables(request: NextRequest): Promise<void> {
 
   const db = await getPoolForRequest(request);
 
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS template_groups (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      name VARCHAR(255) NOT NULL UNIQUE,
-      description TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      created_by VARCHAR(255)
-    )
-  `);
-
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS template_group_members (
-      group_id INT NOT NULL,
-      username VARCHAR(255) NOT NULL,
-      added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (group_id, username),
-      INDEX idx_template_group_members_username (username)
-    )
-  `);
-
+  // Hinweis: Die Tabelle dictionary_groups und dictionary_group_members werden
+  // von groupDictionaryDb.ts verwaltet – hier wird NUR template_group_entries
+  // angelegt, das an dictionary_groups.id anknüpft.
   await db.execute(`
     CREATE TABLE IF NOT EXISTS template_group_entries (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -97,6 +80,11 @@ async function ensureTemplateGroupTables(request: NextRequest): Promise<void> {
       INDEX idx_template_group_entries_group (group_id)
     )
   `);
+
+  // Migration: Alte separate Tabellen löschen (seit Einführung der
+  // gemeinsamen Gruppen-Tabelle dictionary_groups nicht mehr nötig)
+  try { await db.execute('DROP TABLE IF EXISTS template_group_members'); } catch { /* ignore */ }
+  try { await db.execute('DROP TABLE IF EXISTS template_groups'); } catch { /* ignore */ }
 
   tablesCheckedPerPool.set(poolKey, true);
 }
@@ -115,8 +103,8 @@ export async function listTemplateGroupsWithRequest(request: NextRequest): Promi
       COALESCE(g.created_by, '') AS created_by,
       COUNT(DISTINCT m.username) AS member_count,
       COUNT(DISTINCT e.id) AS entry_count
-    FROM template_groups g
-    LEFT JOIN template_group_members m ON m.group_id = g.id
+    FROM dictionary_groups g
+    LEFT JOIN dictionary_group_members m ON m.group_id = g.id
     LEFT JOIN template_group_entries e ON e.group_id = g.id
     GROUP BY g.id, g.name, g.description, g.created_at, g.created_by
     ORDER BY g.name ASC
@@ -146,7 +134,7 @@ export async function createTemplateGroupWithRequest(
     await ensureTemplateGroupTables(request);
     const db = await getPoolForRequest(request);
     const [result] = await db.execute<any>(
-      'INSERT INTO template_groups (name, description, created_by) VALUES (?, ?, ?)',
+      'INSERT INTO dictionary_groups (name, description, created_by) VALUES (?, ?, ?)',
       [trimmedName, description?.trim() || '', createdBy]
     );
     return { success: true, id: Number(result.insertId) };
@@ -164,8 +152,8 @@ export async function deleteTemplateGroupWithRequest(request: NextRequest, group
     await ensureTemplateGroupTables(request);
     const db = await getPoolForRequest(request);
     await db.execute('DELETE FROM template_group_entries WHERE group_id = ?', [groupId]);
-    await db.execute('DELETE FROM template_group_members WHERE group_id = ?', [groupId]);
-    const [result] = await db.execute<any>('DELETE FROM template_groups WHERE id = ?', [groupId]);
+    await db.execute('DELETE FROM dictionary_group_members WHERE group_id = ?', [groupId]);
+    const [result] = await db.execute<any>('DELETE FROM dictionary_groups WHERE id = ?', [groupId]);
     if (result.affectedRows === 0) return { success: false, error: 'Gruppe nicht gefunden' };
     return { success: true };
   } catch (error) {
@@ -178,7 +166,7 @@ export async function getTemplateGroupMembersWithRequest(request: NextRequest, g
   await ensureTemplateGroupTables(request);
   const db = await getPoolForRequest(request);
   const [rows] = await db.execute<any[]>(
-    'SELECT username, added_at FROM template_group_members WHERE group_id = ? ORDER BY username ASC',
+    'SELECT username, added_at FROM dictionary_group_members WHERE group_id = ? ORDER BY username ASC',
     [groupId]
   );
   return rows.map((row: any) => ({
@@ -196,11 +184,11 @@ export async function setTemplateGroupMembersWithRequest(
     await ensureTemplateGroupTables(request);
     const db = await getPoolForRequest(request);
     const normalizedUsers = [...new Set(usernames.map(u => u.trim()).filter(Boolean))];
-    await db.execute('DELETE FROM template_group_members WHERE group_id = ?', [groupId]);
+    await db.execute('DELETE FROM dictionary_group_members WHERE group_id = ?', [groupId]);
 
     for (const username of normalizedUsers) {
       await db.execute(
-        'INSERT IGNORE INTO template_group_members (group_id, username) VALUES (?, ?)',
+        'INSERT IGNORE INTO dictionary_group_members (group_id, username) VALUES (?, ?)',
         [groupId, username]
       );
     }
@@ -217,7 +205,7 @@ export async function getTemplateGroupEntriesWithRequest(request: NextRequest, g
   const [rows] = await db.execute<any[]>(`
     SELECT e.*, g.name AS group_name
     FROM template_group_entries e
-    JOIN template_groups g ON g.id = e.group_id
+    JOIN dictionary_groups g ON g.id = e.group_id
     WHERE e.group_id = ?
     ORDER BY e.name ASC
   `, [groupId]);
@@ -242,8 +230,8 @@ export async function getEntriesForUserTemplateGroupsWithRequest(request: NextRe
   const [rows] = await db.execute<any[]>(`
     SELECT e.*, g.name AS group_name
     FROM template_group_entries e
-    JOIN template_groups g ON g.id = e.group_id
-    JOIN template_group_members m ON m.group_id = g.id
+    JOIN dictionary_groups g ON g.id = e.group_id
+    JOIN dictionary_group_members m ON m.group_id = g.id
     WHERE m.username = ?
     ORDER BY e.name ASC
   `, [username.toLowerCase()]);
@@ -272,7 +260,7 @@ export async function getUserTemplateGroupIds(request: NextRequest, username: st
   await ensureTemplateGroupTables(request);
   const db = await getPoolForRequest(request);
   const [rows] = await db.execute<any[]>(
-    'SELECT group_id FROM template_group_members WHERE username = ? ORDER BY group_id ASC',
+    'SELECT group_id FROM dictionary_group_members WHERE username = ? ORDER BY group_id ASC',
     [username.toLowerCase()]
   );
   return rows.map((row: any) => Number(row.group_id)).filter((id: number) => Number.isFinite(id));
@@ -345,7 +333,7 @@ export async function getTemplateImportCandidatesWithRequest(
       COALESCE(t.field, 'befund') AS field,
       t.format_ranges,
       ge.name AS group_name
-    FROM template_group_members m
+    FROM dictionary_group_members m
     JOIN templates t ON t.username = m.username
     LEFT JOIN template_group_entries ge ON ge.group_id = m.group_id AND ge.name = t.name
     WHERE m.group_id = ?

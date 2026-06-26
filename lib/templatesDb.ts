@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { query, execute, getPoolForRequest } from './db';
 import { normalizeRichTextRanges, type RichTextFormatRange } from './richTextFormatting';
+import { getEntriesForUserTemplateGroupsWithRequest, getUserTemplateGroupIds, upsertTemplateGroupEntryWithRequest } from './templateGroupDb';
 
 export interface Template {
   id: number;
@@ -10,6 +11,12 @@ export interface Template {
   formatRanges: RichTextFormatRange[];
   createdAt: string;
   updatedAt: string;
+  /** 'private' | 'group' – woher dieser Template stammt */
+  scope?: 'private' | 'group';
+  /** Gruppenname, falls scope='group' */
+  groupName?: string;
+  /** Username, nur bei scope='private' relevant (für Admin-Ansicht) */
+  username?: string;
 }
 
 interface DbTemplate {
@@ -82,12 +89,57 @@ export async function getTemplatesWithRequest(request: NextRequest, username: st
       field: t.field || 'befund',
       formatRanges: parseFormatRanges(t.content, t.format_ranges),
       createdAt: t.created_at?.toISOString() || new Date().toISOString(),
-      updatedAt: t.updated_at?.toISOString() || new Date().toISOString()
+      updatedAt: t.updated_at?.toISOString() || new Date().toISOString(),
+      scope: 'private' as const,
+      username,
     }));
   } catch (error) {
     console.error('[Templates] Get templates with request error:', error);
     return [];
   }
+}
+
+/**
+ * Lädt Templates für einen User (privat + Gruppe) und merged sie.
+ * Private Templates überschreiben Gruppen-Templates bei Namensgleichheit.
+ */
+export async function loadTemplatesForUserWithRequest(
+  request: NextRequest,
+  username: string
+): Promise<{ templates: Template[] }> {
+  const [privateEntries, groupEntries] = await Promise.all([
+    getTemplatesWithRequest(request, username),
+    getEntriesForUserTemplateGroupsWithRequest(request, username),
+  ]);
+
+  const templates: Template[] = [];
+  const seen = new Set<string>();
+
+  // Private zuerst (sie gewinnen bei Konflikten)
+  for (const entry of privateEntries) {
+    seen.add(entry.name.toLowerCase());
+    templates.push(entry);
+  }
+
+  // Gruppen-Templates, die nicht bereits privat existieren
+  for (const entry of groupEntries) {
+    const key = entry.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    templates.push({
+      id: entry.id,
+      name: entry.name,
+      content: entry.content,
+      field: entry.field,
+      formatRanges: entry.formatRanges,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+      scope: 'group',
+      groupName: entry.groupName,
+    });
+  }
+
+  return { templates };
 }
 
 // Add new template
@@ -98,6 +150,7 @@ export async function addTemplateWithRequest(
   content: string,
   field: 'methodik' | 'befund' | 'beurteilung' = 'befund',
   formatRanges: RichTextFormatRange[] = [],
+  addToGroup: boolean = false,
 ): Promise<{ success: boolean; error?: string; id?: number }> {
   if (!name?.trim() || !content?.trim()) {
     return { success: false, error: 'Name und Inhalt müssen ausgefüllt sein' };
@@ -125,6 +178,23 @@ export async function addTemplateWithRequest(
     );
     
     console.log('[Templates] Added template for', username, ':', nameTrimmed);
+
+    // Optional: auch in alle Gruppen des Users übernehmen
+    if (addToGroup) {
+      const groupIds = await getUserTemplateGroupIds(request, username);
+      for (const groupId of groupIds) {
+        await upsertTemplateGroupEntryWithRequest(
+          request,
+          groupId,
+          nameTrimmed,
+          contentTrimmed,
+          field,
+          formatRanges,
+          username
+        );
+      }
+    }
+
     return { success: true, id: result.insertId };
   } catch (error) {
     console.error('[Templates] Add template error:', error);

@@ -4,7 +4,8 @@ import {
   addTemplateWithRequest, 
   updateTemplateWithRequest, 
   deleteTemplateWithRequest,
-  ensureTemplatesTable 
+  ensureTemplatesTable,
+  loadTemplatesForUserWithRequest,
 } from '@/lib/templatesDb';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
 import { parseBasicAuth } from '@/lib/apiHelpers';
@@ -52,13 +53,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Nicht authentifiziert' }, { status: 401 });
     }
 
-    // Secretariat users can view other users' templates
     const { searchParams } = new URL(request.url);
     const targetUser = searchParams.get('user');
+    const scope = searchParams.get('scope'); // 'private' | 'group' | undefined (merged)
     const username = (auth.canViewAllDictations && targetUser) ? targetUser : auth.username;
 
-    const templates = await getTemplatesWithRequest(request, username);
-    return NextResponse.json({ success: true, templates });
+    // Nur private Templates anzeigen
+    if (scope === 'private') {
+      const templates = await getTemplatesWithRequest(request, username);
+      return NextResponse.json({ success: true, templates });
+    }
+
+    // Gemergte Ansicht (private + Gruppe)
+    const result = await loadTemplatesForUserWithRequest(request, username);
+    return NextResponse.json({ success: true, templates: result.templates });
   } catch (error) {
     console.error('[Templates GET] Error:', error);
     return NextResponse.json({ success: false, error: 'Fehler beim Laden der Textbausteine', templates: [] }, { status: 500 });
@@ -78,7 +86,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, content, field, formatRanges, username: targetUsername } = body;
+    const { name, content, field, formatRanges, username: targetUsername, addToGroup } = body;
     
     if (!name || !content) {
       return NextResponse.json({ success: false, error: 'Name und Inhalt müssen ausgefüllt sein' }, { status: 400 });
@@ -87,7 +95,7 @@ export async function POST(request: NextRequest) {
     // Secretariat users can add to other users' templates
     const username = (auth.canViewAllDictations && targetUsername) ? targetUsername : auth.username;
     
-    const result = await addTemplateWithRequest(request, username, name, content, field || 'befund', formatRanges || []);
+    const result = await addTemplateWithRequest(request, username, name, content, field || 'befund', formatRanges || [], Boolean(addToGroup));
     
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Textbaustein hinzugefügt', id: result.id });

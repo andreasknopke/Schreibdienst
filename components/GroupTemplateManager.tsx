@@ -12,10 +12,6 @@ interface TemplateGroup {
   entryCount: number;
 }
 
-interface GroupMember {
-  username: string;
-}
-
 interface GroupEntry {
   id: number;
   name: string;
@@ -44,9 +40,7 @@ function notifyTemplatesChanged() {
 export default function GroupTemplateManager() {
   const { getAuthHeader, getDbTokenHeader } = useAuth();
   const [groups, setGroups] = useState<TemplateGroup[]>([]);
-  const [users, setUsers] = useState<{ username: string }[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
-  const [members, setMembers] = useState<GroupMember[]>([]);
   const [entries, setEntries] = useState<GroupEntry[]>([]);
   const [candidates, setCandidates] = useState<ImportCandidate[]>([]);
   const [selectedCandidateKeys, setSelectedCandidateKeys] = useState<Set<string>>(new Set());
@@ -54,10 +48,6 @@ export default function GroupTemplateManager() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-
-  // Create group form
-  const [newGroupName, setNewGroupName] = useState('');
-  const [newGroupDesc, setNewGroupDesc] = useState('');
 
   // Entry form
   const [entryName, setEntryName] = useState('');
@@ -70,7 +60,6 @@ export default function GroupTemplateManager() {
   const [filter, setFilter] = useState('');
 
   const selectedGroup = groups.find(g => g.id === selectedGroupId) || null;
-  const selectedMemberNames = useMemo(() => new Set(members.map(m => m.username)), [members]);
   const normalizedFilter = filter.trim().toLowerCase();
 
   const visibleEntries = useMemo(
@@ -96,7 +85,6 @@ export default function GroupTemplateManager() {
       const data = await res.json();
       if (!res.ok) { setError(data.error || 'Fehler'); return; }
       setGroups(data.groups || []);
-      setUsers(data.users || []);
       if (!selectedGroupId && data.groups?.length) setSelectedGroupId(data.groups[0].id);
     } catch { setError('Fehler beim Laden'); }
     finally { setLoading(false); }
@@ -114,7 +102,6 @@ export default function GroupTemplateManager() {
       const cand = await candRes.json();
       if (!detailRes.ok) { setError(detail.error || 'Fehler'); return; }
       setEntries(detail.entries || []);
-      setMembers(detail.members || []);
       setCandidates(cand.candidates || []);
       setSelectedCandidateKeys(new Set());
       setEditingEntryName(null);
@@ -125,44 +112,8 @@ export default function GroupTemplateManager() {
   useEffect(() => { fetchOverview(); }, []);
   useEffect(() => {
     if (selectedGroupId) fetchGroupDetails(selectedGroupId);
-    else { setMembers([]); setEntries([]); setCandidates([]); }
+    else { setEntries([]); setCandidates([]); }
   }, [selectedGroupId]);
-
-  // ─── Create group ──────────────────────────────────────────
-  const handleCreateGroup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(''); setSuccess('');
-    try {
-      const res = await fetch('/api/template-groups', {
-        method: 'POST', headers: jsonHeaders(),
-        body: JSON.stringify({ action: 'create-group', name: newGroupName, description: newGroupDesc }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) { setError(data.error || 'Fehler'); return; }
-      setSuccess(`Gruppe "${newGroupName}" angelegt`);
-      setNewGroupName(''); setNewGroupDesc('');
-      setSelectedGroupId(data.id);
-      await fetchOverview();
-    } catch { setError('Verbindungsfehler'); }
-  };
-
-  // ─── Members ───────────────────────────────────────────────
-  const handleMemberToggle = async (username: string, checked: boolean) => {
-    if (!selectedGroupId) return;
-    const next = new Set(selectedMemberNames);
-    if (checked) next.add(username); else next.delete(username);
-    try {
-      setError('');
-      const res = await fetch('/api/template-groups', {
-        method: 'PATCH', headers: jsonHeaders(),
-        body: JSON.stringify({ action: 'set-members', groupId: selectedGroupId, usernames: [...next] }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) { setError(data.error || 'Fehler'); return; }
-      await fetchGroupDetails(selectedGroupId);
-      await fetchOverview();
-    } catch { setError('Verbindungsfehler'); }
-  };
 
   // ─── Add/Edit entry ────────────────────────────────────────
   const resetEntryForm = () => {
@@ -226,24 +177,6 @@ export default function GroupTemplateManager() {
     } catch { setError('Verbindungsfehler'); }
   };
 
-  // ─── Delete group ──────────────────────────────────────────
-  const handleDeleteGroup = async () => {
-    if (!selectedGroupId || !selectedGroup) return;
-    if (!confirm(`Gruppe "${selectedGroup.name}" wirklich löschen?`)) return;
-    try {
-      setError('');
-      const res = await fetch('/api/template-groups', {
-        method: 'DELETE', headers: jsonHeaders(),
-        body: JSON.stringify({ groupId: selectedGroupId }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) { setError(data.error || 'Fehler'); return; }
-      setSuccess(`Gruppe "${selectedGroup.name}" gelöscht`);
-      setSelectedGroupId(null);
-      await fetchOverview();
-    } catch { setError('Verbindungsfehler'); }
-  };
-
   // ─── Import candidates ─────────────────────────────────────
   const candidateKey = (c: ImportCandidate) => `${c.sourceUsername}\u0000${c.name}`;
   const toggleCandidate = (key: string, checked: boolean) => {
@@ -283,19 +216,8 @@ export default function GroupTemplateManager() {
       {success && <div className="p-2 text-sm text-green-600 bg-green-50 dark:bg-green-900/20 rounded">{success}</div>}
 
       <div className="flex gap-4">
-        {/* ─── Linke Spalte: Gruppenliste + Neu ─────────────── */}
+        {/* ─── Linke Spalte: Gruppenliste ─────────────── */}
         <div className="w-56 shrink-0 space-y-3">
-          <form onSubmit={handleCreateGroup} className="space-y-2">
-            <input type="text" value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
-              placeholder="Neue Gruppe..." className="w-full px-2 py-1 text-xs border rounded dark:bg-gray-700 dark:border-gray-600" />
-            <input type="text" value={newGroupDesc} onChange={e => setNewGroupDesc(e.target.value)}
-              placeholder="Beschreibung" className="w-full px-2 py-1 text-xs border rounded dark:bg-gray-700 dark:border-gray-600" />
-            <button type="submit" disabled={!newGroupName.trim()}
-              className="w-full px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50">
-              + Gruppe anlegen
-            </button>
-          </form>
-
           <div className="space-y-1 max-h-[400px] overflow-y-auto">
             {groups.map(g => (
               <button key={g.id} onClick={() => setSelectedGroupId(g.id)}
@@ -319,32 +241,9 @@ export default function GroupTemplateManager() {
           ) : (
             <div className="space-y-4">
               {/* Gruppen-Header */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-semibold text-sm">{selectedGroup.name}</h3>
-                  {selectedGroup.description && <p className="text-xs text-gray-500">{selectedGroup.description}</p>}
-                </div>
-                <button onClick={handleDeleteGroup} className="text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
-                  Löschen
-                </button>
-              </div>
-
-              {/* Mitglieder */}
               <div>
-                <h4 className="text-xs font-medium text-gray-500 mb-1">Mitglieder</h4>
-                <div className="flex flex-wrap gap-1">
-                  {users.map(u => {
-                    const isMember = selectedMemberNames.has(u.username);
-                    return (
-                      <button key={u.username} onClick={() => handleMemberToggle(u.username, !isMember)}
-                        className={`text-xs px-2 py-0.5 rounded border transition-colors ${
-                          isMember ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-300' : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-gray-700 dark:text-gray-400'
-                        }`}>
-                        {u.username} {isMember ? '✓' : ''}
-                      </button>
-                    );
-                  })}
-                </div>
+                <h3 className="font-semibold text-sm">{selectedGroup.name}</h3>
+                {selectedGroup.description && <p className="text-xs text-gray-500">{selectedGroup.description}</p>}
               </div>
 
               {/* Filter */}

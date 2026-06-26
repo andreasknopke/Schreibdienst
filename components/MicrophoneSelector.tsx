@@ -48,7 +48,7 @@ export default function MicrophoneSelector() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-xs max-w-[180px]"
+        className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-xs w-44"
         title={`Mikrofon: ${deviceLabel}`}
       >
         {/* Mikrofon-Icon */}

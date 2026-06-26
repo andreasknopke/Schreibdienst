@@ -7,6 +7,8 @@ import ThemeToggle from '@/components/ThemeToggle';
 import VoiceAgentButton from '@/components/VoiceAgentButton';
 import UserMenu from '@/components/UserMenu';
 import LoginForm from '@/components/LoginForm';
+import { MicrophoneProvider } from '@/lib/MicrophoneContext';
+import MicrophoneSelector from '@/components/MicrophoneSelector';
 import { startHidMediaControls, stopHidMediaControls } from '@/lib/hidMediaControls';
 
 const LIVE_EDITOR_WIDTH_CHANGED_EVENT = 'schreibdienst:live-editor-width-changed';
@@ -109,6 +111,7 @@ function LayoutContent({ children }: { children: ReactNode }) {
           <nav className="flex flex-1 min-w-0 items-center justify-end gap-2 text-sm text-gray-600">
             <UserMenu />
             <VoiceAgentButton />
+            <MicrophoneSelector />
             <ThemeToggle />
           </nav>
         </div>
@@ -170,7 +173,9 @@ export default function ClientLayout({ children }: { children: ReactNode }) {
 
   return (
     <AuthProvider>
-      <LayoutContent>{children}</LayoutContent>
+      <MicrophoneProvider>
+        <LayoutContent>{children}</LayoutContent>
+      </MicrophoneProvider>
     </AuthProvider>
   );
 }

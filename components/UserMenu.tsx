@@ -387,39 +387,6 @@ export default function UserMenu() {
   return (
     <>
       <div className="flex flex-1 flex-wrap items-center justify-end gap-1 sm:gap-2 min-w-0 max-w-full">
-        {mounted && hidSupported && (
-          <button
-            onClick={() => {
-              // Native-Host-HID ist immer verbunden – kein WebHID-Dialog nötig
-              if (!hidConnected && hidSource !== 'native-host') {
-                void handleConnectDictationMic();
-              }
-            }}
-            className={`inline-flex items-center gap-1.5 text-xs px-1.5 sm:px-2 py-1 rounded border transition-colors ${
-              hidConnected || hidSource === 'native-host'
-                ? 'text-emerald-700 border-emerald-200 bg-emerald-50 dark:text-emerald-300 dark:border-emerald-800 dark:bg-emerald-900/20 cursor-default'
-                : 'text-amber-700 border-amber-200 bg-amber-50 hover:bg-amber-100 dark:text-amber-300 dark:border-amber-800 dark:bg-amber-900/20 dark:hover:bg-amber-900/30'
-            }`}
-            title={hidConnected || hidSource === 'native-host'
-              ? `Diktiergerät verbunden (via Injector)${hidDeviceName ? `: ${hidDeviceName}` : ''}`
-              : 'Diktiergerät nicht verbunden. Klicken zum Verbinden.'}
-            disabled={hidConnecting || hidConnected || hidSource === 'native-host'}
-            aria-label={hidConnected || hidSource === 'native-host'
-              ? `Diktiergerät verbunden (via Injector)${hidDeviceName ? `: ${hidDeviceName}` : ''}`
-              : 'Diktiergerät nicht verbunden. Klicken zum Verbinden.'}
-          >
-            <span
-              className={`h-2 w-2 rounded-full ${
-                hidConnected || hidSource === 'native-host' ? 'bg-emerald-500' : 'bg-amber-500'
-              }`}
-              aria-hidden="true"
-            />
-            <span>🎙️</span>
-            <span className="hidden sm:inline">
-              {hidConnecting ? 'Verbinde...' : (hidConnected || hidSource === 'native-host') ? 'Verbunden' : 'Nicht verbunden'}
-            </span>
-          </button>
-        )}
         <button
           onClick={() => setShowBugReport(true)}
           className="text-xs text-red-600 hover:text-red-700 px-1.5 sm:px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"

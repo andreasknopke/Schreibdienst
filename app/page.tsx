@@ -5668,6 +5668,10 @@ export default function HomePage() {
                       setShowTemplatesManager(true);
                       return;
                     }
+                    if (val === '__manage__') {
+                      setShowTemplatesManager(true);
+                      return;
+                    }
                     const id = parseInt(val);
                     const template = availableTemplates.find(t => t.id === id);
                     handleTemplateSelection(template || null);
@@ -5678,6 +5682,7 @@ export default function HomePage() {
                   disabled={loadingTemplates}
                 >
                   <option value="">{loadingTemplates ? 'Lade Bausteine...' : '📝 Bausteine'}</option>
+                  <option value="__manage__" className="font-medium text-orange-600 dark:text-orange-400">📂 Meine Bausteine</option>
                   <option value="__new__" className="border-t border-gray-300 dark:border-gray-600 font-medium text-blue-600 dark:text-blue-400">➕ Neuen Baustein anlegen</option>
                   {availableTemplates.map(t => (
                     <option key={t.id} value={t.id}>

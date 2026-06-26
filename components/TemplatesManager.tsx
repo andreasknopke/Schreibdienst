@@ -12,6 +12,8 @@ interface Template {
   formatRanges?: RichTextFormatRange[];
   createdAt: string;
   updatedAt: string;
+  scope?: 'private' | 'group';
+  groupName?: string;
 }
 
 export default function TemplatesManager() {
@@ -27,6 +29,7 @@ export default function TemplatesManager() {
   const [contentFormats, setContentFormats] = useState<RichTextFormatRange[]>([]);
   const [field, setField] = useState<'methodik' | 'befund' | 'beurteilung'>('befund');
   const [adding, setAdding] = useState(false);
+  const [addToGroup, setAddToGroup] = useState(false);
   
   // Edit state
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -77,6 +80,7 @@ export default function TemplatesManager() {
           content,
           field,
           formatRanges: normalizeRichTextRanges(contentFormats, content.length),
+          addToGroup,
         })
       });
 
@@ -252,6 +256,15 @@ export default function TemplatesManager() {
           className="textarea w-full px-3 py-2 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 min-h-[100px]"
           disabled={adding}
         />
+        <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={addToGroup}
+            onChange={(e) => setAddToGroup(e.target.checked)}
+            className="rounded border-gray-300 dark:border-gray-600"
+          />
+          <span>ins Abteilungs-Bausteinpool übernehmen</span>
+        </label>
         <button
           type="submit"
           disabled={adding || !name.trim() || !content.trim()}
@@ -342,6 +355,11 @@ export default function TemplatesManager() {
                           <span className="text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded">
                             {fieldLabels[template.field]}
                           </span>
+                          {template.scope === 'group' && (
+                            <span className="text-xs px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded" title={template.groupName ? `Gruppe: ${template.groupName}` : 'Abteilungs-Baustein'}>
+                              Gruppe
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
                           {template.content}

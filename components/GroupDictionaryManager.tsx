@@ -108,7 +108,6 @@ export default function GroupDictionaryManager() {
   const [allUserEntriesFilter, setAllUserEntriesFilter] = useState('');
 
   const selectedGroup = groups.find(group => group.id === selectedGroupId) || null;
-  const selectedMemberNames = useMemo(() => new Set(members.map(member => member.username)), [members]);
   const normalizedFilter = filter.trim().toLowerCase();
   const normalizedAllUserFilter = allUserEntriesFilter.trim().toLowerCase();
   const visibleAllUserEntries = useMemo(
@@ -307,32 +306,6 @@ export default function GroupDictionaryManager() {
       setNewGroupDescription('');
       setSelectedGroupId(data.id);
       await fetchOverview();
-    } catch {
-      setError('Verbindungsfehler');
-    }
-  };
-
-  const handleMemberToggle = async (username: string, checked: boolean) => {
-    if (!selectedGroupId) return;
-    const nextMembers = new Set(selectedMemberNames);
-    if (checked) nextMembers.add(username);
-    else nextMembers.delete(username);
-
-    try {
-      setError('');
-      const response = await fetch('/api/dictionary-groups', {
-        method: 'PATCH',
-        headers: requestJsonHeaders(),
-        body: JSON.stringify({ action: 'set-members', groupId: selectedGroupId, usernames: [...nextMembers] }),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        setError(data.error || 'Fehler beim Speichern der Mitglieder');
-        return;
-      }
-      await fetchGroupDetails(selectedGroupId);
-      await fetchOverview();
-      notifyDictionaryChanged();
     } catch {
       setError('Verbindungsfehler');
     }
@@ -813,18 +786,6 @@ export default function GroupDictionaryManager() {
                     placeholder="z.B. Bei unverständlichen Wortkombinationen rund um Ambulanz-/Abteilungsnamen prüfen, ob 'Rheumatologische Fachambulanz' gemeint ist."
                   />
                 </form>
-
-                <div className="space-y-2">
-                  <h5 className="font-medium text-sm">Mitglieder</h5>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-36 overflow-y-auto p-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                    {users.map(user => (
-                      <label key={user.username} className="flex items-center gap-2 text-sm min-w-0">
-                        <input type="checkbox" checked={selectedMemberNames.has(user.username)} onChange={event => handleMemberToggle(user.username, event.target.checked)} />
-                        <span className="truncate">{user.username}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
 
                 <form onSubmit={handleAddEntry} className="space-y-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                   <div className="flex items-center justify-between gap-3">

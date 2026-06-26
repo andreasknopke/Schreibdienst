@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useMicrophone } from '@/lib/MicrophoneContext';
 
 /**
  * VAD-basiertes Utterance-Chunking für Online-Diktat.
@@ -60,6 +61,7 @@ export interface UseVadChunkingReturn {
 
 export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingReturn {
   const { onUtterance, onSpeechStart, onAudioLevel, vadThreshold = 0.42 } = options;
+  const { getStream: getMicStream } = useMicrophone();
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const vadRef = useRef<any>(null);
@@ -139,6 +141,15 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       baseAssetPath: '/',
       onnxWASMBasePath: '/',
       model: 'v5',
+
+      // Ausgewähltes Mikrofon verwenden
+      getStream: () => getMicStream({
+        channelCount: 1,
+        echoCancellation: true,
+        autoGainControl: true,
+        noiseSuppression: true,
+      }),
+      startOnLoad: false,
 
       // VAD-Erkennungsschwelle: Höhere Werte = weniger empfindlich.
       // Bei Raumgeräuschen/Nebengesprächen hilft ein höherer Schwellwert.
@@ -266,7 +277,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       return;
     }
     setIsListening(true);
-  }, [onUtterance, onSpeechStart, onAudioLevel]);
+  }, [onUtterance, onSpeechStart, onAudioLevel, getMicStream]);
 
   const stop = useCallback(() => {
     if (stopPromiseRef.current) {

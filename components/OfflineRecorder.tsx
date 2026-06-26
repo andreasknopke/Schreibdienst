@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
+import { useMicrophone } from '@/lib/MicrophoneContext';
 import Spinner from './Spinner';
 
 interface OfflineRecorderProps {
@@ -43,6 +44,7 @@ const ALLOWED_AUDIO_TYPES = [
 const ALLOWED_EXTENSIONS = '.mp3,.wav,.aiff,.aif,.webm,.ogg,.opus,.m4a';
 
 export default function OfflineRecorder({ username, onSubmit, onCancel, availableUsers = [], availableDepartments = [] }: OfflineRecorderProps) {
+  const { getStream: getMicStream } = useMicrophone();
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -112,7 +114,7 @@ export default function OfflineRecorder({ username, onSubmit, onCancel, availabl
     setError(null);
     
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await getMicStream();
       streamRef.current = stream;
       
       // Setup audio visualization

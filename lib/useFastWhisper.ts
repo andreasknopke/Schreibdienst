@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useRef, useState } from 'react';
+import { useMicrophone } from '@/lib/MicrophoneContext';
 
 /**
  * Hook für RealtimeSTT WebSocket-basierte Echtzeit-Transkription
@@ -29,6 +30,7 @@ interface UseFastWhisperReturn {
 
 export function useFastWhisper(options: UseFastWhisperOptions): UseFastWhisperReturn {
   const { wsUrl, onTranscript, onError, onConnect, onDisconnect } = options;
+  const { getStream: getMicStream } = useMicrophone();
   
   const wsRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -121,14 +123,12 @@ export function useFastWhisper(options: UseFastWhisperOptions): UseFastWhisperRe
     }
 
     try {
-      // Hole Mikrofon-Stream
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          sampleRate: 16000,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-        }
+      // Hole Mikrofon-Stream (mit ausgewähltem Gerät)
+      const stream = await getMicStream({
+        sampleRate: 16000,
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
       });
       streamRef.current = stream;
 
@@ -168,7 +168,7 @@ export function useFastWhisper(options: UseFastWhisperOptions): UseFastWhisperRe
       onError?.(error.message);
       throw error;
     }
-  }, [connect, onError]);
+  }, [connect, onError, getMicStream]);
 
   const stopRecording = useCallback(() => {
     // Stoppe Audio-Stream

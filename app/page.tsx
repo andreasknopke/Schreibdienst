@@ -27,6 +27,7 @@ import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/
 import { useVadChunking } from '@/lib/useVadChunking';
 import { checkInjectorAvailability, injectToActiveWindow, registerGlobalHotkeys, reportInjectorRecordingState, configureTargetWindow, setFrontendMode } from '@/lib/injectClient';
 import { replaceAllInText } from '@/lib/replaceText';
+import { useMicrophone } from '@/lib/MicrophoneContext';
 import { normalizeRichTextRanges, remapRichTextRanges, buildRichTextHtml, type RichTextFormatRange } from '@/lib/richTextFormatting';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
@@ -876,6 +877,7 @@ function getTextareaCaretOverlay(
 
 export default function HomePage() {
   const { username, isAdmin, autoCorrect, defaultMode, getAuthHeader, getDbTokenHeader } = useAuth();
+  const { getStream: getMicStream } = useMicrophone();
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [correcting, setCorrecting] = useState(false);
@@ -3931,14 +3933,12 @@ export default function HomePage() {
           }
           
           try {
-            // Mikrofon-Stream holen
-            const stream = await navigator.mediaDevices.getUserMedia({
-              audio: {
-                sampleRate: 16000,
-                channelCount: 1,
-                echoCancellation: true,
-                noiseSuppression: true,
-              }
+            // Mikrofon-Stream holen (mit ausgewähltem Gerät)
+            const stream = await getMicStream({
+              sampleRate: 16000,
+              channelCount: 1,
+              echoCancellation: true,
+              noiseSuppression: true,
             });
             fastWhisperStreamRef.current = stream;
             
@@ -4096,14 +4096,12 @@ export default function HomePage() {
           ws.send(JSON.stringify(sessionConfig));
           
           try {
-            // Mikrofon-Stream holen
-            const stream = await navigator.mediaDevices.getUserMedia({
-              audio: {
-                sampleRate: 16000,
-                channelCount: 1,
-                echoCancellation: true,
-                noiseSuppression: true,
-              }
+            // Mikrofon-Stream holen (mit ausgewähltem Gerät)
+            const stream = await getMicStream({
+              sampleRate: 16000,
+              channelCount: 1,
+              echoCancellation: true,
+              noiseSuppression: true,
             });
             voxtralStreamRef.current = stream;
             
@@ -4263,7 +4261,7 @@ export default function HomePage() {
     }
 
     // Fallback: Klassischer MediaRecorder + setInterval (z.B. für ElevenLabs)
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await getMicStream();
     streamRef.current = stream;
     
     // Setup Audio Level Monitor

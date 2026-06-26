@@ -303,7 +303,7 @@ export default function UserMenu() {
                 className={`px-3 py-1 rounded-md transition-all ${
                   groupDictTab === 'dictionary' ? 'bg-white dark:bg-gray-700 shadow-sm font-medium' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}>
-                Wörterbücher
+                Gruppen-Wörterbücher
               </button>
               <button onClick={() => setGroupDictTab('templates')}
                 className={`px-3 py-1 rounded-md transition-all ${

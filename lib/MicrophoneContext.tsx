@@ -17,6 +17,10 @@ interface MicrophoneContextValue {
    * Optional können zusätzliche Audio-Constraints (z.B. sampleRate) übergeben werden.
    */
   getStream: (extraConstraints?: MediaTrackConstraints) => Promise<MediaStream>;
+  /** deviceId des favorisierten Mikrofons (null = kein Favorit) */
+  favoriteDeviceId: string | null;
+  /** Favorit setzen / entfernen */
+  setFavoriteDeviceId: (deviceId: string | null) => void;
 }
 
 const MicrophoneContext = createContext<MicrophoneContextValue>({
@@ -26,13 +30,22 @@ const MicrophoneContext = createContext<MicrophoneContextValue>({
   selectDevice: () => {},
   refreshDevices: async () => {},
   getStream: async () => { throw new Error('Not initialized'); },
+  favoriteDeviceId: null,
+  setFavoriteDeviceId: () => {},
 });
 
 export function MicrophoneProvider({ children }: { children: React.ReactNode }) {
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [deviceLabel, setDeviceLabel] = useState('Standard-Mikrofon');
   const [available, setAvailable] = useState<MediaDeviceInfo[]>([]);
+  const [favoriteDeviceId, setFavoriteDeviceIdState] = useState<string | null>(null);
   const hasRequestedPermission = useRef(false);
+  const deviceIdRef = useRef<string | null>(null);
+  const favoriteDeviceIdRef = useRef<string | null>(null);
+
+  // Refs immer aktuell halten für devicechange-Handler
+  deviceIdRef.current = deviceId;
+  favoriteDeviceIdRef.current = favoriteDeviceId;
 
   // Geräteliste neu einlesen
   const refreshDevices = useCallback(async () => {
@@ -79,6 +92,18 @@ export function MicrophoneProvider({ children }: { children: React.ReactNode }) 
     } catch { /* ignore */ }
   }, [available]);
 
+  // Favorit setzen / entfernen
+  const setFavoriteDeviceId = useCallback((newFavorite: string | null) => {
+    setFavoriteDeviceIdState(newFavorite);
+    try {
+      if (newFavorite) {
+        localStorage.setItem('schreibdienst:micFavoriteDeviceId', newFavorite);
+      } else {
+        localStorage.removeItem('schreibdienst:micFavoriteDeviceId');
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   // Stream mit dem ausgewählten Gerät erzeugen
   const getStream = useCallback(async (extraConstraints?: MediaTrackConstraints): Promise<MediaStream> => {
     const constraints: MediaTrackConstraints = {
@@ -93,15 +118,23 @@ export function MicrophoneProvider({ children }: { children: React.ReactNode }) 
   // Initialisierung
   useEffect(() => {
     const init = async () => {
-      // Gespeicherte Einstellung laden
+      // Gespeicherte Einstellungen laden
       let savedDeviceId: string | null = null;
+      let savedFavoriteId: string | null = null;
       try {
         savedDeviceId = localStorage.getItem('schreibdienst:micDeviceId');
+        savedFavoriteId = localStorage.getItem('schreibdienst:micFavoriteDeviceId');
       } catch { /* ignore */ }
 
       await refreshDevices();
 
-      // Prüfen ob das gespeicherte Gerät noch existiert
+      // Zuerst: Favorit setzen (damit der devicechange-Handler später
+      // darauf reagieren kann, auch wenn das Gerät noch nicht da ist)
+      if (savedFavoriteId) {
+        setFavoriteDeviceIdState(savedFavoriteId);
+      }
+
+      // Dann: Auswahl aus gespeicherter Einstellung
       if (savedDeviceId) {
         const stillExists = available.some(d => d.deviceId === savedDeviceId);
         if (stillExists) {
@@ -117,7 +150,27 @@ export function MicrophoneProvider({ children }: { children: React.ReactNode }) 
 
   // Auf devicechange-Events horchen (z.B. USB-Mikrofon ein-/ausstecken)
   useEffect(() => {
-    const handleDeviceChange = () => { refreshDevices(); };
+    const handleDeviceChange = () => {
+      refreshDevices().then(() => {
+        // Wenn Favorit gesetzt ist und jetzt verfügbar ist, automatisch umschalten
+        const favId = favoriteDeviceIdRef.current;
+        if (favId) {
+          navigator.mediaDevices.enumerateDevices().then(devices => {
+            const audioInputs = devices.filter(d => d.kind === 'audioinput');
+            const favoriteAvailable = audioInputs.some(d => d.deviceId === favId);
+            if (favoriteAvailable) {
+              setDeviceId(favId);
+              const dev = audioInputs.find(d => d.deviceId === favId);
+              setDeviceLabel(dev?.label || 'Favorit');
+            } else if (deviceIdRef.current === favId) {
+              // Favorit wurde abgesteckt → zurück auf Standard
+              setDeviceId(null);
+              setDeviceLabel('Standard-Mikrofon');
+            }
+          });
+        }
+      });
+    };
     navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
     return () => navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
   }, [refreshDevices]);
@@ -136,6 +189,8 @@ export function MicrophoneProvider({ children }: { children: React.ReactNode }) 
       selectDevice,
       refreshDevices,
       getStream,
+      favoriteDeviceId,
+      setFavoriteDeviceId,
     }}>
       {children}
     </MicrophoneContext.Provider>

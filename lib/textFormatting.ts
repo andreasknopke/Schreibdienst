@@ -660,6 +660,9 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   
   // Delete commands - these need special handling after replacement
   // Mark them for post-processing
+  
+  // Uhrzeit-Nachbereitung: "10: 15" → "10:15" (falls ASR oder LLM Leerzeichen nach : eingefügt haben)
+  { pattern: /(\d{1,2}):\s+(\d{2})\b/gi, replacement: (_match: string, h: string, m: string) => `${h}:${m}` },
 ];
 
 // Delete command patterns
@@ -1301,6 +1304,8 @@ function cleanupFormatting(text: string): string {
     .replace(/[^\S\n]+/g, ' ')
     // Remove space before punctuation
     .replace(/[^\S\n]+([.,;:!?)])/g, '$1')
+    // Remove space after colon before digits (Uhrzeit-Korrektur: "10: 15" → "10:15")
+    .replace(/: +(?=\d)/g, ':')
     // Add space after punctuation if missing (but not before newline or opening bracket)
     .replace(/([.,;:!?])(?=[A-ZÄÖÜa-zäöüß])/g, '$1 ')
     // Remove space after opening parenthesis

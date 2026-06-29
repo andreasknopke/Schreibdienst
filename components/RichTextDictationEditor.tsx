@@ -381,7 +381,7 @@ function ExternalStateSyncPlugin({
     const lastApplied = lastAppliedRef.current;
     if (lastApplied.value === value && lastApplied.formatSignature === formatSignature) {
       const rootElement = editor.getRootElement() as HTMLDivElement | null;
-      if (rootElement && document.activeElement === rootElement) {
+      if (rootElement) {
         restoreSelection(rootElement, selection);
       }
       return;
@@ -395,7 +395,7 @@ function ExternalStateSyncPlugin({
 
     queueMicrotask(() => {
       const rootElement = editor.getRootElement() as HTMLDivElement | null;
-      if (rootElement && document.activeElement === rootElement) {
+      if (rootElement) {
         restoreSelection(rootElement, selection);
       }
     });

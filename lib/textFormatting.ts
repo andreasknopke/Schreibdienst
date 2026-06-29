@@ -565,7 +565,8 @@ export function applyDictionaryCorrectionsDetailed(
 }
 
 // Replacement function type for control words
-type ReplacementFn = (match: string, p1: string) => string;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ReplacementFn = (...args: any[]) => string;
 
 // Control word replacements - order matters for multi-word phrases first
 const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | ReplacementFn }> = [
@@ -647,6 +648,13 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   { pattern: /\banführungszeichen\s*zu\b/gi, replacement: '"' },
   { pattern: /\banführungszeichen\s*oben\b/gi, replacement: '"' },
   { pattern: /\banführungszeichen\s*unten\b/gi, replacement: '„' },
+  
+  // Zahl-zu-Zahl: "80 zu 100" → "80/100" (Blutdruck, Maße, etc.)
+  // Muss vor Delete-Befehlen kommen, da "zu" auch in anderen Kontexten vorkommt
+  { pattern: /\b(\d+)\s*zu\s*(\d+)\b/gi, replacement: (_match: string, num1: string, num2: string) => `${num1}/${num2}` },
+  
+  // Uhrzeit: "10 Uhr 15" → "10:15" (Stunde:Minuten)
+  { pattern: /\b(\d{1,2})\s*uhr\s*(\d{2})\b/gi, replacement: (_match: string, hours: string, minutes: string) => `${hours}:${minutes}` },
   
   // Delete commands - these need special handling after replacement
   // Mark them for post-processing

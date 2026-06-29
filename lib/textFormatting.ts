@@ -655,8 +655,8 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   
   // Uhrzeit: "10 Uhr 15" → "10:15" (Stunde:Minuten)
   { pattern: /\b(\d{1,2})\s*uhr\s*(\d{2})\b/gi, replacement: (_match: string, hours: string, minutes: string) => `${hours}:${minutes}` },
-  // ASR-Variante: "10. 15 Uhr" oder "10.15 Uhr" → "10:15" (Punkt zwischen Zahlen, "Uhr" am Ende)
-  { pattern: /\b(\d{1,2})[.\s]+\s*(\d{2})\s*uhr\b/gi, replacement: (_match: string, hours: string, minutes: string) => `${hours}:${minutes}` },
+  // ASR-Variante: "10. 15 Uhr" oder "10.15 Uhr" → "10:15" (Punkt/Leerzeichen zwischen Zahlen, "Uhr" am Ende)
+  { pattern: /\b(\d{1,2})[\s.]+(\d{2})\s*uhr\b/gi, replacement: (_match: string, hours: string, minutes: string) => `${hours}:${minutes}` },
   
   // Delete commands - these need special handling after replacement
   // Mark them for post-processing

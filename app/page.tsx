@@ -1390,7 +1390,15 @@ export default function HomePage() {
     }
 
     const selection = getStoredSelection(field, existing);
-    const result = insertTextAtSelection(existing, parsedFormatting.text, selection);
+    const rawResult = insertTextAtSelection(existing, parsedFormatting.text, selection);
+    // Sicherstellen, dass nach Doppelpunkten vor Ziffern kein Leerzeichen steht (Uhrzeit-Korrektur)
+    const resultText = rawResult.text.replace(/(\d{1,2}):\s+(\d{2})/g, '$1:$2');
+    const result = {
+      text: resultText,
+      selection: rawResult.selection,
+      insertedStart: rawResult.insertedStart,
+      insertedEnd: rawResult.insertedEnd,
+    };
     appendAdminConsoleEntry('pipeline', `combineTextForField (${field}) AUSGANG`, formatPipelineDetails({ resultText: result.text, resultLänge: result.text.length, insertedStart: result.insertedStart, insertedEnd: result.insertedEnd }));
     setStoredSelection(field, result.selection);
 

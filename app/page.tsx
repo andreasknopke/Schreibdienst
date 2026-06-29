@@ -1745,6 +1745,7 @@ export default function HomePage() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   const [showTemplatesManager, setShowTemplatesManager] = useState(false);
+  const [templateManagerMode, setTemplateManagerMode] = useState<'create' | 'manage'>('create');
   // Refs für den VAD-/Online-Diktatpfad: Die VAD-Callbacks werden beim Start der
   // Aufnahme einmal eingefroren, daher muss der aktuelle Baustein-Zustand über Refs
   // gelesen werden, sonst greift der Auto-Einarbeiten-Modus nicht.
@@ -5668,10 +5669,12 @@ export default function HomePage() {
                   onChange={(e) => {
                     const val = e.target.value;
                     if (val === '__new__') {
+                      setTemplateManagerMode('create');
                       setShowTemplatesManager(true);
                       return;
                     }
                     if (val === '__manage__') {
+                      setTemplateManagerMode('manage');
                       setShowTemplatesManager(true);
                       return;
                     }
@@ -6492,7 +6495,7 @@ export default function HomePage() {
                   <line x1="16" y1="17" x2="8" y2="17"/>
                   <polyline points="10 9 9 9 8 9"/>
                 </svg>
-                Meine Textbausteine
+                {templateManagerMode === 'manage' ? 'Meine Textbausteine verwalten' : 'Neuen Textbaustein anlegen'}
               </h2>
               <button
                 onClick={() => setShowTemplatesManager(false)}
@@ -6506,7 +6509,7 @@ export default function HomePage() {
               </button>
             </div>
             <div className="p-4 overflow-y-auto flex-1">
-              <TemplatesManager />
+              <TemplatesManager mode={templateManagerMode} />
             </div>
           </div>
         </div>,

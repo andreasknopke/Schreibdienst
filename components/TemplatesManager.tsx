@@ -16,7 +16,11 @@ interface Template {
   groupName?: string;
 }
 
-export default function TemplatesManager() {
+interface TemplatesManagerProps {
+  mode?: 'create' | 'manage';
+}
+
+export default function TemplatesManager({ mode = 'create' }: TemplatesManagerProps) {
   const { getAuthHeader, getDbTokenHeader } = useAuth();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
@@ -223,56 +227,58 @@ export default function TemplatesManager() {
 
   return (
     <div className="space-y-4">
-      {/* Add form */}
-      <form onSubmit={handleAdd} className="space-y-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-        <h3 className="font-medium text-sm">Neuer Textbaustein</h3>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Name (z.B. CCT, MRT Knie)"
-            className="flex-1 px-3 py-1.5 text-sm border rounded dark:bg-gray-700 dark:border-gray-600"
-            required
+      {/* Add form – nur im 'create'-Modus */}
+      {mode === 'create' && (
+        <form onSubmit={handleAdd} className="space-y-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+          <h3 className="font-medium text-sm">Neuer Textbaustein</h3>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Name (z.B. CCT, MRT Knie)"
+              className="flex-1 px-3 py-1.5 text-sm border rounded dark:bg-gray-700 dark:border-gray-600"
+              required
+            />
+            <select
+              value={field}
+              onChange={(e) => setField(e.target.value as any)}
+              className="px-2 py-1.5 text-sm border rounded dark:bg-gray-700 dark:border-gray-600"
+            >
+              <option value="methodik">Methodik</option>
+              <option value="befund">Befund</option>
+              <option value="beurteilung">Beurteilung</option>
+            </select>
+          </div>
+          <TemplateRichTextEditor
+            value={content}
+            formats={contentFormats}
+            onChange={(value, formats) => {
+              setContent(value);
+              setContentFormats(formats);
+            }}
+            placeholder="Textbaustein-Inhalt..."
+            className="textarea w-full px-3 py-2 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 min-h-[100px]"
+            disabled={adding}
           />
-          <select
-            value={field}
-            onChange={(e) => setField(e.target.value as any)}
-            className="px-2 py-1.5 text-sm border rounded dark:bg-gray-700 dark:border-gray-600"
+          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={addToGroup}
+              onChange={(e) => setAddToGroup(e.target.checked)}
+              className="rounded border-gray-300 dark:border-gray-600"
+            />
+            <span>ins Abteilungs-Bausteinpool übernehmen</span>
+          </label>
+          <button
+            type="submit"
+            disabled={adding || !name.trim() || !content.trim()}
+            className="w-full px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
           >
-            <option value="methodik">Methodik</option>
-            <option value="befund">Befund</option>
-            <option value="beurteilung">Beurteilung</option>
-          </select>
-        </div>
-        <TemplateRichTextEditor
-          value={content}
-          formats={contentFormats}
-          onChange={(value, formats) => {
-            setContent(value);
-            setContentFormats(formats);
-          }}
-          placeholder="Textbaustein-Inhalt..."
-          className="textarea w-full px-3 py-2 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 min-h-[100px]"
-          disabled={adding}
-        />
-        <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={addToGroup}
-            onChange={(e) => setAddToGroup(e.target.checked)}
-            className="rounded border-gray-300 dark:border-gray-600"
-          />
-          <span>ins Abteilungs-Bausteinpool übernehmen</span>
-        </label>
-        <button
-          type="submit"
-          disabled={adding || !name.trim() || !content.trim()}
-          className="w-full px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
-        >
-          {adding ? 'Speichere...' : '+ Textbaustein hinzufügen'}
-        </button>
-      </form>
+            {adding ? 'Speichere...' : '+ Textbaustein hinzufügen'}
+          </button>
+        </form>
+      )}
 
       {error && (
         <div className="p-2 text-sm text-red-600 bg-red-50 dark:bg-red-900/20 rounded">
@@ -286,11 +292,12 @@ export default function TemplatesManager() {
         </div>
       )}
 
-      {/* Templates list */}
-      <div className="space-y-2">
-        <h3 className="font-medium text-sm text-gray-600 dark:text-gray-400">
-          Meine Textbausteine ({templates.length})
-        </h3>
+      {/* Templates list – nur im 'manage'-Modus */}
+      {mode === 'manage' && (
+        <div className="space-y-2">
+          <h3 className="font-medium text-sm text-gray-600 dark:text-gray-400">
+            Meine Textbausteine ({templates.length})
+          </h3>
         
         {templates.length === 0 ? (
           <p className="text-sm text-gray-500 italic">Noch keine Textbausteine vorhanden</p>
@@ -395,6 +402,8 @@ export default function TemplatesManager() {
           </div>
         )}
       </div>
+      )}
+
     </div>
   );
 }

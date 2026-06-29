@@ -5388,12 +5388,15 @@ export default function HomePage() {
     const target = e.target as HTMLElement;
     
     // Prüfe ob das Ziel oder ein Elternelement ein interaktives Element ist
-    const interactiveSelectors = 'button, a, input, textarea, select, [role="button"], [tabindex]:not([tabindex="-1"])';
+    const interactiveSelectors = 'button, a, input, textarea, select, [role="button"], [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
     const isInteractive = target.closest(interactiveSelectors);
     
     // Prüfe ob ein Textfeld fokussiert ist (blinkender Cursor)
+    // Erkennt sowohl native <textarea>/<input> als auch contentEditable-Divs (z.B. Lexical-Editor)
     const activeElement = document.activeElement;
-    const isEditing = activeElement?.tagName === 'TEXTAREA' || activeElement?.tagName === 'INPUT';
+    const isEditing = activeElement?.tagName === 'TEXTAREA' 
+      || activeElement?.tagName === 'INPUT' 
+      || (activeElement instanceof HTMLElement && activeElement.isContentEditable);
     
     // Nur wenn nicht interaktiv und nicht am Editieren
     if (!isInteractive && !isEditing) {

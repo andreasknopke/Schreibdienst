@@ -149,44 +149,64 @@ function findTextPosition(root: HTMLDivElement, targetOffset: number): { node: N
   function visit(node: Node, traversed: number): { node: Node; offset: number; traversed: number } | null {
     if (node.nodeType === Node.TEXT_NODE) {
       const textLength = node.textContent?.length ?? 0;
-      if (targetOffset <= traversed + textLength) {
+      // targetOffset liegt in diesem Text-Node
+      if (targetOffset < traversed + textLength) {
         return {
           node,
-          offset: Math.max(0, Math.min(targetOffset - traversed, textLength)),
+          offset: Math.max(0, targetOffset - traversed),
           traversed,
         };
       }
-
-      return null;
+      // targetOffset liegt EXAKT am Ende dieses Text-Nodes
+      if (targetOffset === traversed + textLength) {
+        return {
+          node,
+          offset: textLength,
+          traversed,
+        };
+      }
+      // targetOffset liegt dahinter → weitersuchen (kein return null!)
+      // Fall-through zum Geschwister-Loop
     }
 
     if (isLineBreakDomNode(node)) {
-      if (targetOffset <= traversed + 1) {
+      if (targetOffset <= traversed) {
+        // Cursor vor oder auf diesem <br> → Position davor
         const parentNode = node.parentNode;
         if (!parentNode) {
           return null;
         }
-
         const siblingIndex = Array.from(parentNode.childNodes).indexOf(node);
-        return {
-          node: parentNode,
-          offset: siblingIndex + 1,
-          traversed,
-        };
+        return { node: parentNode, offset: siblingIndex, traversed };
       }
-
-      return null;
+      if (targetOffset === traversed + 1) {
+        // Cursor genau nach diesem <br>
+        const parentNode = node.parentNode;
+        if (!parentNode) {
+          return null;
+        }
+        const siblingIndex = Array.from(parentNode.childNodes).indexOf(node);
+        return { node: parentNode, offset: siblingIndex + 1, traversed };
+      }
+      // targetOffset liegt weiter dahinter → weitersuchen
     }
 
+    // Für Nicht-Blatt-Knoten: Kinder durchgehen
     let childTraversed = traversed;
     for (const childNode of Array.from(node.childNodes)) {
-      const result = visit(childNode, childTraversed);
-      if (result) {
-        return result;
+      const childLength = getLogicalNodeLength(childNode);
+      // Nur in Kind eintauchen, wenn targetOffset in dessen Bereich liegt
+      if (targetOffset <= childTraversed + childLength) {
+        const result = visit(childNode, childTraversed);
+        if (result) {
+          return result;
+        }
+        // Kein Treffer → nächsten Geschwister versuchen
       }
-      childTraversed += getLogicalNodeLength(childNode);
+      childTraversed += childLength;
     }
 
+    // Nichts gefunden in diesem Unterbaum
     return null;
   }
 
@@ -195,6 +215,7 @@ function findTextPosition(root: HTMLDivElement, targetOffset: number): { node: N
     return { node: result.node, offset: result.offset };
   }
 
+  // Fallback: ans Ende des letzten Kindes
   if (root.lastChild) {
     const lastNode = root.lastChild;
     if (isLineBreakDomNode(lastNode) && lastNode.parentNode) {

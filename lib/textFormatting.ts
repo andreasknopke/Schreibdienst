@@ -599,10 +599,15 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   // ", Klammer auf, " → " ("  and  ", Klammer zu, " → ") "
   { pattern: /[,\s]*\bklammer\s*auf\b[,\s]*/gi, replacement: ' (' },
   { pattern: /[,\s]*\bklammer\s*zu\b[,\s]*/gi, replacement: ') ' },
-  // "klammern" alleine (ohne "auf") = Klammer auf (umgangssprachlich)
+  // "klammern auf" / "klammern zu" (Plural-Varianten, müssen vor dem reinen "klammern" kommen)
+  { pattern: /[,\s]*\bklammern\s*auf\b[,\s]*/gi, replacement: ' (' },
+  { pattern: /[,\s]*\bklammern\s*zu\b[,\s]*/gi, replacement: ') ' },
+  // "klammern" alleine (ohne "auf"/"zu") = Klammer auf (umgangssprachlich)
   { pattern: /[,\s]*\bklammern\b(?!\s*(auf|zu))[,\s]*/gi, replacement: ' (' },
   // "Xklammer zu" - Whisper schreibt manchmal zusammen, z.B. "Histoklammer zu" → "Histo)"
   { pattern: /(\w+)klammer\s*zu\b[,\s]*/gi, replacement: '$1) ' },
+  // "Xklammern zu" - auch Plural, z.B. "Diagnosenklammern zu" → "Diagnosen)"
+  { pattern: /(\w+)klammern\s*zu\b[,\s]*/gi, replacement: '$1) ' },
   { pattern: /\bin\s*klammern\s+/gi, replacement: '(' }, // "in Klammern XYZ" - opening only, closing handled separately
   
   // Punctuation with preceding comma removal - ",[ ]Doppelpunkt" → ":"

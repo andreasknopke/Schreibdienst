@@ -59,6 +59,29 @@ async function copyRichTextToClipboard(text: string, html: string): Promise<void
   await navigator.clipboard.write([item]);
 }
 
+function printRichText(text: string, html: string, title: string): void {
+  if (!text) return;
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) return;
+
+  printWindow.document.write(`<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>${title}</title>
+  <style>
+    @page { margin: 2cm; size: A4; }
+    body { font-family: 'Times New Roman', Times, serif; font-size: 12pt; line-height: 1.5; color: #000; max-width: 16cm; margin: 0 auto; padding: 0; white-space: pre-wrap; }
+    u { text-decoration: underline; }
+  </style>
+</head>
+<body>${html}</body>
+</html>`);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+}
+
 // Intervall für kontinuierliche Transkription (in ms)
 // 2 Sekunden für schnelle Rückmeldung
 const TRANSCRIPTION_INTERVAL = 2000;
@@ -5983,6 +6006,14 @@ export default function HomePage() {
                     >
                       📋
                     </button>
+                    <button 
+                      className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
+                      onClick={() => printRichText(methodik, buildRichTextHtml(methodik, getFieldRichTextFormats('methodik')), 'Methodik')}
+                      disabled={!methodik}
+                      title="Drucken"
+                    >
+                      🖨️
+                    </button>
                     <CustomActionButtons
                       currentField="methodik"
                       getText={() => methodik}
@@ -6067,6 +6098,14 @@ export default function HomePage() {
                       title="Kopieren"
                     >
                       📋
+                    </button>
+                    <button 
+                      className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
+                      onClick={() => printRichText(transcript, buildRichTextHtml(transcript, getFieldRichTextFormats('befund')), 'Befund')}
+                      disabled={!transcript}
+                      title="Drucken"
+                    >
+                      🖨️
                     </button>
                     <CustomActionButtons
                       currentField="befund"
@@ -6168,6 +6207,14 @@ export default function HomePage() {
                       title="Kopieren"
                     >
                       📋
+                    </button>
+                    <button 
+                      className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
+                      onClick={() => printRichText(beurteilung, buildRichTextHtml(beurteilung, getFieldRichTextFormats('beurteilung')), 'Zusammenfassung')}
+                      disabled={!beurteilung}
+                      title="Drucken"
+                    >
+                      🖨️
                     </button>
                     <CustomActionButtons
                       currentField="beurteilung"
@@ -6279,6 +6326,14 @@ export default function HomePage() {
                   title="Kopieren"
                 >
                   📋
+                </button>
+                <button 
+                  className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
+                  onClick={() => printRichText(transcript, buildRichTextHtml(transcript, getFieldRichTextFormats('transcript')), 'Arztbrief')}
+                  disabled={!transcript}
+                  title="Drucken"
+                >
+                  🖨️
                 </button>
                 <CustomActionButtons
                   currentField="transcript"

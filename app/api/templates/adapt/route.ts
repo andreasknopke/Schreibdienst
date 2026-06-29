@@ -246,27 +246,18 @@ function tryParseTemplateAdaptJson(raw: string): { adaptedText: string; unusedTe
 function stripIntroducedMarkdown(original: string, adapted: string): string {
   let result = adapted;
 
-  // Fett (**text** / __text__) entfernen, wenn das Original es nicht verwendet hat
-  if (!original.includes('**')) {
-    result = result.replace(/\*\*(.*?)\*\*/g, '$1');
-  }
-  if (!original.includes('__')) {
-    result = result.replace(/__(.*?)__/g, '$1');
-  }
+  // Fett (**text**) immer entfernen – die Formatierung wird über formatRanges
+  // + Lexical-Rendering gesteuert. Das LLM verschiebt ** oft an falsche Stellen
+  // (z.B. **text****text**:), sodass die konditionale Prüfung nicht ausreicht.
+  result = result.replace(/\*\*(.*?)\*\*/g, '$1');
+  result = result.replace(/__(.*?)__/g, '$1');
 
-  // Kursiv (*text* / _text_) entfernen, wenn das Original es nicht verwendet hat
-  if (!original.includes('*')) {
-    result = result.replace(/\*([^*\n]+)\*/g, '$1');
-  }
-  if (!original.includes('_')) {
-    result = result.replace(/_([^_\n]+)_/g, '$1');
-  }
+  // Kursiv (*text* / _text_) immer entfernen
+  result = result.replace(/\*([^*\n]+)\*/g, '$1');
+  result = result.replace(/_([^_\n]+)_/g, '$1');
 
-  // Markdown-Überschriften (# ...) am Zeilenanfang entfernen, wenn das Original
-  // keine verwendet hat
-  if (!/^#{1,6}\s/m.test(original)) {
-    result = result.replace(/^#{1,6}\s+/gm, '');
-  }
+  // Markdown-Überschriften (# ...) am Zeilenanfang entfernen
+  result = result.replace(/^#{1,6}\s+/gm, '');
 
   return result;
 }
@@ -309,8 +300,13 @@ export async function POST(req: NextRequest) {
       ? `${TEMPLATE_ADAPT_PROMPT}\n${dictionarySuffix}`
       : TEMPLATE_ADAPT_PROMPT;
     
+    // Markdown-Marker aus dem Template entfernen, damit das LLM sie nicht
+    // versehentlich verschiebt oder dupliziert. Die Formatierung wird über
+    // formatRanges + Lexical gesteuert, nicht über ** im Text.
+    const cleanedTemplate = template.replace(/\*\*/g, '');
+
     const userMessage = `VOLLSTÄNDIGER TEXTBAUSTEIN (behalte die Struktur bei):
-${template}
+${cleanedTemplate}
 
 DIKTIERTE ÄNDERUNGEN (füge diese an der semantisch passenden Stelle ein, NICHT mitten in einen Satz):
 ${changes}

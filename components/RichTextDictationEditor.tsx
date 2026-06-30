@@ -400,9 +400,11 @@ function ExternalStateSyncPlugin({
 
   useEffect(() => {
     const lastApplied = lastAppliedRef.current;
+    const rootElement = editor.getRootElement() as HTMLDivElement | null;
+    const editorHasFocus = rootElement !== null && (rootElement === document.activeElement || rootElement.contains(document.activeElement));
+
     if (lastApplied.value === value && lastApplied.formatSignature === formatSignature) {
-      const rootElement = editor.getRootElement() as HTMLDivElement | null;
-      if (rootElement) {
+      if (rootElement && editorHasFocus) {
         restoreSelection(rootElement, selection);
       }
       return;
@@ -417,7 +419,10 @@ function ExternalStateSyncPlugin({
     queueMicrotask(() => {
       const rootElement = editor.getRootElement() as HTMLDivElement | null;
       if (rootElement) {
-        restoreSelection(rootElement, selection);
+        const stillHasFocus = rootElement === document.activeElement || rootElement.contains(document.activeElement);
+        if (stillHasFocus) {
+          restoreSelection(rootElement, selection);
+        }
       }
     });
   }, [editor, formatSignature, formats, lastAppliedRef, selection, suppressOnChangeRef, value]);

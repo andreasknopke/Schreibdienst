@@ -221,11 +221,41 @@ export function buildRichTextHtml(text: string, formats: RichTextFormatRange[]):
     return escapedText;
   }).join('');
 
-  // Convert line breaks to HTML: double newlines become <p> blocks,
-  // single newlines become <br> to preserve layout in target apps.
-  const paragraphs = html.split(/\n\n+/).filter(Boolean);
-  if (paragraphs.length > 1) {
-    html = paragraphs.map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+  // Convert line breaks to HTML: preserve empty lines for paragraph separation.
+  // Each \n\n (or more) represents empty lines between paragraphs.
+  // Single \n within text becomes <br> inside a paragraph.
+  const lines = html.split('\n');
+  const blocks: string[] = [];
+  let currentParagraph: string[] = [];
+  let wasEmpty = false;
+
+  for (const line of lines) {
+    if (line === '') {
+      // Empty line (consecutive \n → empty string from split)
+      if (currentParagraph.length > 0) {
+        blocks.push(`<p>${currentParagraph.join('<br>')}</p>`);
+        currentParagraph = [];
+        wasEmpty = true;
+      } else if (wasEmpty) {
+        // Another consecutive empty line → empty paragraph
+        blocks.push('<p><br></p>');
+      } else {
+        wasEmpty = true;
+      }
+    } else {
+      wasEmpty = false;
+      currentParagraph.push(line);
+    }
+  }
+
+  // Flush remaining paragraph content (trailing empty lines are already handled
+  // in the loop above, so we only flush non-empty content here).
+  if (currentParagraph.length > 0) {
+    blocks.push(`<p>${currentParagraph.join('<br>')}</p>`);
+  }
+
+  if (blocks.length > 0) {
+    html = blocks.join('');
   } else {
     html = html.replace(/\n/g, '<br>');
   }

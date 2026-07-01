@@ -5491,7 +5491,7 @@ export default function HomePage() {
               <div className="flex flex-col items-center gap-1">
                 {RecordButton}
               </div>
-              <span className="text-[10px] text-gray-400 dark:text-gray-500 select-none mr-0.5">•၊၊||၊|။|||||||။၊|•</span>
+              <span className="text-[10px] text-gray-400 dark:text-gray-500 select-none mr-0.5">{recording ? '•၊||၊|။|||||။|•' : '•၊၊။။။။။။၊•'}</span>
               <button
                 className={`btn h-9 w-9 p-0 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'} ${autoIntegrateTemplateAudio ? 'opacity-50 cursor-not-allowed' : ''}`}
                 onClick={() => {

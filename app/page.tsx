@@ -998,13 +998,16 @@ export default function HomePage() {
     beurteilung: hiddenCaretOverlay(),
   });
   const [mode, setMode] = useState<'arztbrief' | 'befund'>('befund');
-  const IDLE_ANIM_STATES = [
-    '•။၊။၊။၊။၊။၊။၊|•',
-    '•။၊။၊။၊။၊၊|။•',
-    '•။၊။၊။၊၊|။၊။•',
-    '•။၊။၊၊|။၊။၊။•',
-    '•။၊၊|။၊။၊။၊။•',
-  ];
+  const IDLE_BASE = '၊،၊،၊،၊၊၊၊၊၊';
+  const REC_BASE = '၊||၊|။|||||။|';
+  const IDLE_ANIM_FRAMES = Array.from({ length: 13 }, (_, i) =>
+    '•' + IDLE_BASE.slice(0, 12 - i) + '|' + IDLE_BASE.slice(12 - i) + '•'
+  );
+  const REC_DOUBLED = REC_BASE + REC_BASE;
+  const REC_ANIM_FRAMES = Array.from({ length: 13 }, (_, i) =>
+    '•' + REC_DOUBLED.substring(i, i + 13) + '•'
+  );
+  const [recordingAnimFrame, setRecordingAnimFrame] = useState(0);
 
   const [liveEditorWidth, setLiveEditorWidth] = useState<LiveEditorWidth>('small');
   const modeRef = useRef<'arztbrief' | 'befund'>('befund');
@@ -2416,15 +2419,16 @@ export default function HomePage() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Animation der Idle-Zeichenfolge (wenn nicht aufgenommen wird)
+  // Animation der Zeichenfolge – Idle (Mikro aus): großer Strich wandert rechts→links
+  // Recording: Schallmuster wandert rechts→links
   useEffect(() => {
-    if (recording) {
-      setIdleAnimFrame(0);
-      return;
-    }
     const timer = setInterval(() => {
-      setIdleAnimFrame(prev => (prev + 1) % 5);
-    }, 600);
+      if (recording) {
+        setRecordingAnimFrame(prev => (prev + 1) % 13);
+      } else {
+        setIdleAnimFrame(prev => (prev + 1) % 13);
+      }
+    }, 200);
     return () => clearInterval(timer);
   }, [recording]);
 
@@ -5513,7 +5517,7 @@ export default function HomePage() {
                 {RecordButton}
               </div>
               <span className="inline-flex items-center justify-center w-[9ch] text-[10px] text-gray-400 dark:text-gray-500 select-none">
-                {recording ? '•၊||၊|။|||||။|•' : IDLE_ANIM_STATES[idleAnimFrame]}
+                {recording ? REC_ANIM_FRAMES[recordingAnimFrame] : IDLE_ANIM_FRAMES[idleAnimFrame]}
               </span>
               <button
                 className={`btn h-9 min-w-[80px] px-1.5 text-[11px] font-medium relative overflow-hidden ${liveInjectEnabled ? 'btn-success' : 'btn-outline'} ${autoIntegrateTemplateAudio ? 'opacity-50 cursor-not-allowed' : ''}`}

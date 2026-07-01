@@ -48,12 +48,15 @@ export function MicrophoneProvider({ children }: { children: React.ReactNode }) 
   favoriteDeviceIdRef.current = favoriteDeviceId;
 
   // Geräteliste neu einlesen
-  const refreshDevices = useCallback(async () => {
+  const refreshDevices = useCallback(async (): Promise<MediaDeviceInfo[]> => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
-      setAvailable(devices.filter(d => d.kind === 'audioinput'));
+      const audioInputs = devices.filter(d => d.kind === 'audioinput');
+      setAvailable(audioInputs);
+      return audioInputs;
     } catch (err) {
       console.warn('[MicrophoneContext] enumerateDevices fehlgeschlagen:', err);
+      return [];
     }
   }, []);
 
@@ -126,7 +129,7 @@ export function MicrophoneProvider({ children }: { children: React.ReactNode }) 
         savedFavoriteId = localStorage.getItem('schreibdienst:micFavoriteDeviceId');
       } catch { /* ignore */ }
 
-      await refreshDevices();
+      const devices = await refreshDevices();
 
       // Zuerst: Favorit setzen (damit der devicechange-Handler später
       // darauf reagieren kann, auch wenn das Gerät noch nicht da ist)
@@ -134,12 +137,18 @@ export function MicrophoneProvider({ children }: { children: React.ReactNode }) 
         setFavoriteDeviceIdState(savedFavoriteId);
       }
 
-      // Dann: Auswahl aus gespeicherter Einstellung
-      if (savedDeviceId) {
-        const stillExists = available.some(d => d.deviceId === savedDeviceId);
+      // Auswahl priorisieren: Favorit > zuletzt genutztes Mikrofon
+      if (savedFavoriteId && devices.some(d => d.deviceId === savedFavoriteId)) {
+        // Favorit ist verfügbar → automatisch auswählen
+        setDeviceId(savedFavoriteId);
+        const dev = devices.find(d => d.deviceId === savedFavoriteId);
+        if (dev?.label) setDeviceLabel(dev.label);
+      } else if (savedDeviceId) {
+        // Kein Favorit oder nicht verfügbar → zuletzt genutztes wiederherstellen
+        const stillExists = devices.some(d => d.deviceId === savedDeviceId);
         if (stillExists) {
           setDeviceId(savedDeviceId);
-          const dev = available.find(d => d.deviceId === savedDeviceId);
+          const dev = devices.find(d => d.deviceId === savedDeviceId);
           if (dev?.label) setDeviceLabel(dev.label);
         }
       }

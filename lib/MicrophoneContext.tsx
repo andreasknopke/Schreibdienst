@@ -10,8 +10,8 @@ interface MicrophoneContextValue {
   available: MediaDeviceInfo[];
   /** Mikrofon auswählen (null = Standard) */
   selectDevice: (deviceId: string | null) => void;
-  /** Geräteliste neu einlesen */
-  refreshDevices: () => Promise<void>;
+  /** Geräteliste neu einlesen (gibt die Liste der Audio-Input-Geräte zurück) */
+  refreshDevices: () => Promise<MediaDeviceInfo[]>;
   /**
    * Erzeugt einen MediaStream mit dem ausgewählten Mikrofon.
    * Optional können zusätzliche Audio-Constraints (z.B. sampleRate) übergeben werden.
@@ -28,7 +28,7 @@ const MicrophoneContext = createContext<MicrophoneContextValue>({
   deviceLabel: 'Standard-Mikrofon',
   available: [],
   selectDevice: () => {},
-  refreshDevices: async () => {},
+  refreshDevices: async () => [] as MediaDeviceInfo[],
   getStream: async () => { throw new Error('Not initialized'); },
   favoriteDeviceId: null,
   setFavoriteDeviceId: () => {},

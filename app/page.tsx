@@ -902,6 +902,7 @@ export default function HomePage() {
   const { username, isAdmin, autoCorrect, defaultMode, getAuthHeader, getDbTokenHeader } = useAuth();
   const { getStream: getMicStream } = useMicrophone();
   const [recording, setRecording] = useState(false);
+  const [idleAnimFrame, setIdleAnimFrame] = useState(0);
   const [transcribing, setTranscribing] = useState(false);
   const [correcting, setCorrecting] = useState(false);
   const [dictionarySet, setDictionarySet] = useState<DictionarySet>('medical');
@@ -997,6 +998,14 @@ export default function HomePage() {
     beurteilung: hiddenCaretOverlay(),
   });
   const [mode, setMode] = useState<'arztbrief' | 'befund'>('befund');
+  const IDLE_ANIM_STATES = [
+    '•။၊။၊။၊။၊။၊။၊|•',
+    '•။၊။၊။၊။၊၊|။•',
+    '•။၊။၊။၊၊|။၊။•',
+    '•။၊။၊၊|။၊။၊။•',
+    '•။၊၊|။၊။၊။၊။•',
+  ];
+
   const [liveEditorWidth, setLiveEditorWidth] = useState<LiveEditorWidth>('small');
   const modeRef = useRef<'arztbrief' | 'befund'>('befund');
   useEffect(() => { modeRef.current = mode; }, [mode]);
@@ -2406,6 +2415,18 @@ export default function HomePage() {
     const timer = setTimeout(warmupWhisper, 500);
     return () => clearTimeout(timer);
   }, []);
+
+  // Animation der Idle-Zeichenfolge (wenn nicht aufgenommen wird)
+  useEffect(() => {
+    if (recording) {
+      setIdleAnimFrame(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setIdleAnimFrame(prev => (prev + 1) % 5);
+    }, 600);
+    return () => clearInterval(timer);
+  }, [recording]);
 
   // Templates beim Start laden
   useEffect(() => {
@@ -5491,8 +5512,8 @@ export default function HomePage() {
               <div className="flex flex-col items-center gap-1">
                 {RecordButton}
               </div>
-              <span className="text-[10px] text-gray-400 dark:text-gray-500 select-none mr-0.5">
-                {recording ? '•၊||၊|။|||||။|•' : '•၊၊။။။။။။၊•'}
+              <span className="inline-flex items-center justify-center w-[9ch] text-[10px] text-gray-400 dark:text-gray-500 select-none">
+                {recording ? '•၊||၊|။|||||။|•' : IDLE_ANIM_STATES[idleAnimFrame]}
               </span>
               <button
                 className={`btn h-9 min-w-[80px] px-1.5 text-[11px] font-medium relative overflow-hidden ${liveInjectEnabled ? 'btn-success' : 'btn-outline'} ${autoIntegrateTemplateAudio ? 'opacity-50 cursor-not-allowed' : ''}`}

@@ -1564,6 +1564,8 @@ export default function HomePage() {
       }
 
       setLiveInjectEnabled(true);
+      // Baustein-Modus deaktivieren, da Direkt-Diktat und Baustein-Modus nicht gleichzeitig funktionieren
+      setAutoIntegrateTemplateAudio(false);
       setFrontendMode('target-app').catch(() => {});
     } finally {
       setInjectorCheckInProgress(false);
@@ -5490,18 +5492,22 @@ export default function HomePage() {
                 {RecordButton}
               </div>
               <button
-                className={`btn h-9 w-9 p-0 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'}`}
+                className={`btn h-9 w-9 p-0 ${liveInjectEnabled ? 'btn-success' : 'btn-outline'} ${autoIntegrateTemplateAudio ? 'opacity-50 cursor-not-allowed' : ''}`}
                 onClick={() => {
                   void handleToggleLiveInject();
                 }}
-                title={liveInjectEnabled
-                  ? 'Live-Übertragung an Ziel-App ist aktiv'
-                  : 'Live-Übertragung an Ziel-App aktivieren'}
-                aria-label={liveInjectEnabled
-                  ? 'Live-Übertragung an Ziel-App deaktivieren'
-                  : 'Live-Übertragung an Ziel-App aktivieren'}
+                title={autoIntegrateTemplateAudio
+                  ? 'Direkt-Diktat nicht verfügbar – bitte zuerst den Baustein-Modus deaktivieren'
+                  : liveInjectEnabled
+                    ? 'Live-Übertragung an Ziel-App ist aktiv'
+                    : 'Live-Übertragung an Ziel-App aktivieren'}
+                aria-label={autoIntegrateTemplateAudio
+                  ? 'Direkt-Diktat nicht verfügbar – Baustein-Modus ist aktiv'
+                  : liveInjectEnabled
+                    ? 'Live-Übertragung an Ziel-App deaktivieren'
+                    : 'Live-Übertragung an Ziel-App aktivieren'}
                 aria-pressed={liveInjectEnabled}
-                disabled={injectorCheckInProgress}
+                disabled={injectorCheckInProgress || autoIntegrateTemplateAudio}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M17 3l4 4-4 4" />

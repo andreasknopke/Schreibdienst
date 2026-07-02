@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { loadDictionaryWithRequest, formatDictionaryForPrompt } from '@/lib/dictionaryDb';
+import { addLlmPromptLog, updateLlmPromptLog } from '@/lib/llmPromptLog';
 
 export const runtime = 'nodejs';
 
@@ -71,9 +72,22 @@ interface LLMConfig {
 async function callLLM(
   config: LLMConfig,
   messages: LLMMessage[],
-  options: LLMCallOptions = {}
+  options: LLMCallOptions = {},
+  meta?: { endpoint: string; username?: string },
 ): Promise<{ content: string; tokens?: { input: number; output: number } }> {
   const { temperature = 0.3, maxTokens = 2000 } = options;
+
+  // Prompt-Log erfassen (für Admin-Konsole)
+  const systemPrompt = messages.find((m) => m.role === 'system')?.content || '';
+  const userMessage = messages.find((m) => m.role === 'user')?.content || '';
+  const logId = addLlmPromptLog(
+    meta?.endpoint || 'templates-adapt',
+    meta?.username || 'unknown',
+    config.provider,
+    config.model,
+    systemPrompt,
+    userMessage,
+  );
   
   try {
     if (config.provider === 'openai' && !hasUsableApiKey(config.apiKey)) {
@@ -102,6 +116,7 @@ async function callLLM(
       body.max_tokens = maxTokens;
     }
 
+    const startTime = Date.now();
     const endpoint = `${config.baseUrl.replace(/\/+$/, '')}/v1/chat/completions`;
     
     const response = await fetch(endpoint, {
@@ -110,15 +125,21 @@ async function callLLM(
       body: JSON.stringify(body),
     });
 
+    const elapsed = Date.now() - startTime;
+
     if (!response.ok) {
       const error = await response.text();
+      updateLlmPromptLog(logId, '', elapsed, 'error', `LLM API error: ${response.status} - ${error}`);
       throw new Error(`LLM API error: ${response.status} - ${error}`);
     }
 
     const data = await response.json();
+    const content = data.choices[0]?.message?.content || '';
+    
+    updateLlmPromptLog(logId, content, elapsed, 'success');
     
     return {
-      content: data.choices[0]?.message?.content || '',
+      content,
       tokens: data.usage ? {
         input: data.usage.prompt_tokens,
         output: data.usage.completion_tokens
@@ -325,7 +346,8 @@ Gib den vollständigen angepassten Text zurück:`;
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage }
       ],
-      { temperature: 0.2, maxTokens: 4000 }  // Lower temperature for more precise edits, higher token limit for complete templates
+      { temperature: 0.2, maxTokens: 4000 },
+      { endpoint: 'templates-adapt', username }
     );
     
     const parsedResult = tryParseTemplateAdaptJson(result.content || '');

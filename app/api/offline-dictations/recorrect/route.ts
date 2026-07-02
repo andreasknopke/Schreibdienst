@@ -14,6 +14,7 @@ import {
 } from '@/lib/correctionLogDb';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
+import { addLlmPromptLog, updateLlmPromptLog } from '@/lib/llmPromptLog';
 import { formatGroupPromptInsertSection, getPromptInsertsForUserGroupsWithRequest } from '@/lib/groupDictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
@@ -202,7 +203,8 @@ async function doublePrecisionMerge(
   result1: TranscriptionResult,
   result2: TranscriptionResult,
   mergeContext?: MergeContext,
-  metadata?: unknown
+  metadata?: unknown,
+  username?: string,
 ): Promise<string> {
   console.log(`[ReCorrect DoublePrecision] Merging transcriptions from ${result1.provider} and ${result2.provider}`);
   
@@ -254,6 +256,8 @@ async function doublePrecisionMerge(
     
     modelName = runtimeConfig.openaiModel || 'gpt-4o-mini';
     modelProvider = 'openai';
+
+    const logId = addLlmPromptLog('recorrect/double-precision', username || 'unknown', modelProvider, modelName, mergePrompt, 'Erstelle den finalen Text.');
     
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -275,12 +279,15 @@ async function doublePrecisionMerge(
     const data = await res.json();
     const content = data.choices?.[0]?.message?.content;
     finalText = (typeof content === 'string' ? content.trim() : (content ? String(content) : '')) || result1.text;
+    updateLlmPromptLog(logId, finalText, 0, 'success');
   } else if (llmProvider === 'mistral') {
     const apiKey = process.env.MISTRAL_API_KEY;
     if (!apiKey) throw new Error('MISTRAL_API_KEY not configured');
     
     modelName = runtimeConfig.mistralModel || 'mistral-large-latest';
     modelProvider = 'mistral';
+
+    const logId = addLlmPromptLog('recorrect/double-precision', username || 'unknown', modelProvider, modelName, mergePrompt, 'Erstelle den finalen Text.');
     
     const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
       method: 'POST',
@@ -302,6 +309,7 @@ async function doublePrecisionMerge(
     const data = await res.json();
     const mistralContent = data.choices?.[0]?.message?.content;
     finalText = (typeof mistralContent === 'string' ? mistralContent.trim() : (mistralContent ? String(mistralContent) : '')) || result1.text;
+    updateLlmPromptLog(logId, finalText, 0, 'success');
   } else if (llmProvider === 'lmstudio') {
     const lmStudioUrl = process.env.LLM_STUDIO_URL || 'http://localhost:1234';
     // Use session override if available
@@ -311,6 +319,8 @@ async function doublePrecisionMerge(
     // LM Studio uses fixed max tokens
     const temperature = 0.1;
     const maxTokens = LM_STUDIO_MAX_TOKENS;
+
+    const logId = addLlmPromptLog('recorrect/double-precision', username || 'unknown', modelProvider, modelName, mergePrompt, 'Erstelle den finalen Text.');
     
     console.log(`[ReCorrect DoublePrecision] Using LM Studio: ${lmStudioUrl}, model: ${modelName}`);
     
@@ -337,6 +347,7 @@ async function doublePrecisionMerge(
     const data = await res.json();
     const lmContent = data.choices?.[0]?.message?.content;
     finalText = (typeof lmContent === 'string' ? lmContent.trim() : (lmContent ? String(lmContent) : '')) || result1.text;
+    updateLlmPromptLog(logId, finalText, 0, 'success');
   } else {
     console.warn(`[ReCorrect DoublePrecision] Unknown LLM provider "${llmProvider}", using first transcription`);
     modelName = 'fallback';
@@ -473,6 +484,8 @@ REGELN:
     } else {
       return chunkText;
     }
+
+    const logId = addLlmPromptLog('recorrect/cloud', username || 'unknown', llmConfig.provider, llmConfig.model, prompt, chunkUserMessage);
     
     // Add timeout - 5 minutes for very long texts, 2 minutes for normal
     const totalChars = prompt.length + chunkText.length;
@@ -483,6 +496,7 @@ REGELN:
       console.error(`[ReCorrect] Request TIMEOUT after ${timeoutMs / 1000}s for ${llmConfig.provider}`);
     }, timeoutMs);
     
+    const startTime = Date.now();
     try {
       const res = await fetch(url, {
         method: 'POST',
@@ -499,15 +513,20 @@ REGELN:
       });
       
       clearTimeout(timeoutId);
+      const elapsed = Date.now() - startTime;
       
       if (res.ok) {
         const data = await res.json();
         const content = data.choices?.[0]?.message?.content;
-        return (typeof content === 'string' ? content.trim() : (content ? String(content) : '')) || chunkText;
+        const resultText = (typeof content === 'string' ? content.trim() : (content ? String(content) : '')) || chunkText;
+        updateLlmPromptLog(logId, resultText, elapsed, 'success');
+        return resultText;
       }
+      updateLlmPromptLog(logId, '', elapsed, 'error', `HTTP ${res.status}`);
       return chunkText;
     } catch (error: any) {
       clearTimeout(timeoutId);
+      updateLlmPromptLog(logId, '', Date.now() - startTime, 'error', error.message);
       if (error.name === 'AbortError') {
         throw new Error(`LLM request timeout after ${timeoutMs / 1000}s (provider: ${llmConfig.provider}, input: ${totalChars} chars)`);
       }
@@ -546,7 +565,11 @@ REGELN:
     // LM Studio uses fixed max tokens
     const temperature = 0.1;
     const maxTokens = LM_STUDIO_MAX_TOKENS;
+
+    const lmUserMessage = `<<<DIKTAT_START>>>\n${text}\n<<<DIKTAT_ENDE>>>`;
+    const logId = addLlmPromptLog('recorrect/lmstudio', username || 'unknown', 'lmstudio', llmConfig.model, systemPrompt, lmUserMessage);
     
+    const startTime = Date.now();
     const res = await fetch(`${lmStudioUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -554,17 +577,22 @@ REGELN:
         model: llmConfig.model,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `<<<DIKTAT_START>>>\n${text}\n<<<DIKTAT_ENDE>>>` }
+          { role: 'user', content: lmUserMessage }
         ],
         temperature,
         max_tokens: maxTokens,
       }),
     });
     
+    const elapsed = Date.now() - startTime;
+    
     if (res.ok) {
       const data = await res.json();
       const lmCorrContent = data.choices?.[0]?.message?.content;
       correctedText = (typeof lmCorrContent === 'string' ? lmCorrContent.trim() : (lmCorrContent ? String(lmCorrContent) : '')) || text;
+      updateLlmPromptLog(logId, correctedText, elapsed, 'success');
+    } else {
+      updateLlmPromptLog(logId, '', elapsed, 'error', `HTTP ${res.status}`);
     }
   }
   
@@ -759,7 +787,8 @@ export async function POST(req: NextRequest) {
           { text: preprocessedResult1.text, originalText: parsed.text1, provider: parsed.provider1 },
           { text: preprocessedResult2.text, originalText: parsed.text2, provider: parsed.provider2 },
           mergeContext,
-          preprocessingMetadata
+          preprocessingMetadata,
+          dictation.username
         );
         
         console.log(`[ReCorrect] Double Precision merge complete: ${textForCorrection.length} chars`);

@@ -1027,6 +1027,10 @@ export default function HomePage() {
   const [adminConsoleOpen, setAdminConsoleOpen] = useState(false);
   const [adminConsoleEntries, setAdminConsoleEntries] = useState<AdminConsoleEntry[]>([]);
   const adminConsoleEntryIdRef = useRef(0);
+  const [adminConsoleTab, setAdminConsoleTab] = useState<'pipeline' | 'prompt-logs'>('pipeline');
+  const [llmPromptLogs, setLlmPromptLogs] = useState<any[]>([]);
+  const [llmPromptLogsLoading, setLlmPromptLogsLoading] = useState(false);
+  const [expandedPromptLogIds, setExpandedPromptLogIds] = useState<Set<number>>(new Set());
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Status tracking for UI indicators
@@ -2497,6 +2501,29 @@ export default function HomePage() {
 
   // Reset template selection when active field changes and template doesn't match
   }, [fetchTemplates]);
+
+  // Prompt-Logs aus dem Admin-API abrufen (nur für Admins)
+  const fetchLlmPromptLogs = useCallback(async () => {
+    if (!isAdmin || !adminConsoleOpen) return;
+    setLlmPromptLogsLoading(true);
+    try {
+      const resp = await fetch('/api/admin/prompt-logs');
+      if (resp.ok) {
+        const data = await resp.json();
+        setLlmPromptLogs(data.entries || []);
+      }
+    } catch {
+      // silent
+    } finally {
+      setLlmPromptLogsLoading(false);
+    }
+  }, [isAdmin, adminConsoleOpen]);
+
+  useEffect(() => {
+    fetchLlmPromptLogs();
+    const interval = setInterval(fetchLlmPromptLogs, 5000);
+    return () => clearInterval(interval);
+  }, [fetchLlmPromptLogs]);
 
   useEffect(() => {
     if (selectedTemplate && selectedTemplate.field !== currentTemplateField) {
@@ -6639,17 +6666,57 @@ export default function HomePage() {
             <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-2 dark:border-gray-700">
               <div>
                 <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Admin-Konsole</div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">Registrierte Tastatur-Hotkeys und HID-Befehle</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">
+                  {adminConsoleTab === 'pipeline'
+                    ? 'Pipeline-Ereignisse, Tastatur-Hotkeys, HID-Befehle'
+                    : 'LLM-Prompt-Logs (letzte 100)'}
+                </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-500 dark:text-gray-400">{adminConsoleEntries.length} Einträge</span>
-                <button
-                  type="button"
-                  className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
-                  onClick={() => setAdminConsoleEntries([])}
-                >
-                  Leeren
-                </button>
+                {/* Tab-Umschalter */}
+                <div className="flex rounded border border-gray-300 dark:border-gray-600 overflow-hidden">
+                  <button
+                    type="button"
+                    className={`px-2 py-1 text-xs ${adminConsoleTab === 'pipeline' ? 'bg-blue-600 text-white' : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                    onClick={() => setAdminConsoleTab('pipeline')}
+                  >
+                    Pipeline
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-2 py-1 text-xs ${adminConsoleTab === 'prompt-logs' ? 'bg-blue-600 text-white' : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                    onClick={() => setAdminConsoleTab('prompt-logs')}
+                  >
+                    Prompt-Logs
+                  </button>
+                </div>
+                {adminConsoleTab === 'pipeline' && (
+                  <>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">{adminConsoleEntries.length} Einträge</span>
+                    <button
+                      type="button"
+                      className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                      onClick={() => setAdminConsoleEntries([])}
+                    >
+                      Leeren
+                    </button>
+                  </>
+                )}
+                {adminConsoleTab === 'prompt-logs' && (
+                  <>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">{llmPromptLogs.length} Einträge</span>
+                    <button
+                      type="button"
+                      className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                      onClick={async () => {
+                        await fetch('/api/admin/prompt-logs', { method: 'DELETE' });
+                        setLlmPromptLogs([]);
+                      }}
+                    >
+                      Leeren
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
@@ -6660,7 +6727,7 @@ export default function HomePage() {
                 </button>
               </div>
             </div>
-            {adminConsoleOpen && (
+            {adminConsoleOpen && adminConsoleTab === 'pipeline' && (
               <div className="max-h-64 overflow-y-auto bg-gray-950 px-4 py-3 font-mono text-xs text-gray-100">
                 {adminConsoleEntries.length === 0 ? (
                   <div className="text-gray-400">Noch keine registrierten Tastatur- oder HID-Ereignisse.</div>
@@ -6676,6 +6743,109 @@ export default function HomePage() {
                         <div className="mt-1 break-all text-gray-400">{entry.details}</div>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {adminConsoleOpen && adminConsoleTab === 'prompt-logs' && (
+              <div className="max-h-96 overflow-y-auto bg-gray-950 px-4 py-3 font-mono text-xs text-gray-100">
+                {llmPromptLogs.length === 0 ? (
+                  <div className="text-gray-400">
+                    {llmPromptLogsLoading ? 'Lade Prompt-Logs...' : 'Noch keine LLM-Prompts geloggt. Starte eine Korrektur oder Diktat.'}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {llmPromptLogs.map((entry: any) => {
+                      const isExpanded = expandedPromptLogIds.has(entry.id);
+                      const createdAt = entry.timestamp
+                        ? new Date(entry.timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                        : '--';
+                      return (
+                        <div
+                          key={entry.id}
+                          className="rounded border border-gray-800 bg-gray-900/80 px-3 py-2 cursor-pointer"
+                          onClick={() => {
+                            setExpandedPromptLogIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(entry.id)) next.delete(entry.id);
+                              else next.add(entry.id);
+                              return next;
+                            });
+                          }}
+                        >
+                          {/* Kopfzeile */}
+                          <div className="flex flex-wrap items-center gap-2 text-gray-300">
+                            <span className="text-cyan-300">[{createdAt}]</span>
+                            <span className={`px-1 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                              entry.status === 'success' ? 'bg-green-900/60 text-green-300'
+                                : entry.status === 'error' ? 'bg-red-900/60 text-red-300'
+                                : 'bg-yellow-900/60 text-yellow-300'
+                            }`}>
+                              {entry.status || 'pending'}
+                            </span>
+                            <span className="text-fuchsia-300">{entry.endpoint}</span>
+                            <span className="text-amber-300">{entry.provider}</span>
+                            <span className="text-gray-400">/</span>
+                            <span className="text-gray-400">{entry.model}</span>
+                            {entry.durationMs > 0 && (
+                              <span className="text-gray-400">({(entry.durationMs / 1000).toFixed(1)}s)</span>
+                            )}
+                            <span className="text-gray-500 ml-auto">{entry.username}</span>
+                          </div>
+
+                          {/* Detail-Infos (aufgeklappt) */}
+                          {isExpanded && (
+                            <div className="mt-2 space-y-2 border-t border-gray-800 pt-2">
+                              {/* Error */}
+                              {entry.errorMessage && (
+                                <div className="rounded bg-red-900/30 px-2 py-1 text-red-300">
+                                  ⚠ {entry.errorMessage}
+                                </div>
+                              )}
+
+                              {/* System Prompt */}
+                              <div>
+                                <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-0.5">System Prompt ({entry.systemPrompt?.length || 0} Zeichen)</div>
+                                <div className="rounded bg-gray-800/60 px-2 py-1 text-gray-300 whitespace-pre-wrap break-all max-h-48 overflow-y-auto text-[11px]"
+                                  onClick={(e) => e.stopPropagation()}>
+                                  {entry.systemPrompt || '(leer)'}
+                                </div>
+                              </div>
+
+                              {/* User Message */}
+                              <div>
+                                <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-0.5">User Message ({entry.userMessage?.length || 0} Zeichen)</div>
+                                <div className="rounded bg-gray-800/60 px-2 py-1 text-gray-300 whitespace-pre-wrap break-all max-h-48 overflow-y-auto text-[11px]"
+                                  onClick={(e) => e.stopPropagation()}>
+                                  {entry.userMessage || '(leer)'}
+                                </div>
+                              </div>
+
+                              {/* Response Preview */}
+                              {entry.responsePreview && (
+                                <div>
+                                  <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-0.5">Antwort (Auszug, {entry.responsePreview.length} Zeichen)</div>
+                                  <div className="rounded bg-gray-800/60 px-2 py-1 text-emerald-300 whitespace-pre-wrap break-all max-h-32 overflow-y-auto text-[11px]"
+                                    onClick={(e) => e.stopPropagation()}>
+                                    {entry.responsePreview}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Nicht aufgeklappt: Zeige Preview */}
+                          {!isExpanded && (entry.userMessage || entry.systemPrompt) && (
+                            <div className="mt-1 text-gray-500 truncate text-[11px]">
+                              {entry.userMessage
+                                ? entry.userMessage.substring(0, 150).replace(/\n/g, ' ')
+                                : entry.systemPrompt.substring(0, 150).replace(/\n/g, ' ')}
+                              {(entry.userMessage?.length > 150 || entry.systemPrompt?.length > 150) && '…'}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

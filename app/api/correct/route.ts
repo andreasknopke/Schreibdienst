@@ -5,6 +5,7 @@ import { formatGroupPromptInsertSection, getPromptInsertsForUserGroupsWithReques
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
+import { addLlmPromptLog, updateLlmPromptLog } from '@/lib/llmPromptLog';
 
 export const runtime = 'nodejs';
 
@@ -490,10 +491,16 @@ function logLLMCorrections(label: string, inputText: string, outputText: string,
   }
 }
 
+interface LlmCallMeta {
+  endpoint: string;
+  username?: string;
+}
+
 async function callLLM(
   config: LLMConfig,
   messages: { role: string; content: string }[],
-  options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {}
+  options: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {},
+  meta?: LlmCallMeta,
 ): Promise<{ content: string; tokens?: { input: number; output: number } }> {
   // LM-Studio uses 10000 max tokens, API providers use provided value or default
   const isLMStudio = config.provider === 'lmstudio';
@@ -565,6 +572,18 @@ async function callLLM(
     console.log(`[LLM] [${msg.role.toUpperCase()}]: ${truncatedContent}`);
   }
   console.log(`[LLM] === PROMPT END ===`);
+
+  // Prompt-Log erfassen (für Admin-Konsole)
+  const systemPrompt = messages.find((m) => m.role === 'system')?.content || '';
+  const userMessage = messages.find((m) => m.role === 'user')?.content || '';
+  const logId = addLlmPromptLog(
+    meta?.endpoint || 'correct',
+    meta?.username || 'unknown',
+    config.provider,
+    config.model,
+    systemPrompt,
+    userMessage,
+  );
   
   const startTime = Date.now();
   
@@ -613,6 +632,7 @@ async function callLLM(
       console.log(`[LLM] Tokens used: input=${tokens.input}, output=${tokens.output}`);
     }
     console.log(`[LLM] ========== LLM REQUEST SUCCESS (${elapsed}ms) ==========`);
+    updateLlmPromptLog(logId, content, elapsed, 'success');
     return { content, tokens };
   } catch (error: any) {
     const elapsed = Date.now() - startTime;
@@ -646,6 +666,7 @@ async function callLLM(
     }
     
     console.error(`[LLM] ========== END ERROR ==========`);
+    updateLlmPromptLog(logId, '', elapsed, 'error', error.message);
     throw error;
   }
 }
@@ -1062,7 +1083,8 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
             { role: 'system', content: BEURTEILUNG_SUGGEST_PROMPT },
             { role: 'user', content: userMessage }
           ],
-          { temperature: 0.3, maxTokens: 500 }
+          { temperature: 0.3, maxTokens: 500 },
+          { endpoint: 'suggest-beurteilung', username }
         );
 
         const suggestedBeurteilung = result.content;
@@ -1129,7 +1151,8 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
                   { role: 'system', content: enhancedSystemPrompt },
                   { role: 'user', content: `Korrigiere den folgenden diktierten Text (${fieldName}):\n<<<DIKTAT_START>>>${fieldText}<<<DIKTAT_ENDE>>>` }
                 ],
-                { temperature: 0.3, maxTokens: 1000 }
+                { temperature: 0.3, maxTokens: 1000 },
+                { endpoint: `correct/${fieldName}`, username }
               );
               // Use robust cleanup function
               let cleaned = cleanLLMOutput(result.content || fieldText, fieldText);
@@ -1153,7 +1176,8 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
                   { role: 'system', content: enhancedSystemPrompt },
                   { role: 'user', content: `Korrigiere den folgenden diktierten Text:\n<<<DIKTAT_START>>>${chunk}<<<DIKTAT_ENDE>>>` }
                 ],
-                { temperature: 0.3, maxTokens: 1000 }
+                { temperature: 0.3, maxTokens: 1000 },
+                { endpoint: `correct/${fieldName}/chunk`, username }
               );
 
               // Use robust cleanup function
@@ -1238,7 +1262,8 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
             { role: 'system', content: enhancedBefundPrompt },
             { role: 'user', content: userMessage }
           ],
-          { temperature: 0.3, maxTokens: dynamicMaxTokens, jsonMode: true }
+          { temperature: 0.3, maxTokens: dynamicMaxTokens, jsonMode: true },
+          { endpoint: 'correct/befund-fields', username }
         );
 
         const responseText = result.content || '{}';
@@ -1346,7 +1371,8 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
                 { role: 'system', content: chunkSystemPrompt },
                 { role: 'user', content: chunkMessage }
               ],
-              { temperature: 0.3, maxTokens: 1000 }
+              { temperature: 0.3, maxTokens: 1000 },
+              { endpoint: 'correct/lmstudio-chunk', username }
             );
 
             // Use robust cleanup function
@@ -1417,7 +1443,8 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
               { role: 'system', content: cloudChunkSystemPrompt },
               { role: 'user', content: chunkMessage }
             ],
-            { temperature: 0.3, maxTokens: chunkMaxTokens }
+            { temperature: 0.3, maxTokens: chunkMaxTokens },
+            { endpoint: 'correct/cloud-chunk', username }
           );
 
           let correctedChunk = cleanLLMOutput(chunkResult.content || chunk, chunk);
@@ -1471,7 +1498,8 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
           { role: 'system', content: enhancedSystemPrompt },
           { role: 'user', content: userMessage }
         ],
-        { temperature: 0.3, maxTokens: dynamicMaxTokens }
+        { temperature: 0.3, maxTokens: dynamicMaxTokens },
+        { endpoint: 'correct/standard', username }
       );
 
       // Use robust cleanup function

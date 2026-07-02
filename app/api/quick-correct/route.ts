@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { removeMarkdownFormatting } from '@/lib/textFormatting';
 import { applyLLMPhoneticGuard } from '@/lib/phoneticMatch';
+import { addLlmPromptLog, updateLlmPromptLog } from '@/lib/llmPromptLog';
 
 export const runtime = 'nodejs';
 
@@ -86,7 +87,7 @@ function selectRelevantTerms(terms: string[], inputText: string, maxTerms: numbe
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { text, referenceTerms, dictionaryCorrections } = body;
+    const { text, referenceTerms, dictionaryCorrections, username } = body;
 
     if (!text || typeof text !== 'string') {
       return NextResponse.json({ error: 'Text fehlt' }, { status: 400 });
@@ -126,6 +127,7 @@ export async function POST(request: NextRequest) {
 
     const startTime = Date.now();
     let response: Response;
+    let logId = 0;
     
     console.log(`[QuickCorrect] ========== LM STUDIO REQUEST START ==========`);
     console.log(`[QuickCorrect] LM Studio URL: ${lmStudioUrl}`);
@@ -154,9 +156,13 @@ export async function POST(request: NextRequest) {
       // Standard temperature for LM Studio
       const temperature = 0.1;
       
+      // Prompt-Log erfassen (für Admin-Konsole)
       if (useCompletionApi) {
+        const promptText = `${cachedSystemPrompt}\n\n${INPUT_MARKER_START}${text}${INPUT_MARKER_END}\n\nKorrigierter Text:`;
+        logId = addLlmPromptLog('quick-correct-completion', username || 'unknown', 'lmstudio', lmStudioModel, cachedSystemPrompt, promptText);
+
         // Completion API - effizienter, kein Chat-Overhead
-        const prompt = `${cachedSystemPrompt}\n\n${INPUT_MARKER_START}${text}${INPUT_MARKER_END}\n\nKorrigierter Text:`;
+        const prompt = promptText;
         const fullUrl = `${lmStudioUrl}/v1/completions`;
         console.log(`[QuickCorrect] Fetching (Completion API): ${fullUrl}`);
         
@@ -174,8 +180,10 @@ export async function POST(request: NextRequest) {
           signal: controller.signal,
         });
       } else {
-        // Chat API - Standard mit Markern
         const userContent = `${INPUT_MARKER_START}${text}${INPUT_MARKER_END}`;
+        logId = addLlmPromptLog('quick-correct-chat', username || 'unknown', 'lmstudio', lmStudioModel, cachedSystemPrompt, userContent);
+
+        // Chat API - Standard mit Markern
         const fullUrl = `${lmStudioUrl}/v1/chat/completions`;
         console.log(`[QuickCorrect] Fetching (Chat API): ${fullUrl}`);
         
@@ -246,6 +254,7 @@ export async function POST(request: NextRequest) {
       console.error(`[QuickCorrect] ========== LM STUDIO ERROR ==========`);
       console.error('[QuickCorrect] LM Studio error response:', error);
       console.error(`[QuickCorrect] ========== END ERROR ==========`);
+      updateLlmPromptLog(logId, '', elapsed, 'error', error);
       return NextResponse.json({ corrected: text, changed: false, error: 'API error' });
     }
     
@@ -260,6 +269,8 @@ export async function POST(request: NextRequest) {
     } else {
       corrected = data.choices?.[0]?.message?.content?.trim() || text;
     }
+    
+    updateLlmPromptLog(logId, corrected, elapsed, 'success');
     
     // Entferne Marker falls das LLM sie zurückgibt
     corrected = corrected

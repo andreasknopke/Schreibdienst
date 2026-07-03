@@ -5941,36 +5941,34 @@ export default function HomePage() {
               ? 'Neue Audio-Transkripte werden direkt in diesen Baustein eingearbeitet.'
               : 'Neue Audio-Transkripte werden normal am Cursor oder am Feldende eingefügt.'}
           </p>
-          {isAdmin && (
-            <div className="mt-2 flex items-center gap-4 flex-wrap">
-              {/* Widersprüche erkennen */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium whitespace-nowrap">Widersprüche:</span>
-                <div className="flex rounded border border-emerald-300 dark:border-emerald-700 overflow-hidden">
-                  {(['aus', 'einfach', 'genau', 'optionen'] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={`px-2 py-0.5 text-[11px] transition-colors ${
-                        templateContradictionMode === mode
-                          ? 'bg-emerald-600 text-white'
-                          : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
-                      }`}
-                      onClick={() => setTemplateContradictionMode(mode)}
-                      title={
-                        mode === 'genau' ? 'Ausführliche Widerspruchsprüfung inkl. Beispiele'
-                        : mode === 'einfach' ? 'Verkürzte Widerspruchsprüfung'
-                        : mode === 'optionen' ? 'Aus [Optionen] im Baustein-Text auswählen'
-                        : 'Keine Widerspruchsprüfung'
-                      }
-                    >
-                      {mode === 'aus' ? 'Aus' : mode === 'einfach' ? 'Einfach' : mode === 'genau' ? 'Genau' : 'Optionen'}
-                    </button>
-                  ))}
-                </div>
+          <div className="mt-2 flex items-center gap-4 flex-wrap">
+            {/* Widersprüche erkennen */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium whitespace-nowrap">Widersprüche:</span>
+              <div className="flex rounded border border-emerald-300 dark:border-emerald-700 overflow-hidden">
+                {(['aus', 'einfach', 'genau', 'optionen'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`px-2 py-0.5 text-[11px] transition-colors ${
+                      templateContradictionMode === mode
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
+                    }`}
+                    onClick={() => setTemplateContradictionMode(mode)}
+                    title={
+                      mode === 'genau' ? 'Ausführliche Widerspruchsprüfung inkl. Beispiele'
+                      : mode === 'einfach' ? 'Verkürzte Widerspruchsprüfung'
+                      : mode === 'optionen' ? 'Aus [Optionen] im Baustein-Text auswählen'
+                      : 'Keine Widerspruchsprüfung'
+                    }
+                  >
+                    {mode === 'aus' ? 'Aus' : mode === 'einfach' ? 'Einfach' : mode === 'genau' ? 'Genau' : 'Optionen'}
+                  </button>
+                ))}
               </div>
             </div>
-          )}
+          </div>
         </div>
       )}
 

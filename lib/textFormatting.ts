@@ -5,6 +5,10 @@
 
 import { buildPhoneticIndex, applyPhoneticCorrectionsDetailed } from './phoneticMatch';
 import { applyDictionaryReplacementCase } from './replacementCase';
+import { CONTROL_WORD_REPLACEMENTS } from '../formattings/control-words';
+import { DELETE_PATTERNS } from '../formattings/delete-patterns';
+import { NUMBER_WORDS } from '../formattings/number-words';
+import { ONLINE_COMMAND_PATTERNS, OnlineCommandMatch } from '../formattings/online-commands';
 
 // Dictionary entry interface (compatible with dictionaryDb.ts)
 export interface DictionaryEntry {
@@ -809,33 +813,7 @@ type OnlineCommandType =
   | 'period'
   | 'dash';
 
-interface OnlineCommandMatch {
-  type: OnlineCommandType;
-  index: number;
-  length: number;
-}
-
-const ONLINE_COMMAND_PATTERNS: Array<{ type: OnlineCommandType; pattern: RegExp }> = [
-  { type: 'deleteWord', pattern: /\blösche\s*(?:das\s*)?letzte(?:s)?\s*wort\b[.,;:!?]*/i },
-  { type: 'deleteWord', pattern: /\bletztes\s*wort\s*löschen\b[.,;:!?]*/i },
-  { type: 'deleteWord', pattern: /\bwort\s*löschen\b[.,;:!?]*/i },
-  { type: 'deleteWord', pattern: /\bwort\s*streichen\b[.,;:!?]*/i },
-  { type: 'deleteWord', pattern: /\bstreiche\s*wort\b[.,;:!?]*/i },
-  { type: 'deleteSentence', pattern: /\blösche\s*(?:den\s*)?letzten\s*satz\b[.,;:!?]*/i },
-  { type: 'deleteSentence', pattern: /\bsatz\s*löschen\b[.,;:!?]*/i },
-  { type: 'deleteSentence', pattern: /\bletzen\s*satz\s*löschen\b[.,;:!?]*/i },
-  { type: 'deleteSentence', pattern: /\bletzten\s*satz\s*löschen\b[.,;:!?]*/i },
-  { type: 'deleteParagraph', pattern: /\blösche\s*(?:den\s*)?letzten\s*absatz\b[.,;:!?]*/i },
-  { type: 'deleteParagraph', pattern: /\bletzten\s*absatz\s*löschen\b[.,;:!?]*/i },
-  { type: 'paragraphBreak', pattern: /\b(?:neuer\s*|nächster\s*)?absatz\b[.,;:!?]*/i },
-  { type: 'lineBreak', pattern: /\b(?:neue|nächste)\s*zeile\b[.,;:!?]*/i },
-  { type: 'lineBreak', pattern: /\bzeilenumbruch\b[.,;:!?]*/i },
-  { type: 'bulletPoint', pattern: /\bnächster\s*anstrich\b[.,;:!?]*/i },
-  { type: 'bulletPoint', pattern: /\banstrich\b[.,;:!?]*/i },
-  { type: 'comma', pattern: /\b(?:komma|beistrich)\b[.,;:!?]*/i },
-  { type: 'period', pattern: /\bpunkt\b[.,;:!?]*/i },
-  { type: 'dash', pattern: /\bbindestrich\b[.,;:!?]*/i },
-];
+// ONLINE_COMMAND_PATTERNS importiert aus formattings/online-commands.ts
 
 function findNextOnlineCommand(text: string, startIndex: number): OnlineCommandMatch | null {
   let bestMatch: OnlineCommandMatch | null = null;

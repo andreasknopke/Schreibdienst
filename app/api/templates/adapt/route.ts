@@ -186,20 +186,6 @@ WIDERSPRÜCHE:
 - Pathologische Angabe widerspricht Normal-Aussage → Normal-Aussage ersetzen
 - Beispiel: "Hydrocephalus" widerspricht "normalweite Liquorräume" → entferne "normalweite Liquorräume"`;
 
-const LAYOUT_GENAU = `
-LAYOUT EXAKT BEIBEHALTEN (SEHR WICHTIG):
-- Übernimm das Layout des Originals ZEICHENGENAU: Überschriften, Labels, Doppelpunkte, Bindestriche, Einrückungen, Leerzeilen und Zeilenumbrüche bleiben unverändert
-- Ändere KEINE Schreibweise von Labels/Überschriften (z. B. bleibt "Teil 1:" exakt "Teil 1:" und wird NICHT zu "**Teil 1**", "Teil 1 :" oder "TEIL 1:")
-- Füge KEINE Markdown- oder Formatierungszeichen hinzu, die im Original nicht vorkommen (kein **fett**, kein *kursiv*, keine #-Überschriften, keine Aufzählungszeichen)
-- Entferne KEINE vorhandenen Labels, Doppelpunkte oder Leerzeilen
-- Trage die diktierten Angaben NUR an der passenden Stelle hinter dem jeweiligen Label/Abschnitt ein und lasse die restliche Struktur unangetastet`;
-
-const LAYOUT_EINFACH = `
-LAYOUT:
-- Behalte das Layout (Überschriften, Labels, Doppelpunkte, Zeilenumbrüche) exakt bei
-- Keine Markdown-Formatierung hinzufügen oder entfernen
-- Setze Änderungen nur an der passenden Stelle hinter dem jeweiligen Label/Abschnitt ein`;
-
 const TEMPLATE_NIEMALS = `
 KRITISCH - NIEMALS:
 - Änderungen MITTEN in einen Satz einfügen und den Satz grammatisch zerstören
@@ -282,7 +268,7 @@ export async function POST(req: NextRequest) {
   
   try {
     const body = await req.json();
-    const { template, changes, field, username, contradictionMode, layoutMode } = body;
+    const { template, changes, field, username, contradictionMode } = body;
     
     if (!template || !changes) {
       return NextResponse.json({ error: 'Template und Änderungen erforderlich' }, { status: 400 });
@@ -291,7 +277,7 @@ export async function POST(req: NextRequest) {
     console.log(`[Template] Field: ${field || 'befund'}, Username: ${username || 'unknown'}`);
     console.log(`[Template] Template length: ${template.length} chars`);
     console.log(`[Template] Changes: "${changes}"`);
-    console.log(`[Template] contradictionMode: ${contradictionMode || 'genau'}, layoutMode: ${layoutMode || 'genau'}`);
+    console.log(`[Template] contradictionMode: ${contradictionMode || 'genau'}`);
     
     // Get LLM config
     const llmConfig = await getLLMConfig(req);
@@ -299,8 +285,7 @@ export async function POST(req: NextRequest) {
     
     // System-Prompt aus den konfigurierten Modulen zusammensetzen
     const contradictionSection = contradictionMode === 'aus' ? '' : contradictionMode === 'einfach' ? CONTRADICTION_EINFACH : CONTRADICTION_GENAU;
-    const layoutSection = layoutMode === 'aus' ? '' : layoutMode === 'einfach' ? LAYOUT_EINFACH : LAYOUT_GENAU;
-    const systemPrompt = `${TEMPLATE_ADAPT_BASE}${contradictionSection}${layoutSection}${TEMPLATE_NIEMALS}`;
+    const systemPrompt = `${TEMPLATE_ADAPT_BASE}${contradictionSection}${TEMPLATE_NIEMALS}`;
     
     // Markdown-Marker aus dem Template entfernen, damit das LLM sie nicht
     // versehentlich verschiebt oder dupliziert. Die Formatierung wird über

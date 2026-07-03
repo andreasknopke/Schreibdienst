@@ -12,13 +12,24 @@
  * der Live-Diktat-Aufnahme (Online/VAD-Pfad) erkannt werden.
  */
 
+export type OnlineCommandType =
+  | 'deleteWord'
+  | 'deleteSentence'
+  | 'deleteParagraph'
+  | 'lineBreak'
+  | 'paragraphBreak'
+  | 'bulletPoint'
+  | 'comma'
+  | 'period'
+  | 'dash';
+
 export interface OnlineCommandPattern {
-  type: string;
+  type: OnlineCommandType;
   pattern: RegExp;
 }
 
 export interface OnlineCommandMatch {
-  type: string;
+  type: OnlineCommandType;
   index: number;
   length: number;
 }

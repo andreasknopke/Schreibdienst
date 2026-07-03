@@ -8,7 +8,7 @@ import { applyDictionaryReplacementCase } from './replacementCase';
 import { CONTROL_WORD_REPLACEMENTS } from '../formattings/control-words';
 import { DELETE_PATTERNS } from '../formattings/delete-patterns';
 import { NUMBER_WORDS } from '../formattings/number-words';
-import { ONLINE_COMMAND_PATTERNS, OnlineCommandMatch } from '../formattings/online-commands';
+import { ONLINE_COMMAND_PATTERNS, OnlineCommandMatch, OnlineCommandType } from '../formattings/online-commands';
 
 // Dictionary entry interface (compatible with dictionaryDb.ts)
 export interface DictionaryEntry {
@@ -568,142 +568,6 @@ export function applyDictionaryCorrectionsDetailed(
   return { text: result, operations };
 }
 
-// Replacement function type for control words
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ReplacementFn = (...args: any[]) => string;
-
-// Control word replacements - order matters for multi-word phrases first
-const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | ReplacementFn }> = [
-  // Paragraph/line breaks (must come before simpler patterns)
-  // Capture surrounding punctuation (. , ;) and whitespace that Whisper often adds
-  { pattern: /[.,;\s]*\bneuer\s*absatz\b[.,;\s]*/gi, replacement: '\n\n' },
-  { pattern: /[.,;\s]*\bnächster\s*absatz\b[.,;\s]*/gi, replacement: '\n\n' },
-  { pattern: /[.,;\s]*\babsatz\b[.,;\s]*/gi, replacement: '\n\n' },
-  { pattern: /[.,;\s]*\bneue\s*zeile\b[.,;\s]*/gi, replacement: '\n' },
-  { pattern: /[.,;\s]*\bnächste\s*zeile\b[.,;\s]*/gi, replacement: '\n' },
-  
-  // Indent control:
-  //   "eingerückt" → new line + indent (e.g. 2 spaces)
-  //   "rücke ein" → same (common dictation variant)
-  //   "nächster Punkt eingerückt" → new line with bullet + indent
-  { pattern: /[.,;\s]*\bnächster\s*punkt\s*eingerückt\b[.,;\s]*/gi, replacement: '\n  - ' },
-  { pattern: /[.,;\s]*\beingerückt\b[.,;\s]*/gi, replacement: '\n  ' },
-  { pattern: /[.,;\s]*\brücke\s*ein\b[.,;\s]*/gi, replacement: '\n  ' },
-  { pattern: /[.,;\s]*\beinrücken\b[.,;\s]*/gi, replacement: '\n  ' },
-  
-  // Bullet points (Aufzählungsanstriche)
-  // "nächster Anstrich" must come before "Anstrich" (multi-word first)
-  { pattern: /[.,;\s]*\bnächster\s*anstrich\b[.,;\s]*/gi, replacement: '\n- ' },
-  { pattern: /[.,;\s]*\banstrich\b[.,;\s]*/gi, replacement: '\n- ' },
-  
-  // NOTE: "Punkt eins", "Punkt zwei", etc. are handled in handleEnumerationCommands()
-  // which is called BEFORE these replacements
-  
-  // Brackets/parentheses - capture surrounding commas/spaces that Whisper often adds
-  // ", Klammer auf, " → " ("  and  ", Klammer zu, " → ") "
-  { pattern: /[,\s]*\bklammer\s*auf\b[,\s]*/gi, replacement: ' (' },
-  { pattern: /[,\s]*\bklammer\s*zu\b[,\s]*/gi, replacement: ') ' },
-  // "klammern auf" / "klammern zu" (Plural-Varianten, müssen vor dem reinen "klammern" kommen)
-  { pattern: /[,\s]*\bklammern\s*auf\b[,\s]*/gi, replacement: ' (' },
-  { pattern: /[,\s]*\bklammern\s*zu\b[,\s]*/gi, replacement: ') ' },
-  // "klammern" alleine (ohne "auf"/"zu") = Klammer auf (umgangssprachlich)
-  { pattern: /[,\s]*\bklammern\b(?!\s*(auf|zu))[,\s]*/gi, replacement: ' (' },
-  // "Xklammer zu" - Whisper schreibt manchmal zusammen, z.B. "Histoklammer zu" → "Histo)"
-  { pattern: /(\w+)klammer\s*zu\b[,\s]*/gi, replacement: '$1) ' },
-  // "Xklammern zu" - auch Plural, z.B. "Diagnosenklammern zu" → "Diagnosen)"
-  { pattern: /(\w+)klammern\s*zu\b[,\s]*/gi, replacement: '$1) ' },
-  { pattern: /\bin\s*klammern\s+/gi, replacement: '(' }, // "in Klammern XYZ" - opening only, closing handled separately
-  
-  // Punctuation with preceding comma removal - ",[ ]Doppelpunkt" → ":"
-  // Handle cases like "Hauptdiagnose, Doppelpunkt" → "Hauptdiagnose:"
-  { pattern: /,\s*doppelpunkt\b/gi, replacement: ':' },
-  { pattern: /,\s*semikolon\b/gi, replacement: ';' },
-  { pattern: /,\s*fragezeichen\b/gi, replacement: '?' },
-  { pattern: /,\s*ausrufezeichen\b/gi, replacement: '!' },
-  // ", Punkt." → "." (mit nachfolgendem Punkt) - muss vor dem allgemeinen Pattern kommen
-  { pattern: /,\s*punkt\s*\./gi, replacement: '.' },
-  { pattern: /,\s*punkt\b(?!\s*(eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|\d))/gi, replacement: '.' },
-  
-  // "Punkt" and "Komma" as control words when surrounded by punctuation
-  // ". Punkt." → "." (redundant spoken punctuation)
-  // ". Punkt " → ". " (Punkt as control word after sentence end)
-  // "? Punkt." → "?" etc.
-  { pattern: /([.!?])\s*punkt\s*\./gi, replacement: '$1' },  // ". Punkt." → "."
-  { pattern: /([.!?])\s*punkt\s+/gi, replacement: '$1 ' },   // ". Punkt " → ". "
-  { pattern: /([.!?])\s*komma\s*[.,]/gi, replacement: '$1' }, // ". Komma," → "."
-  
-  // Standalone "Punkt." at sentence boundary (after space or at start)
-  // This catches "... Text. Punkt." → "... Text."
-  { pattern: /\.\s+punkt\s*\./gi, replacement: '.' },
-  
-  // Punctuation - FIRST handle compound words ending with punctuation command
-  // e.g., "Diagnosedoppelpunkt" → "Diagnose:"
-  // NOTE: "Punkt" and "Komma" are handled by LLM because they're too ambiguous
-  //       (e.g., "der entscheidende Punkt ist..." should NOT become "der entscheidende . ist...")
-  { pattern: /\b(\w+?)doppelpunkt\b/gi, replacement: (_: string, word: string) => `${word}:` },
-  { pattern: /\b(\w+?)semikolon\b/gi, replacement: (_: string, word: string) => `${word};` },
-  { pattern: /\b(\w+?)fragezeichen\b/gi, replacement: (_: string, word: string) => `${word}?` },
-  { pattern: /\b(\w+?)ausrufezeichen\b/gi, replacement: (_: string, word: string) => `${word}!` },
-  
-  // Punctuation (standalone words only) - unambiguous ones only
-  // "Punkt" and "Komma" are left to LLM for context-aware handling
-  { pattern: /\bdoppelpunkt\b/gi, replacement: ':' },
-  { pattern: /\bsemikolon\b/gi, replacement: ';' },
-  { pattern: /\bfragezeichen\b/gi, replacement: '?' },
-  { pattern: /\bausrufezeichen\b/gi, replacement: '!' },
-  
-  // Quotes
-  { pattern: /\banführungszeichen\s*auf\b/gi, replacement: '„' },
-  { pattern: /\banführungszeichen\s*zu\b/gi, replacement: '"' },
-  { pattern: /\banführungszeichen\s*oben\b/gi, replacement: '"' },
-  { pattern: /\banführungszeichen\s*unten\b/gi, replacement: '„' },
-  
-  // Zahl-zu-Zahl: "80 zu 100" → "80/100" (Blutdruck, Maße, etc.)
-  // Muss vor Delete-Befehlen kommen, da "zu" auch in anderen Kontexten vorkommt
-  { pattern: /\b(\d+)\s*zu\s*(\d+)\b/gi, replacement: (_match: string, num1: string, num2: string) => `${num1}/${num2}` },
-  
-  // Uhrzeit: "10 Uhr 15" → "10:15" (Stunde:Minuten)
-  { pattern: /\b(\d{1,2})\s*uhr\s*(\d{2})\b/gi, replacement: (_match: string, hours: string, minutes: string) => `${hours}:${minutes}` },
-  // ASR-Variante: "10. 15 Uhr" oder "10.15 Uhr" → "10:15" (Punkt/Leerzeichen zwischen Zahlen, "Uhr" am Ende)
-  { pattern: /\b(\d{1,2})[\s.]+(\d{2})\s*uhr\b/gi, replacement: (_match: string, hours: string, minutes: string) => `${hours}:${minutes}` },
-  
-  // Delete commands - these need special handling after replacement
-  // Mark them for post-processing
-  
-  // Uhrzeit-Nachbereitung: "10: 15" → "10:15" (falls ASR oder LLM Leerzeichen nach : eingefügt haben)
-  { pattern: /(\d{1,2}):\s+(\d{2})\b/gi, replacement: (_match: string, h: string, m: string) => `${h}:${m}` },
-];
-
-// Delete command patterns
-const DELETE_PATTERNS = [
-  { pattern: /\bwort\s*streichen\b/gi, type: 'word' as const },  // "Wort streichen" or "Wortstreichen"
-  { pattern: /\bstreiche\s*wort\b/gi, type: 'word' as const },   // "streiche Wort" or "streichewort"
-  { pattern: /\bwort\s*löschen\b/gi, type: 'word' as const },
-  { pattern: /lösche\s*(?:das\s*)?letzte(?:s)?\s*wort\b/gi, type: 'word' as const },
-  { pattern: /letztes\s*wort\s*löschen\b/gi, type: 'word' as const },
-  { pattern: /lösche\s*(?:den\s*)?letzten\s*satz\b/gi, type: 'sentence' as const },
-  { pattern: /\bsatz\s*löschen\b/gi, type: 'sentence' as const },
-  { pattern: /letzten\s*satz\s*löschen\b/gi, type: 'sentence' as const },
-  { pattern: /lösche\s*(?:den\s*)?letzten\s*absatz\b/gi, type: 'paragraph' as const },
-  { pattern: /letzten\s*absatz\s*löschen\b/gi, type: 'paragraph' as const },
-];
-
-// Number word to digit mapping for enumeration
-const NUMBER_WORDS: Record<string, number> = {
-  'eins': 1, 'ein': 1, 'erste': 1, 'erster': 1, 'erstes': 1,
-  'zwei': 2, 'zweite': 2, 'zweiter': 2, 'zweites': 2,
-  'drei': 3, 'dritte': 3, 'dritter': 3, 'drittes': 3,
-  'vier': 4, 'vierte': 4, 'vierter': 4, 'viertes': 4,
-  'fünf': 5, 'fünfte': 5, 'fünfter': 5, 'fünftes': 5,
-  'sechs': 6, 'sechste': 6, 'sechster': 6, 'sechstes': 6,
-  'sieben': 7, 'siebte': 7, 'siebter': 7, 'siebtes': 7,
-  'acht': 8, 'achte': 8, 'achter': 8, 'achtes': 8,
-  'neun': 9, 'neunte': 9, 'neunter': 9, 'neuntes': 9,
-  'zehn': 10, 'zehnte': 10, 'zehnter': 10, 'zehntes': 10,
-  'elf': 11, 'elfte': 11, 'elfter': 11, 'elftes': 11,
-  'zwölf': 12, 'zwölfte': 12, 'zwölfter': 12, 'zwölftes': 12,
-};
-
 /**
  * Apply formatting control words programmatically.
  * This should be called BEFORE sending text to LLM for correction.
@@ -802,18 +666,7 @@ function isStandaloneDeleteCommand(text: string): boolean {
   return standaloneDeletePatterns.some((pattern) => pattern.test(normalized));
 }
 
-type OnlineCommandType =
-  | 'deleteWord'
-  | 'deleteSentence'
-  | 'deleteParagraph'
-  | 'lineBreak'
-  | 'paragraphBreak'
-  | 'bulletPoint'
-  | 'comma'
-  | 'period'
-  | 'dash';
-
-// ONLINE_COMMAND_PATTERNS importiert aus formattings/online-commands.ts
+// OnlineCommandType, ONLINE_COMMAND_PATTERNS importiert aus formattings/online-commands.ts
 
 function findNextOnlineCommand(text: string, startIndex: number): OnlineCommandMatch | null {
   let bestMatch: OnlineCommandMatch | null = null;

@@ -122,6 +122,73 @@ Keine pathologischen Lymphknoten.
 
 ---
 
+## Test 6 (Optionen-Modus): Handkraft mit [Optionen]
+
+**Feld:** `befund`
+
+**Baustein-Inhalt:**
+```
+Neurologischer Status:
+Kraftgrad der oberen Extremitäten: [rechts/kraftgrad 5/5, links/kraftgrad 5/5].
+Patient kann [beide Hände/die linke Hand/die rechte Hand/keine Hand] drücken.
+Sensibilität intakt.
+```
+
+**Diktierte Änderung:**
+> Patient kann die linke Hand drücken
+
+**Erwartung (Optionen-Modus):**
+| Einstellung | Ergebnis |
+|-------------|----------|
+| **Optionen** | "Patient kann [beide Hände/die linke Hand/die rechte Hand/keine Hand] drücken" → "Patient kann die linke Hand drücken". Die zweite [Optionen]-Klammer bleibt erhalten (keine diktierten Änderungen zu Kraftgrad). |
+| **Optionen** mit nicht passender Änderung (z. B. "Zehenspitzenstand möglich") | Klammern bleiben unverändert, "Zehenspitzenstand möglich" erscheint im **unusedText**-Fenster. |
+
+---
+
+## Test 7 (Optionen-Modus): Seitenlokalisation
+
+**Feld:** `befund`
+
+**Baustein-Inhalt:**
+```
+Sonographie Abdomen:
+Leber [unauffällig/vergrößert/verkleinert], [homogenes/inhomogenes] Parenchym.
+Gallenblase [unauffällig/steintragend/nicht beurteilbar].
+Pankreas unauffällig.
+```
+
+**Diktierte Änderung:**
+> Leber vergrößert, inhomogenes Parenchym, Gallenblase steintragend
+
+**Erwartung (Optionen-Modus):**
+| Einstellung | Ergebnis |
+|-------------|----------|
+| **Optionen** | Alle drei Klammern werden korrekt aufgelöst: "Leber vergrößert, inhomogenes Parenchym. Gallenblase steintragend." |
+| **Optionen** (nur "Leber vergrößert" diktiert) | Nur die erste Klammer wird aufgelöst, die anderen bleiben → "Leber vergrößert, [homogenes/inhomogenes] Parenchym. Gallenblase [unauffällig/steintragend/nicht beurteilbar]." |
+
+---
+
+## Test 8 (Optionen-Modus): Teilweise passende Änderung
+
+**Feld:** `befund`
+
+**Baustein-Inhalt:**
+```
+CT-Thorax:
+Lunge [unauffällig/geringgradig/mittelgradig] [emphysematös/fibrotisch verändert].
+Mediastinum [unauffällig/verbreitert].
+```
+
+**Diktierte Änderung:**
+> Lunge mittelgradig fibrotisch, bitte auch auf Lymphknoten achten
+
+**Erwartung (Optionen-Modus):**
+| Einstellung | Ergebnis |
+|-------------|----------|
+| **Optionen** | Die erste Klammer wird auf "mittelgradig" und die zweite auf "fibrotisch verändert" aufgelöst. "Bitte auch auf Lymphknoten achten" passt in keine Option → erscheint im **unusedText**-Fenster. |
+
+---
+
 ## So testen
 
 1. Baustein-Admin öffnen und einen neuen Baustein mit dem obigen Inhalt anlegen
@@ -130,5 +197,6 @@ Keine pathologischen Lymphknoten.
    - `Widersprüche: Aus` — zum Prüfen, ob der Widerspruch **nicht** aufgelöst wird
    - `Widersprüche: Einfach` — verkürzte Erkennung
    - `Widersprüche: Genau` — volle Erkennung (Default)
+   - `Widersprüche: Optionen` — wählt aus [Option A/Option B] im Baustein-Text
 4. Änderung diktieren (oder via Texteingabe + "Änderungen einfügen")
-5. Ergebnis prüfen
+5. Ergebnis prüfen — bei Optionen-Modus: nicht zuordenbarer Text erscheint im "nicht verwendet"-Fenster

@@ -452,6 +452,10 @@ async function correctText(
 
 AUFGABE: Korrigiere den Text zwischen <<<DIKTAT_START>>> und <<<DIKTAT_ENDE>>> und gib NUR den korrigierten Text zurück.
 
+WICHTIGSTE REGEL - KEINE HALSUZINATIONEN:
+- Erfinde NIEMALS medizinische Inhalte oder klinische Aussagen
+- Behalte unklare Begriffe im Original bei, wenn du nicht 100% sicher bist
+
 REGELN:
 1. Korrigiere Grammatik- und Rechtschreibfehler
 2. Korrigiere falsch transkribierte medizinische Fachbegriffe

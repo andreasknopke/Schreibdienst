@@ -9,24 +9,25 @@
  */
 
 export interface DeletePattern {
+  commands: string[];
   pattern: RegExp;
   type: 'word' | 'sentence' | 'paragraph';
 }
 
 export const DELETE_PATTERNS: DeletePattern[] = [
   // --- Wort löschen ---
-  { pattern: /\bwort\s*streichen\b/gi, type: 'word' as const },
-  { pattern: /\bstreiche\s*wort\b/gi, type: 'word' as const },
-  { pattern: /\bwort\s*löschen\b/gi, type: 'word' as const },
-  { pattern: /lösche\s*(?:das\s*)?letzte(?:s)?\s*wort\b/gi, type: 'word' as const },
-  { pattern: /letztes\s*wort\s*löschen\b/gi, type: 'word' as const },
+  { commands: ['Wort streichen'],               pattern: /\bwort\s*streichen\b/gi, type: 'word' as const },
+  { commands: ['streiche Wort'],                pattern: /\bstreiche\s*wort\b/gi, type: 'word' as const },
+  { commands: ['Wort löschen'],                 pattern: /\bwort\s*löschen\b/gi, type: 'word' as const },
+  { commands: ['lösche das letzte Wort'],       pattern: /lösche\s*(?:das\s*)?letzte(?:s)?\s*wort\b/gi, type: 'word' as const },
+  { commands: ['letztes Wort löschen'],         pattern: /letztes\s*wort\s*löschen\b/gi, type: 'word' as const },
 
   // --- Satz löschen ---
-  { pattern: /lösche\s*(?:den\s*)?letzten\s*satz\b/gi, type: 'sentence' as const },
-  { pattern: /\bsatz\s*löschen\b/gi, type: 'sentence' as const },
-  { pattern: /letzten\s*satz\s*löschen\b/gi, type: 'sentence' as const },
+  { commands: ['lösche den letzten Satz'],      pattern: /lösche\s*(?:den\s*)?letzten\s*satz\b/gi, type: 'sentence' as const },
+  { commands: ['Satz löschen'],                 pattern: /\bsatz\s*löschen\b/gi, type: 'sentence' as const },
+  { commands: ['letzten Satz löschen'],         pattern: /letzten\s*satz\s*löschen\b/gi, type: 'sentence' as const },
 
   // --- Absatz löschen ---
-  { pattern: /lösche\s*(?:den\s*)?letzten\s*absatz\b/gi, type: 'paragraph' as const },
-  { pattern: /letzten\s*absatz\s*löschen\b/gi, type: 'paragraph' as const },
+  { commands: ['lösche den letzten Absatz'],    pattern: /lösche\s*(?:den\s*)?letzten\s*absatz\b/gi, type: 'paragraph' as const },
+  { commands: ['letzten Absatz löschen'],       pattern: /letzten\s*absatz\s*löschen\b/gi, type: 'paragraph' as const },
 ];

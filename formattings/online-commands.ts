@@ -24,6 +24,7 @@ export type OnlineCommandType =
   | 'dash';
 
 export interface OnlineCommandPattern {
+  commands: string[];
   type: OnlineCommandType;
   pattern: RegExp;
 }
@@ -36,25 +37,25 @@ export interface OnlineCommandMatch {
 
 export const ONLINE_COMMAND_PATTERNS: OnlineCommandPattern[] = [
   // --- Löschbefehle ---
-  { type: 'deleteWord', pattern: /\blösche\s*(?:das\s*)?letzte(?:s)?\s*wort\b[.,;:!?]*/i },
-  { type: 'deleteWord', pattern: /\bworte?\s*löschen\b[.,;:!?]*/i },
-  { type: 'deleteSentence', pattern: /\blösche\s*(?:den\s*)?letzten\s*satz\b[.,;:!?]*/i },
-  { type: 'deleteSentence', pattern: /\bsatz\s*löschen\b[.,;:!?]*/i },
-  { type: 'deleteSentence', pattern: /\blez(?:te|en)\s*satz\s*löschen\b[.,;:!?]*/i },
-  { type: 'deleteParagraph', pattern: /\blösche\s*(?:den\s*)?letzten\s*absatz\b[.,;:!?]*/i },
-  { type: 'deleteParagraph', pattern: /\bletzten\s*absatz\s*löschen\b[.,;:!?]*/i },
+  { commands: ['lösche das letzte Wort'],           type: 'deleteWord', pattern: /\blösche\s*(?:das\s*)?letzte(?:s)?\s*wort\b[.,;:!?]*/i },
+  { commands: ['Wort löschen'],                     type: 'deleteWord', pattern: /\bworte?\s*löschen\b[.,;:!?]*/i },
+  { commands: ['lösche den letzten Satz'],           type: 'deleteSentence', pattern: /\blösche\s*(?:den\s*)?letzten\s*satz\b[.,;:!?]*/i },
+  { commands: ['Satz löschen'],                     type: 'deleteSentence', pattern: /\bsatz\s*löschen\b[.,;:!?]*/i },
+  { commands: ['letzten Satz löschen'],              type: 'deleteSentence', pattern: /\blez(?:te|en)\s*satz\s*löschen\b[.,;:!?]*/i },
+  { commands: ['lösche den letzten Absatz'],         type: 'deleteParagraph', pattern: /\blösche\s*(?:den\s*)?letzten\s*absatz\b[.,;:!?]*/i },
+  { commands: ['letzten Absatz löschen'],            type: 'deleteParagraph', pattern: /\bletzten\s*absatz\s*löschen\b[.,;:!?]*/i },
 
   // --- Absätze & Zeilenumbrüche ---
-  { type: 'paragraphBreak', pattern: /\b(?:neuer\s*|nächster\s*)?absatz\b[.,;:!?]*/i },
-  { type: 'lineBreak', pattern: /\b(?:neue|nächste)\s*zeile\b[.,;:!?]*/i },
-  { type: 'lineBreak', pattern: /\bzeilenumbruch\b[.,;:!?]*/i },
+  { commands: ['neuer Absatz', 'nächster Absatz', 'Absatz'], type: 'paragraphBreak', pattern: /\b(?:neuer\s*|nächster\s*)?absatz\b[.,;:!?]*/i },
+  { commands: ['neue Zeile', 'nächste Zeile'],      type: 'lineBreak', pattern: /\b(?:neue|nächste)\s*zeile\b[.,;:!?]*/i },
+  { commands: ['Zeilenumbruch'],                    type: 'lineBreak', pattern: /\bzeilenumbruch\b[.,;:!?]*/i },
 
   // --- Aufzählungen ---
-  { type: 'bulletPoint', pattern: /\bnächster\s*anstrich\b[.,;:!?]*/i },
-  { type: 'bulletPoint', pattern: /\banstrich\b[.,;:!?]*/i },
+  { commands: ['nächster Anstrich'],                type: 'bulletPoint', pattern: /\bnächster\s*anstrich\b[.,;:!?]*/i },
+  { commands: ['Anstrich'],                         type: 'bulletPoint', pattern: /\banstrich\b[.,;:!?]*/i },
 
   // --- Satzzeichen ---
-  { type: 'comma', pattern: /\b(?:komma|beistrich)\b[.,;:!?]*/i },
-  { type: 'period', pattern: /\bpunkt\b[.,;:!?]*/i },
-  { type: 'dash', pattern: /\bbindestrich\b[.,;:!?]*/i },
+  { commands: ['Komma', 'Beistrich'],               type: 'comma', pattern: /\b(?:komma|beistrich)\b[.,;:!?]*/i },
+  { commands: ['Punkt'],                            type: 'period', pattern: /\bpunkt\b[.,;:!?]*/i },
+  { commands: ['Bindestrich', 'Minus'],             type: 'dash', pattern: /\bbindestrich\b[.,;:!?]*/i },
 ];

@@ -1802,6 +1802,10 @@ export default function HomePage() {
   // gelesen werden, sonst greift der Auto-Einarbeiten-Modus nicht.
   const autoIntegrateTemplateAudioRef = useRef(autoIntegrateTemplateAudio);
   autoIntegrateTemplateAudioRef.current = autoIntegrateTemplateAudio;
+  const templateContradictionModeRef = useRef(templateContradictionMode);
+  templateContradictionModeRef.current = templateContradictionMode;
+  const templateLayoutModeRef = useRef(templateLayoutMode);
+  templateLayoutModeRef.current = templateLayoutMode;
   const activeTemplateContextRef = useRef(activeTemplateContext);
   activeTemplateContextRef.current = activeTemplateContext;
   const applyTemplateChangesRef = useRef<((template: Template, changesOverride?: string) => Promise<boolean>) | null>(null);
@@ -1861,8 +1865,8 @@ export default function HomePage() {
             changes: changesText,
             field: template.field,
             username,
-            contradictionMode: templateContradictionMode,
-            layoutMode: templateLayoutMode,
+            contradictionMode: templateContradictionModeRef.current,
+            layoutMode: templateLayoutModeRef.current,
           }),
         });
 

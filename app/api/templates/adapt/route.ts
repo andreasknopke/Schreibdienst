@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { addLlmPromptLog, updateLlmPromptLog } from '@/lib/llmPromptLog';
+import { TEMPLATE_ADAPT_BASE } from '@/prompts/templates/adapt-base';
+import { CONTRADICTION_GENAU } from '@/prompts/templates/contradiction-genau';
+import { CONTRADICTION_EINFACH } from '@/prompts/templates/contradiction-einfach';
+import { CONTRADICTION_OPTIONEN } from '@/prompts/templates/contradiction-optionen';
+import { TEMPLATE_NIEMALS } from '@/prompts/templates/template-niemals';
 
 export const runtime = 'nodejs';
 
@@ -150,73 +155,7 @@ async function callLLM(
   }
 }
 
-const TEMPLATE_ADAPT_BASE = `Du bist ein medizinischer Befund-Assistent. Deine Aufgabe ist es, einen Textbaustein basierend auf diktierten Änderungen/Ergänzungen anzupassen.
-
-EINGABE:
-1. Ein VOLLSTÄNDIGER medizinischer Textbaustein (Vorlage) - dieser Text ist bereits strukturiert und formatiert
-2. Diktierte Änderungen/Ergänzungen vom Arzt
-
-DEINE AUFGABE - INTELLIGENTE INTEGRATION:
-1. Analysiere den Textbaustein und verstehe seine Struktur und den inhaltlichen Aufbau
-2. Identifiziere, WO die diktierten Änderungen inhaltlich hingehören
-3. Füge die Änderungen an der SEMANTISCH PASSENDEN Stelle ein`;
-
-const CONTRADICTION_GENAU = `
-4. PRÜFE AUF WIDERSPRÜCHE: Wenn die Änderung einer bestehenden Aussage WIDERSPRICHT, muss die widersprüchliche Aussage ENTFERNT oder ERSETZT werden
-5. Behalte nur die Teile des Textbausteins bei, die mit den Änderungen VEREINBAR sind
-
-WIDERSPRÜCHE ERKENNEN UND BEHEBEN:
-- Wenn eine pathologische Änderung eine "unauffällig/normal"-Aussage widerspricht, ERSETZE diese
-- Beispiel: "Hydrocephalus" widerspricht "normalweite Liquorräume" → Entferne "normalweite Liquorräume"
-- Beispiel: "Hepatomegalie" widerspricht "Leber normal groß" → Ersetze durch die pathologische Angabe
-- Beispiel: "Harnstau Grad II rechts" widerspricht "keine Harnstauung" → Passe an
-
-WICHTIGE REGELN:
-- Wenn "sonst keine Änderungen" gesagt wird, behalte alle NICHT-WIDERSPRÜCHLICHEN Teile bei
-- Prüfe JEDEN Teil des Textbausteins auf Konsistenz mit den Änderungen
-- Behalte die Formatierung (Absätze, Zeilenumbrüche) des Originals bei
-- Behalte den professionellen medizinischen Schreibstil bei
-- Die Ausgabe muss ein vollständiger, medizinisch KONSISTENTER Befundtext sein`;
-
-const CONTRADICTION_EINFACH = `
-4. PRÜFE AUF WIDERSPRÜCHE: Wenn eine Änderung einer bestehenden Aussage widerspricht, ENTFERNE oder ERSETZE die widersprüchliche Aussage
-5. Behalte nur die mit den Änderungen VEREINBAREN Teile bei
-
-WIDERSPRÜCHE:
-- Pathologische Angabe widerspricht Normal-Aussage → Normal-Aussage ersetzen
-- Beispiel: "Hydrocephalus" widerspricht "normalweite Liquorräume" → entferne "normalweite Liquorräume"`;
-
-const CONTRADICTION_OPTIONEN = `
-Der Textbaustein enthält Wahlmöglichkeiten in Klammern, z. B. "[Option A/Option B]".
-
-DEINE AUFGABE:
-- Wähle aus den Optionen in [Klammern] diejenige aus, die der diktierten Änderung am nächsten kommt
-- Ersetze die gesamte Klammer inklusive Inhalt durch die gewählte Option
-- Stimmt KEINE der Optionen mit der diktierten Änderung überein, lasse die Klammer unverändert
-- Widerspruchsprüfung ist in diesem Modus NICKT nötig – die Optionen definieren die
-  gültigen Alternativen bereits
-
-UNUSED-TEXT (SEHR WICHTIG):
-- Diktierte Änderungen, die in KEINE der vorhandenen Optionen passen, MÜSSEN im unusedText
-  landen. Sie dürfen NICHT eigenmächtig als Freitext in den Baustein eingefügt werden.
-- Nur wenn eine Änderung eindeutig einer Option zugeordnet werden kann, wird sie eingebaut.
-- Bei Unsicherheit: lieber in unusedText als eine falsche Option zu wählen.`;
-
-const TEMPLATE_NIEMALS = `
-KRITISCH - NIEMALS:
-- Änderungen MITTEN in einen Satz einfügen und den Satz grammatisch zerstören
-- Widersprüchliche Aussagen im Text belassen (z.B. "normalweite Liquorräume" UND "Hydrocephalus")
-- Einen Satz aufspalten und die Änderung dazwischen setzen
-
-AUSGABEFORMAT:
-- Gib AUSSCHLIESSLICH JSON im folgenden Format zurück:
-  {"adaptedText":"...","unusedText":"..."}
-- adaptedText enthält den vollständigen angepassten Textbaustein
-- unusedText enthält nur die diktierten Textteile, die inhaltlich NICHT sinnvoll in den Baustein eingebaut werden konnten
-- Wenn alles sinnvoll eingebaut wurde, setze unusedText auf einen leeren String
-- KEINE Einleitungen wie "Der angepasste Text lautet:"
-- KEINE Erklärungen oder Kommentare
-- KEINE Markdown-Codeblöcke oder zusätzlichen Markierungen`;
+// Prompt definitions moved to prompts/templates/
 
 function tryParseTemplateAdaptJson(raw: string): { adaptedText: string; unusedText: string } | null {
   const trimmed = raw.trim();

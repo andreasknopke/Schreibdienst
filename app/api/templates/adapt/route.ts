@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
-import { loadDictionaryWithRequest, formatDictionaryForPrompt } from '@/lib/dictionaryDb';
 import { addLlmPromptLog, updateLlmPromptLog } from '@/lib/llmPromptLog';
 
 export const runtime = 'nodejs';
@@ -151,7 +150,7 @@ async function callLLM(
   }
 }
 
-const TEMPLATE_ADAPT_PROMPT = `Du bist ein medizinischer Befund-Assistent. Deine Aufgabe ist es, einen Textbaustein basierend auf diktierten Änderungen/Ergänzungen anzupassen.
+const TEMPLATE_ADAPT_BASE = `Du bist ein medizinischer Befund-Assistent. Deine Aufgabe ist es, einen Textbaustein basierend auf diktierten Änderungen/Ergänzungen anzupassen.
 
 EINGABE:
 1. Ein VOLLSTÄNDIGER medizinischer Textbaustein (Vorlage) - dieser Text ist bereits strukturiert und formatiert
@@ -160,7 +159,9 @@ EINGABE:
 DEINE AUFGABE - INTELLIGENTE INTEGRATION:
 1. Analysiere den Textbaustein und verstehe seine Struktur und den inhaltlichen Aufbau
 2. Identifiziere, WO die diktierten Änderungen inhaltlich hingehören
-3. Füge die Änderungen an der SEMANTISCH PASSENDEN Stelle ein
+3. Füge die Änderungen an der SEMANTISCH PASSENDEN Stelle ein`;
+
+const CONTRADICTION_GENAU = `
 4. PRÜFE AUF WIDERSPRÜCHE: Wenn die Änderung einer bestehenden Aussage WIDERSPRICHT, muss die widersprüchliche Aussage ENTFERNT oder ERSETZT werden
 5. Behalte nur die Teile des Textbausteins bei, die mit den Änderungen VEREINBAR sind
 
@@ -175,39 +176,31 @@ WICHTIGE REGELN:
 - Prüfe JEDEN Teil des Textbausteins auf Konsistenz mit den Änderungen
 - Behalte die Formatierung (Absätze, Zeilenumbrüche) des Originals bei
 - Behalte den professionellen medizinischen Schreibstil bei
-- Die Ausgabe muss ein vollständiger, medizinisch KONSISTENTER Befundtext sein
+- Die Ausgabe muss ein vollständiger, medizinisch KONSISTENTER Befundtext sein`;
 
+const CONTRADICTION_EINFACH = `
+4. PRÜFE AUF WIDERSPRÜCHE: Wenn eine Änderung einer bestehenden Aussage widerspricht, ENTFERNE oder ERSETZE die widersprüchliche Aussage
+5. Behalte nur die mit den Änderungen VEREINBAREN Teile bei
+
+WIDERSPRÜCHE:
+- Pathologische Angabe widerspricht Normal-Aussage → Normal-Aussage ersetzen
+- Beispiel: "Hydrocephalus" widerspricht "normalweite Liquorräume" → entferne "normalweite Liquorräume"`;
+
+const LAYOUT_GENAU = `
 LAYOUT EXAKT BEIBEHALTEN (SEHR WICHTIG):
 - Übernimm das Layout des Originals ZEICHENGENAU: Überschriften, Labels, Doppelpunkte, Bindestriche, Einrückungen, Leerzeilen und Zeilenumbrüche bleiben unverändert
 - Ändere KEINE Schreibweise von Labels/Überschriften (z. B. bleibt "Teil 1:" exakt "Teil 1:" und wird NICHT zu "**Teil 1**", "Teil 1 :" oder "TEIL 1:")
 - Füge KEINE Markdown- oder Formatierungszeichen hinzu, die im Original nicht vorkommen (kein **fett**, kein *kursiv*, keine #-Überschriften, keine Aufzählungszeichen)
 - Entferne KEINE vorhandenen Labels, Doppelpunkte oder Leerzeilen
-- Trage die diktierten Angaben NUR an der passenden Stelle hinter dem jeweiligen Label/Abschnitt ein und lasse die restliche Struktur unangetastet
+- Trage die diktierten Angaben NUR an der passenden Stelle hinter dem jeweiligen Label/Abschnitt ein und lasse die restliche Struktur unangetastet`;
 
-BEISPIELE:
+const LAYOUT_EINFACH = `
+LAYOUT:
+- Behalte das Layout (Überschriften, Labels, Doppelpunkte, Zeilenumbrüche) exakt bei
+- Keine Markdown-Formatierung hinzufügen oder entfernen
+- Setze Änderungen nur an der passenden Stelle hinter dem jeweiligen Label/Abschnitt ein`;
 
-Beispiel 1 - Einfache Ergänzung (kein Widerspruch):
-Textbaustein: "Normalweite innere und äußere Liquorräume. Keine Mittellinienverlagerung. Keine Hirndruckzeichen."
-Änderungen: "Zeichen einer diffusen Mikroangiopathie"
-Ergebnis: "Zeichen einer diffusen Mikroangiopathie. Normalweite innere und äußere Liquorräume. Keine Mittellinienverlagerung. Keine Hirndruckzeichen."
-
-Beispiel 2 - WIDERSPRUCH erkennen und beheben:
-Textbaustein: "Normalweite innere und äußere Liquorräume. Keine Mittellinienverlagerung. Keine Hirndruckzeichen."
-Änderungen: "Hydrocephalus e vacuo"
-Ergebnis: "Hydrocephalus e vacuo. Keine Mittellinienverlagerung. Keine Hirndruckzeichen."
-(Hier wurde "Normalweite Liquorräume" entfernt, da dies dem Hydrocephalus widerspricht!)
-
-Beispiel 3 - Teilweise Änderung mit Widerspruch:
-Textbaustein: "Gallenblase unauffällig, kein Steinnachweis. Gallenwege nicht erweitert."
-Änderungen: "multiple Gallensteine"
-Ergebnis: "Gallenblase mit multiplen Gallensteinen. Gallenwege nicht erweitert."
-(Hier wurde "unauffällig, kein Steinnachweis" durch die pathologische Angabe ersetzt)
-
-Beispiel 4 - Änderung ohne Widerspruch, passende Stelle:
-Textbaustein: "Nieren beidseits orthotop und normal groß. Keine Harnstauung. Nebennieren unauffällig."
-Änderungen: "rechts eine kleine 12mm Zyste"
-Ergebnis: "Nieren beidseits orthotop und normal groß. Rechts eine kleine 12 mm große Zyste. Keine Harnstauung. Nebennieren unauffällig."
-
+const TEMPLATE_NIEMALS = `
 KRITISCH - NIEMALS:
 - Änderungen MITTEN in einen Satz einfügen und den Satz grammatisch zerstören
 - Widersprüchliche Aussagen im Text belassen (z.B. "normalweite Liquorräume" UND "Hydrocephalus")
@@ -289,7 +282,7 @@ export async function POST(req: NextRequest) {
   
   try {
     const body = await req.json();
-    const { template, changes, field, username } = body;
+    const { template, changes, field, username, contradictionMode, layoutMode } = body;
     
     if (!template || !changes) {
       return NextResponse.json({ error: 'Template und Änderungen erforderlich' }, { status: 400 });
@@ -298,28 +291,16 @@ export async function POST(req: NextRequest) {
     console.log(`[Template] Field: ${field || 'befund'}, Username: ${username || 'unknown'}`);
     console.log(`[Template] Template length: ${template.length} chars`);
     console.log(`[Template] Changes: "${changes}"`);
+    console.log(`[Template] contradictionMode: ${contradictionMode || 'genau'}, layoutMode: ${layoutMode || 'genau'}`);
     
     // Get LLM config
     const llmConfig = await getLLMConfig(req);
     console.log(`[Template] Using provider: ${llmConfig.provider}, model: ${llmConfig.model}`);
     
-    // Load dictionary for user if available
-    let dictionarySuffix = '';
-    if (username) {
-      try {
-        const { entries } = await loadDictionaryWithRequest(req, username);
-        if (entries && entries.length > 0) {
-          dictionarySuffix = formatDictionaryForPrompt(entries);
-          console.log(`[Template] Loaded ${entries.length} dictionary entries`);
-        }
-      } catch (error) {
-        console.error('[Template] Dictionary load error:', error);
-      }
-    }
-    
-    const systemPrompt = dictionarySuffix 
-      ? `${TEMPLATE_ADAPT_PROMPT}\n${dictionarySuffix}`
-      : TEMPLATE_ADAPT_PROMPT;
+    // System-Prompt aus den konfigurierten Modulen zusammensetzen
+    const contradictionSection = contradictionMode === 'aus' ? '' : contradictionMode === 'einfach' ? CONTRADICTION_EINFACH : CONTRADICTION_GENAU;
+    const layoutSection = layoutMode === 'aus' ? '' : layoutMode === 'einfach' ? LAYOUT_EINFACH : LAYOUT_GENAU;
+    const systemPrompt = `${TEMPLATE_ADAPT_BASE}${contradictionSection}${layoutSection}${TEMPLATE_NIEMALS}`;
     
     // Markdown-Marker aus dem Template entfernen, damit das LLM sie nicht
     // versehentlich verschiebt oder dupliziert. Die Formatierung wird über

@@ -35,17 +35,6 @@ REGELN:
    - Größenangaben: "sechzehn mal zehn Millimeter" → "16 x 10 mm"
    - Jahreszahlen: "neunzehnhunderteinundneunzig" → "1991", "zweitausend" → "2000"
    - Scores/Grade: "G2-Score sechs" → "G2-Score 6", "Fazekas zwei" → "Fazekas 2"
-4. FORMATIERUNGSBEFEHLE SOFORT UMSETZEN - diese Wörter durch Formatierung ersetzen:
-   - "Neuer Absatz" oder "neuer Absatz" → zwei Zeilenumbrüche (Leerzeile einfügen)
-   - "Neue Zeile" oder "neue Zeile" → ein Zeilenumbruch
-   - "Doppelpunkt" → ":"
-   - "Punkt" (als eigenständiges Wort) → "."
-   - "Komma" (als eigenständiges Wort) → ","
-   - "Klammer auf" → "("
-   - "Klammer zu" → ")"
-4. Entferne "lösche das letzte Wort/Satz" und das entsprechende Wort/Satz
-5. Entferne Füllwörter wie "ähm", "äh"
-
 WICHTIG - DATUMSFORMATE:
 - Datumsangaben wie "18.09.2025" NICHT ändern - sie sind bereits korrekt!
 - Nur gesprochene Daten umwandeln: "achtzenter neunter zweitausendfünfundzwanzig" → "18.09.2025"

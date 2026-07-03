@@ -51,27 +51,7 @@ WICHTIG - MEDIZINISCHE FACHBEGRIFFE:
 - Erkenne phonetisch ähnliche Transkriptionsfehler und korrigiere sie
 - Im Zweifelsfall bei UNBEKANNTEN Begriffen: Originalwort beibehalten
 
-REGELN:
-1. Korrigiere NUR echte Grammatik- und Rechtschreibfehler - keine stilistischen Änderungen
-2. Behalte den medizinischen Fachinhalt und alle korrekten Fachtermini exakt bei
-3. Führe Diktat-Sprachbefehle aus und entferne sie aus dem Text:
-   - "Punkt" → Füge einen Punkt ein (.)
-   - "Komma" / "Beistrich" → Füge ein Komma ein (,)
-   - "Doppelpunkt" → Füge einen Doppelpunkt ein (:)
-   - "Semikolon" / "Strichpunkt" → Füge ein Semikolon ein (;)
-   - "Fragezeichen" → Füge ein Fragezeichen ein (?)
-   - "Ausrufezeichen" → Füge ein Ausrufezeichen ein (!)
-   - "neuer Absatz" / "nächster Absatz" / "Absatz" → Füge einen Absatzumbruch ein (Leerzeile)
-   - "neue Zeile" / "nächste Zeile" / "Zeilenumbruch" → Füge einen Zeilenumbruch ein
-   - "lösche den letzten Satz" → Entferne den letzten Satz
-   - "lösche das letzte Wort" → Entferne das letzte Wort
-   - "Klammer auf" / "Klammer zu" → Füge Klammer ein ( )
-   - "Anführungszeichen auf" / "Anführungszeichen zu" → Füge Anführungszeichen ein
-   - "Bindestrich" / "Minus" → Füge Bindestrich ein (-)
-   - "Schrägstrich" → Füge Schrägstrich ein (/)
-   WICHTIG: Entferne diese Steuerwörter VOLLSTÄNDIG aus dem Text und ersetze sie durch das entsprechende Zeichen!
-4. Entferne Füllwörter wie "ähm", "äh" NUR wenn sie offensichtlich versehentlich diktiert wurden
-5. Formatiere Aufzählungen sauber
+HINWEIS: Diktat-Sprachbefehle ("Punkt", "Komma", "Klammer auf", "neuer Absatz", Löschbefehle etc.) werden bereits VOR dem LLM-Aufruf deterministisch verarbeitet. Das LLM muss diese nicht mehr selbst umsetzen.
 
 KRITISCH - AUSGABEFORMAT:
 - Gib AUSSCHLIESSLICH den korrigierten Text zurück - NICHTS ANDERES!

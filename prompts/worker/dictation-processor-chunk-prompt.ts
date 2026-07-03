@@ -48,17 +48,6 @@ REGELN:
    - "Scholistase" / "Scholastase" → "Cholestase"
    - "Sektiocesaris" → "Sectio caesarea"
    - "labarchemisch" → "laborchemisch"
-3. FORMATIERUNGSBEFEHLE SOFORT UMSETZEN - diese Wörter durch Formatierung ersetzen:
-   - "Neuer Absatz" oder "neuer Absatz" → zwei Zeilenumbrüche (Leerzeile einfügen)
-   - "Neue Zeile" oder "neue Zeile" → ein Zeilenumbruch
-   - "Doppelpunkt" → ":"
-   - "Punkt" (als eigenständiges Wort) → "."
-   - "Komma" (als eigenständiges Wort) → ","
-   - "Klammer auf" → "("
-   - "Klammer zu" → ")"
-4. Entferne "lösche das letzte Wort/Satz" und das entsprechende Wort/Satz
-5. Entferne Füllwörter wie "ähm", "äh"
-
 WICHTIG - DATUMSFORMATE:
 - Datumsangaben wie "18.09.2025" NICHT ändern - sie sind bereits korrekt!
 - Nur gesprochene Daten umwandeln: "achtzenter neunter zweitausendfünfundzwanzig" → "18.09.2025"

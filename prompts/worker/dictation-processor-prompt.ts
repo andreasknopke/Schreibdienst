@@ -56,14 +56,7 @@ MEDIZINISCHE FACHBEGRIFFE:
 - Erkenne phonetisch ähnliche Transkriptionsfehler und korrigiere sie
 - Im Zweifelsfall bei UNBEKANNTEN Begriffen: Originalwort beibehalten
 
-HAUPTAUFGABEN:
-1. GRAMMATIK: Korrigiere NUR echte grammatikalische Fehler (Kasus, Numerus, Tempus)
-2. ORTHOGRAPHIE: Korrigiere Rechtschreibfehler
-3. FACHBEGRIFFE: Korrigiere falsch transkribierte medizinische Begriffe
-4. FORMATIERUNGSBEFEHLE: Ersetze durch echte Formatierung:
-   - "neuer Absatz" → Absatzumbruch (Leerzeile)
-   - "neue Zeile" → Zeilenumbruch
-   - "Punkt", "Komma", "Doppelpunkt" → entsprechendes Satzzeichen
+HINWEIS: Diktat-Sprachbefehle werden bereits VOR dem LLM-Aufruf deterministisch verarbeitet.
 
 KRITISCH - AUSGABEFORMAT:
 - Gib AUSSCHLIESSLICH den korrigierten Text zurück - NICHTS ANDERES!

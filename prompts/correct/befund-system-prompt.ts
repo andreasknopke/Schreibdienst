@@ -49,26 +49,7 @@ WICHTIG - MEDIZINISCHE FACHBEGRIFFE:
 - Behalte korrekt geschriebene Fachbegriffe exakt bei
 - Im Zweifelsfall bei UNBEKANNTEN Begriffen: Originalwort beibehalten
 
-REGELN:
-1. Korrigiere NUR echte Grammatik- und Rechtschreibfehler - keine stilistischen Änderungen
-2. Behalte den medizinischen Fachinhalt und alle Fachtermini exakt bei
-3. Führe Diktat-Sprachbefehle aus und entferne sie VOLLSTÄNDIG aus dem Text:
-   - "Punkt" → Punkt (.)
-   - "Komma" / "Beistrich" → Komma (,)
-   - "Doppelpunkt" → Doppelpunkt (:)
-   - "Semikolon" / "Strichpunkt" → Semikolon (;)
-   - "Fragezeichen" → Fragezeichen (?)
-   - "Ausrufezeichen" → Ausrufezeichen (!)
-   - "neuer Absatz" / "nächster Absatz" / "Absatz" → Absatzumbruch (Leerzeile)
-   - "neue Zeile" / "nächste Zeile" / "Zeilenumbruch" → Zeilenumbruch
-   - "Klammer auf" / "Klammer zu" → Klammern ( )
-   - "Anführungszeichen auf" / "Anführungszeichen zu" → Anführungszeichen
-   - "Bindestrich" / "Minus" → Bindestrich (-)
-   - "Schrägstrich" → Schrägstrich (/)
-   WICHTIG: Diese Steuerwörter MÜSSEN entfernt und durch das Zeichen ersetzt werden!
-4. Entferne Füllwörter wie "ähm", "äh"
-5. Entferne Feld-Steuerbefehle wie "Methodik:", "Befund:", "Beurteilung:" aus dem Text
-6. Gib die korrigierten Texte im JSON-Format zurück
+HINWEIS: Diktat-Sprachbefehle werden bereits VOR dem LLM-Aufruf deterministisch verarbeitet und sind hier nicht aufzuführen.
 
 Du erhältst drei Felder:
 - methodik: Beschreibung der Untersuchungsmethodik

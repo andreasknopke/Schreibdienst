@@ -1802,10 +1802,6 @@ export default function HomePage() {
   // gelesen werden, sonst greift der Auto-Einarbeiten-Modus nicht.
   const autoIntegrateTemplateAudioRef = useRef(autoIntegrateTemplateAudio);
   autoIntegrateTemplateAudioRef.current = autoIntegrateTemplateAudio;
-  const templateContradictionModeRef = useRef(templateContradictionMode);
-  templateContradictionModeRef.current = templateContradictionMode;
-  const templateLayoutModeRef = useRef(templateLayoutMode);
-  templateLayoutModeRef.current = templateLayoutMode;
   const activeTemplateContextRef = useRef(activeTemplateContext);
   activeTemplateContextRef.current = activeTemplateContext;
   const applyTemplateChangesRef = useRef<((template: Template, changesOverride?: string) => Promise<boolean>) | null>(null);
@@ -1865,8 +1861,8 @@ export default function HomePage() {
             changes: changesText,
             field: template.field,
             username,
-            contradictionMode: templateContradictionModeRef.current,
-            layoutMode: templateLayoutModeRef.current,
+            contradictionMode: templateContradictionMode,
+            layoutMode: templateLayoutMode,
           }),
         });
 
@@ -1909,7 +1905,7 @@ export default function HomePage() {
     } finally {
       setCorrecting(false);
     }
-  }, [cloneRichTextRanges, getFieldRichTextFormats, getTextForBefundField, getAuthHeader, getDbTokenHeader, username, methodik, transcript, beurteilung, setFieldTextWithFormats]);
+  }, [cloneRichTextRanges, getFieldRichTextFormats, getTextForBefundField, getAuthHeader, getDbTokenHeader, username, methodik, transcript, beurteilung, setFieldTextWithFormats, templateContradictionMode, templateLayoutMode]);
   applyTemplateChangesRef.current = applyTemplateChanges;
 
   const applySelectedTemplate = useCallback(async (changesOverride?: string) => {

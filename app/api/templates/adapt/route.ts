@@ -186,6 +186,22 @@ WIDERSPRÜCHE:
 - Pathologische Angabe widerspricht Normal-Aussage → Normal-Aussage ersetzen
 - Beispiel: "Hydrocephalus" widerspricht "normalweite Liquorräume" → entferne "normalweite Liquorräume"`;
 
+const CONTRADICTION_OPTIONEN = `
+Der Textbaustein enthält Wahlmöglichkeiten in Klammern, z. B. "[Option A/Option B]".
+
+DEINE AUFGABE:
+- Wähle aus den Optionen in [Klammern] diejenige aus, die der diktierten Änderung am nächsten kommt
+- Ersetze die gesamte Klammer inklusive Inhalt durch die gewählte Option
+- Stimmt KEINE der Optionen mit der diktierten Änderung überein, lasse die Klammer unverändert
+- Widerspruchsprüfung ist in diesem Modus NICKT nötig – die Optionen definieren die
+  gültigen Alternativen bereits
+
+UNUSED-TEXT (SEHR WICHTIG):
+- Diktierte Änderungen, die in KEINE der vorhandenen Optionen passen, MÜSSEN im unusedText
+  landen. Sie dürfen NICHT eigenmächtig als Freitext in den Baustein eingefügt werden.
+- Nur wenn eine Änderung eindeutig einer Option zugeordnet werden kann, wird sie eingebaut.
+- Bei Unsicherheit: lieber in unusedText als eine falsche Option zu wählen.`;
+
 const TEMPLATE_NIEMALS = `
 KRITISCH - NIEMALS:
 - Änderungen MITTEN in einen Satz einfügen und den Satz grammatisch zerstören
@@ -284,21 +300,51 @@ export async function POST(req: NextRequest) {
     console.log(`[Template] Using provider: ${llmConfig.provider}, model: ${llmConfig.model}`);
     
     // System-Prompt aus den konfigurierten Modulen zusammensetzen
-    const contradictionSection = contradictionMode === 'aus' ? '' : contradictionMode === 'einfach' ? CONTRADICTION_EINFACH : CONTRADICTION_GENAU;
-    const systemPrompt = `${TEMPLATE_ADAPT_BASE}${contradictionSection}${TEMPLATE_NIEMALS}`;
+    let contradictionSection: string;
+    let systemPrompt: string;
+    let isOptionenMode = false;
+    if (contradictionMode === 'optionen') {
+      isOptionenMode = true;
+      contradictionSection = CONTRADICTION_OPTIONEN;
+      systemPrompt = `${TEMPLATE_ADAPT_BASE}${contradictionSection}
+
+AUSGABEFORMAT:
+- Gib AUSSCHLIESSLICH JSON im folgenden Format zurück:
+  {"adaptedText":"...","unusedText":"..."}
+- adaptedText enthält den vollständigen angepassten Textbaustein
+- unusedText enthält nur die diktierten Textteile, die inhaltlich NICHT sinnvoll in den Baustein eingebaut werden konnten
+- Wenn alles sinnvoll eingebaut wurde, setze unusedText auf einen leeren String
+- KEINE Einleitungen wie "Der angepasste Text lautet:"
+- KEINE Erklärungen oder Kommentare
+- KEINE Markdown-Codeblöcke oder zusätzlichen Markierungen`;
+    } else {
+      contradictionSection = contradictionMode === 'aus' ? '' : contradictionMode === 'einfach' ? CONTRADICTION_EINFACH : CONTRADICTION_GENAU;
+      systemPrompt = `${TEMPLATE_ADAPT_BASE}${contradictionSection}${TEMPLATE_NIEMALS}`;
+    }
     
     // Markdown-Marker aus dem Template entfernen, damit das LLM sie nicht
     // versehentlich verschiebt oder dupliziert. Die Formatierung wird über
     // formatRanges + Lexical gesteuert, nicht über ** im Text.
     const cleanedTemplate = template.replace(/\*\*/g, '');
 
-    const userMessage = `VOLLSTÄNDIGER TEXTBAUSTEIN (behalte die Struktur bei):
+    let userMessage: string;
+    if (isOptionenMode) {
+      userMessage = `TEXTBAUSTEIN MIT OPTIONEN (wähle aus den [Optionen] basierend auf den Änderungen):
+${cleanedTemplate}
+
+DIKTIERTE ÄNDERUNGEN (ordne diese den [Optionen] im Textbaustein zu):
+${changes}
+
+Gib den vollständigen angepassten Text zurück:`;
+    } else {
+      userMessage = `VOLLSTÄNDIGER TEXTBAUSTEIN (behalte die Struktur bei):
 ${cleanedTemplate}
 
 DIKTIERTE ÄNDERUNGEN (füge diese an der semantisch passenden Stelle ein, NICHT mitten in einen Satz):
 ${changes}
 
 Gib den vollständigen angepassten Text zurück:`;
+    }
 
     // Detailliertes Logging des gesamten Prompts
     console.log('\n--- SYSTEM PROMPT ---');

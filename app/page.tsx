@@ -1791,7 +1791,7 @@ export default function HomePage() {
   const [pendingTemplateInsertChoice, setPendingTemplateInsertChoice] = useState<PendingTemplateInsertChoice | null>(null);
   const [activeTemplateContext, setActiveTemplateContext] = useState<Template | null>(null);
   const [autoIntegrateTemplateAudio, setAutoIntegrateTemplateAudio] = useState(false);
-  const [templateContradictionMode, setTemplateContradictionMode] = useState<'genau' | 'einfach' | 'aus'>('genau');
+  const [templateContradictionMode, setTemplateContradictionMode] = useState<'genau' | 'einfach' | 'aus' | 'optionen'>('genau');
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   const [showTemplatesManager, setShowTemplatesManager] = useState(false);
@@ -5947,7 +5947,7 @@ export default function HomePage() {
               <div className="flex items-center gap-1.5">
                 <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium whitespace-nowrap">Widersprüche:</span>
                 <div className="flex rounded border border-emerald-300 dark:border-emerald-700 overflow-hidden">
-                  {(['aus', 'einfach', 'genau'] as const).map((mode) => (
+                  {(['aus', 'einfach', 'genau', 'optionen'] as const).map((mode) => (
                     <button
                       key={mode}
                       type="button"
@@ -5957,9 +5957,14 @@ export default function HomePage() {
                           : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
                       }`}
                       onClick={() => setTemplateContradictionMode(mode)}
-                      title={mode === 'genau' ? 'Ausführliche Widerspruchsprüfung inkl. Beispiele' : mode === 'einfach' ? 'Verkürzte Widerspruchsprüfung' : 'Keine Widerspruchsprüfung'}
+                      title={
+                        mode === 'genau' ? 'Ausführliche Widerspruchsprüfung inkl. Beispiele'
+                        : mode === 'einfach' ? 'Verkürzte Widerspruchsprüfung'
+                        : mode === 'optionen' ? 'Aus [Optionen] im Baustein-Text auswählen'
+                        : 'Keine Widerspruchsprüfung'
+                      }
                     >
-                      {mode === 'aus' ? 'Aus' : mode === 'einfach' ? 'Einfach' : 'Genau'}
+                      {mode === 'aus' ? 'Aus' : mode === 'einfach' ? 'Einfach' : mode === 'genau' ? 'Genau' : 'Optionen'}
                     </button>
                   ))}
                 </div>

@@ -80,8 +80,8 @@ export async function GET() {
 
   // ABBREVIATIONS – nach Kategorie gruppiert
   const abbrCategories: { category: string; icon: string; items: { id: string; commands: string; replacement: string }[] }[] = [];
-  const abbrCatOrder = ['Einheiten', 'Medikation', 'Laborwerte', 'Allgemein'] as AbbreviationEntry['category'][];
-  const abbrCatIcons: Record<string, string> = { Einheiten: '📏', Medikation: '💊', Laborwerte: '🧪', Allgemein: '📋' };
+  const abbrCatOrder = ['Einheiten', 'Medikation', 'Laborwerte', 'Diagnostik', 'Allgemein'] as AbbreviationEntry['category'][];
+  const abbrCatIcons: Record<string, string> = { Einheiten: '📏', Medikation: '💊', Laborwerte: '🧪', Diagnostik: '🩺', Allgemein: '📋' };
   for (const cat of abbrCatOrder) {
     const items = ABBREVIATIONS.filter(a => a.category === cat)
       .map(a => ({ id: a.id, commands: a.commands.join(', '), replacement: a.replacement }));

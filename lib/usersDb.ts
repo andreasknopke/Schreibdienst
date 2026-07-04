@@ -388,13 +388,41 @@ export async function updateUserSettingsWithRequest(
     params.push(username);
     
     const db = await getPoolForRequest(request);
-    const [result] = await db.execute(
-      `UPDATE users SET ${updates.join(', ')} WHERE username = ?`,
-      params
-    );
     
-    if ((result as any).affectedRows === 0) {
-      return { success: false, error: 'Benutzer nicht gefunden' };
+    // Try the full update first. If a column is missing (migration not yet run),
+    // fall back to only updating columns that exist.
+    try {
+      const [result] = await db.execute(
+        `UPDATE users SET ${updates.join(', ')} WHERE username = ?`,
+        params
+      );
+      if ((result as any).affectedRows === 0) {
+        return { success: false, error: 'Benutzer nicht gefunden' };
+      }
+    } catch (updateError: any) {
+      // Falls neue Spalten (disabled_formattings, disabled_abbreviations) noch
+      // nicht existieren: entferne sie aus dem UPDATE und versuche es erneut.
+      if (updateError?.code === 'ER_BAD_FIELD_ERROR') {
+        const safeUpdates = updates.filter(u =>
+          !u.startsWith('disabled_formattings') && !u.startsWith('disabled_abbreviations')
+        );
+        const safeParams = params.filter((_, i) =>
+          i < updates.length && safeUpdates.includes(updates[i])
+        );
+        if (safeUpdates.length === 0) {
+          return { success: true }; // nichts zu updaten
+        }
+        safeParams.push(username);
+        const [safeResult] = await db.execute(
+          `UPDATE users SET ${safeUpdates.join(', ')} WHERE username = ?`,
+          safeParams
+        );
+        if ((safeResult as any).affectedRows === 0) {
+          return { success: false, error: 'Benutzer nicht gefunden' };
+        }
+      } else {
+        throw updateError;
+      }
     }
     
     console.log('[Users] Updated settings for:', username, settings);

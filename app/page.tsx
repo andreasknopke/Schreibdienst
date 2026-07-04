@@ -7,7 +7,7 @@ import Spinner from '@/components/Spinner';
 import { useAuth } from '@/components/AuthProvider';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import { ChangeIndicator, ChangeWarningBanner } from '@/components/ChangeIndicator';
-import { applyDeleteCommands, applyFormattingControlWords, applyMedicalAbbreviations, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, fixConcatenatedPunkt, preprocessTranscription, type OnlineUtteranceApplicationDebugStep } from '@/lib/textFormatting';
+import { applyDeleteCommands, applyFormattingControlWords, applyAbbreviations, applyOnlineDictationControlWords, applyOnlineUtteranceToText, combineFormattedText, fixConcatenatedPunkt, preprocessTranscription, type OnlineUtteranceApplicationDebugStep } from '@/lib/textFormatting';
 import { buildPhoneticIndex, applyPhoneticCorrections, applyPhoneticCorrectionsDetailed, areWordsPhoneticallySimilar, type PhoneticReplacementOperation } from '@/lib/phoneticMatch';
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import CustomActionButtons from '@/components/CustomActionButtons';
@@ -2151,8 +2151,8 @@ export default function HomePage() {
       text = result;
     }
     
-    // Pass 3: Medizinische Abkürzungen/Units (nur wenn Medical-Modus aktiv)
-    text = applyMedicalAbbreviations(text, dictionarySet);
+    // Pass 3: Medizinische Abkürzungen/Units (disabledIds via Benutzereinstellungen)
+    text = applyAbbreviations(text);
     
     return text;
   }, [dictionaryEntries, dictionarySet]);

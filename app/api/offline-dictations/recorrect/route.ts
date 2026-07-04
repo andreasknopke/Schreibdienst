@@ -428,12 +428,8 @@ async function correctText(
     await getPromptInsertsForUserGroupsWithRequest(request, username)
   );
   
-  // Build dictionary section
-  let dictionaryPromptSection = '';
-  if (dictionaryEntries && dictionaryEntries.length > 0) {
-    const dictionaryLines = dictionaryEntries.map(e => `"${e.wrong}" → "${e.correct}"`).join(', ');
-    dictionaryPromptSection = `\n\nWÖRTERBUCH (HÖCHSTE PRIORITÄT):\n${dictionaryLines}`;
-  }
+  // Wörterbuch wird NIEMALS an das LLM gesendet – phonetisches Matching übernimmt die Korrektur
+  // (applyLLMPhoneticGuard am Ende von correctText)
   
   // Build context section
   let contextPromptSection = '';
@@ -463,7 +459,7 @@ REGELN:
 8. Markiere NIEMALS Wörter mit [?] oder [???], die du nicht kennst
    (z. B. Medikamente wie "Falithrom", "Zirpin", Eigennamen, Fachbegriffe).
    Solche Wörter sind oft korrekt - du erkennst sie nur nicht.
-   Lasse sie unverändert stehen. Nur bei echten Transkriptionsfehlern [?] setzen.${dictionaryPromptSection}${contextPromptSection}${groupPromptInsertSection}${promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : ''}`;
+   Lasse sie unverändert stehen. Nur bei echten Transkriptionsfehlern [?] setzen.${contextPromptSection}${groupPromptInsertSection}${promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : ''}`;
 
   // Helper to call a cloud LLM (OpenAI/Mistral) for a single chunk
   async function callCloudLLM(prompt: string, chunkText: string): Promise<string> {

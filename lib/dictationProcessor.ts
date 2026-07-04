@@ -1385,19 +1385,28 @@ async function transcribeWithVoxtralLocal(file: Blob): Promise<{ text: string; s
   const startTime = Date.now();
   
   const arrayBuffer = await file.arrayBuffer();
-  let audioBuffer = Buffer.from(arrayBuffer);
-  let mimeType = file.type || 'audio/webm';
+  const audioBuffer = Buffer.from(arrayBuffer);
+  const mimeType = file.type || 'audio/webm';
   
-  console.log(`[Worker Voxtral-Local] Converting ${mimeType} to WAV...`);
-  const { data: normalizedData, mimeType: normalizedMime, normalized } = 
-    await normalizeAudioForWhisper(audioBuffer, mimeType);
-  if (normalized) {
-    audioBuffer = Buffer.from(normalizedData);
-    mimeType = normalizedMime;
-  }
+  // Voxtral/vLLM unterstützt komprimierte Formate (OGG, MP3, WebM) nativ –
+  // keine WAV-Konvertierung nötig, die die Dateigröße 10x aufblähen würde.
+  const mimeToExt: Record<string, string> = {
+    'audio/webm': 'webm',
+    'audio/wav': 'wav',
+    'audio/wave': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/mpeg': 'mp3',
+    'audio/mp3': 'mp3',
+    'audio/ogg': 'ogg',
+    'audio/opus': 'opus',
+    'audio/mp4': 'm4a',
+    'audio/x-m4a': 'm4a',
+  };
+  const fileExt = mimeToExt[mimeType] || 'webm';
+  console.log(`[Worker Voxtral-Local] Using original ${mimeType} (${fileSizeMB}MB, no WAV conversion)`);
   
   const formData = new FormData();
-  const audioFile = new File([audioBuffer], 'audio.wav', { type: mimeType });
+  const audioFile = new File([audioBuffer], `audio.${fileExt}`, { type: mimeType });
   formData.append('file', audioFile);
   formData.append('model', process.env.VOXTRAL_LOCAL_MODEL || 'mistralai/Voxtral-Mini-3B-2507');
   formData.append('language', 'de');
@@ -1464,21 +1473,8 @@ async function correctText(
     ? formatGroupPromptInsertSection(await getPromptInsertsForUserGroupsWithRequest(request, username))
     : '';
   
-  // Build dictionary prompt section for LLM hints (words to correct if similar found)
-  // Note: Dictionary corrections are also applied programmatically in preprocessTranscription()
-  // The LLM section here catches phonetically similar words that aren't exact matches
-  let dictionaryPromptSection = '';
-  if (dictionaryEntries && dictionaryEntries.length > 0) {
-    const dictionaryLines = dictionaryEntries.map(e => 
-      `"${e.wrong}" → "${e.correct}"`
-    ).join(', ');
-    dictionaryPromptSection = `
-
-WÖRTERBUCH (HÖCHSTE PRIORITÄT - immer anwenden):
-${dictionaryLines}
-Wende diese Korrekturen an, wenn du ein Wort findest das gleich oder phonetisch ähnlich klingt.`;
-    console.log(`[Worker] Dictionary added to LLM prompt: ${dictionaryEntries.length} entries`);
-  }
+  // Wörterbuch wird NIEMALS an das LLM gesendet – phonetisches Matching übernimmt die Korrektur
+  // (applyLLMPhoneticGuard am Ende von correctText)
   
   // Build context section for patient and doctor names
   let contextPromptSection = '';
@@ -1504,8 +1500,8 @@ Korrigiere phonetisch ähnliche Namen zu diesen korrekten Schreibweisen.`;
     console.log(`[Worker] Context added to LLM prompt: ${contextParts.join(', ')}`);
   }
   
-  // Combine all prompt additions
-  const promptSuffix = (dictionaryPromptSection + contextPromptSection + groupPromptInsertSection + (promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : '')).trim();
+  // Combine all prompt additions (Wörterbuch wird NIEMALS mitgesendet – phonetisches Matching reicht)
+  const promptSuffix = (contextPromptSection + groupPromptInsertSection + (promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : '')).trim();
   
   // Full system prompt for OpenAI or single-chunk processing
   const systemPrompt = `Du bist ein medizinischer Diktat-Korrektur-Assistent. Deine EINZIGE Aufgabe ist die sprachliche Korrektur diktierter medizinischer Texte.
@@ -1878,7 +1874,7 @@ function cleanLLMOutput(text: string): string {
 }
 
 // Split text into chunks of sentences for smaller models (LM Studio)
-const LM_STUDIO_MAX_SENTENCES = 10;
+const LM_STUDIO_MAX_SENTENCES = 25;
 
 // Max characters per chunk for cloud LLMs (Mistral, OpenAI) to avoid timeouts
 const CLOUD_LLM_MAX_CHARS = 40000;
@@ -2048,7 +2044,7 @@ async function callLLM(
   const body: any = {
     model: config.model,
     messages,
-    temperature: 0.3,
+    temperature: 0.1,
   };
   
   // Only send max_tokens for LM-Studio (local models need explicit limit)

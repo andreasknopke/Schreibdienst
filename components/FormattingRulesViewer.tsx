@@ -15,7 +15,7 @@ interface RuleCategory {
 }
 
 export default function FormattingRulesViewer() {
-  const { getAuthHeader, getDbTokenHeader } = useAuth();
+  const { username, getAuthHeader, getDbTokenHeader } = useAuth();
   const [tab, setTab] = useState<'formattings' | 'abbreviations'>('formattings');
   const [categories, setCategories] = useState<RuleCategory[]>([]);
   const [abbrCategories, setAbbrCategories] = useState<RuleCategory[]>([]);
@@ -24,6 +24,8 @@ export default function FormattingRulesViewer() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [broadcasting, setBroadcasting] = useState(false);
+  const [broadcastMsg, setBroadcastMsg] = useState('');
 
   const headers = useCallback(() => ({
     'Authorization': getAuthHeader(),
@@ -81,6 +83,31 @@ export default function FormattingRulesViewer() {
     }
   }, [ids, setIds, settingKey, headers]);
 
+  const broadcastSettings = useCallback(async () => {
+    setBroadcasting(true);
+    setBroadcastMsg('');
+    const key = tab === 'formattings' ? 'disabledFormattings' : 'disabledAbbreviations';
+    const value = tab === 'formattings' ? [...disabledIds] : [...disabledAbbrIds];
+    try {
+      const res = await fetch('/api/users/settings/broadcast', {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ [key]: value }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setBroadcastMsg(`✓ Auf ${data.updatedUsers} Benutzer übertragen`);
+      } else {
+        setBroadcastMsg(`✗ ${data.error || 'Fehler'}`);
+      }
+    } catch {
+      setBroadcastMsg('✗ Verbindungsfehler');
+    } finally {
+      setBroadcasting(false);
+      setTimeout(() => setBroadcastMsg(''), 4000);
+    }
+  }, [tab, disabledIds, disabledAbbrIds, headers]);
+
   const currentCategories = tab === 'formattings' ? categories : abbrCategories;
 
   if (loading) {
@@ -108,6 +135,25 @@ export default function FormattingRulesViewer() {
           📏 Abkürzungen
         </button>
       </div>
+
+      {/* Root: Broadcast-Button */}
+      {username === 'root' && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={broadcastSettings}
+            disabled={broadcasting}
+            className="text-xs px-2 py-1 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800/60 disabled:opacity-50 transition-colors"
+            title={'Aktuelle ' + (tab === 'formattings' ? 'Formatierungs' : 'Abkürzungs') + '-Einstellungen auf ALLE Benutzer übertragen'}
+          >
+            {broadcasting ? '⏳ Übertrage…' : '📢 Auf alle Benutzer übertragen'}
+          </button>
+          {broadcastMsg && (
+            <span className={`text-xs ${broadcastMsg.startsWith('✓') ? 'text-green-600' : 'text-red-500'}`}>
+              {broadcastMsg}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="space-y-4">
         {currentCategories.map((cat) => (

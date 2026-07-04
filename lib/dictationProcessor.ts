@@ -17,6 +17,7 @@ import {
 } from '@/lib/correctionLogDb';
 import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath, getEffectiveOfflineService, getEffectiveDoublePrecisionService, RuntimeConfig } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
+import { getUserSettingsWithRequest } from '@/lib/usersDb';
 import { formatGroupPromptInsertSection, getPromptInsertsForUserGroupsWithRequest } from '@/lib/groupDictionaryDb';
 import { calculateChangeScore } from '@/lib/changeScore';
 import { preprocessTranscriptionDetailed, removeMarkdownFormatting } from '@/lib/textFormatting';
@@ -208,11 +209,24 @@ export async function processDictation(request: NextRequest, dictationId: number
     const dictionaryEntries = dictionary.entries;
     const standardDictionaryEntries = await getStandardDictEntries(request);
     
+    // Load user's disabled abbreviation preferences
+    let disabledAbbreviationIds: Set<string> | undefined;
+    if (dictation.username) {
+      try {
+        const settings = await getUserSettingsWithRequest(request, dictation.username);
+        if (settings?.disabledAbbreviations && settings.disabledAbbreviations.length > 0) {
+          disabledAbbreviationIds = new Set(settings.disabledAbbreviations);
+          console.log(`[Worker] User ${dictation.username}: ${disabledAbbreviationIds.size} disabled abbreviations`);
+        }
+      } catch (e) { /* ignore - settings not critical */ }
+    }
+    
     const preprocessingResult = preprocessTranscriptionDetailed(
       rawTranscript,
       dictionaryEntries,
       standardDictionaryEntries,
-      { targetUsername: dictation.username, dictionarySet }
+      { targetUsername: dictation.username, dictionarySet },
+      disabledAbbreviationIds
     );
     const preprocessedText = preprocessingResult.text;
     console.log(
@@ -641,6 +655,17 @@ async function transcribeAudio(
     }
   }
   
+  // Load user's disabled abbreviation preferences
+  let disabledAbbreviationIds: Set<string> | undefined;
+  if (username) {
+    try {
+      const settings = await getUserSettingsWithRequest(request, username);
+      if (settings?.disabledAbbreviations && settings.disabledAbbreviations.length > 0) {
+        disabledAbbreviationIds = new Set(settings.disabledAbbreviations);
+      }
+    } catch (e) { /* ignore */ }
+  }
+  
   // Double Precision Pipeline
   if (runtimeConfig.doublePrecisionEnabled) {
     const secondProvider = dpService.provider;
@@ -678,7 +703,8 @@ async function transcribeAudio(
         primaryResult.text,
         dictionaryEntries,
         standardDictionaryEntries,
-        { targetUsername: username, dictionarySet }
+        { targetUsername: username, dictionarySet },
+        disabledAbbreviationIds
       );
       const fallbackText = preprocessedPrimary.text;
       const fallbackMetadata = {
@@ -755,7 +781,8 @@ async function transcribeAudio(
       result1.text,
       dictionaryEntries,
       standardDictionaryEntries,
-      { targetUsername: username }
+      { targetUsername: username },
+      disabledAbbreviationIds
     );
 
     // Log preprocessing (inkl. phonetischem Matching) für Transkription A
@@ -786,7 +813,8 @@ async function transcribeAudio(
       result2.text,
       dictionaryEntries,
       standardDictionaryEntries,
-      { targetUsername: username }
+      { targetUsername: username },
+      disabledAbbreviationIds
     );
 
     // Log preprocessing (inkl. phonetischem Matching) für Transkription B

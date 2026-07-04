@@ -906,6 +906,10 @@ export default function HomePage() {
   const [transcribing, setTranscribing] = useState(false);
   const [correcting, setCorrecting] = useState(false);
   const [dictionarySet, setDictionarySet] = useState<DictionarySet>('medical');
+  // Nutzer-einstellbare Abkürzungen (re./li./mg etc.) – aus DB geladen
+  const [disabledAbbreviationIds, setDisabledAbbreviationIds] = useState<Set<string>>(new Set());
+  const disabledAbbreviationIdsRef = useRef(disabledAbbreviationIds);
+  disabledAbbreviationIdsRef.current = disabledAbbreviationIds;
   // Flag um zu tracken ob nach Aufnahme noch keine Korrektur durchgeführt wurde
   const [pendingCorrection, setPendingCorrection] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -1794,6 +1798,20 @@ export default function HomePage() {
   const [templateContradictionMode, setTemplateContradictionMode] = useState<'genau' | 'einfach' | 'aus' | 'optionen'>('genau');
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
+  // Lade disabledAbbreviations aus der DB (für applyAbbreviations)
+  useEffect(() => {
+    if (!username) return;
+    fetch('/api/users/settings', {
+      headers: { 'Authorization': getAuthHeader(), ...getDbTokenHeader() },
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data.disabledAbbreviations)) {
+          setDisabledAbbreviationIds(new Set(data.disabledAbbreviations));
+        }
+      })
+      .catch(() => {});
+  }, [username, getAuthHeader, getDbTokenHeader]);
   const [showTemplatesManager, setShowTemplatesManager] = useState(false);
   const [templateManagerMode, setTemplateManagerMode] = useState<'create' | 'manage'>('create');
   // Refs für den VAD-/Online-Diktatpfad: Die VAD-Callbacks werden beim Start der
@@ -2152,7 +2170,7 @@ export default function HomePage() {
     }
     
     // Pass 3: Medizinische Abkürzungen/Units (disabledIds via Benutzereinstellungen)
-    text = applyAbbreviations(text);
+    text = applyAbbreviations(text, disabledAbbreviationIdsRef.current);
     
     return text;
   }, [dictionaryEntries, dictionarySet]);

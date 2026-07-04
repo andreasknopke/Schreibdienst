@@ -354,7 +354,17 @@ export async function updateUserSettingsWithRequest(
   settings: { autoCorrect?: boolean; dictionarySet?: 'alltag' | 'medical'; disabledFormattings?: string[]; disabledAbbreviations?: string[] }
 ): Promise<{ success: boolean; error?: string }> {
   if (username.toLowerCase() === 'root') {
-    return { success: false, error: 'Root-Benutzer-Einstellungen können nicht geändert werden' };
+    // Root darf Formatierungs-Präferenzen setzen (für Session/Broadcast),
+    // aber keine echten DB-Settings (autoCorrect, dictionarySet).
+    if (settings.autoCorrect !== undefined || settings.dictionarySet !== undefined) {
+      // Nur ablehnen wenn auch wirklich kritische Settings geändert werden sollen
+      const onlyFormatting = settings.autoCorrect === undefined && settings.dictionarySet === undefined;
+      if (!onlyFormatting) {
+        return { success: false, error: 'Root-Benutzer-Einstellungen können nicht geändert werden' };
+      }
+    }
+    // Formatierungs-Only: Root hat keine DB-Zeile, aber der Client soll nicht blockiert werden
+    return { success: true };
   }
 
   try {

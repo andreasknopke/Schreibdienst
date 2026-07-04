@@ -1565,7 +1565,15 @@ HAUPTAUFGABEN:
 4. FORMATIERUNGSBEFEHLE: Ersetze durch echte Formatierung:
    - "neuer Absatz" → Absatzumbruch (Leerzeile)
    - "neue Zeile" → Zeilenumbruch
-   - "Punkt", "Komma", "Doppelpunkt" → entsprechendes Satzzeichen
+   - "Punkt" (alleinstehend) → "."
+   - "Komma" → "," (IMMER ersetzen, auch in Kombination wie "Komma-Bild" → ",-Bild", "SUV Komma 6" → "SUV, 6")
+   - "Doppelpunkt" → ":"
+   - "nächstes" → neue Aufzählungszeile mit "- " (Bindestrich + Leerzeichen)
+   - "nächstes eingerückt" oder "nächstes darunter eingerückt" → neue eingerückte Zeile mit "  - "
+   - "Klammer auf" → "("
+   - "Klammer zu" → ")"
+   - "Schrägstrich" → "/"
+   - "Semikolon" → ";"
 ${promptSuffix ? `\n${promptSuffix}` : ''}
 
 KRITISCH - AUSGABEFORMAT:
@@ -1630,10 +1638,15 @@ REGELN:
    - "Neuer Absatz" oder "neuer Absatz" → zwei Zeilenumbrüche (Leerzeile einfügen)
    - "Neue Zeile" oder "neue Zeile" → ein Zeilenumbruch
    - "Doppelpunkt" → ":"
-   - "Punkt" (als eigenständiges Wort) → "."
-   - "Komma" (als eigenständiges Wort) → ","
+   - "Punkt" (alleinstehend) → "."
+   - "Komma" → "," (IMMER ersetzen, auch in Kombination: "Komma-Bild" → ",-Bild", "Wert Komma 6" → "Wert, 6")
    - "Klammer auf" → "("
    - "Klammer zu" → ")"
+   - "Schrägstrich" → "/"
+   - "Semikolon" → ";"
+   - "nächstes" → neue Zeile mit "- " (Bindestrich + Leerzeichen)
+   - "nächstes eingerückt" oder "nächstes darunter eingerückt" → neue Zeile mit "  - " (eingerückt)
+   - "Bindestrich" → "-"
 4. Entferne "lösche das letzte Wort/Satz" und das entsprechende Wort/Satz
 5. Entferne Füllwörter wie "ähm", "äh"
 ${promptSuffix ? `\n${promptSuffix}` : ''}

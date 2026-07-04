@@ -594,18 +594,6 @@ export interface ControlWordResult {
 }
 
 /**
- * Apply formatting control words programmatically.
- * This should be called BEFORE sending text to LLM for correction.
- * 
- * @param text - Raw transcription text with spoken control words
- * @returns Text with control words replaced by actual formatting
- */
-export function applyFormattingControlWords(text: string): string {
-  const result = applyFormattingControlWordsWithStats(text);
-  return result.text;
-}
-
-/**
  * Online-Modus: aggressivere Steuerwort-Ersetzung für bereits segmentierte Utterances.
  * In VAD-/Realtime-Pfaden sind einzelne Utterances deutlich eher echte Befehle als Fließtext,
  * deshalb werden hier auch Punkt/Komma/Bindestrich programmgesteuert umgesetzt.
@@ -879,11 +867,24 @@ export function combineFormattedText(existingText: string, incomingText: string)
   return cleanupFormattingPreserveEdgeBreaks(`${existingText}${separator}${incomingText}`);
 }
 
+function makeId(...parts: string[]): string {
+  return parts[0].toLowerCase().replace(/\s+/g, '-').replace(/[^a-zäöüß0-9-]/g, '');
+}
+
+/**
+ * Apply formatting control words programmatically.
+ * @param disabledIds - Optional set of rule IDs to skip (from user preferences)
+ */
+export function applyFormattingControlWords(text: string, disabledIds?: Set<string>): string {
+  const result = applyFormattingControlWordsWithStats(text, disabledIds);
+  return result.text;
+}
+
 /**
  * Apply formatting control words and return statistics about what was applied.
  * Use this version when you need to log/display the results.
  */
-export function applyFormattingControlWordsWithStats(text: string): ControlWordResult {
+export function applyFormattingControlWordsWithStats(text: string, disabledIds?: Set<string>): ControlWordResult {
   if (!text) return { text, stats: { paragraphs: 0, lineBreaks: 0, bulletPoints: 0, punctuation: 0, brackets: 0, deletions: 0, enumerations: 0, total: 0 } };
   
   let result = text;
@@ -896,7 +897,10 @@ export function applyFormattingControlWordsWithStats(text: string): ControlWordR
   stats.total += enumResult.count;
   
   // Step 1: Apply simple replacements and count
-  for (const { pattern, replacement } of CONTROL_WORD_REPLACEMENTS) {
+  for (const entry of CONTROL_WORD_REPLACEMENTS) {
+    // Skip disabled rules
+    if (disabledIds?.has(makeId(...entry.commands))) continue;
+    const { pattern, replacement } = entry;
     const matches = result.match(pattern);
     if (matches) {
       const count = matches.length;

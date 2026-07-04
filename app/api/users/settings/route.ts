@@ -61,19 +61,25 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { autoCorrect, dictionarySet } = body as {
+    const { autoCorrect, dictionarySet, disabledFormattings } = body as {
       autoCorrect?: unknown;
       dictionarySet?: unknown;
+      disabledFormattings?: unknown;
     };
     const hasAutoCorrect = autoCorrect !== undefined;
     const hasDictionarySet = dictionarySet !== undefined;
+    const hasDisabledFormattings = disabledFormattings !== undefined;
     const normalizedDictionarySet =
       dictionarySet === 'alltag' || dictionarySet === 'medical'
         ? dictionarySet
         : undefined;
+    const normalizedDisabledFormattings =
+      Array.isArray(disabledFormattings) && disabledFormattings.every((v) => typeof v === 'string')
+        ? disabledFormattings as string[]
+        : undefined;
     
     // Validate input
-    if (!hasAutoCorrect && !hasDictionarySet) {
+    if (!hasAutoCorrect && !hasDictionarySet && !hasDisabledFormattings) {
       return NextResponse.json({ success: false, error: 'Keine Einstellung angegeben' }, { status: 400 });
     }
 
@@ -85,9 +91,14 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Ungültiges dictionarySet' }, { status: 400 });
     }
 
+    if (hasDisabledFormattings && !normalizedDisabledFormattings) {
+      return NextResponse.json({ success: false, error: 'Ungültiges disabledFormattings' }, { status: 400 });
+    }
+
     const result = await updateUserSettingsWithRequest(request, auth.username, {
       autoCorrect: hasAutoCorrect ? (autoCorrect as boolean) : undefined,
       dictionarySet: normalizedDictionarySet,
+      disabledFormattings: normalizedDisabledFormattings,
     });
     
     if (result.success) {
@@ -95,6 +106,7 @@ export async function PATCH(request: NextRequest) {
         success: true,
         ...(hasAutoCorrect ? { autoCorrect } : {}),
         ...(hasDictionarySet ? { dictionarySet: normalizedDictionarySet } : {}),
+        ...(hasDisabledFormattings ? { disabledFormattings: normalizedDisabledFormattings } : {}),
       });
     }
     

@@ -286,13 +286,22 @@ export async function authenticateUserWithRequest(
 }
 
 // Get user settings with Request context
+function tryParseJsonArray(val: unknown): string[] | undefined {
+  if (!val) return undefined;
+  if (Array.isArray(val)) return val.map(String);
+  if (typeof val === 'string') {
+    try { const parsed = JSON.parse(val); return Array.isArray(parsed) ? parsed.map(String) : undefined; } catch { return undefined; }
+  }
+  return undefined;
+}
+
 export async function getUserSettingsWithRequest(
   request: NextRequest,
   username: string
-): Promise<{ autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief'; dictionarySet: 'alltag' | 'medical' } | null> {
+): Promise<{ autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief'; dictionarySet: 'alltag' | 'medical'; disabledFormattings?: string[] } | null> {
   // Root user always has autoCorrect enabled
   if (username.toLowerCase() === 'root') {
-    return { autoCorrect: true, defaultMode: 'befund', dictionarySet: 'medical' };
+    return { autoCorrect: true, defaultMode: 'befund', dictionarySet: 'medical', disabledFormattings: [] };
   }
 
   try {
@@ -300,7 +309,7 @@ export async function getUserSettingsWithRequest(
     let rows: any[] = [];
     try {
       const [result] = await db.execute<any[]>(
-        'SELECT auto_correct, default_mode, dictionary_set FROM users WHERE username = ?',
+        'SELECT auto_correct, default_mode, dictionary_set, disabled_formattings FROM users WHERE username = ?',
         [username]
       );
       rows = result;
@@ -309,7 +318,7 @@ export async function getUserSettingsWithRequest(
         throw error;
       }
 
-      // Fallback für Datenbanken ohne dictionary_set-Spalte.
+      // Fallback für Datenbanken ohne neue Spalten.
       const [result] = await db.execute<any[]>(
         'SELECT auto_correct, default_mode FROM users WHERE username = ?',
         [username]
@@ -323,10 +332,12 @@ export async function getUserSettingsWithRequest(
 
     const user = rows[0];
     const dictionarySet = user.dictionary_set;
+    const disabledFormattings = tryParseJsonArray(user.disabled_formattings);
     return {
       autoCorrect: user.auto_correct !== false,
       defaultMode: user.default_mode || 'befund',
       dictionarySet: dictionarySet === 'alltag' || dictionarySet === 'medical' ? dictionarySet : 'medical',
+      disabledFormattings,
     };
   } catch (error) {
     console.error('[Users] Get settings error:', error);
@@ -338,7 +349,7 @@ export async function getUserSettingsWithRequest(
 export async function updateUserSettingsWithRequest(
   request: NextRequest,
   username: string,
-  settings: { autoCorrect?: boolean; dictionarySet?: 'alltag' | 'medical' }
+  settings: { autoCorrect?: boolean; dictionarySet?: 'alltag' | 'medical'; disabledFormattings?: string[] }
 ): Promise<{ success: boolean; error?: string }> {
   if (username.toLowerCase() === 'root') {
     return { success: false, error: 'Root-Benutzer-Einstellungen können nicht geändert werden' };
@@ -356,6 +367,11 @@ export async function updateUserSettingsWithRequest(
     if (settings.dictionarySet !== undefined) {
       updates.push('dictionary_set = ?');
       params.push(settings.dictionarySet);
+    }
+
+    if (settings.disabledFormattings !== undefined) {
+      updates.push('disabled_formattings = ?');
+      params.push(JSON.stringify(settings.disabledFormattings));
     }
     
     if (updates.length === 0) {

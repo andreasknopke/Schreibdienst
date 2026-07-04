@@ -72,6 +72,18 @@ export async function POST(request: NextRequest) {
         }
       }
       
+      // Migration: disabled_formattings Spalte hinzufügen (JSON-Array als Text)
+      try {
+        await pool.execute(`
+          ALTER TABLE users ADD COLUMN disabled_formattings TEXT DEFAULT '[]'
+        `);
+        console.log('[Migration] users table: added disabled_formattings column');
+      } catch (alterError: any) {
+        if (!alterError.message.includes('Duplicate column')) {
+          console.log('[Migration] users table: disabled_formattings column already exists');
+        }
+      }
+      
       status.users = true;
       console.log('[Migration] users table: OK');
     } catch (error: any) {

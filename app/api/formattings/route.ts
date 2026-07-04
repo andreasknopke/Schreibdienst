@@ -18,45 +18,50 @@ function getReplacementDisplay(replacement: any): string {
   return String(replacement);
 }
 
+function makeId(...parts: string[]): string {
+  return parts[0].toLowerCase().replace(/\s+/g, '-').replace(/[^a-zäöüß0-9-]/g, '');
+}
+
 export async function GET() {
   const rules: {
     category: string;
     icon: string;
-    items: { commands: string; replacement: string; file: string }[];
+    items: { id: string; commands: string; replacement: string }[];
   }[] = [];
 
   // CONTROL_WORD_REPLACEMENTS
-  const controlItems: { commands: string; replacement: string; file: string }[] = [];
+  const controlItems: { id: string; commands: string; replacement: string }[] = [];
   for (const entry of CONTROL_WORD_REPLACEMENTS) {
     controlItems.push({
+      id: makeId(...entry.commands),
       commands: entry.commands.join(', '),
       replacement: getReplacementDisplay(entry.replacement),
-      file: 'formattings/control-words.ts',
     });
   }
   rules.push({ category: 'Absätze, Klammern & Satzzeichen', icon: '🔣', items: controlItems });
 
   // DELETE_PATTERNS
-  const deleteItems: { commands: string; replacement: string; file: string }[] = [];
+  const deleteItems: { id: string; commands: string; replacement: string }[] = [];
   for (const entry of DELETE_PATTERNS) {
     deleteItems.push({
+      id: makeId(...entry.commands),
       commands: entry.commands.join(', '),
       replacement: entry.type === 'word' ? '🗑 Letztes Wort löschen'
         : entry.type === 'sentence' ? '🗑 Letzten Satz löschen'
         : '🗑 Letzten Absatz löschen',
-      file: 'formattings/delete-patterns.ts',
     });
   }
   rules.push({ category: 'Löschbefehle', icon: '🗑', items: deleteItems });
 
   // ONLINE_COMMAND_PATTERNS
-  const onlineItems: { commands: string; replacement: string; file: string }[] = [];
+  const onlineItems: { id: string; commands: string; replacement: string }[] = [];
   const seenCommands = new Set<string>();
   for (const entry of ONLINE_COMMAND_PATTERNS) {
     const cmdKey = entry.commands.join('|');
     if (seenCommands.has(cmdKey)) continue;
     seenCommands.add(cmdKey);
     onlineItems.push({
+      id: makeId(...entry.commands),
       commands: entry.commands.join(', '),
       replacement: entry.type === 'comma' ? ','
         : entry.type === 'period' ? '.'
@@ -68,7 +73,6 @@ export async function GET() {
         : entry.type === 'deleteSentence' ? '🗑 Letzten Satz löschen'
         : entry.type === 'deleteParagraph' ? '🗑 Letzten Absatz löschen'
         : `(${entry.type})`,
-      file: 'formattings/online-commands.ts',
     });
   }
   rules.push({ category: 'Live-Diktat-Befehle (Online/VAD)', icon: '⚡', items: onlineItems });

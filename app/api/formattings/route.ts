@@ -1,0 +1,77 @@
+import { NextResponse } from 'next/server';
+import { CONTROL_WORD_REPLACEMENTS } from '@/formattings/control-words';
+import { DELETE_PATTERNS } from '@/formattings/delete-patterns';
+import { ONLINE_COMMAND_PATTERNS } from '@/formattings/online-commands';
+
+export const runtime = 'nodejs';
+
+function getReplacementDisplay(replacement: any): string {
+  if (typeof replacement === 'string') {
+    return replacement
+      .replace(/\n/g, '¶ ')
+      .replace(/¶ $/, '')
+      .replace(/¶$/, '') || '(leer)';
+  }
+  if (typeof replacement === 'function') {
+    return '(dynamisch)';
+  }
+  return String(replacement);
+}
+
+export async function GET() {
+  const rules: {
+    category: string;
+    icon: string;
+    items: { commands: string; replacement: string; file: string }[];
+  }[] = [];
+
+  // CONTROL_WORD_REPLACEMENTS
+  const controlItems: { commands: string; replacement: string; file: string }[] = [];
+  for (const entry of CONTROL_WORD_REPLACEMENTS) {
+    controlItems.push({
+      commands: entry.commands.join(', '),
+      replacement: getReplacementDisplay(entry.replacement),
+      file: 'formattings/control-words.ts',
+    });
+  }
+  rules.push({ category: 'Absätze, Klammern & Satzzeichen', icon: '🔣', items: controlItems });
+
+  // DELETE_PATTERNS
+  const deleteItems: { commands: string; replacement: string; file: string }[] = [];
+  for (const entry of DELETE_PATTERNS) {
+    deleteItems.push({
+      commands: entry.commands.join(', '),
+      replacement: entry.type === 'word' ? '🗑 Letztes Wort löschen'
+        : entry.type === 'sentence' ? '🗑 Letzten Satz löschen'
+        : '🗑 Letzten Absatz löschen',
+      file: 'formattings/delete-patterns.ts',
+    });
+  }
+  rules.push({ category: 'Löschbefehle', icon: '🗑', items: deleteItems });
+
+  // ONLINE_COMMAND_PATTERNS
+  const onlineItems: { commands: string; replacement: string; file: string }[] = [];
+  const seenCommands = new Set<string>();
+  for (const entry of ONLINE_COMMAND_PATTERNS) {
+    const cmdKey = entry.commands.join('|');
+    if (seenCommands.has(cmdKey)) continue;
+    seenCommands.add(cmdKey);
+    onlineItems.push({
+      commands: entry.commands.join(', '),
+      replacement: entry.type === 'comma' ? ','
+        : entry.type === 'period' ? '.'
+        : entry.type === 'dash' ? '-'
+        : entry.type === 'lineBreak' ? '¶ Zeilenumbruch'
+        : entry.type === 'paragraphBreak' ? '¶¶ Absatzumbruch'
+        : entry.type === 'bulletPoint' ? '• Aufzählungspunkt'
+        : entry.type === 'deleteWord' ? '🗑 Letztes Wort löschen'
+        : entry.type === 'deleteSentence' ? '🗑 Letzten Satz löschen'
+        : entry.type === 'deleteParagraph' ? '🗑 Letzten Absatz löschen'
+        : `(${entry.type})`,
+      file: 'formattings/online-commands.ts',
+    });
+  }
+  rules.push({ category: 'Live-Diktat-Befehle (Online/VAD)', icon: '⚡', items: onlineItems });
+
+  return NextResponse.json({ rules });
+}

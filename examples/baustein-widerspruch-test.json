@@ -1,0 +1,53 @@
+[
+  {
+    "name": "Test 1: Liquorräume (Hydrocephalus)",
+    "content": "CT-Schädel nativ:\nNormalweite innere und äußere Liquorräume. Keine Mittellinienverlagerung.\nKeine intrakranielle Raumforderung. Keine Hirndruckzeichen.\nStammganglien und Marklager unauffällig.",
+    "field": "befund",
+    "changes": "Zeichen eines Hydrocephalus e vacuo"
+  },
+  {
+    "name": "Test 2: Leber (Hepatomegalie)",
+    "content": "Sonographie Abdomen:\nLeber normal groß, glatt begrenzt, homogenes Parenchym.\nGallenblase unauffällig. Pankreas unauffällig.\nNieren beidseits orthotop und normal groß. Keine Harnstauung.",
+    "field": "befund",
+    "changes": "Hepatomegalie mit inhomogenem Parenchym"
+  },
+  {
+    "name": "Test 3: Nieren (Harnstau)",
+    "content": "Nieren beidseits orthotop, normal groß, scharfe Kontur.\nKeine Harnstauung. Keine Konkremente.\nNebennieren unauffällig.",
+    "field": "befund",
+    "changes": "Rechts Harnstau Grad II"
+  },
+  {
+    "name": "Test 4: Pankreas (Pankreatitis)",
+    "content": "MRT Abdomen:\nPankreas unauffällig. Gallenwege nicht erweitert.\nMilz normal groß. Leber unauffällig.",
+    "field": "befund",
+    "changes": "Pankreatitis mit peripankreatischer Flüssigkeit"
+  },
+  {
+    "name": "Test 5: Thorax (Pleuraerguss)",
+    "content": "CT-Thorax:\nLunge unauffällig entfaltet. Kein Infiltrat, kein Pleuraerguss.\nMediastinum unauffällig. Herzgröße normal.\nKeine pathologischen Lymphknoten.",
+    "field": "befund",
+    "changes": "links basal ein kleiner Pleuraerguss. sonst keine Änderungen"
+  },
+  {
+    "name": "Test 6: Optionen – Handkraft",
+    "content": "Neurologischer Status:\nKraftgrad der oberen Extremitäten: [rechts/kraftgrad 5/5, links/kraftgrad 5/5].\nPatient kann [beide Hände/die linke Hand/die rechte Hand/keine Hand] drücken.\nSensibilität intakt.",
+    "field": "befund",
+    "changes": "Patient kann die linke Hand drücken",
+    "mode": "optionen"
+  },
+  {
+    "name": "Test 7: Optionen – Leber & Gallenblase",
+    "content": "Sonographie Abdomen:\nLeber [unauffällig/vergrößert/verkleinert], [homogenes/inhomogenes] Parenchym.\nGallenblase [unauffällig/steintragend/nicht beurteilbar].\nPankreas unauffällig.",
+    "field": "befund",
+    "changes": "Leber vergrößert, inhomogenes Parenchym, Gallenblase steintragend",
+    "mode": "optionen"
+  },
+  {
+    "name": "Test 8: Optionen – Lunge mit unusedText",
+    "content": "CT-Thorax:\nLunge [unauffällig/geringgradig/mittelgradig] [emphysematös/fibrotisch verändert].\nMediastinum [unauffällig/verbreitert].",
+    "field": "befund",
+    "changes": "Lunge mittelgradig fibrotisch, bitte auch auf Lymphknoten achten",
+    "mode": "optionen"
+  }
+]

@@ -298,10 +298,10 @@ function tryParseJsonArray(val: unknown): string[] | undefined {
 export async function getUserSettingsWithRequest(
   request: NextRequest,
   username: string
-): Promise<{ autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief'; dictionarySet: 'alltag' | 'medical'; disabledFormattings?: string[] } | null> {
+): Promise<{ autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief'; dictionarySet: 'alltag' | 'medical'; disabledFormattings?: string[]; disabledAbbreviations?: string[] } | null> {
   // Root user always has autoCorrect enabled
   if (username.toLowerCase() === 'root') {
-    return { autoCorrect: true, defaultMode: 'befund', dictionarySet: 'medical', disabledFormattings: [] };
+    return { autoCorrect: true, defaultMode: 'befund', dictionarySet: 'medical', disabledFormattings: [], disabledAbbreviations: [] };
   }
 
   try {
@@ -309,7 +309,7 @@ export async function getUserSettingsWithRequest(
     let rows: any[] = [];
     try {
       const [result] = await db.execute<any[]>(
-        'SELECT auto_correct, default_mode, dictionary_set, disabled_formattings FROM users WHERE username = ?',
+        'SELECT auto_correct, default_mode, dictionary_set, disabled_formattings, disabled_abbreviations FROM users WHERE username = ?',
         [username]
       );
       rows = result;
@@ -333,11 +333,13 @@ export async function getUserSettingsWithRequest(
     const user = rows[0];
     const dictionarySet = user.dictionary_set;
     const disabledFormattings = tryParseJsonArray(user.disabled_formattings);
+    const disabledAbbreviations = tryParseJsonArray(user.disabled_abbreviations);
     return {
       autoCorrect: user.auto_correct !== false,
       defaultMode: user.default_mode || 'befund',
       dictionarySet: dictionarySet === 'alltag' || dictionarySet === 'medical' ? dictionarySet : 'medical',
       disabledFormattings,
+      disabledAbbreviations,
     };
   } catch (error) {
     console.error('[Users] Get settings error:', error);
@@ -349,7 +351,7 @@ export async function getUserSettingsWithRequest(
 export async function updateUserSettingsWithRequest(
   request: NextRequest,
   username: string,
-  settings: { autoCorrect?: boolean; dictionarySet?: 'alltag' | 'medical'; disabledFormattings?: string[] }
+  settings: { autoCorrect?: boolean; dictionarySet?: 'alltag' | 'medical'; disabledFormattings?: string[]; disabledAbbreviations?: string[] }
 ): Promise<{ success: boolean; error?: string }> {
   if (username.toLowerCase() === 'root') {
     return { success: false, error: 'Root-Benutzer-Einstellungen können nicht geändert werden' };
@@ -372,6 +374,11 @@ export async function updateUserSettingsWithRequest(
     if (settings.disabledFormattings !== undefined) {
       updates.push('disabled_formattings = ?');
       params.push(JSON.stringify(settings.disabledFormattings));
+    }
+
+    if (settings.disabledAbbreviations !== undefined) {
+      updates.push('disabled_abbreviations = ?');
+      params.push(JSON.stringify(settings.disabledAbbreviations));
     }
     
     if (updates.length === 0) {

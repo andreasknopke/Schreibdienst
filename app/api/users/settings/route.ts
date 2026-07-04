@@ -61,14 +61,16 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { autoCorrect, dictionarySet, disabledFormattings } = body as {
+    const { autoCorrect, dictionarySet, disabledFormattings, disabledAbbreviations } = body as {
       autoCorrect?: unknown;
       dictionarySet?: unknown;
       disabledFormattings?: unknown;
+      disabledAbbreviations?: unknown;
     };
     const hasAutoCorrect = autoCorrect !== undefined;
     const hasDictionarySet = dictionarySet !== undefined;
     const hasDisabledFormattings = disabledFormattings !== undefined;
+    const hasDisabledAbbreviations = disabledAbbreviations !== undefined;
     const normalizedDictionarySet =
       dictionarySet === 'alltag' || dictionarySet === 'medical'
         ? dictionarySet
@@ -77,9 +79,13 @@ export async function PATCH(request: NextRequest) {
       Array.isArray(disabledFormattings) && disabledFormattings.every((v) => typeof v === 'string')
         ? disabledFormattings as string[]
         : undefined;
+    const normalizedDisabledAbbreviations =
+      Array.isArray(disabledAbbreviations) && disabledAbbreviations.every((v) => typeof v === 'string')
+        ? disabledAbbreviations as string[]
+        : undefined;
     
     // Validate input
-    if (!hasAutoCorrect && !hasDictionarySet && !hasDisabledFormattings) {
+    if (!hasAutoCorrect && !hasDictionarySet && !hasDisabledFormattings && !hasDisabledAbbreviations) {
       return NextResponse.json({ success: false, error: 'Keine Einstellung angegeben' }, { status: 400 });
     }
 
@@ -95,10 +101,15 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Ungültiges disabledFormattings' }, { status: 400 });
     }
 
+    if (hasDisabledAbbreviations && !normalizedDisabledAbbreviations) {
+      return NextResponse.json({ success: false, error: 'Ungültiges disabledAbbreviations' }, { status: 400 });
+    }
+
     const result = await updateUserSettingsWithRequest(request, auth.username, {
       autoCorrect: hasAutoCorrect ? (autoCorrect as boolean) : undefined,
       dictionarySet: normalizedDictionarySet,
       disabledFormattings: normalizedDisabledFormattings,
+      disabledAbbreviations: normalizedDisabledAbbreviations,
     });
     
     if (result.success) {
@@ -107,6 +118,7 @@ export async function PATCH(request: NextRequest) {
         ...(hasAutoCorrect ? { autoCorrect } : {}),
         ...(hasDictionarySet ? { dictionarySet: normalizedDictionarySet } : {}),
         ...(hasDisabledFormattings ? { disabledFormattings: normalizedDisabledFormattings } : {}),
+        ...(hasDisabledAbbreviations ? { disabledAbbreviations: normalizedDisabledAbbreviations } : {}),
       });
     }
     

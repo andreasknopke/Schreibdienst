@@ -9,6 +9,7 @@ import { CONTROL_WORD_REPLACEMENTS } from '../formattings/control-words';
 import { DELETE_PATTERNS } from '../formattings/delete-patterns';
 import { NUMBER_WORDS } from '../formattings/number-words';
 import { ONLINE_COMMAND_PATTERNS, OnlineCommandMatch, OnlineCommandType } from '../formattings/online-commands';
+import { ABBREVIATIONS } from '../formattings/abbreviations';
 
 // Dictionary entry interface (compatible with dictionaryDb.ts)
 export interface DictionaryEntry {
@@ -976,6 +977,20 @@ export function applyFormattingControlWordsWithStats(text: string, disabledIds?:
 }
 
 /**
+ * Wendet medizinische Abkürzungen deterministisch an (z.B. "Milligramm" → "mg").
+ * @param disabledIds - Optional deaktivierte Abkürzungs-IDs (aus Benutzereinstellungen)
+ */
+export function applyAbbreviations(text: string, disabledIds?: Set<string>): string {
+  if (!text) return text;
+  let result = text;
+  for (const entry of ABBREVIATIONS) {
+    if (disabledIds?.has(entry.id)) continue;
+    result = result.replace(entry.pattern, entry.replacement);
+  }
+  return result;
+}
+
+/**
  * Handle enumeration/list commands
  * Patterns:
  * - "Aufzählung beginnen/starten" (optional start marker, removed)
@@ -1299,7 +1314,8 @@ export function preprocessTranscriptionDetailed(
   text: string,
   dictionaryEntries?: DictionaryEntry[],
   standardEntries?: { wrong: string; correct: string; phoneticMinSimilarity?: number }[],
-  options?: PreprocessTranscriptionOptions
+  options?: PreprocessTranscriptionOptions,
+  disabledAbbreviationIds?: Set<string>
 ): PreprocessTranscriptionResult {
   if (!text) return { text, operations: [] };
   
@@ -1311,6 +1327,13 @@ export function preprocessTranscriptionDetailed(
   
   // Step 2: Apply formatting control words (logs automatically if any found)
   result = applyFormattingControlWords(result);
+  
+  // Step 2c: Apply medical abbreviations (Milligramm → mg, etc.)
+  if (disabledAbbreviationIds) {
+    result = applyAbbreviations(result, disabledAbbreviationIds);
+  } else {
+    result = applyAbbreviations(result);
+  }
   
   // Step 2b: Fix concatenated "punkt" words (z.B. "stehenpunkt." → "stehen. ")
   // Läuft NACH den control words (die standalone "Punkt" behandeln) und VOR

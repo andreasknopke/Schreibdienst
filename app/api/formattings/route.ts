@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { CONTROL_WORD_REPLACEMENTS } from '@/formattings/control-words';
 import { DELETE_PATTERNS } from '@/formattings/delete-patterns';
 import { ONLINE_COMMAND_PATTERNS } from '@/formattings/online-commands';
+import { ABBREVIATIONS, AbbreviationEntry } from '@/formattings/abbreviations';
 
 export const runtime = 'nodejs';
 
@@ -77,5 +78,17 @@ export async function GET() {
   }
   rules.push({ category: 'Live-Diktat-Befehle (Online/VAD)', icon: '⚡', items: onlineItems });
 
-  return NextResponse.json({ rules });
+  // ABBREVIATIONS – nach Kategorie gruppiert
+  const abbrCategories: { category: string; icon: string; items: { id: string; commands: string; replacement: string }[] }[] = [];
+  const abbrCatOrder = ['Einheiten', 'Medikation', 'Laborwerte', 'Allgemein'] as AbbreviationEntry['category'][];
+  const abbrCatIcons: Record<string, string> = { Einheiten: '📏', Medikation: '💊', Laborwerte: '🧪', Allgemein: '📋' };
+  for (const cat of abbrCatOrder) {
+    const items = ABBREVIATIONS.filter(a => a.category === cat)
+      .map(a => ({ id: a.id, commands: a.commands.join(', '), replacement: a.replacement }));
+    if (items.length > 0) {
+      abbrCategories.push({ category: cat, icon: abbrCatIcons[cat] || '📋', items });
+    }
+  }
+
+  return NextResponse.json({ rules, abbreviations: abbrCategories });
 }

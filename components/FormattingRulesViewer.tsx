@@ -16,8 +16,11 @@ interface RuleCategory {
 
 export default function FormattingRulesViewer() {
   const { getAuthHeader, getDbTokenHeader } = useAuth();
+  const [tab, setTab] = useState<'formattings' | 'abbreviations'>('formattings');
   const [categories, setCategories] = useState<RuleCategory[]>([]);
+  const [abbrCategories, setAbbrCategories] = useState<RuleCategory[]>([]);
   const [disabledIds, setDisabledIds] = useState<Set<string>>(new Set());
+  const [disabledAbbrIds, setDisabledAbbrIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -36,8 +39,11 @@ export default function FormattingRulesViewer() {
     ])
       .then(([fmtData, settingsData]) => {
         setCategories(fmtData.rules || []);
+        setAbbrCategories(fmtData.abbreviations || []);
         const d = settingsData.disabledFormattings;
+        const da = settingsData.disabledAbbreviations;
         if (Array.isArray(d)) setDisabledIds(new Set(d));
+        if (Array.isArray(da)) setDisabledAbbrIds(new Set(da));
         setLoading(false);
       })
       .catch((err) => {
@@ -46,28 +52,36 @@ export default function FormattingRulesViewer() {
       });
   }, [getAuthHeader, getDbTokenHeader]);
 
+  const ids = tab === 'formattings' ? disabledIds : disabledAbbrIds;
+  const setIds = tab === 'formattings'
+    ? (next: Set<string>) => setDisabledIds(next)
+    : (next: Set<string>) => setDisabledAbbrIds(next);
+  const settingKey = tab === 'formattings' ? 'disabledFormattings' : 'disabledAbbreviations';
+
   const toggleRule = useCallback(async (id: string) => {
     setSavingId(id);
-    const wasDisabled = disabledIds.has(id);
-    const next = new Set(disabledIds);
+    const wasDisabled = ids.has(id);
+    const next = new Set(ids);
     if (wasDisabled) next.delete(id); else next.add(id);
-    setDisabledIds(next);
+    setIds(next);
 
     try {
       const res = await fetch('/api/users/settings', {
         method: 'PATCH',
         headers: headers(),
-        body: JSON.stringify({ disabledFormattings: [...next] }),
+        body: JSON.stringify({ [settingKey]: [...next] }),
       });
       if (!res.ok) {
-        setDisabledIds(disabledIds); // rollback
+        setIds(ids); // rollback
       }
     } catch {
-      setDisabledIds(disabledIds); // rollback
+      setIds(ids); // rollback
     } finally {
       setSavingId(null);
     }
-  }, [disabledIds, headers]);
+  }, [ids, setIds, settingKey, headers]);
+
+  const currentCategories = tab === 'formattings' ? categories : abbrCategories;
 
   if (loading) {
     return <div className="text-sm text-gray-500 dark:text-gray-400 p-4">Lade Formatierungsregeln…</div>;
@@ -78,42 +92,60 @@ export default function FormattingRulesViewer() {
   }
 
   return (
-    <div className="space-y-4">
-      {categories.map((cat) => (
-        <div key={cat.category}>
-          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1.5 flex items-center gap-1.5">
-            <span>{cat.icon}</span>
-            <span>{cat.category}</span>
-          </h3>
-          <div className="space-y-0.5">
-            {cat.items.map((item) => {
-              const isDisabled = disabledIds.has(item.id);
-              return (
-                <div
-                  key={item.id}
-                  className={`flex items-center gap-2 rounded px-2 py-1 text-xs hover:bg-gray-50 dark:hover:bg-gray-800/40 ${isDisabled ? 'opacity-50' : ''}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={!isDisabled}
-                    onChange={() => toggleRule(item.id)}
-                    disabled={savingId === item.id}
-                    className="rounded shrink-0"
-                    title={isDisabled ? 'Regel aktivieren' : 'Regel deaktivieren'}
-                  />
-                  <code className={`font-medium shrink-0 ${isDisabled ? 'line-through' : 'text-gray-800 dark:text-gray-200'}`}>
-                    {item.commands}
-                  </code>
-                  <span className="text-gray-400 dark:text-gray-500 mx-1">→</span>
-                  <code className="text-green-700 dark:text-green-400 shrink-0 font-mono text-[11px]">
-                    {item.replacement}
-                  </code>
-                </div>
-              );
-            })}
+    <div className="space-y-3">
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700 pb-1">
+        <button
+          onClick={() => setTab('formattings')}
+          className={`text-xs px-3 py-1 rounded-t font-medium transition-colors ${tab === 'formattings' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+        >
+          🔣 Formatierung
+        </button>
+        <button
+          onClick={() => setTab('abbreviations')}
+          className={`text-xs px-3 py-1 rounded-t font-medium transition-colors ${tab === 'abbreviations' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+        >
+          📏 Abkürzungen
+        </button>
+      </div>
+
+      <div className="space-y-4">
+        {currentCategories.map((cat) => (
+          <div key={cat.category}>
+            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1.5 flex items-center gap-1.5">
+              <span>{cat.icon}</span>
+              <span>{cat.category}</span>
+            </h3>
+            <div className="space-y-0.5">
+              {cat.items.map((item) => {
+                const isDisabled = ids.has(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className={`flex items-center gap-2 rounded px-2 py-1 text-xs hover:bg-gray-50 dark:hover:bg-gray-800/40 ${isDisabled ? 'opacity-50' : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!isDisabled}
+                      onChange={() => toggleRule(item.id)}
+                      disabled={savingId === item.id}
+                      className="rounded shrink-0"
+                      title={isDisabled ? 'Regel aktivieren' : 'Regel deaktivieren'}
+                    />
+                    <code className={`font-medium shrink-0 ${isDisabled ? 'line-through' : 'text-gray-800 dark:text-gray-200'}`}>
+                      {item.commands}
+                    </code>
+                    <span className="text-gray-400 dark:text-gray-500 mx-1">→</span>
+                    <code className="text-green-700 dark:text-green-400 shrink-0 font-mono text-[11px]">
+                      {item.replacement}
+                    </code>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

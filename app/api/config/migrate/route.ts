@@ -84,6 +84,18 @@ export async function POST(request: NextRequest) {
         }
       }
       
+      // Migration: disabled_abbreviations Spalte hinzufügen (JSON-Array als Text)
+      try {
+        await pool.execute(`
+          ALTER TABLE users ADD COLUMN disabled_abbreviations TEXT DEFAULT '[]'
+        `);
+        console.log('[Migration] users table: added disabled_abbreviations column');
+      } catch (alterError: any) {
+        if (!alterError.message.includes('Duplicate column')) {
+          console.log('[Migration] users table: disabled_abbreviations column already exists');
+        }
+      }
+      
       status.users = true;
       console.log('[Migration] users table: OK');
     } catch (error: any) {

@@ -504,7 +504,7 @@ async function callLLM(
 ): Promise<{ content: string; tokens?: { input: number; output: number } }> {
   // LM-Studio uses 10000 max tokens, API providers use provided value or default
   const isLMStudio = config.provider === 'lmstudio';
-  const temperature = options.temperature ?? 0.3;
+  const temperature = options.temperature ?? 0.1;
   const maxTokens = isLMStudio ? LM_STUDIO_MAX_TOKENS : (options.maxTokens ?? 2000);
   const jsonMode = options.jsonMode ?? false;
   
@@ -1083,7 +1083,7 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
             { role: 'system', content: BEURTEILUNG_SUGGEST_PROMPT },
             { role: 'user', content: userMessage }
           ],
-          { temperature: 0.3, maxTokens: 500 },
+          { temperature: 0.1, maxTokens: 500 },
           { endpoint: 'suggest-beurteilung', username }
         );
 
@@ -1151,7 +1151,7 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
                   { role: 'system', content: enhancedSystemPrompt },
                   { role: 'user', content: `Korrigiere den folgenden diktierten Text (${fieldName}):\n<<<DIKTAT_START>>>${fieldText}<<<DIKTAT_ENDE>>>` }
                 ],
-                { temperature: 0.3, maxTokens: 1000 },
+                { temperature: 0.1, maxTokens: 1000 },
                 { endpoint: `correct/${fieldName}`, username }
               );
               // Use robust cleanup function
@@ -1176,7 +1176,7 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
                   { role: 'system', content: enhancedSystemPrompt },
                   { role: 'user', content: `Korrigiere den folgenden diktierten Text:\n<<<DIKTAT_START>>>${chunk}<<<DIKTAT_ENDE>>>` }
                 ],
-                { temperature: 0.3, maxTokens: 1000 },
+                { temperature: 0.1, maxTokens: 1000 },
                 { endpoint: `correct/${fieldName}/chunk`, username }
               );
 
@@ -1262,7 +1262,7 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
             { role: 'system', content: enhancedBefundPrompt },
             { role: 'user', content: userMessage }
           ],
-          { temperature: 0.3, maxTokens: dynamicMaxTokens, jsonMode: true },
+          { temperature: 0.1, maxTokens: dynamicMaxTokens, jsonMode: true },
           { endpoint: 'correct/befund-fields', username }
         );
 
@@ -1371,7 +1371,7 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
                 { role: 'system', content: chunkSystemPrompt },
                 { role: 'user', content: chunkMessage }
               ],
-              { temperature: 0.3, maxTokens: 1000 },
+              { temperature: 0.1, maxTokens: 1000 },
               { endpoint: 'correct/lmstudio-chunk', username }
             );
 
@@ -1443,7 +1443,7 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
               { role: 'system', content: cloudChunkSystemPrompt },
               { role: 'user', content: chunkMessage }
             ],
-            { temperature: 0.3, maxTokens: chunkMaxTokens },
+            { temperature: 0.1, maxTokens: chunkMaxTokens },
             { endpoint: 'correct/cloud-chunk', username }
           );
 
@@ -1498,7 +1498,7 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
           { role: 'system', content: enhancedSystemPrompt },
           { role: 'user', content: userMessage }
         ],
-        { temperature: 0.3, maxTokens: dynamicMaxTokens },
+        { temperature: 0.1, maxTokens: dynamicMaxTokens },
         { endpoint: 'correct/standard', username }
       );
 

@@ -582,7 +582,14 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   //   "eingerückt" → new line + indent (e.g. 2 spaces)
   //   "rücke ein" → same (common dictation variant)
   //   "nächster Punkt eingerückt" → new line with bullet + indent
+  //   "nächstes" → new bullet (Ärzte sagen meist "nächstes" statt "nächster")
   { pattern: /[.,;\s]*\bnächster\s*punkt\s*eingerückt\b[.,;\s]*/gi, replacement: '\n  - ' },
+  { pattern: /[.,;\s]*\bnächstes\s*darunter\s*eingerückt\b[.,;\s]*/gi, replacement: '\n  - ' },
+  { pattern: /[.,;\s]*\bnächstes\s*eingerückt\b[.,;\s]*/gi, replacement: '\n  - ' },
+  { pattern: /[.,;\s]*\bnächstes\s*darunter\b[.,;\s]*/gi, replacement: '\n- ' },
+  // "nächstes" alleinstehend wird NUR ersetzt, wenn vorher eine der Langformen
+  // vorkam (siehe Post-Processing in applyFormattingControlWordsWithStats).
+  // Grund: "nächstes" ist ein häufiges Wort, nur in Aufzählungskontext ein Befehl.
   { pattern: /[.,;\s]*\beingerückt\b[.,;\s]*/gi, replacement: '\n  ' },
   { pattern: /[.,;\s]*\brücke\s*ein\b[.,;\s]*/gi, replacement: '\n  ' },
   { pattern: /[.,;\s]*\beinrücken\b[.,;\s]*/gi, replacement: '\n  ' },
@@ -634,15 +641,16 @@ const CONTROL_WORD_REPLACEMENTS: Array<{ pattern: RegExp; replacement: string | 
   
   // Punctuation - FIRST handle compound words ending with punctuation command
   // e.g., "Diagnosedoppelpunkt" → "Diagnose:"
-  // NOTE: "Punkt" and "Komma" are handled by LLM because they're too ambiguous
-  //       (e.g., "der entscheidende Punkt ist..." should NOT become "der entscheidende . ist...")
   { pattern: /\b(\w+?)doppelpunkt\b/gi, replacement: (_: string, word: string) => `${word}:` },
   { pattern: /\b(\w+?)semikolon\b/gi, replacement: (_: string, word: string) => `${word};` },
   { pattern: /\b(\w+?)fragezeichen\b/gi, replacement: (_: string, word: string) => `${word}?` },
   { pattern: /\b(\w+?)ausrufezeichen\b/gi, replacement: (_: string, word: string) => `${word}!` },
   
-  // Punctuation (standalone words only) - unambiguous ones only
-  // "Punkt" and "Komma" are left to LLM for context-aware handling
+  // Punctuation (standalone words)
+  // "Komma" als alleinstehendes Wort ist in Arztdiktaten IMMER ein Satzzeichenbefehl.
+  // "Punkt" bleibt beim LLM – "Punkt" kann auch echtes Wort sein ("ein wichtiger Punkt").
+  { pattern: /\bkomma\b/gi, replacement: ',' },
+  { pattern: /\bbeistrich\b/gi, replacement: ',' },
   { pattern: /\bdoppelpunkt\b/gi, replacement: ':' },
   { pattern: /\bsemikolon\b/gi, replacement: ';' },
   { pattern: /\bfragezeichen\b/gi, replacement: '?' },
@@ -1102,6 +1110,22 @@ export function applyFormattingControlWordsWithStats(text: string): ControlWordR
   if (beforeDelete !== result) {
     stats.deletions++;
     stats.total++;
+  }
+  
+  // Step 2.5: Bedingte "nächstes"-Ersetzung
+  // "nächstes" alleinstehend → Bullet NUR wenn vorher eine der Langformen im
+  // Originaltext vorkam ("nächstes darunter", "nächstes eingerückt" usw.).
+  // In diesem Kontext ist es eine Verkürzung des Aufzählungsbefehls.
+  // Ohne vorherige Langform ist "nächstes" ein normales Wort → nicht ersetzen.
+  const hadMultiWordNaechstes = /nächstes\s+(?:darunter|eingerückt)/i.test(text);
+  if (hadMultiWordNaechstes) {
+    const beforeNaechstes = result;
+    result = result.replace(/[.,;\s]*\bnächstes\b[.,;\s]*/gi, '\n- ');
+    if (result !== beforeNaechstes) {
+      const naechstesCount = (beforeNaechstes.match(/\bnächstes\b/gi) || []).length;
+      stats.bulletPoints += naechstesCount;
+      stats.total += naechstesCount;
+    }
   }
   
   // Step 3: Clean up formatting

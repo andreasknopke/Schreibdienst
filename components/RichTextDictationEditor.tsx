@@ -397,16 +397,20 @@ function ExternalStateSyncPlugin({
 }) {
   const [editor] = useLexicalComposerContext();
   const formatSignature = useMemo(() => JSON.stringify(formats), [formats]);
+  const selectionRef = useRef(selection);
+
+  // selection via Ref, nicht als Dependency → verhindert Cursor-Springen
+  // durch restoreSelection bei jeder Cursor-Bewegung
+  useEffect(() => {
+    selectionRef.current = selection;
+  }, [selection]);
 
   useEffect(() => {
     const lastApplied = lastAppliedRef.current;
-    const rootElement = editor.getRootElement() as HTMLDivElement | null;
-    const editorHasFocus = rootElement !== null && (rootElement === document.activeElement || rootElement.contains(document.activeElement));
 
     if (lastApplied.value === value && lastApplied.formatSignature === formatSignature) {
-      if (rootElement && editorHasFocus) {
-        restoreSelection(rootElement, selection);
-      }
+      // Inhalt unverändert → Browser/Lexical native Selection belassen,
+      // kein restoreSelection nötig
       return;
     }
 
@@ -421,11 +425,13 @@ function ExternalStateSyncPlugin({
       if (rootElement) {
         const stillHasFocus = rootElement === document.activeElement || rootElement.contains(document.activeElement);
         if (stillHasFocus) {
-          restoreSelection(rootElement, selection);
+          restoreSelection(rootElement, selectionRef.current);
         }
       }
     });
-  }, [editor, formatSignature, formats, lastAppliedRef, selection, suppressOnChangeRef, value]);
+  // selection bewusst NICHT als Dependency – verhindert unnötige Effekt-Ausführung
+  // bei Cursor-Bewegungen
+  }, [editor, formatSignature, formats, lastAppliedRef, suppressOnChangeRef, value]);
 
   return null;
 }

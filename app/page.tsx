@@ -6057,22 +6057,46 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Processing Status Indicator */}
-      {isProcessing && (
-        <div className={`${recording ? 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800' : 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800'} border rounded-lg px-4 py-3 flex items-center gap-3`}>
-          <Spinner size={18} className={recording ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'} />
+      {/* Processing Status — Aufnahme-Live-Indikator (inline) */}
+      {recording && (
+        <div className="bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800 border rounded-lg px-4 py-3 flex items-center gap-3">
+          <Spinner size={18} className="text-green-600 dark:text-green-400" />
           <div className="flex-1">
-            <span className={`text-sm font-medium ${recording ? 'text-green-700 dark:text-green-300' : 'text-blue-700 dark:text-blue-300'}`}>
+            <span className="text-sm font-medium text-green-700 dark:text-green-300">
               {processingStatus}
             </span>
-            <p className={`text-xs mt-0.5 ${recording ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>
-              {recording ? 'Sprechen Sie in das Mikrofon.' : 'Bitte warten Sie, bis die Verarbeitung abgeschlossen ist.'}
+            <p className="text-xs mt-0.5 text-green-600 dark:text-green-400">
+              Sprechen Sie in das Mikrofon.
             </p>
           </div>
           <div className="flex gap-1">
-            <span className={`w-2 h-2 ${recording ? 'bg-green-500' : 'bg-blue-500'} rounded-full animate-bounce`} style={{ animationDelay: '0ms' }}></span>
-            <span className={`w-2 h-2 ${recording ? 'bg-green-500' : 'bg-blue-500'} rounded-full animate-bounce`} style={{ animationDelay: '150ms' }}></span>
-            <span className={`w-2 h-2 ${recording ? 'bg-green-500' : 'bg-blue-500'} rounded-full animate-bounce`} style={{ animationDelay: '300ms' }}></span>
+            <span className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+            <span className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+            <span className="w-2 h-2 bg-green-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+          </div>
+        </div>
+      )}
+
+      {/* Processing Status — Verarbeitungs-Popup (bei Korrektur/Transkription) */}
+      {!recording && isProcessing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-900">
+            <div className="flex flex-col items-center gap-4">
+              <Spinner size={32} className="text-blue-600 dark:text-blue-400" />
+              <div className="text-center">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {processingStatus}
+                </p>
+                <p className="text-xs mt-1 text-gray-500 dark:text-gray-400">
+                  Bitte warten Sie, bis die Verarbeitung abgeschlossen ist.
+                </p>
+              </div>
+              <div className="flex gap-1.5">
+                <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                <span className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+              </div>
+            </div>
           </div>
         </div>
       )}

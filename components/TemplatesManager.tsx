@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from './AuthProvider';
 import TemplateRichTextEditor from './TemplateRichTextEditor';
+import BracketHighlight from './BracketHighlight';
 import { normalizeRichTextRanges, type RichTextFormatRange } from '@/lib/richTextFormatting';
 
 interface Template {
@@ -372,7 +373,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
                       )}
                     </div>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
-                      {template.content}
+                      <BracketHighlight text={template.content} />
                     </p>
                   </div>
                   <div className="flex gap-1">

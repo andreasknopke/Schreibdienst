@@ -560,7 +560,7 @@ export default function RichTextDictationEditor({
   }), [formatSignature, formats, readOnly, value]);
 
   return (
-    <div className="relative">
+    <div className="relative flex flex-col flex-1 min-h-0">
       <div
         className="pointer-events-none absolute bottom-2 right-2 z-10 h-3 w-3 opacity-70"
         style={{

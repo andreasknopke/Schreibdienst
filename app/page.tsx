@@ -5420,7 +5420,7 @@ export default function HomePage() {
 
       {/* Neuen Baustein anlegen Dialog */}
       {showNewTemplateDialog && (
-        <div className="border border-orange-200 dark:border-orange-800 rounded-lg p-4 bg-orange-50 dark:bg-orange-900/30">
+        <div id="inline-template-dialog" className="border border-orange-200 dark:border-orange-800 rounded-lg p-4 bg-orange-50 dark:bg-orange-900/30 flex flex-col">
           <h4 className="font-semibold text-orange-900 dark:text-orange-100 mb-3 flex items-center gap-2">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
@@ -5430,8 +5430,8 @@ export default function HomePage() {
             </svg>
             Neuen Textbaustein anlegen
           </h4>
-          <div className="space-y-3">
-            <div>
+          <div id="inline-template-dialog-body" className="flex flex-col flex-1 min-h-0 gap-3">
+            <div id="inline-template-dialog-name-group" className="flex-shrink-0">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
               <input
                 type="text"
@@ -5442,7 +5442,7 @@ export default function HomePage() {
                 autoFocus
               />
             </div>
-            <div>
+            <div id="inline-template-dialog-content-group" className="flex flex-col flex-1 min-h-0">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Inhalt</label>
               <TemplateRichTextEditor
                 value={newTemplateContent}
@@ -5452,11 +5452,11 @@ export default function HomePage() {
                   setNewTemplateFormats(nextFormats);
                 }}
                 placeholder="Textbaustein-Inhalt..."
-                className="textarea w-full text-sm min-h-[120px] border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-orange-400 focus:ring-1 focus:ring-orange-300 focus:outline-none"
+                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-orange-400 focus:ring-1 focus:ring-orange-300 focus:outline-none h-full min-h-0"
                 disabled={creatingTemplate}
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div id="inline-template-dialog-actions" className="flex items-center gap-2 flex-shrink-0">
               <button
                 className="btn btn-primary text-sm"
                 onClick={handleCreateNewTemplate}
@@ -6677,8 +6677,8 @@ export default function HomePage() {
 
       {/* Templates-Manager Modal — Breite folgt liveEditorWidth */}
       {showTemplatesManager && mounted && createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className={`bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full my-8 flex flex-col h-[80vh] max-h-[calc(100vh-4rem)] min-h-[300px] resize-y overflow-auto ${templateEditorWidthClass}`}>
+        <div id="templates-manager-overlay" className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
+          <div id="templates-manager-modal" className={`bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full my-8 flex flex-col h-[80vh] max-h-[calc(100vh-4rem)] min-h-[300px] resize-y overflow-auto ${templateEditorWidthClass}`}>
             <div className="flex items-center justify-between p-4 border-b dark:border-gray-700 flex-shrink-0">
               <h2 className="font-semibold flex items-center gap-2">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -6701,7 +6701,7 @@ export default function HomePage() {
                 </svg>
               </button>
             </div>
-            <div className="p-4 overflow-y-auto flex flex-col flex-1 min-h-0">
+            <div id="templates-manager-body" className="p-4 overflow-y-auto flex flex-col flex-1 min-h-0">
               <TemplatesManager mode={templateManagerMode} />
             </div>
           </div>

@@ -226,12 +226,12 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 h-full">
+    <div id="templates-manager-root" className="flex flex-col flex-1 min-h-0 h-full">
       {/* Add form – nur im 'create'-Modus */}
       {mode === 'create' && (
-        <form onSubmit={handleAdd} className="flex flex-col flex-1 min-h-0 gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+        <form id="tm-create-form" onSubmit={handleAdd} className="flex flex-col flex-1 min-h-0 gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
           <h3 className="font-medium text-sm flex-shrink-0">Neuer Textbaustein</h3>
-          <div className="flex gap-2 flex-shrink-0">
+          <div id="tm-create-name-row" className="flex gap-2 flex-shrink-0">
             <input
               type="text"
               value={name}
@@ -258,7 +258,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
               setContentFormats(formats);
             }}
             placeholder="Textbaustein-Inhalt..."
-            className="textarea w-full px-3 py-2 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 flex-1 min-h-0"
+            className="w-full px-3 py-2 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 bg-white h-full min-h-0"
             disabled={adding}
           />
           <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer flex-shrink-0">
@@ -281,20 +281,20 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
       )}
 
       {error && (
-        <div className="p-2 text-sm text-red-600 bg-red-50 dark:bg-red-900/20 rounded flex-shrink-0">
+        <div id="tm-error" className="p-2 text-sm text-red-600 bg-red-50 dark:bg-red-900/20 rounded flex-shrink-0">
           {error}
         </div>
       )}
 
       {success && (
-        <div className="p-2 text-sm text-green-600 bg-green-50 dark:bg-green-900/20 rounded flex-shrink-0">
+        <div id="tm-success" className="p-2 text-sm text-green-600 bg-green-50 dark:bg-green-900/20 rounded flex-shrink-0">
           {success}
         </div>
       )}
 
       {/* Templates list – nur im 'manage'-Modus */}
       {mode === 'manage' && (
-        <div className="flex flex-col flex-1 min-h-0">
+        <div id="tm-manage-root" className="flex flex-col flex-1 min-h-0">
           <h3 className="font-medium text-sm text-gray-600 dark:text-gray-400 flex-shrink-0">
             Meine Textbausteine ({templates.length})
           </h3>
@@ -303,11 +303,11 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
           <p className="text-sm text-gray-500 italic">Noch keine Textbausteine vorhanden</p>
         ) : editingId !== null ? (
           /* Nur den gerade editierten Baustein anzeigen, vollflächig */
-          <div className="flex flex-col flex-1 min-h-0">
+          <div id="tm-edit-container" className="flex flex-col flex-1 min-h-0">
             {templates.filter(t => t.id === editingId).map(template => (
               <div key={template.id} className="flex flex-col flex-1 min-h-0 p-3 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg">
-                <div className="flex flex-col flex-1 min-h-0 gap-2">
-                  <div className="flex gap-2 flex-shrink-0">
+                <div id="tm-edit-form-body" className="flex flex-col flex-1 min-h-0 gap-2">
+                  <div id="tm-edit-name-row" className="flex gap-2 flex-shrink-0">
                     <input
                       type="text"
                       value={editName}
@@ -331,9 +331,9 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
                       setEditContent(value);
                       setEditContentFormats(formats);
                     }}
-                    className="textarea w-full px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 flex-1 min-h-0"
+                    className="w-full px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 bg-white h-full min-h-0"
                   />
-                  <div className="flex gap-2 flex-shrink-0">
+                  <div id="tm-edit-actions" className="flex gap-2 flex-shrink-0">
                     <button
                       onClick={handleSaveEdit}
                       className="px-3 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600"

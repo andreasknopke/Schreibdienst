@@ -136,9 +136,14 @@ export async function getCustomFormattingsForUser(
     const value = (rows as any[])?.[0]?.config_value;
     if (value) {
       const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+      console.log(`[CustomFormattings] GELADEN fuer ${username}:`, JSON.stringify(parsed).substring(0, 500));
       if (parsed && typeof parsed === 'object') return parsed;
+    } else {
+      console.log(`[CustomFormattings] KEINE Eintraege fuer ${username} (config_key=${customFormattingsKey(username)})`);
     }
-  } catch { /* DB nicht verfügbar */ }
+  } catch (e: any) {
+    console.warn(`[CustomFormattings] Fehler beim Laden fuer ${username}:`, e?.message);
+  }
   return undefined;
 }
 
@@ -154,6 +159,7 @@ export async function saveCustomFormattingsForUser(
   const db = await getPoolForRequest(request);
   const key = customFormattingsKey(username);
   const content = JSON.stringify(formattings);
+  console.log(`[CustomFormattings] SPEICHERN fuer ${username}:`, content.substring(0, 500));
   await db.execute(
     `INSERT INTO config (config_key, config_value) VALUES (?, ?)
      ON DUPLICATE KEY UPDATE config_value = ?`,

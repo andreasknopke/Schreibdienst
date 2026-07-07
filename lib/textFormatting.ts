@@ -545,9 +545,13 @@ export function applyFormattingControlWordsWithStats(text: string, disabledIds?:
       }
     }
     // Check for custom override replacement
-    const customRepl = customReplacements?.[makeId(...entry.commands)];
+    const entryId = makeId(...entry.commands);
+    const customRepl = customReplacements?.[entryId];
     if (customRepl !== undefined) {
       // Custom overrides are always plain strings
+      if (result.match(pattern)) {
+        console.log(`[CustomFormattings] ANWENDEN override ${entryId}: pattern`, pattern.source, '→', customRepl);
+      }
       result = result.replace(pattern, customRepl);
     } else if (typeof replacement === 'function') {
       result = result.replace(pattern, replacement as (...args: string[]) => string);
@@ -562,6 +566,12 @@ export function applyFormattingControlWordsWithStats(text: string, disabledIds?:
     for (const [id, repl] of Object.entries(customReplacements)) {
       if (knownIds.has(id)) continue; // already handled above
       if (!repl) continue;
+      const words = id.replace(/[-]+/g, ' ').trim();
+      if (!words) continue;
+      const pattern = new RegExp('\\b' + words.split(/\s+/).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+') + '\\b', 'gi');
+      if (result.match(pattern)) {
+        console.log(`[CustomFormattings] ANWENDEN custom-only ${id}:`, words, '→', repl);
+      }
       // Find the corresponding commands from the original customFormattings
       // We don't have the commands here, but the ID was derived from them.
       // Reconstruct a word-boundary regex from the ID (hyphens → spaces).

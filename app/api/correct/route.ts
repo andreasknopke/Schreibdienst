@@ -745,6 +745,7 @@ export async function POST(req: NextRequest) {
     if (username) {
       try {
         const settings = await getUserSettingsWithRequest(req, username);
+        console.log(`[Correct] Settings geladen fuer ${username}: customFormattings =`, settings?.customFormattings ? `vorhanden (${Object.keys(settings.customFormattings).length} Eintraege)` : 'KEINE');
         if (settings?.customFormattings) {
           const controlWords: Record<string, string> = {};
           for (const [id, ov] of Object.entries(settings.customFormattings)) {
@@ -752,10 +753,14 @@ export async function POST(req: NextRequest) {
           }
           if (Object.keys(controlWords).length > 0) {
             customFormattings = { controlWords };
-            console.log(`[Correct] Loaded ${Object.keys(controlWords).length} custom formatting overrides for ${username}`);
+            console.log(`[Correct] ${Object.keys(controlWords).length} custom overrides geladen:`, JSON.stringify(controlWords));
           }
         }
-      } catch { /* ignore */ }
+      } catch (e: any) {
+        console.warn('[Correct] Fehler beim Laden customFormattings:', e?.message);
+      }
+    } else {
+      console.log('[Correct] Kein username — customFormattings uebersprungen');
     }
 
     // Preprocess text: apply formatting control words AND dictionary corrections BEFORE LLM

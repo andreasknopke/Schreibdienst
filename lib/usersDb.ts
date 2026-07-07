@@ -295,13 +295,18 @@ function tryParseJsonArray(val: unknown): string[] | undefined {
   return undefined;
 }
 
+export interface CustomFormattingOverride {
+  commands?: string;
+  replacement?: string;
+}
+
 export async function getUserSettingsWithRequest(
   request: NextRequest,
   username: string
-): Promise<{ autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief'; dictionarySet: 'alltag' | 'medical'; disabledFormattings?: string[]; disabledAbbreviations?: string[] } | null> {
+): Promise<{ autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief'; dictionarySet: 'alltag' | 'medical'; disabledFormattings?: string[]; disabledAbbreviations?: string[]; customFormattings?: Record<string, CustomFormattingOverride> } | null> {
   // Root user always has autoCorrect enabled
   if (username.toLowerCase() === 'root') {
-    return { autoCorrect: true, defaultMode: 'befund', dictionarySet: 'medical', disabledFormattings: [], disabledAbbreviations: [] };
+    return { autoCorrect: true, defaultMode: 'befund', dictionarySet: 'medical', disabledFormattings: [], disabledAbbreviations: [], customFormattings: {} };
   }
 
   try {
@@ -309,7 +314,7 @@ export async function getUserSettingsWithRequest(
     let rows: any[] = [];
     try {
       const [result] = await db.execute<any[]>(
-        'SELECT auto_correct, default_mode, dictionary_set, disabled_formattings, disabled_abbreviations FROM users WHERE username = ?',
+        'SELECT auto_correct, default_mode, dictionary_set, disabled_formattings, disabled_abbreviations, custom_formattings FROM users WHERE username = ?',
         [username]
       );
       rows = result;
@@ -334,12 +339,21 @@ export async function getUserSettingsWithRequest(
     const dictionarySet = user.dictionary_set;
     const disabledFormattings = tryParseJsonArray(user.disabled_formattings);
     const disabledAbbreviations = tryParseJsonArray(user.disabled_abbreviations);
+    let customFormattings: Record<string, CustomFormattingOverride> | undefined;
+    if (user.custom_formattings) {
+      try {
+        customFormattings = typeof user.custom_formattings === 'string'
+          ? JSON.parse(user.custom_formattings)
+          : user.custom_formattings;
+      } catch { /* ignore */ }
+    }
     return {
       autoCorrect: user.auto_correct !== false,
       defaultMode: user.default_mode || 'befund',
       dictionarySet: dictionarySet === 'alltag' || dictionarySet === 'medical' ? dictionarySet : 'medical',
       disabledFormattings,
       disabledAbbreviations,
+      customFormattings,
     };
   } catch (error) {
     console.error('[Users] Get settings error:', error);
@@ -351,7 +365,7 @@ export async function getUserSettingsWithRequest(
 export async function updateUserSettingsWithRequest(
   request: NextRequest,
   username: string,
-  settings: { autoCorrect?: boolean; dictionarySet?: 'alltag' | 'medical'; disabledFormattings?: string[]; disabledAbbreviations?: string[] }
+  settings: { autoCorrect?: boolean; dictionarySet?: 'alltag' | 'medical'; disabledFormattings?: string[]; disabledAbbreviations?: string[]; customFormattings?: Record<string, CustomFormattingOverride> }
 ): Promise<{ success: boolean; error?: string }> {
   if (username.toLowerCase() === 'root') {
     // Root darf Formatierungs-Präferenzen setzen (für Session/Broadcast),
@@ -390,6 +404,11 @@ export async function updateUserSettingsWithRequest(
       updates.push('disabled_abbreviations = ?');
       params.push(JSON.stringify(settings.disabledAbbreviations));
     }
+
+    if (settings.customFormattings !== undefined) {
+      updates.push('custom_formattings = ?');
+      params.push(JSON.stringify(settings.customFormattings));
+    }
     
     if (updates.length === 0) {
       return { success: false, error: 'Keine Änderungen angegeben' };
@@ -414,7 +433,7 @@ export async function updateUserSettingsWithRequest(
       // nicht existieren: entferne sie aus dem UPDATE und versuche es erneut.
       if (updateError?.code === 'ER_BAD_FIELD_ERROR') {
         const safeUpdates = updates.filter(u =>
-          !u.startsWith('disabled_formattings') && !u.startsWith('disabled_abbreviations')
+          !u.startsWith('disabled_formattings') && !u.startsWith('disabled_abbreviations') && !u.startsWith('custom_formattings')
         );
         const safeParams = params.filter((_, i) =>
           i < updates.length && safeUpdates.includes(updates[i])

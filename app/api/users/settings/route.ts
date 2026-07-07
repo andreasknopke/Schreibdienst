@@ -61,16 +61,18 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { autoCorrect, dictionarySet, disabledFormattings, disabledAbbreviations } = body as {
+    const { autoCorrect, dictionarySet, disabledFormattings, disabledAbbreviations, customFormattings } = body as {
       autoCorrect?: unknown;
       dictionarySet?: unknown;
       disabledFormattings?: unknown;
       disabledAbbreviations?: unknown;
+      customFormattings?: unknown;
     };
     const hasAutoCorrect = autoCorrect !== undefined;
     const hasDictionarySet = dictionarySet !== undefined;
     const hasDisabledFormattings = disabledFormattings !== undefined;
     const hasDisabledAbbreviations = disabledAbbreviations !== undefined;
+    const hasCustomFormattings = customFormattings !== undefined;
     const normalizedDictionarySet =
       dictionarySet === 'alltag' || dictionarySet === 'medical'
         ? dictionarySet
@@ -85,8 +87,12 @@ export async function PATCH(request: NextRequest) {
         : undefined;
     
     // Validate input
-    if (!hasAutoCorrect && !hasDictionarySet && !hasDisabledFormattings && !hasDisabledAbbreviations) {
+    if (!hasAutoCorrect && !hasDictionarySet && !hasDisabledFormattings && !hasDisabledAbbreviations && !hasCustomFormattings) {
       return NextResponse.json({ success: false, error: 'Keine Einstellung angegeben' }, { status: 400 });
+    }
+
+    if (hasCustomFormattings && (typeof customFormattings !== 'object' || customFormattings === null)) {
+      return NextResponse.json({ success: false, error: 'Ungültiges customFormattings' }, { status: 400 });
     }
 
     if (hasAutoCorrect && typeof autoCorrect !== 'boolean') {
@@ -105,11 +111,17 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Ungültiges disabledAbbreviations' }, { status: 400 });
     }
 
+    const normalizedCustomFormattings: Record<string, { commands?: string; replacement?: string }> | undefined =
+      hasCustomFormattings && typeof customFormattings === 'object' && customFormattings !== null
+        ? (customFormattings as Record<string, { commands?: string; replacement?: string }>)
+        : undefined;
+
     const result = await updateUserSettingsWithRequest(request, auth.username, {
       autoCorrect: hasAutoCorrect ? (autoCorrect as boolean) : undefined,
       dictionarySet: normalizedDictionarySet,
       disabledFormattings: normalizedDisabledFormattings,
       disabledAbbreviations: normalizedDisabledAbbreviations,
+      customFormattings: normalizedCustomFormattings,
     });
     
     if (result.success) {
@@ -119,6 +131,7 @@ export async function PATCH(request: NextRequest) {
         ...(hasDictionarySet ? { dictionarySet: normalizedDictionarySet } : {}),
         ...(hasDisabledFormattings ? { disabledFormattings: normalizedDisabledFormattings } : {}),
         ...(hasDisabledAbbreviations ? { disabledAbbreviations: normalizedDisabledAbbreviations } : {}),
+        ...(hasCustomFormattings ? { customFormattings: normalizedCustomFormattings } : {}),
       });
     }
     

@@ -274,6 +274,9 @@ ${cleanedTemplate}
 DIKTIERTE ÄNDERUNGEN (ordne diese den [Optionen] im Textbaustein zu):
 ${changes}
 
+WICHTIG: {…} am Absatzanfang sind Wiederholungs-Marker, KEINE Optionen.
+Absätze mit {…} können mehrfach vorkommen, Absätze ohne {…} nicht.
+
 Gib den vollständigen angepassten Text zurück:`;
     } else {
       userMessage = `VOLLSTÄNDIGER TEXTBAUSTEIN (behalte die Struktur bei):
@@ -281,6 +284,9 @@ ${cleanedTemplate}
 
 DIKTIERTE ÄNDERUNGEN (füge diese an der semantisch passenden Stelle ein, NICHT mitten in einen Satz):
 ${changes}
+
+WICHTIG: {…} am Absatzanfang sind Wiederholungs-Marker, KEINE Optionen.
+Absätze mit {…} können mehrfach vorkommen, Absätze ohne {…} nicht.
 
 Gib den vollständigen angepassten Text zurück:`;
     }

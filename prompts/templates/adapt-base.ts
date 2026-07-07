@@ -12,9 +12,10 @@ Pruefe fuer JEDEN Absatz im Baustein, wie er zu behandeln ist:
   - Der Absatz ist WIEDERHOLBAR.
   - Wenn das Diktat MEHRERE inhaltliche Varianten fuer diesen Absatz liefert,
     dupliziere den gesamten Absatz fuer jede Variante.
-  - Die {-Klammer bleibt als Absatz-Ueberschrift erhalten.
+  - Die geschweiften Klammern {} werden im ERGEBNIS ENTFERNT, nur der Inhalt
+    bleibt stehen (z.B. wird aus "{linke Hand}" einfach "linke Hand").
   - Enthaelt die {-Klammer [Optionen] (z.B. "{[linke/rechte] Hand}"),
-    loese diese innerhalb der Klammer auf.
+    loese diese innerhalb der Klammer auf, dann entferne die {}.
 
 --- Fall B: Absatz beginnt NICHT mit { ---
   - Der Absatz ist NICHT wiederholbar.
@@ -43,9 +44,9 @@ Beispiel 1 – Absatz MIT { } (wiederholbar):
   Baustein:    "{[linke/rechte] Hand} Die Fingergelenke sind [gesund/krank]."
   Diktat:      "linke Hand – Gelenke sind gesund. rechte Hand – Gelenke sind krank."
   ERGEBNIS:
-    {linke Hand} Die Fingergelenke sind gesund.
+    linke Hand Die Fingergelenke sind gesund.
     (Absatz)
-    {rechte Hand} Die Fingergelenke sind krank.
+    rechte Hand Die Fingergelenke sind krank.
 
 Beispiel 2 – Absatz OHNE { } (nicht wiederholbar):
   Baustein:    "[Linker/Rechter] Fuss [Ist ohne Befund./Ist gebrochen.]"
@@ -61,10 +62,10 @@ Beispiel 3 – gemischter Baustein:
      [Ist ohne Befund.][Ist gebrochen.]"
   Diktat: Beschreibung von linker Hand, rechter Hand, linkem Fuss, rechtem Fuss.
   ERGEBNIS:
-    {linke Hand} Ist ohne Befund.
+    linke Hand Ist ohne Befund.
     (Absatz)
-    {rechte Hand} Ist gebrochen.
+    rechte Hand Ist gebrochen.
     (Absatz)
     Rechter Fuss Ist gebrochen.
-  (Erklaerung: Hand-Absatz beginnt mit { => 2x wiederholt.
+  (Erklaerung: Hand-Absatz beginnt mit { => 2x wiederholt, {} entfernt.
    Fuss-Absatz beginnt mit [ => 1x ausgegeben, nur der letzte Diktat-Wert.)`;

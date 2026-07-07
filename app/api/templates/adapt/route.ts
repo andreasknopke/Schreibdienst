@@ -217,6 +217,13 @@ function stripIntroducedMarkdown(original: string, adapted: string): string {
   return result;
 }
 
+// Entfernt geschweifte Klammern {…} aus dem LLM-Ergebnis.
+// Die {…} sind reine Steuer-Marker fuer die Wiederholungslogik und gehoeren
+// nicht in den Endtext.
+function stripCurlyBraces(text: string): string {
+  return text.replace(/\{([^}]*)\}/g, '$1');
+}
+
 export async function POST(req: NextRequest) {
   console.log('\n=== Template Adapt Request ===');
   const startTime = Date.now();
@@ -323,6 +330,7 @@ Gib den vollständigen angepassten Text zurück:`;
     // wieder entfernen, damit das ursprüngliche Layout des Bausteins erhalten bleibt
     // (z. B. "**Teil 1**" -> "Teil 1").
     adaptedText = stripIntroducedMarkdown(template, adaptedText);
+    adaptedText = stripCurlyBraces(adaptedText);
     unusedText = unusedText.trim();
     
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);

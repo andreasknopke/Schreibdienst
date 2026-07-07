@@ -22,6 +22,7 @@ import RichTextDictationEditor, { getRichTextSelection } from '@/components/Rich
 import TemplateRichTextEditor from '@/components/TemplateRichTextEditor';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import TemplatesManager from '@/components/TemplatesManager';
+import BracketHighlight from '@/components/BracketHighlight';
 import { createPortal } from 'react-dom';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
@@ -5927,7 +5928,7 @@ export default function HomePage() {
             </button>
           </div>
           <p className="text-xs text-orange-700 dark:text-orange-300 line-clamp-2">
-            {selectedTemplate.content.substring(0, 150)}...
+            <BracketHighlight text={selectedTemplate.content.substring(0, 150) + '...'} />
           </p>
           <p className="text-xs text-orange-600 dark:text-orange-400 mt-1 italic">
             💡 Diktieren Sie nur die Änderungen. {hasTemplateChanges ? 'Mit "Änderungen einfügen" werden diese per LLM in den Baustein eingebaut.' : 'Mit "Einfügen" wird der Baustein unverändert übernommen.'}

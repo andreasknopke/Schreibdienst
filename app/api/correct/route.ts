@@ -11,6 +11,7 @@ import { SYSTEM_PROMPT } from '@/prompts/correct/system-prompt';
 import { BEFUND_SYSTEM_PROMPT } from '@/prompts/correct/befund-system-prompt';
 import { BEURTEILUNG_SUGGEST_PROMPT } from '@/prompts/correct/beurteilung-suggest-prompt';
 import { getEffectivePrompt } from '@/lib/promptOverrides';
+import { getUserSettingsWithRequest } from '@/lib/usersDb';
 
 export const runtime = 'nodejs';
 
@@ -739,6 +740,24 @@ export async function POST(req: NextRequest) {
     // Aufteilen in private+group (für LLM-Prompt) und alle (für deterministische Vorverarbeitung)
     const dictionaryEntries = activeEntries; // wird in der Vorverarbeitung verwendet
 
+    // Load user's custom formatting overrides
+    let customFormattings: { controlWords?: Record<string, string> } | undefined;
+    if (username) {
+      try {
+        const settings = await getUserSettingsWithRequest(req, username);
+        if (settings?.customFormattings) {
+          const controlWords: Record<string, string> = {};
+          for (const [id, ov] of Object.entries(settings.customFormattings)) {
+            if (ov.replacement) controlWords[id] = ov.replacement;
+          }
+          if (Object.keys(controlWords).length > 0) {
+            customFormattings = { controlWords };
+            console.log(`[Correct] Loaded ${Object.keys(controlWords).length} custom formatting overrides for ${username}`);
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
     // Preprocess text: apply formatting control words AND dictionary corrections BEFORE LLM
     // This handles "neuer Absatz", "neue Zeile", "Klammer auf/zu", etc. programmatically
     // AND applies user dictionary corrections deterministically (saves tokens & more reliable)
@@ -746,7 +765,7 @@ export async function POST(req: NextRequest) {
       if (!raw) return raw;
       if (dictionarySet !== 'medical') return raw;
       const before = raw;
-      const detailed = preprocessTranscriptionDetailed(raw, activeEntries, [], { targetUsername: username });
+      const detailed = preprocessTranscriptionDetailed(raw, activeEntries, [], { targetUsername: username }, undefined, customFormattings);
       if (detailed.operations.length > 0) {
         console.log(
           `[Correct] Preprocess applied ${detailed.operations.length} dictionary ` +

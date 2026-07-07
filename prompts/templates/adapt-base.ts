@@ -4,42 +4,67 @@ EINGABE:
 1. Ein VOLLSTÄNDIGER medizinischer Textbaustein (Vorlage) - dieser Text ist bereits strukturiert und formatiert
 2. Diktierte Änderungen/Ergänzungen vom Arzt
 
-KRITISCH: WIEDERHOLBARE ABSÄTZE ({…}-MARKER) VS. EINFACHE KORREKTUR
+ENTSCHIEDUNGSBAUM: WIEDERHOLUNG VON ABSAETZEN
 
-Ein Absatz, der mit einer geschweiften Klammer {…} beginnt, ist ein WIEDERHOLBARER
-Absatz. Das Diktat kann für diesen Absatz MEHRERE Varianten liefern, und der
-Absatz wird dann entsprechend oft ausgegeben.
+Pruefe fuer JEDEN Absatz im Baustein, wie er zu behandeln ist:
 
-Ein Absatz OHNE {…} ist ein EINFACHER Absatz – bei mehreren widersprüchlichen
-Angaben im Diktat zählt NUR DIE LETZTE (normale Korrektur-Logik).
+--- Fall A: Absatz beginnt mit einer geschweiften Klammer { (curly brace) ---
+  - Der Absatz ist WIEDERHOLBAR.
+  - Wenn das Diktat MEHRERE inhaltliche Varianten fuer diesen Absatz liefert,
+    dupliziere den gesamten Absatz fuer jede Variante.
+  - Die {-Klammer bleibt als Absatz-Ueberschrift erhalten.
+  - Enthaelt die {-Klammer [Optionen] (z.B. "{[linke/rechte] Hand}"),
+    loese diese innerhalb der Klammer auf.
 
---- Regel 1: Absatz OHNE {…} (einfache Korrektur) ---
-- Der Absatz wird HÖCHSTENS EINMAL ausgegeben.
-- Enthält das Diktat mehrere widersprüchliche Angaben zu diesem Absatz, wird
-  NUR die letztgenannte übernommen.
-- Beispiel: "Patientenname ist Greta Leim. Ach nein, Patientenname ist Greta Lein."
-  → Ergebnis: "Patientenname ist Greta Lein." (nur die letzte Korrektur zählt)
+--- Fall B: Absatz beginnt NICHT mit { ---
+  - Der Absatz ist NICHT wiederholbar.
+  - Er wird HOECHSTENS EINMAL ausgegeben.
+  - Enthaelt das Diktat mehrere Angaben zu diesem Absatz, wird NUR die letzte
+    uebernommen (normale Korrektur-Logik).
+  - Auch wenn der Absatz [Optionen] enthaelt: Er wird NICHT dupliziert.
 
---- Regel 2: Absatz MIT {…} (wiederholbar) ---
-- Der Absatz KANN MEHRFACH im Ergebnis vorkommen, wenn das Diktat mehrere
-  inhaltlich unterschiedliche Durchläufe für diesen Absatz enthält.
-- Die {…}-Klammer bleibt im ausgegebenen Text erhalten – sie dient als
-  Absatz-Überschrift und wird NICHT entfernt.
-- Enthält der {…}-Marker zusätzlich [Optionen] (z. B. "{[linke/rechte] Hand}"),
-  werden diese wie gewohnt aufgelöst. Die Wiederholungslogik bleibt aktiv.
+--- KRITISCHE REGEL ---
+NUR Absaetze, deren ERSTES ZEICHEN eine geschweifte Klammer { ist, duerfen
+vervielfaeltigt werden. Beginnt ein Absatz mit [ oder einem anderen Zeichen,
+wird er NICHT wiederholt – egal wie viele Optionen oder Varianten das Diktat liefert.
 
-  Vorgehen beim Wiederholen:
-  1. Zerlege das Diktat in die einzelnen Varianten pro Absatz-Durchlauf
-  2. Dupliziere den gesamten Absatz für jede Variante
-  3. Passe den Inhalt der {…}-Klammer sowie den Absatztext an die jeweilige Variante an
-  4. Gib die Absätze in der Reihenfolge der diktierten Varianten aus
+--- Negative Beispiele (FALSCH) ---
+FALSCH: Baustein hat "[Linker/Rechter] Fuss" (beginnt mit [, nicht {).
+        Diktat nennt linken und rechten Fuss.
+        - Darf NICHT zu zwei Fuss-Absaetzen werden! Nur der letzte Fuss zaehlt.
 
-  Beispiel:
+FALSCH: Baustein hat "Patient: [name]" (beginnt mit P, nicht {).
+        Diktat nennt zwei Namen.
+        - Darf NICHT zu zwei Absaetzen werden! Nur der letzte Name zaehlt.
+
+--- Positive Beispiele (RICHTIG) ---
+
+Beispiel 1 – Absatz MIT { } (wiederholbar):
   Baustein:    "{[linke/rechte] Hand} Die Fingergelenke sind [gesund/krank]."
-  Diktat:      "linke hand – Gelenke sind gesund. rechte hand – Gelenke sind krank."
-  Ergebnis:    "{linke Hand} Die Fingergelenke sind gesund.\n\n{rechte Hand} Die Fingergelenke sind krank."
+  Diktat:      "linke Hand – Gelenke sind gesund. rechte Hand – Gelenke sind krank."
+  ERGEBNIS:
+    {linke Hand} Die Fingergelenke sind gesund.
+    (Absatz)
+    {rechte Hand} Die Fingergelenke sind krank.
 
-  Beispiel 2 (nur eine Variante im Diktat → kein Wiederholen):
-  Baustein:    "{[linke/rechte] Hand} Die Fingergelenke sind [gesund/krank]."
-  Diktat:      "rechte Hand – Gelenke sind krank."
-  Ergebnis:    "{rechte Hand} Die Fingergelenke sind krank."`;
+Beispiel 2 – Absatz OHNE { } (nicht wiederholbar):
+  Baustein:    "[Linker/Rechter] Fuss [Ist ohne Befund./Ist gebrochen.]"
+  Diktat:      "linker Fuss ohne Befund. rechter Fuss gebrochen."
+  ERGEBNIS (NUR der letzte diktierte Wert):
+    Rechter Fuss Ist gebrochen.
+
+Beispiel 3 – gemischter Baustein:
+  Baustein:
+    "{[Linke/Rechte] Hand}
+     [Ist ohne Befund.][Ist gebrochen.]"
+    "[Linker/Rechter] Fuss
+     [Ist ohne Befund.][Ist gebrochen.]"
+  Diktat: Beschreibung von linker Hand, rechter Hand, linkem Fuss, rechtem Fuss.
+  ERGEBNIS:
+    {linke Hand} Ist ohne Befund.
+    (Absatz)
+    {rechte Hand} Ist gebrochen.
+    (Absatz)
+    Rechter Fuss Ist gebrochen.
+  (Erklaerung: Hand-Absatz beginnt mit { => 2x wiederholt.
+   Fuss-Absatz beginnt mit [ => 1x ausgegeben, nur der letzte Diktat-Wert.)`;

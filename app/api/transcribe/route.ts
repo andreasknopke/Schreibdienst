@@ -947,7 +947,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (username && shouldLogStats) {
-    if (username && shouldLogStats) {
       logOnlineUsageEventWithRequest(request, {
         username,
         eventType: 'utterance',

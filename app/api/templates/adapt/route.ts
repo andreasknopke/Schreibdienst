@@ -6,6 +6,7 @@ import { CONTRADICTION_GENAU } from '@/prompts/templates/contradiction-genau';
 import { CONTRADICTION_EINFACH } from '@/prompts/templates/contradiction-einfach';
 import { CONTRADICTION_OPTIONEN } from '@/prompts/templates/contradiction-optionen';
 import { TEMPLATE_NIEMALS } from '@/prompts/templates/template-niemals';
+import { remapRichTextRanges, normalizeRichTextRanges, type RichTextFormatRange } from '@/lib/richTextFormatting';
 
 export const runtime = 'nodejs';
 
@@ -224,13 +225,63 @@ function stripCurlyBraces(text: string): string {
   return text.replace(/\{([^}]*)\}/g, '$1');
 }
 
+/**
+ * Nach dem Standard-Remap: Findet Format-Ranges fuer duplizierte Absaetze.
+ *
+ * Das Standard-remapRichTextRanges bildet Format-Ranges 1:1 von Original auf
+ * Zieltext ab – wenn das LLM aber einen Absatz dupliziert hat (z. B. weil
+ * ein {-Marker wiederholt wurde), bekommt die Kopie keine Format-Ranges.
+ *
+ * Diese Funktion sucht nach unformatierten Textabschnitten und kopiert
+ * Format-Ranges aus inhaltlich passenden Quellen.
+ */
+function applyFormatRangesToDuplications(
+  originalText: string,
+  adaptedText: string,
+  inputRanges: RichTextFormatRange[],
+  remappedRanges: RichTextFormatRange[],
+): RichTextFormatRange[] {
+  const result = [...remappedRanges];
+  if (inputRanges.length === 0) return result;
+
+  const maxEnd = Math.max(0, ...result.map(r => r.end));
+  if (maxEnd >= adaptedText.length) return result; // keine Duplikation erkannt
+
+  // Fuer jede originale Range: suche den Segmenttext im Bereich NACH maxEnd
+  const seen = new Set<string>();
+  for (const input of inputRanges) {
+    const segment = originalText.slice(input.start, input.end);
+    if (!segment || segment.length < 3) continue;
+    const key = `${segment}|${input.bold}|${input.italic}|${input.underline}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    // Alle Vorkommen in adaptedText nach maxEnd finden
+    let searchPos = maxEnd;
+    while (searchPos < adaptedText.length) {
+      const foundAt = adaptedText.indexOf(segment, searchPos);
+      if (foundAt === -1 || foundAt > adaptedText.length) break;
+      result.push({
+        start: foundAt,
+        end: foundAt + segment.length,
+        bold: input.bold,
+        italic: input.italic,
+        underline: input.underline,
+      });
+      searchPos = foundAt + segment.length;
+    }
+  }
+
+  return normalizeRichTextRanges(result, adaptedText.length);
+}
+
 export async function POST(req: NextRequest) {
   console.log('\n=== Template Adapt Request ===');
   const startTime = Date.now();
   
   try {
     const body = await req.json();
-    const { template, changes, field, username, contradictionMode } = body;
+    const { template, changes, field, username, contradictionMode, formatRanges } = body;
     
     if (!template || !changes) {
       return NextResponse.json({ error: 'Template und Änderungen erforderlich' }, { status: 400 });
@@ -238,6 +289,7 @@ export async function POST(req: NextRequest) {
     
     console.log(`[Template] Field: ${field || 'befund'}, Username: ${username || 'unknown'}`);
     console.log(`[Template] Template length: ${template.length} chars`);
+    console.log(`[Template] FormatRanges: ${(formatRanges ?? []).length} ranges`);
     console.log(`[Template] Changes: "${changes}"`);
     console.log(`[Template] contradictionMode: ${contradictionMode || 'genau'}`);
     
@@ -333,9 +385,21 @@ Gib den vollständigen angepassten Text zurück:`;
     adaptedText = stripCurlyBraces(adaptedText);
     unusedText = unusedText.trim();
     
+    // Format-Ranges fuer den adaptierten Text berechnen
+    const inputFormats = (formatRanges as RichTextFormatRange[] | undefined) ?? [];
+    let adaptedFormats: RichTextFormatRange[] = [];
+    if (inputFormats.length > 0) {
+      // Schritt 1: Standard-Remap vom Original-Template zum LLM-Output
+      let remapped = remapRichTextRanges(template, adaptedText, inputFormats);
+      // Schritt 2: Duplikations-Erkennung – kopiert Ranges auf wiederholte Absätze
+      remapped = applyFormatRangesToDuplications(template, adaptedText, inputFormats, remapped);
+      adaptedFormats = remapped;
+    }
+    
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     const tokens = result.tokens ? `${result.tokens.input}/${result.tokens.output}` : 'unknown';
     console.log(`[Template] Success - Duration: ${duration}s, Tokens: ${tokens}`);
+    console.log(`[Template] Adapted formats: ${adaptedFormats.length} ranges`);
     console.log('\n--- LLM OUTPUT ---');
     console.log(adaptedText);
     console.log('--- END OUTPUT ---\n');
@@ -345,6 +409,7 @@ Gib den vollständigen angepassten Text zurück:`;
       success: true, 
       adaptedText,
       unusedText,
+      formatRanges: adaptedFormats,
       field: field || 'befund'
     });
     

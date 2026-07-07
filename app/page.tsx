@@ -1826,6 +1826,8 @@ export default function HomePage() {
   const templateAudioBufferRef = useRef('');
   // Markiert, dass nach dem Leeren der VAD-Commit-Queue in den Baustein eingearbeitet werden soll.
   const pendingTemplateIntegrationRef = useRef(false);
+  // Speichert die letzte /api/templates/adapt-Antwort fuer Format-Ranges.
+  const adaptDataRef = useRef<Record<string, unknown> | null>(null);
   const currentTemplateField: BefundField = mode === 'befund' ? activeField : 'befund';
   const availableTemplates = templates.filter((template) => template.field === currentTemplateField);
 
@@ -1879,6 +1881,7 @@ export default function HomePage() {
             field: template.field,
             username,
             contradictionMode: templateContradictionMode,
+            formatRanges: template.formatRanges,
           }),
         });
 
@@ -1893,6 +1896,7 @@ export default function HomePage() {
         }
 
         nextText = data.adaptedText;
+        adaptDataRef.current = data;
         setTemplateUnusedText((data.unusedText || '').trim());
       } else {
         setTemplateUnusedText('');
@@ -1901,8 +1905,13 @@ export default function HomePage() {
       const baseFormats = autoIntegrateTemplateAudioRef.current && currentFieldText
         ? getFieldRichTextFormats(template.field)
         : (template.formatRanges ?? []);
+      // Server-seitig berechnete Format-Ranges nutzen, falls vorhanden
+      // (die API berechnet sie inkl. Duplikations-Erkennung).
+      // Fallback: client-seitiges Standard-Remap.
+      const adaptResult = adaptDataRef.current;
+      const serverFormats = adaptResult?.formatRanges as RichTextFormatRange[] | undefined;
       const nextFormats = changesText
-        ? remapRichTextRanges(baseText, nextText, baseFormats)
+        ? serverFormats ?? remapRichTextRanges(baseText, nextText, baseFormats)
         : cloneRichTextRanges(baseFormats);
 
       setFieldTextWithFormats(template.field, nextText, nextFormats);

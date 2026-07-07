@@ -22,6 +22,7 @@ import { applyLLMPhoneticGuard, buildProtectedWordsFromOperations } from '@/lib/
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
 import { mergeTranscriptionsWithMarkers, createMergePrompt, stripNovelWordsFromMergeOutput, restoreMissingMedicalCodes, TranscriptionResult, MergeContext } from '@/lib/doublePrecision';
 import { RECORRECT_BASE_PROMPT } from '@/prompts/offline/recorrect-system-prompt';
+import { getEffectivePrompt } from '@/lib/promptOverrides';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120; // 2 minutes max
@@ -445,7 +446,8 @@ async function correctText(
     contextPromptSection = `\n\nDIKTAT-KONTEXT:\n${contextParts.join(', ')}`;
   }
   
-  const systemPrompt = `${RECORRECT_BASE_PROMPT}${contextPromptSection}${groupPromptInsertSection}${promptAddition ? `
+  const effectiveRecorrect = await getEffectivePrompt(request, 'offline/recorrect-system-prompt', RECORRECT_BASE_PROMPT);
+  const systemPrompt = `${effectiveRecorrect.text}${contextPromptSection}${groupPromptInsertSection}${promptAddition ? `
 
 === OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===
 ${promptAddition}` : ''}`;

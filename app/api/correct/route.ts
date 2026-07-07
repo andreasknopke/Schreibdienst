@@ -10,6 +10,7 @@ import { CHUNK_SYSTEM_PROMPT } from '@/prompts/correct/chunk-system-prompt';
 import { SYSTEM_PROMPT } from '@/prompts/correct/system-prompt';
 import { BEFUND_SYSTEM_PROMPT } from '@/prompts/correct/befund-system-prompt';
 import { BEURTEILUNG_SUGGEST_PROMPT } from '@/prompts/correct/beurteilung-suggest-prompt';
+import { getEffectivePrompt } from '@/lib/promptOverrides';
 
 export const runtime = 'nodejs';
 
@@ -818,13 +819,15 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
     const promptSuffix = (dictionaryPromptSection + patientNamePromptSection + groupPromptInsertSection + (promptAddition ? `\n\n=== OVERRULE - DIESE ANWEISUNGEN HABEN VORRANG ===\n${promptAddition}` : '')).trim();
     
     // Combine system prompt with dictionary and custom additions
+    const effectiveSystem = await getEffectivePrompt(req, 'correct/system-prompt', SYSTEM_PROMPT);
     const enhancedSystemPrompt = promptSuffix 
-      ? `${SYSTEM_PROMPT}\n\n${promptSuffix}`
-      : SYSTEM_PROMPT;
+      ? `${effectiveSystem.text}\n\n${promptSuffix}`
+      : effectiveSystem.text;
     
+    const effectiveBefund = await getEffectivePrompt(req, 'correct/befund-system-prompt', BEFUND_SYSTEM_PROMPT);
     const enhancedBefundPrompt = promptSuffix 
-      ? `${BEFUND_SYSTEM_PROMPT}\n\n${promptSuffix}`
-      : BEFUND_SYSTEM_PROMPT;
+      ? `${effectiveBefund.text}\n\n${promptSuffix}`
+      : effectiveBefund.text;
     
     // Beurteilung vorschlagen basierend auf Befund
     if (suggestBeurteilung && befund) {
@@ -837,10 +840,11 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
         ? `Erstelle eine Beurteilung basierend auf folgenden Informationen:\n\nMethodik:\n<<<BEFUND_DATEN>>>${preprocessedMethodik}<<<ENDE_DATEN>>>\n\nBefund:\n<<<BEFUND_DATEN>>>${preprocessedBefund}<<<ENDE_DATEN>>>`
         : `Erstelle eine Beurteilung basierend auf folgendem Befund:\n\n<<<BEFUND_DATEN>>>${preprocessedBefund}<<<ENDE_DATEN>>>`;
 
+      const effectiveSuggest = await getEffectivePrompt(req, 'correct/beurteilung-suggest-prompt', BEURTEILUNG_SUGGEST_PROMPT);
       try {
         const result = await callLLM(llmConfig,
           [
-            { role: 'system', content: BEURTEILUNG_SUGGEST_PROMPT },
+            { role: 'system', content: effectiveSuggest.text },
             { role: 'user', content: userMessage }
           ],
           { temperature: 0.1, maxTokens: 500 },
@@ -1112,9 +1116,10 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
           console.log(`[Chunked] Processing ${chunks.length} chunks of max ${LM_STUDIO_MAX_SENTENCES} sentences each`);
           
           // Use simplified chunk prompt with dictionary and custom additions if available
+          const effectiveChunk = await getEffectivePrompt(req, 'correct/chunk-system-prompt', CHUNK_SYSTEM_PROMPT);
           const chunkSystemPrompt = promptSuffix 
-            ? `${CHUNK_SYSTEM_PROMPT}\n\n${promptSuffix}`
-            : CHUNK_SYSTEM_PROMPT;
+            ? `${effectiveChunk.text}\n\n${promptSuffix}`
+            : effectiveChunk.text;
           
           const correctedChunks: string[] = [];
           let totalInputTokens = 0;
@@ -1180,9 +1185,10 @@ Beispiele für phonetische Ähnlichkeiten, die korrigiert werden sollen:
         console.log(`[Chunked] Cloud LLM (${llmConfig.provider}): Text too long (${preprocessedText.length} chars), splitting into ${cloudChunks.length} chunks of max ${CLOUD_LLM_MAX_CHARS} chars`);
         
         // Use simplified chunk prompt with dictionary and custom additions if available
+        const effectiveCloudChunk = await getEffectivePrompt(req, 'correct/chunk-system-prompt', CHUNK_SYSTEM_PROMPT);
         const cloudChunkSystemPrompt = promptSuffix 
-          ? `${CHUNK_SYSTEM_PROMPT}\n\n${promptSuffix}`
-          : CHUNK_SYSTEM_PROMPT;
+          ? `${effectiveCloudChunk.text}\n\n${promptSuffix}`
+          : effectiveCloudChunk.text;
         
         const correctedChunks: string[] = [];
         let totalInputTokens = 0;

@@ -27,6 +27,7 @@ import { mergeTranscriptionsWithMarkers, createMergePrompt, stripNovelWordsFromM
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
 import { DICTATION_PROCESSOR_PROMPT } from '@/prompts/worker/dictation-processor-prompt';
 import { DICTATION_PROCESSOR_CHUNK_PROMPT } from '@/prompts/worker/dictation-processor-chunk-prompt';
+import { getEffectivePrompt } from '@/lib/promptOverrides';
 
 // LM-Studio Max Token Limit (aus Umgebungsvariable oder Standard 10000)
 const LM_STUDIO_MAX_TOKENS = parseInt(process.env.LLM_STUDIO_TOKEN || '10000', 10);

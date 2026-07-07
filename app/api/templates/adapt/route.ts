@@ -6,6 +6,7 @@ import { CONTRADICTION_GENAU } from '@/prompts/templates/contradiction-genau';
 import { CONTRADICTION_EINFACH } from '@/prompts/templates/contradiction-einfach';
 import { CONTRADICTION_OPTIONEN } from '@/prompts/templates/contradiction-optionen';
 import { TEMPLATE_NIEMALS } from '@/prompts/templates/template-niemals';
+import { getEffectivePrompt } from '@/lib/promptOverrides';
 import { remapRichTextRanges, normalizeRichTextRanges, type RichTextFormatRange } from '@/lib/richTextFormatting';
 
 export const runtime = 'nodejs';
@@ -301,10 +302,17 @@ export async function POST(req: NextRequest) {
     let contradictionSection: string;
     let systemPrompt: string;
     let isOptionenMode = false;
+
+    const effectiveAdaptBase = (await getEffectivePrompt(req, 'templates/adapt-base', TEMPLATE_ADAPT_BASE)).text;
+    const effectiveNiemals = (await getEffectivePrompt(req, 'templates/template-niemals', TEMPLATE_NIEMALS)).text;
+    const effectiveOptionen = (await getEffectivePrompt(req, 'templates/contradiction-optionen', CONTRADICTION_OPTIONEN)).text;
+    const effectiveEinfach = (await getEffectivePrompt(req, 'templates/contradiction-einfach', CONTRADICTION_EINFACH)).text;
+    const effectiveGenau = (await getEffectivePrompt(req, 'templates/contradiction-genau', CONTRADICTION_GENAU)).text;
+
     if (contradictionMode === 'optionen') {
       isOptionenMode = true;
-      contradictionSection = CONTRADICTION_OPTIONEN;
-      systemPrompt = `${TEMPLATE_ADAPT_BASE}${contradictionSection}
+      contradictionSection = effectiveOptionen;
+      systemPrompt = `${effectiveAdaptBase}${contradictionSection}
 
 AUSGABEFORMAT:
 - Gib AUSSCHLIESSLICH JSON im folgenden Format zurück:
@@ -316,8 +324,8 @@ AUSGABEFORMAT:
 - KEINE Erklärungen oder Kommentare
 - KEINE Markdown-Codeblöcke oder zusätzlichen Markierungen`;
     } else {
-      contradictionSection = contradictionMode === 'aus' ? '' : contradictionMode === 'einfach' ? CONTRADICTION_EINFACH : CONTRADICTION_GENAU;
-      systemPrompt = `${TEMPLATE_ADAPT_BASE}${contradictionSection}${TEMPLATE_NIEMALS}`;
+      contradictionSection = contradictionMode === 'aus' ? '' : contradictionMode === 'einfach' ? effectiveEinfach : effectiveGenau;
+      systemPrompt = `${effectiveAdaptBase}${contradictionSection}${effectiveNiemals}`;
     }
     
     // Markdown-Marker aus dem Template entfernen, damit das LLM sie nicht

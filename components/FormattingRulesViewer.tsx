@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthProvider';
+import PromptManager from './PromptManager';
 
 interface FormattingRule {
   id: string;
@@ -18,7 +19,7 @@ type CustomFormattings = Record<string, { commands?: string; replacement?: strin
 
 export default function FormattingRulesViewer() {
   const { username, getAuthHeader, getDbTokenHeader } = useAuth();
-  const [tab, setTab] = useState<'formattings' | 'abbreviations'>('formattings');
+  const [tab, setTab] = useState<'formattings' | 'abbreviations' | 'prompts'>('formattings');
   const [categories, setCategories] = useState<RuleCategory[]>([]);
   const [abbrCategories, setAbbrCategories] = useState<RuleCategory[]>([]);
   const [disabledIds, setDisabledIds] = useState<Set<string>>(new Set());
@@ -37,6 +38,11 @@ export default function FormattingRulesViewer() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [newCommands, setNewCommands] = useState('');
   const [newReplacement, setNewReplacement] = useState('');
+
+  // Generate ID from commands string (mirrors makeId in formattings route)
+  const makeId = (commands: string): string => {
+    return commands.toLowerCase().replace(/\s+/g, '-').replace(/[^a-zäöüß0-9-]/g, '');
+  };
 
   const headers = useCallback(() => ({
     'Authorization': getAuthHeader(),
@@ -164,7 +170,7 @@ export default function FormattingRulesViewer() {
     } catch {
       loadData(); // rollback
     }
-  }, [newCommands, newReplacement, customFormattings, makeId, headers, loadData]);
+  }, [newCommands, newReplacement, customFormattings, headers, loadData]);
 
   const deleteCustomRule = useCallback(async (id: string) => {
     const next = { ...customFormattings };
@@ -237,11 +243,6 @@ export default function FormattingRulesViewer() {
     });
   }, [customFormattings]);
 
-  // Generate ID from commands string (mirrors makeId in formattings route)
-  const makeId = useCallback((commands: string): string => {
-    return commands.toLowerCase().replace(/\s+/g, '-').replace(/[^a-zäöüß0-9-]/g, '');
-  }, []);
-
   // Collect all known source IDs to distinguish overrides from new custom rules
   const allSourceIds = new Set<string>();
   for (const cat of categories) {
@@ -271,12 +272,46 @@ export default function FormattingRulesViewer() {
 
   const currentCategories = tab === 'formattings' ? categories : abbrCategories;
 
+  // Prompt tab is only for root/admin
+  const showPromptTab = username === 'root';
+
   if (loading) {
     return <div className="text-sm text-gray-500 dark:text-gray-400 p-4">Lade Formatierungsregeln…</div>;
   }
 
   if (error) {
     return <div className="text-sm text-red-500 p-4">Fehler: {error}</div>;
+  }
+
+  // Full-screen prompt editor when prompts tab is active
+  if (tab === 'prompts') {
+    return (
+      <div className="space-y-3">
+        <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700 pb-1">
+          <button
+            onClick={() => setTab('formattings')}
+            className="text-xs px-3 py-1 rounded-t font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+          >
+            🔣 Formatierung
+          </button>
+          <button
+            onClick={() => setTab('abbreviations')}
+            className="text-xs px-3 py-1 rounded-t font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+          >
+            📏 Abkürzungen
+          </button>
+          {showPromptTab && (
+            <button
+              onClick={() => setTab('prompts')}
+              className="text-xs px-3 py-1 rounded-t font-medium bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 transition-colors"
+            >
+              📝 Prompts
+            </button>
+          )}
+        </div>
+        <PromptManager />
+      </div>
+    );
   }
 
   return (
@@ -295,6 +330,14 @@ export default function FormattingRulesViewer() {
         >
           📏 Abkürzungen
         </button>
+        {showPromptTab && (
+          <button
+            onClick={() => setTab('prompts')}
+            className="text-xs px-3 py-1 rounded-t font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+          >
+            📝 Prompts
+          </button>
+        )}
       </div>
 
       {/* Root: Broadcast-Button */}

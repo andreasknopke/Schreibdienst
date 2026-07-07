@@ -226,12 +226,12 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Add form – nur im 'create'-Modus */}
       {mode === 'create' && (
-        <form onSubmit={handleAdd} className="space-y-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-          <h3 className="font-medium text-sm">Neuer Textbaustein</h3>
-          <div className="flex gap-2">
+        <form onSubmit={handleAdd} className="flex flex-col flex-1 min-h-0 gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+          <h3 className="font-medium text-sm flex-shrink-0">Neuer Textbaustein</h3>
+          <div className="flex gap-2 flex-shrink-0">
             <input
               type="text"
               value={name}
@@ -258,10 +258,10 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
               setContentFormats(formats);
             }}
             placeholder="Textbaustein-Inhalt..."
-            className="textarea w-full px-3 py-2 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 min-h-[100px]"
+            className="textarea w-full px-3 py-2 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 flex-1 min-h-0"
             disabled={adding}
           />
-          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer flex-shrink-0">
             <input
               type="checkbox"
               checked={addToGroup}
@@ -273,7 +273,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
           <button
             type="submit"
             disabled={adding || !name.trim() || !content.trim()}
-            className="w-full px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+            className="w-full px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 flex-shrink-0"
           >
             {adding ? 'Speichere...' : '+ Textbaustein hinzufügen'}
           </button>
@@ -281,122 +281,123 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
       )}
 
       {error && (
-        <div className="p-2 text-sm text-red-600 bg-red-50 dark:bg-red-900/20 rounded">
+        <div className="p-2 text-sm text-red-600 bg-red-50 dark:bg-red-900/20 rounded flex-shrink-0">
           {error}
         </div>
       )}
 
       {success && (
-        <div className="p-2 text-sm text-green-600 bg-green-50 dark:bg-green-900/20 rounded">
+        <div className="p-2 text-sm text-green-600 bg-green-50 dark:bg-green-900/20 rounded flex-shrink-0">
           {success}
         </div>
       )}
 
       {/* Templates list – nur im 'manage'-Modus */}
       {mode === 'manage' && (
-        <div className="space-y-2">
-          <h3 className="font-medium text-sm text-gray-600 dark:text-gray-400">
+        <div className="flex flex-col flex-1 min-h-0">
+          <h3 className="font-medium text-sm text-gray-600 dark:text-gray-400 flex-shrink-0">
             Meine Textbausteine ({templates.length})
           </h3>
         
         {templates.length === 0 ? (
           <p className="text-sm text-gray-500 italic">Noch keine Textbausteine vorhanden</p>
+        ) : editingId !== null ? (
+          /* Nur den gerade editierten Baustein anzeigen, vollflächig */
+          <div className="flex flex-col flex-1 min-h-0">
+            {templates.filter(t => t.id === editingId).map(template => (
+              <div key={template.id} className="flex flex-col flex-1 min-h-0 p-3 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg">
+                <div className="flex flex-col flex-1 min-h-0 gap-2">
+                  <div className="flex gap-2 flex-shrink-0">
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="flex-1 px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600"
+                    />
+                    <select
+                      value={editField}
+                      onChange={(e) => setEditField(e.target.value as any)}
+                      className="px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600"
+                    >
+                      <option value="methodik">Methodik</option>
+                      <option value="befund">Befund</option>
+                      <option value="beurteilung">Beurteilung</option>
+                    </select>
+                  </div>
+                  <TemplateRichTextEditor
+                    value={editContent}
+                    formats={editContentFormats}
+                    onChange={(value, formats) => {
+                      setEditContent(value);
+                      setEditContentFormats(formats);
+                    }}
+                    className="textarea w-full px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 flex-1 min-h-0"
+                  />
+                  <div className="flex gap-2 flex-shrink-0">
+                    <button
+                      onClick={handleSaveEdit}
+                      className="px-3 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600"
+                    >
+                      Speichern
+                    </button>
+                    <button
+                      onClick={handleCancelEdit}
+                      className="px-3 py-1 text-xs bg-gray-300 dark:bg-gray-600 rounded hover:bg-gray-400"
+                    >
+                      Abbrechen
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
-          <div className="space-y-2 max-h-[400px] overflow-y-auto">
+          <div className="space-y-2 flex-1 min-h-0 overflow-y-auto">
             {templates.map((template) => (
               <div
                 key={template.id}
                 className="p-3 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg"
               >
-                {editingId === template.id ? (
-                  // Edit mode
-                  <div className="space-y-2">
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className="flex-1 px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600"
-                      />
-                      <select
-                        value={editField}
-                        onChange={(e) => setEditField(e.target.value as any)}
-                        className="px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600"
-                      >
-                        <option value="methodik">Methodik</option>
-                        <option value="befund">Befund</option>
-                        <option value="beurteilung">Beurteilung</option>
-                      </select>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm">{template.name}</span>
+                      <span className="text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded">
+                        {fieldLabels[template.field]}
+                      </span>
+                      {template.scope === 'group' && (
+                        <span className="text-xs px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded" title={template.groupName ? `Gruppe: ${template.groupName}` : 'Abteilungs-Baustein'}>
+                          Gruppe
+                        </span>
+                      )}
                     </div>
-                    <TemplateRichTextEditor
-                      value={editContent}
-                      formats={editContentFormats}
-                      onChange={(value, formats) => {
-                        setEditContent(value);
-                        setEditContentFormats(formats);
-                      }}
-                      className="textarea w-full px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 min-h-[80px]"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleSaveEdit}
-                        className="px-3 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600"
-                      >
-                        Speichern
-                      </button>
-                      <button
-                        onClick={handleCancelEdit}
-                        className="px-3 py-1 text-xs bg-gray-300 dark:bg-gray-600 rounded hover:bg-gray-400"
-                      >
-                        Abbrechen
-                      </button>
-                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
+                      {template.content}
+                    </p>
                   </div>
-                ) : (
-                  // View mode
-                  <>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-sm">{template.name}</span>
-                          <span className="text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded">
-                            {fieldLabels[template.field]}
-                          </span>
-                          {template.scope === 'group' && (
-                            <span className="text-xs px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded" title={template.groupName ? `Gruppe: ${template.groupName}` : 'Abteilungs-Baustein'}>
-                              Gruppe
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
-                          {template.content}
-                        </p>
-                      </div>
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => handleEdit(template)}
-                          className="p-1 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
-                          title="Bearbeiten"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => handleDelete(template.id, template.name)}
-                          className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                          title="Löschen"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M3 6h18"/>
-                            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => handleEdit(template)}
+                      className="p-1 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
+                      title="Bearbeiten"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => handleDelete(template.id, template.name)}
+                      className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                      title="Löschen"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M3 6h18"/>
+                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
               </div>
             ))}
           </div>

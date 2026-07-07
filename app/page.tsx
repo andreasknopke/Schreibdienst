@@ -6701,7 +6701,7 @@ export default function HomePage() {
                 </svg>
               </button>
             </div>
-            <div className="p-4 overflow-y-auto flex-1">
+            <div className="p-4 overflow-y-auto flex flex-col flex-1 min-h-0">
               <TemplatesManager mode={templateManagerMode} />
             </div>
           </div>

@@ -226,7 +226,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex flex-col flex-1 min-h-0 h-full">
       {/* Add form – nur im 'create'-Modus */}
       {mode === 'create' && (
         <form onSubmit={handleAdd} className="flex flex-col flex-1 min-h-0 gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">

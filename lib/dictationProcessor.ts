@@ -216,6 +216,7 @@ export async function processDictation(request: NextRequest, dictationId: number
     if (dictation.username) {
       try {
         const settings = await getUserSettingsWithRequest(request, dictation.username);
+        console.log(`[Worker] Settings fuer ${dictation.username}: customFormattings =`, settings?.customFormattings ? `vorhanden (${Object.keys(settings.customFormattings).length} Eintraege)` : 'KEINE');
         if (settings?.disabledAbbreviations && settings.disabledAbbreviations.length > 0) {
           disabledAbbreviationIds = new Set(settings.disabledAbbreviations);
         }
@@ -229,9 +230,10 @@ export async function processDictation(request: NextRequest, dictationId: number
           }
           if (Object.keys(controlWords).length > 0) {
             customFormattings = { controlWords };
+            console.log(`[Worker] ${Object.keys(controlWords).length} custom overrides fuer Worker:`, JSON.stringify(controlWords));
           }
         }
-      } catch (e) { /* ignore - settings not critical */ }
+      } catch (e: any) { console.warn('[Worker] Fehler customFormattings:', e?.message); }
     }
     
     const preprocessingResult = preprocessTranscriptionDetailed(
@@ -675,6 +677,9 @@ async function transcribeAudio(
   if (username) {
     try {
       const settings = await getUserSettingsWithRequest(request, username);
+      if (settings?.customFormattings) {
+        console.log(`[Worker correctText] customFormattings fuer ${username}: ${Object.keys(settings.customFormattings).length} Eintraege`);
+      }
       if (settings?.disabledAbbreviations && settings.disabledAbbreviations.length > 0) {
         disabledAbbreviationIds = new Set(settings.disabledAbbreviations);
       }

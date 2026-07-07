@@ -495,8 +495,8 @@ function makeId(...parts: string[]): string {
  * Apply formatting control words programmatically.
  * @param disabledIds - Optional set of rule IDs to skip (from user preferences)
  */
-export function applyFormattingControlWords(text: string, disabledIds?: Set<string>): string {
-  const result = applyFormattingControlWordsWithStats(text, disabledIds);
+export function applyFormattingControlWords(text: string, disabledIds?: Set<string>, customReplacements?: Record<string, string>): string {
+  const result = applyFormattingControlWordsWithStats(text, disabledIds, customReplacements);
   return result.text;
 }
 
@@ -504,7 +504,7 @@ export function applyFormattingControlWords(text: string, disabledIds?: Set<stri
  * Apply formatting control words and return statistics about what was applied.
  * Use this version when you need to log/display the results.
  */
-export function applyFormattingControlWordsWithStats(text: string, disabledIds?: Set<string>): ControlWordResult {
+export function applyFormattingControlWordsWithStats(text: string, disabledIds?: Set<string>, customReplacements?: Record<string, string>): ControlWordResult {
   if (!text) return { text, stats: { paragraphs: 0, lineBreaks: 0, bulletPoints: 0, punctuation: 0, brackets: 0, deletions: 0, enumerations: 0, total: 0 } };
   
   let result = text;
@@ -544,8 +544,12 @@ export function applyFormattingControlWordsWithStats(text: string, disabledIds?:
         stats.punctuation += count;
       }
     }
-    // Handle both string and function replacements
-    if (typeof replacement === 'function') {
+    // Check for custom override replacement
+    const customRepl = customReplacements?.[makeId(...entry.commands)];
+    if (customRepl !== undefined) {
+      // Custom overrides are always plain strings
+      result = result.replace(pattern, customRepl);
+    } else if (typeof replacement === 'function') {
       result = result.replace(pattern, replacement as (...args: string[]) => string);
     } else {
       result = result.replace(pattern, replacement);
@@ -599,12 +603,13 @@ export function applyFormattingControlWordsWithStats(text: string, disabledIds?:
  * Wendet medizinische Abkürzungen deterministisch an (z.B. "Milligramm" → "mg").
  * @param disabledIds - Optional deaktivierte Abkürzungs-IDs (aus Benutzereinstellungen)
  */
-export function applyAbbreviations(text: string, disabledIds?: Set<string>): string {
+export function applyAbbreviations(text: string, disabledIds?: Set<string>, customReplacements?: Record<string, string>): string {
   if (!text) return text;
   let result = text;
   for (const entry of ABBREVIATIONS) {
     if (disabledIds?.has(entry.id)) continue;
-    result = result.replace(entry.pattern, entry.replacement);
+    const customRepl = customReplacements?.[entry.id];
+    result = result.replace(entry.pattern, customRepl ?? entry.replacement);
   }
   return result;
 }
@@ -934,7 +939,8 @@ export function preprocessTranscriptionDetailed(
   dictionaryEntries?: DictionaryEntry[],
   standardEntries?: { wrong: string; correct: string; phoneticMinSimilarity?: number }[],
   options?: PreprocessTranscriptionOptions,
-  disabledAbbreviationIds?: Set<string>
+  disabledAbbreviationIds?: Set<string>,
+  customFormattings?: { controlWords?: Record<string, string>; abbreviations?: Record<string, string> }
 ): PreprocessTranscriptionResult {
   if (!text) return { text, operations: [] };
   
@@ -945,7 +951,7 @@ export function preprocessTranscriptionDetailed(
   result = removeFillerWords(result);
   
   // Step 2: Apply formatting control words (logs automatically if any found)
-  result = applyFormattingControlWords(result);
+  result = applyFormattingControlWords(result, undefined, customFormattings?.controlWords);
   
   // Step 2b: Fix concatenated "punkt" words (z.B. "stehenpunkt." → "stehen. ")
   // Läuft NACH den control words (die standalone "Punkt" behandeln) und VOR
@@ -979,9 +985,9 @@ export function preprocessTranscriptionDetailed(
   
   // Step 4: Deterministic medical abbreviation conversion (e.g. Milligramm → mg, rechts → re.)
   if (disabledAbbreviationIds) {
-    result = applyAbbreviations(result, disabledAbbreviationIds);
+    result = applyAbbreviations(result, disabledAbbreviationIds, customFormattings?.abbreviations);
   } else {
-    result = applyAbbreviations(result);
+    result = applyAbbreviations(result, undefined, customFormattings?.abbreviations);
   }
   
   return { text: result, operations };

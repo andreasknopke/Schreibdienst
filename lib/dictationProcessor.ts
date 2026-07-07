@@ -209,14 +209,33 @@ export async function processDictation(request: NextRequest, dictationId: number
     const dictionaryEntries = dictionary.entries;
     const standardDictionaryEntries = await getStandardDictEntries(request);
     
-    // Load user's disabled abbreviation preferences
+    // Load user's disabled abbreviation and custom formatting preferences
     let disabledAbbreviationIds: Set<string> | undefined;
+    let customFormattings: { controlWords?: Record<string, string>; abbreviations?: Record<string, string> } | undefined;
     if (dictation.username) {
       try {
         const settings = await getUserSettingsWithRequest(request, dictation.username);
         if (settings?.disabledAbbreviations && settings.disabledAbbreviations.length > 0) {
           disabledAbbreviationIds = new Set(settings.disabledAbbreviations);
-          console.log(`[Worker] User ${dictation.username}: ${disabledAbbreviationIds.size} disabled abbreviations`);
+        }
+        // Build custom formattings from user overrides
+        if (settings?.customFormattings) {
+          const controlWords: Record<string, string> = {};
+          const abbreviations: Record<string, string> = {};
+          for (const [id, ov] of Object.entries(settings.customFormattings)) {
+            if (ov.replacement) {
+              // Determine if it's a control word or abbreviation by ID pattern
+              // (abbreviations have short IDs like 'mg', 'g', 'ml'; control words have hyphenated IDs)
+              if (id.includes('-') || id.length > 10) {
+                controlWords[id] = ov.replacement;
+              } else {
+                abbreviations[id] = ov.replacement;
+              }
+            }
+          }
+          if (Object.keys(controlWords).length > 0 || Object.keys(abbreviations).length > 0) {
+            customFormattings = { controlWords, abbreviations };
+          }
         }
       } catch (e) { /* ignore - settings not critical */ }
     }
@@ -226,7 +245,8 @@ export async function processDictation(request: NextRequest, dictationId: number
       dictionaryEntries,
       standardDictionaryEntries,
       { targetUsername: dictation.username, dictionarySet },
-      disabledAbbreviationIds
+      disabledAbbreviationIds,
+      customFormattings
     );
     const preprocessedText = preprocessingResult.text;
     console.log(
@@ -655,13 +675,31 @@ async function transcribeAudio(
     }
   }
   
-  // Load user's disabled abbreviation preferences
+  // Load user's disabled abbreviation and custom formatting preferences
   let disabledAbbreviationIds: Set<string> | undefined;
+  let customFormattings: { controlWords?: Record<string, string>; abbreviations?: Record<string, string> } | undefined;
   if (username) {
     try {
       const settings = await getUserSettingsWithRequest(request, username);
       if (settings?.disabledAbbreviations && settings.disabledAbbreviations.length > 0) {
         disabledAbbreviationIds = new Set(settings.disabledAbbreviations);
+      }
+      // Build custom formattings from user overrides
+      if (settings?.customFormattings) {
+        const controlWords: Record<string, string> = {};
+        const abbreviations: Record<string, string> = {};
+        for (const [id, ov] of Object.entries(settings.customFormattings)) {
+          if (ov.replacement) {
+            if (id.includes('-') || id.length > 10) {
+              controlWords[id] = ov.replacement;
+            } else {
+              abbreviations[id] = ov.replacement;
+            }
+          }
+        }
+        if (Object.keys(controlWords).length > 0 || Object.keys(abbreviations).length > 0) {
+          customFormattings = { controlWords, abbreviations };
+        }
       }
     } catch (e) { /* ignore */ }
   }
@@ -704,7 +742,8 @@ async function transcribeAudio(
         dictionaryEntries,
         standardDictionaryEntries,
         { targetUsername: username, dictionarySet },
-        disabledAbbreviationIds
+        disabledAbbreviationIds,
+        customFormattings
       );
       const fallbackText = preprocessedPrimary.text;
       const fallbackMetadata = {
@@ -782,7 +821,8 @@ async function transcribeAudio(
       dictionaryEntries,
       standardDictionaryEntries,
       { targetUsername: username },
-      disabledAbbreviationIds
+      disabledAbbreviationIds,
+      customFormattings
     );
 
     // Log preprocessing (inkl. phonetischem Matching) für Transkription A
@@ -814,7 +854,8 @@ async function transcribeAudio(
       dictionaryEntries,
       standardDictionaryEntries,
       { targetUsername: username },
-      disabledAbbreviationIds
+      disabledAbbreviationIds,
+      customFormattings
     );
 
     // Log preprocessing (inkl. phonetischem Matching) für Transkription B

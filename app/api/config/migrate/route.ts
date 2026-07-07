@@ -96,6 +96,18 @@ export async function POST(request: NextRequest) {
         }
       }
       
+      // Migration: custom_formattings Spalte hinzufügen (JSON-Objekt als Text)
+      try {
+        await pool.execute(`
+          ALTER TABLE users ADD COLUMN custom_formattings TEXT DEFAULT NULL
+        `);
+        console.log('[Migration] users table: added custom_formattings column');
+      } catch (alterError: any) {
+        if (!alterError.message.includes('Duplicate column')) {
+          console.log('[Migration] users table: custom_formattings column already exists');
+        }
+      }
+      
       status.users = true;
       console.log('[Migration] users table: OK');
     } catch (error: any) {

@@ -115,6 +115,52 @@ export function getPromptTemplateList(): Omit<PromptTemplateMeta, 'defaultConten
   return PROMPT_TEMPLATES.map(({ id, label, group, file }) => ({ id, label, group, file }));
 }
 
+/** Config-Key für User-spezifische customFormattings */
+function customFormattingsKey(username: string): string {
+  return `user_custom_formattings:${username.toLowerCase()}`;
+}
+
+/**
+ * Lädt customFormattings für einen User aus der config-Tabelle.
+ */
+export async function getCustomFormattingsForUser(
+  request: NextRequest,
+  username: string
+): Promise<Record<string, { commands?: string; replacement?: string }> | undefined> {
+  try {
+    const db = await getPoolForRequest(request);
+    const [rows] = await db.execute<any[]>(
+      'SELECT config_value FROM config WHERE config_key = ?',
+      [customFormattingsKey(username)]
+    );
+    const value = (rows as any[])?.[0]?.config_value;
+    if (value) {
+      const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch { /* DB nicht verfügbar */ }
+  return undefined;
+}
+
+/**
+ * Speichert customFormattings für einen User in der config-Tabelle.
+ * Wenn `formattings` leer ist, wird der Eintrag gelöscht.
+ */
+export async function saveCustomFormattingsForUser(
+  request: NextRequest,
+  username: string,
+  formattings: Record<string, { commands?: string; replacement?: string }>
+): Promise<void> {
+  const db = await getPoolForRequest(request);
+  const key = customFormattingsKey(username);
+  const content = JSON.stringify(formattings);
+  await db.execute(
+    `INSERT INTO config (config_key, config_value) VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE config_value = ?`,
+    [key, content, content]
+  );
+}
+
 /**
  * Liefert den effektiven Prompt für eine ID zurück:
  * - Default-Inhalt aus der Datei (einmalig geladen)

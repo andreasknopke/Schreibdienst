@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { NextRequest } from 'next/server';
 import { query, execute, getPoolForRequest } from './db';
+import { getCustomFormattingsForUser, saveCustomFormattingsForUser } from './promptOverrides';
 
 export interface User {
   username: string;
@@ -304,9 +305,12 @@ export async function getUserSettingsWithRequest(
   request: NextRequest,
   username: string
 ): Promise<{ autoCorrect: boolean; defaultMode: 'befund' | 'arztbrief'; dictionarySet: 'alltag' | 'medical'; disabledFormattings?: string[]; disabledAbbreviations?: string[]; customFormattings?: Record<string, CustomFormattingOverride> } | null> {
+  // Load custom formattings from config table (works for ALL users including root)
+  const configCustomFormattings = username ? await getCustomFormattingsForUser(request, username).catch(() => undefined) : undefined;
+
   // Root user always has autoCorrect enabled
   if (username.toLowerCase() === 'root') {
-    return { autoCorrect: true, defaultMode: 'befund', dictionarySet: 'medical', disabledFormattings: [], disabledAbbreviations: [], customFormattings: {} };
+    return { autoCorrect: true, defaultMode: 'befund', dictionarySet: 'medical', disabledFormattings: [], disabledAbbreviations: [], customFormattings: configCustomFormattings || {} };
   }
 
   try {
@@ -314,7 +318,7 @@ export async function getUserSettingsWithRequest(
     let rows: any[] = [];
     try {
       const [result] = await db.execute<any[]>(
-        'SELECT auto_correct, default_mode, dictionary_set, disabled_formattings, disabled_abbreviations, custom_formattings FROM users WHERE username = ?',
+        'SELECT auto_correct, default_mode, dictionary_set, disabled_formattings, disabled_abbreviations FROM users WHERE username = ?',
         [username]
       );
       rows = result;
@@ -339,14 +343,8 @@ export async function getUserSettingsWithRequest(
     const dictionarySet = user.dictionary_set;
     const disabledFormattings = tryParseJsonArray(user.disabled_formattings);
     const disabledAbbreviations = tryParseJsonArray(user.disabled_abbreviations);
-    let customFormattings: Record<string, CustomFormattingOverride> | undefined;
-    if (user.custom_formattings) {
-      try {
-        customFormattings = typeof user.custom_formattings === 'string'
-          ? JSON.parse(user.custom_formattings)
-          : user.custom_formattings;
-      } catch { /* ignore */ }
-    }
+    // customFormattings from config table (loaded above — more reliable than users column)
+    const customFormattings = configCustomFormattings;
     return {
       autoCorrect: user.auto_correct !== false,
       defaultMode: user.default_mode || 'befund',
@@ -367,17 +365,24 @@ export async function updateUserSettingsWithRequest(
   username: string,
   settings: { autoCorrect?: boolean; dictionarySet?: 'alltag' | 'medical'; disabledFormattings?: string[]; disabledAbbreviations?: string[]; customFormattings?: Record<string, CustomFormattingOverride> }
 ): Promise<{ success: boolean; error?: string }> {
+  // Save customFormattings to config table (works for ALL users, no migration needed)
+  if (settings.customFormattings !== undefined) {
+    try {
+      await saveCustomFormattingsForUser(request, username, settings.customFormattings);
+    } catch (e: any) {
+      // Config table might not exist on some setups — ignore silently
+      console.warn('[Users] Could not save customFormattings to config table:', e?.message);
+    }
+  }
+
   if (username.toLowerCase() === 'root') {
-    // Root darf Formatierungs-Präferenzen setzen (für Session/Broadcast),
-    // aber keine echten DB-Settings (autoCorrect, dictionarySet).
+    // Root has no DB row — only customFormattings (handled above) can be saved
     if (settings.autoCorrect !== undefined || settings.dictionarySet !== undefined) {
-      // Nur ablehnen wenn auch wirklich kritische Settings geändert werden sollen
       const onlyFormatting = settings.autoCorrect === undefined && settings.dictionarySet === undefined;
       if (!onlyFormatting) {
         return { success: false, error: 'Root-Benutzer-Einstellungen können nicht geändert werden' };
       }
     }
-    // Formatierungs-Only: Root hat keine DB-Zeile, aber der Client soll nicht blockiert werden
     return { success: true };
   }
 
@@ -404,14 +409,9 @@ export async function updateUserSettingsWithRequest(
       updates.push('disabled_abbreviations = ?');
       params.push(JSON.stringify(settings.disabledAbbreviations));
     }
-
-    if (settings.customFormattings !== undefined) {
-      updates.push('custom_formattings = ?');
-      params.push(JSON.stringify(settings.customFormattings));
-    }
     
     if (updates.length === 0) {
-      return { success: false, error: 'Keine Änderungen angegeben' };
+      return { success: true }; // Nur customFormattings wurde gespeichert
     }
     
     params.push(username);
@@ -433,7 +433,7 @@ export async function updateUserSettingsWithRequest(
       // nicht existieren: entferne sie aus dem UPDATE und versuche es erneut.
       if (updateError?.code === 'ER_BAD_FIELD_ERROR') {
         const safeUpdates = updates.filter(u =>
-          !u.startsWith('disabled_formattings') && !u.startsWith('disabled_abbreviations') && !u.startsWith('custom_formattings')
+          !u.startsWith('disabled_formattings') && !u.startsWith('disabled_abbreviations')
         );
         const safeParams = params.filter((_, i) =>
           i < updates.length && safeUpdates.includes(updates[i])

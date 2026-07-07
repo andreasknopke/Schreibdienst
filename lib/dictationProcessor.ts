@@ -219,23 +219,16 @@ export async function processDictation(request: NextRequest, dictationId: number
         if (settings?.disabledAbbreviations && settings.disabledAbbreviations.length > 0) {
           disabledAbbreviationIds = new Set(settings.disabledAbbreviations);
         }
-        // Build custom formattings from user overrides
+        // Build custom formattings from user overrides — all go as controlWords
         if (settings?.customFormattings) {
           const controlWords: Record<string, string> = {};
-          const abbreviations: Record<string, string> = {};
           for (const [id, ov] of Object.entries(settings.customFormattings)) {
             if (ov.replacement) {
-              // Determine if it's a control word or abbreviation by ID pattern
-              // (abbreviations have short IDs like 'mg', 'g', 'ml'; control words have hyphenated IDs)
-              if (id.includes('-') || id.length > 10) {
-                controlWords[id] = ov.replacement;
-              } else {
-                abbreviations[id] = ov.replacement;
-              }
+              controlWords[id] = ov.replacement;
             }
           }
-          if (Object.keys(controlWords).length > 0 || Object.keys(abbreviations).length > 0) {
-            customFormattings = { controlWords, abbreviations };
+          if (Object.keys(controlWords).length > 0) {
+            customFormattings = { controlWords };
           }
         }
       } catch (e) { /* ignore - settings not critical */ }
@@ -685,21 +678,16 @@ async function transcribeAudio(
       if (settings?.disabledAbbreviations && settings.disabledAbbreviations.length > 0) {
         disabledAbbreviationIds = new Set(settings.disabledAbbreviations);
       }
-      // Build custom formattings from user overrides
+      // Build custom formattings from user overrides — all go as controlWords
       if (settings?.customFormattings) {
         const controlWords: Record<string, string> = {};
-        const abbreviations: Record<string, string> = {};
         for (const [id, ov] of Object.entries(settings.customFormattings)) {
           if (ov.replacement) {
-            if (id.includes('-') || id.length > 10) {
-              controlWords[id] = ov.replacement;
-            } else {
-              abbreviations[id] = ov.replacement;
-            }
+            controlWords[id] = ov.replacement;
           }
         }
-        if (Object.keys(controlWords).length > 0 || Object.keys(abbreviations).length > 0) {
-          customFormattings = { controlWords, abbreviations };
+        if (Object.keys(controlWords).length > 0) {
+          customFormattings = { controlWords };
         }
       }
     } catch (e) { /* ignore */ }

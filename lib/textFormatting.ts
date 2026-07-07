@@ -572,12 +572,6 @@ export function applyFormattingControlWordsWithStats(text: string, disabledIds?:
       if (result.match(pattern)) {
         console.log(`[CustomFormattings] ANWENDEN custom-only ${id}:`, words, '→', repl);
       }
-      // Find the corresponding commands from the original customFormattings
-      // We don't have the commands here, but the ID was derived from them.
-      // Reconstruct a word-boundary regex from the ID (hyphens → spaces).
-      const words = id.replace(/[-]+/g, ' ').trim();
-      if (!words) continue;
-      const pattern = new RegExp('\\b' + words.split(/\s+/).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+') + '\\b', 'gi');
       result = result.replace(pattern, repl);
       stats.total++;
     }

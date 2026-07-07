@@ -555,6 +555,23 @@ export function applyFormattingControlWordsWithStats(text: string, disabledIds?:
       result = result.replace(pattern, replacement);
     }
   }
+
+  // Step 1b: Apply custom-only entries (not in CONTROL_WORD_REPLACEMENTS)
+  if (customReplacements) {
+    const knownIds = new Set(CONTROL_WORD_REPLACEMENTS.map((e) => makeId(...e.commands)));
+    for (const [id, repl] of Object.entries(customReplacements)) {
+      if (knownIds.has(id)) continue; // already handled above
+      if (!repl) continue;
+      // Find the corresponding commands from the original customFormattings
+      // We don't have the commands here, but the ID was derived from them.
+      // Reconstruct a word-boundary regex from the ID (hyphens → spaces).
+      const words = id.replace(/[-]+/g, ' ').trim();
+      if (!words) continue;
+      const pattern = new RegExp('\\b' + words.split(/\s+/).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+') + '\\b', 'gi');
+      result = result.replace(pattern, repl);
+      stats.total++;
+    }
+  }
   
   // Step 2: Handle delete commands
   const beforeDelete = result;

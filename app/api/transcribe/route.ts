@@ -6,6 +6,8 @@ import { countWords, logOnlineUsageEventWithRequest } from '@/lib/onlineUsageDb'
 import { mergeWithStandardDictionary } from '@/lib/standardDictionary';
 import { getStandardDictEntries } from '@/lib/standardDictionaryDb';
 import { loadGroupDictionaryForUser } from '@/lib/groupDictionaryDb';
+import { getUserSettingsWithRequest } from '@/lib/usersDb';
+import { applyFormattingControlWords } from '@/lib/textFormatting';
 
 export const runtime = 'nodejs';
 
@@ -923,6 +925,28 @@ export async function POST(request: NextRequest) {
 
     const totalDuration = ((Date.now() - requestStart) / 1000).toFixed(2);
     console.log(`[Success] Provider: ${result.provider}, Total duration: ${totalDuration}s, Segments: ${result.segments?.length || 0}`);
+
+    // Apply user's custom formatting rules (e.g. "ist gleich" → "=")
+    if (username && result.text) {
+      try {
+        const settings = await getUserSettingsWithRequest(request, username);
+        if (settings?.customFormattings) {
+          const controlWords: Record<string, string> = {};
+          for (const [id, ov] of Object.entries(settings.customFormattings)) {
+            if (ov.replacement) controlWords[id] = ov.replacement;
+          }
+          if (Object.keys(controlWords).length > 0) {
+            const before = result.text;
+            result.text = applyFormattingControlWords(result.text, undefined, controlWords);
+            console.log(`[Transcribe] Custom formattings applied: ${before !== result.text ? 'geaendert' : 'keine Aenderung'} (${Object.keys(controlWords).length} Regeln)`);
+          }
+        }
+      } catch (e: any) {
+        console.warn('[Transcribe] Fehler bei customFormattings:', e?.message);
+      }
+    }
+
+    if (username && shouldLogStats) {
     if (username && shouldLogStats) {
       logOnlineUsageEventWithRequest(request, {
         username,

@@ -184,7 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const getAuthHeader = (): string => {
     if (username && password) {
-      return 'Basic ' + btoa(`${username}:${password}`);
+      return 'Basic ' + btoa(String.fromCharCode(...new TextEncoder().encode(`${username}:${password}`)));
     }
     return '';
   };

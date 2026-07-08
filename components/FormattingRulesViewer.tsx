@@ -212,9 +212,10 @@ export default function FormattingRulesViewer() {
         return;
       }
     } else {
+      const existing = next[editItem.id] ?? {};
       next[editItem.id] = {
-        commands: trimmedCommands !== editItem.commands ? trimmedCommands : undefined,
-        replacement: trimmedReplacement !== editItem.replacement ? trimmedReplacement : undefined,
+        commands: trimmedCommands !== editItem.commands ? trimmedCommands : existing.commands,
+        replacement: trimmedReplacement !== editItem.replacement ? trimmedReplacement : existing.replacement,
       };
     }
 

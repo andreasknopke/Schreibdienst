@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from './AuthProvider';
 import PromptManager from './PromptManager';
 
@@ -38,6 +38,7 @@ export default function FormattingRulesViewer() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [newCommands, setNewCommands] = useState('');
   const [newReplacement, setNewReplacement] = useState('');
+  const allSourceIdsRef = useRef<Set<string>>(new Set());
 
   // Generate ID from commands string (mirrors makeId in formattings route)
   const makeId = (commands: string): string => {
@@ -198,12 +199,17 @@ export default function FormattingRulesViewer() {
     const trimmedReplacement = editReplacement.trim();
 
     if (trimmedCommands === editItem.commands && trimmedReplacement === editItem.replacement) {
-      // No change: remove override if exists
+      if (!allSourceIdsRef.current.has(editItem.id)) {
+        // Custom-only rule: no change = nichts tun (nicht löschen!)
+        closeEdit();
+        return;
+      }
+      // Override einer eingebauten Regel: kein Change → Override entfernen (Revert)
       if (next[editItem.id]) {
         delete next[editItem.id];
       } else {
         closeEdit();
-        return; // nothing to save
+        return;
       }
     } else {
       next[editItem.id] = {
@@ -255,6 +261,7 @@ export default function FormattingRulesViewer() {
       allSourceIds.add(item.id);
     }
   }
+  allSourceIdsRef.current = allSourceIds;
 
   // Custom-only rules: entries in customFormattings whose ID doesn't exist in source
   const customOnlyRules: FormattingRule[] = [];

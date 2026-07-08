@@ -364,7 +364,7 @@ export const generateEncryptedToken = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Basic ' + btoa(`${authUsername}:${authPassword}`)
+        'Authorization': 'Basic ' + btoa(String.fromCharCode(...new TextEncoder().encode(`${authUsername}:${authPassword}`)))
       },
       body: JSON.stringify({
         host: credentials.host,

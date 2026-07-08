@@ -123,17 +123,17 @@ export default function PromptManager() {
         /* Editor */
         <div>
           <div className="flex items-center justify-between mb-3">
-            <div>
+            <div className="flex items-center gap-2">
               <button
                 onClick={closeEditor}
-                className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 mr-2"
+                className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 shrink-0"
               >
                 ← Zurück
               </button>
               <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
                 {selected.label}
               </span>
-              <span className="text-[10px] text-gray-400 dark:text-gray-500 ml-2">
+              <span className="text-[10px] text-gray-400 dark:text-gray-500">
                 ({selected.file})
               </span>
             </div>

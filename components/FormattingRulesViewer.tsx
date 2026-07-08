@@ -235,7 +235,7 @@ export default function FormattingRulesViewer() {
     } catch {
       loadData(); // rollback by reloading
     }
-  }, [editItem, customFormattings, headers, closeEdit, loadData]);
+  }, [editItem, editCommands, editReplacement, customFormattings, headers, closeEdit, loadData]);
 
   // Merge custom overrides into items
   const mergeItems = useCallback((items: FormattingRule[]): FormattingRule[] => {

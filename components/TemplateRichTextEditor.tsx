@@ -17,6 +17,24 @@ type RichTextFormatKey = 'bold' | 'italic' | 'underline';
 const BRACKET_OPEN = '[';
 const BRACKET_CLOSE = ']';
 
+/** Prüft ob eine Cursor-Position innerhalb eines [...] Klammerpaars liegt */
+function isCursorInsideBrackets(text: string, cursorPos: number): boolean {
+  // Rückwärts nach [ oder ] suchen
+  let openIdx = -1;
+  for (let i = cursorPos - 1; i >= 0; i--) {
+    if (text[i] === '[') { openIdx = i; break; }
+    if (text[i] === ']') break; // schließende Klammer vor öffnender → nicht drinnen
+  }
+  if (openIdx === -1) return false;
+
+  // Vorwärts nach ] suchen (ab openIdx)
+  for (let i = Math.max(cursorPos, openIdx + 1); i < text.length; i++) {
+    if (text[i] === ']') return true;
+    if (text[i] === '[') break; // neue öffnende Klammer → nicht in diesem Paar
+  }
+  return false;
+}
+
 interface TemplateRichTextEditorProps {
   value: string;
   formats: RichTextFormatRange[];
@@ -124,6 +142,29 @@ export default function TemplateRichTextEditor({
     }));
   }, [onChange, syncSelection]);
 
+  /** Fügt einen /-Trenner ein, aber nur wenn der Cursor innerhalb von [ ] ist */
+  const handleSeparatorAction = useCallback(() => {
+    const currentValue = valueRef.current;
+    const liveSelection = editorRef.current ? getRichTextSelection(editorRef.current) : null;
+    const nextSelection = liveSelection ?? selectionRef.current ?? getDefaultSelection(currentValue);
+    const { start, end } = getRichTextSelectionBounds(nextSelection);
+    const cursorPos = Math.min(start, end);
+
+    if (!isCursorInsideBrackets(currentValue, cursorPos)) return;
+
+    const newText = currentValue.slice(0, cursorPos) + '/' + currentValue.slice(cursorPos);
+    const shiftedFormats = remapRichTextRanges(currentValue, newText, formatsRef.current);
+
+    valueRef.current = newText;
+    formatsRef.current = shiftedFormats;
+
+    // Cursor hinter den /
+    const newSel: RichTextSelection = { start: cursorPos + 1, end: cursorPos + 1, direction: 'none' };
+    syncSelection(newSel);
+
+    onChange(newText, shiftedFormats);
+  }, [onChange, syncSelection]);
+
   const handleBracketAction = useCallback(() => {
     const currentValue = valueRef.current;
     const liveSelection = editorRef.current ? getRichTextSelection(editorRef.current) : null;
@@ -217,6 +258,19 @@ export default function TemplateRichTextEditor({
         >
           <span className="bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 rounded px-0.5 font-medium">[ ]</span>
           Optionen
+        </button>
+        <button
+          type="button"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            handleSeparatorAction();
+          }}
+          disabled={disabled}
+          className="inline-flex h-7 items-center gap-1 rounded border border-gray-300 bg-white px-2 text-xs text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+          title="Trenner / einfügen (nur innerhalb von [Optionen])"
+        >
+          <span className="font-mono font-bold">/</span>
+          Trenner
         </button>
       </div>
 

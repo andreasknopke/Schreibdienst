@@ -35,6 +35,7 @@ import { normalizeRichTextRanges, remapRichTextRanges, buildRichTextHtml, type R
 import {
   initializeBlocksFromText,
   createBausteinBlock,
+  ensureFieldHasBlocks,
   type EditorBlocksByField,
 } from '@/lib/editorBlocks';
 
@@ -2809,6 +2810,24 @@ export default function HomePage() {
   ) => {
     handleManualTextChange(field, value, setter, getRichTextSelection(editor), formats);
   }, [handleManualTextChange]);
+
+  /**
+   * Wird beim Fokussieren eines Feldes aufgerufen. Stellt sicher, dass
+   * die Block-Liste für das Feld existiert, und setzt activeBlockId.
+   */
+  const handleFieldActivation = useCallback((field: BefundField, editor: HTMLDivElement) => {
+    setEditorBlocksByField((prev) => {
+      const updated = ensureFieldHasBlocks(prev, field, getFieldTextValue(field), getFieldRichTextFormats(field));
+      // activeBlockId auf den ersten Block setzen, wenn noch keiner aktiv ist
+      if (!activeBlockIdRef.current && updated[field].length > 0) {
+        setActiveBlockId(updated[field][0].id);
+      }
+      return updated;
+    });
+    setActiveField(field);
+    setFocusedTextField(field);
+    handleRichTextSelectionChange(field, editor);
+  }, [getFieldTextValue, getFieldRichTextFormats, handleRichTextSelectionChange]);
 
   const handleRichTextWordDoubleClick = useCallback((
     field: TextInsertionTarget,
@@ -6408,6 +6427,8 @@ export default function HomePage() {
                     showPersistentCaret={showPersistentCaret}
                     caretPosition={caretOverlays.methodik}
                     placeholder="Methodik..."
+                    contradictionMode={templateContradictionMode}
+                    onContradictionModeChange={setTemplateContradictionMode}
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
                     onChange={(value, editor) => {
                       handleRichTextEditorChange('methodik', value, setMethodik, editor);
@@ -6420,7 +6441,7 @@ export default function HomePage() {
                         }));
                       }
                     }}
-                    onFocus={(editor) => { setActiveField('methodik'); setFocusedTextField('methodik'); handleRichTextSelectionChange('methodik', editor); }}
+                    onFocus={(editor) => handleFieldActivation('methodik', editor)}
                     onBlur={() => setFocusedTextField((current) => current === 'methodik' ? null : current)}
                     onSelectionChange={(editor) => handleRichTextSelectionChange('methodik', editor)}
                     onWordDoubleClick={(info) => handleRichTextWordDoubleClick('methodik', info)}
@@ -6505,6 +6526,8 @@ export default function HomePage() {
                     showPersistentCaret={showPersistentCaret}
                     caretPosition={caretOverlays.befund}
                     placeholder="Befund..."
+                    contradictionMode={templateContradictionMode}
+                    onContradictionModeChange={setTemplateContradictionMode}
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
                     onChange={(value, editor) => {
                       handleRichTextEditorChange('befund', value, setTranscript, editor);
@@ -6517,7 +6540,7 @@ export default function HomePage() {
                         }));
                       }
                     }}
-                    onFocus={(editor) => { setActiveField('befund'); setFocusedTextField('befund'); handleRichTextSelectionChange('befund', editor); }}
+                    onFocus={(editor) => handleFieldActivation('befund', editor)}
                     onBlur={() => setFocusedTextField((current) => current === 'befund' ? null : current)}
                     onSelectionChange={(editor) => handleRichTextSelectionChange('befund', editor)}
                     onWordDoubleClick={(info) => handleRichTextWordDoubleClick('befund', info)}
@@ -6618,6 +6641,8 @@ export default function HomePage() {
                     showPersistentCaret={showPersistentCaret}
                     caretPosition={caretOverlays.beurteilung}
                     placeholder="Zusammenfassung..."
+                    contradictionMode={templateContradictionMode}
+                    onContradictionModeChange={setTemplateContradictionMode}
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
                     onChange={(value, editor) => {
                       handleRichTextEditorChange('beurteilung', value, setBeurteilung, editor);
@@ -6630,7 +6655,7 @@ export default function HomePage() {
                         }));
                       }
                     }}
-                    onFocus={(editor) => { setActiveField('beurteilung'); setFocusedTextField('beurteilung'); handleRichTextSelectionChange('beurteilung', editor); }}
+                    onFocus={(editor) => handleFieldActivation('beurteilung', editor)}
                     onBlur={() => setFocusedTextField((current) => current === 'beurteilung' ? null : current)}
                     onSelectionChange={(editor) => handleRichTextSelectionChange('beurteilung', editor)}
                     onWordDoubleClick={(info) => handleRichTextWordDoubleClick('beurteilung', info)}

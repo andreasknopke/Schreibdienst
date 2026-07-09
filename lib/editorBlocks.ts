@@ -91,3 +91,20 @@ export function initializeBlocksFromText(
   }
   return blocks;
 }
+
+/**
+ * Ensure a field has at least one block. If empty, create a freitext block
+ * from the given text. Returns the (possibly updated) map.
+ */
+export function ensureFieldHasBlocks(
+  prev: EditorBlocksByField,
+  field: BefundField,
+  text: string,
+  formatRanges?: RichTextFormatRange[],
+): EditorBlocksByField {
+  if (prev[field].length > 0) return prev;
+  return {
+    ...prev,
+    [field]: [createFreitextBlock(field, text, formatRanges)],
+  };
+}

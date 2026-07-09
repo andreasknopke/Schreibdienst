@@ -22,7 +22,7 @@ import RichTextDictationEditor, { getRichTextSelection } from '@/components/Rich
 import TemplateRichTextEditor from '@/components/TemplateRichTextEditor';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import TemplatesManager from '@/components/TemplatesManager';
-import EditorBlockSidebar from '@/components/EditorBlockSidebar';
+import BausteinPalette from '@/components/BausteinPalette';
 import BracketHighlight from '@/components/BracketHighlight';
 import { createPortal } from 'react-dom';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
@@ -33,8 +33,6 @@ import { useMicrophone } from '@/lib/MicrophoneContext';
 import { normalizeRichTextRanges, remapRichTextRanges, buildRichTextHtml, type RichTextFormatRange } from '@/lib/richTextFormatting';
 import {
   initializeBlocksFromText,
-  createFreitextBlock,
-  type EditorBlock,
   type EditorBlocksByField,
 } from '@/lib/editorBlocks';
 
@@ -1071,6 +1069,7 @@ export default function HomePage() {
     ),
   );
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  const [showMultiBausteinMode, setShowMultiBausteinMode] = useState(false);
   const templateSelectRef = useRef<HTMLSelectElement | null>(null);
 
   // Aktuelles aktives Feld für Befund-Modus
@@ -5851,6 +5850,10 @@ export default function HomePage() {
                       setShowTemplatesManager(true);
                       return;
                     }
+                    if (val === '__multi__') {
+                      setShowMultiBausteinMode((prev) => !prev);
+                      return;
+                    }
                     const id = parseInt(val);
                     const template = availableTemplates.find(t => t.id === id);
                     handleTemplateSelection(template || null);
@@ -5863,6 +5866,9 @@ export default function HomePage() {
                   <option value="">{loadingTemplates ? 'Lade Bausteine...' : '📝 Bausteine'}</option>
                   <option value="__manage__" className="font-medium text-orange-600 dark:text-orange-400">📂 Meine Bausteine</option>
                   <option value="__new__" className="border-t border-gray-300 dark:border-gray-600 font-medium text-blue-600 dark:text-blue-400">➕ Neuen Baustein anlegen</option>
+                  <option value="__multi__" className={`font-medium ${showMultiBausteinMode ? 'text-green-600 dark:text-green-400' : 'text-purple-600 dark:text-purple-400'}`}>
+                    {showMultiBausteinMode ? '✓ Mit mehreren Bausteinen arbeiten' : '⊞ Mit mehreren Bausteinen arbeiten'}
+                  </option>
                   {availableTemplates.map(t => (
                     <option key={t.id} value={t.id}>
                       {t.name.length > 20 ? t.name.substring(0, 20) + '…' : t.name}
@@ -6176,22 +6182,7 @@ export default function HomePage() {
         <div className="space-y-3">
           {/* Methodik-Feld mit Action-Buttons */}
           <div className="card">
-              <div className="card-body py-3 flex flex-row">
-                <EditorBlockSidebar
-                  blocks={editorBlocksByField.methodik}
-                  activeBlockId={activeBlockId}
-                  fieldLabel="Methodik"
-                  onAddBaustein={() => templateSelectRef.current?.focus()}
-                  onBlockSelect={(blockId) => setActiveBlockId(blockId)}
-                  onDeleteBlock={(blockId) => {
-                    setEditorBlocksByField((prev) => ({
-                      ...prev,
-                      methodik: prev.methodik.filter((b) => b.id !== blockId),
-                    }));
-                    if (activeBlockId === blockId) setActiveBlockId(null);
-                  }}
-                />
-                <div className="flex-1 min-w-0 space-y-2">
+              <div className="card-body py-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium flex items-center gap-2">
                     Methodik
@@ -6280,27 +6271,11 @@ export default function HomePage() {
                   />
                 )}
               </div>
-              </div>
           </div>
 
           {/* Befund-Feld (Hauptfeld) mit Action-Buttons */}
           <div className="card">
-              <div className="card-body py-3 flex flex-row">
-                <EditorBlockSidebar
-                  blocks={editorBlocksByField.befund}
-                  activeBlockId={activeBlockId}
-                  fieldLabel="Befund"
-                  onAddBaustein={() => templateSelectRef.current?.focus()}
-                  onBlockSelect={(blockId) => setActiveBlockId(blockId)}
-                  onDeleteBlock={(blockId) => {
-                    setEditorBlocksByField((prev) => ({
-                      ...prev,
-                      befund: prev.befund.filter((b) => b.id !== blockId),
-                    }));
-                    if (activeBlockId === blockId) setActiveBlockId(null);
-                  }}
-                />
-                <div className="flex-1 min-w-0 space-y-2">
+              <div className="card-body py-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium flex items-center gap-2">
                     Befund
@@ -6395,7 +6370,6 @@ export default function HomePage() {
                   </div>
                 )}
               </div>
-              </div>
           </div>
 
           {/* Warnbanner bei signifikanten Änderungen */}
@@ -6405,22 +6379,7 @@ export default function HomePage() {
 
           {/* Beurteilung-Feld mit Action-Buttons */}
           <div className="card">
-              <div className="card-body py-3 flex flex-row">
-                <EditorBlockSidebar
-                  blocks={editorBlocksByField.beurteilung}
-                  activeBlockId={activeBlockId}
-                  fieldLabel="Beurteilung"
-                  onAddBaustein={() => templateSelectRef.current?.focus()}
-                  onBlockSelect={(blockId) => setActiveBlockId(blockId)}
-                  onDeleteBlock={(blockId) => {
-                    setEditorBlocksByField((prev) => ({
-                      ...prev,
-                      beurteilung: prev.beurteilung.filter((b) => b.id !== blockId),
-                    }));
-                    if (activeBlockId === blockId) setActiveBlockId(null);
-                  }}
-                />
-                <div className="flex-1 min-w-0 space-y-2">
+              <div className="card-body py-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <label className="text-xs font-medium flex items-center gap-2">
@@ -6524,7 +6483,6 @@ export default function HomePage() {
                     '✨ Zusammenfassung erstellen'
                   )}
                 </button>
-              </div>
               </div>
           </div>
 
@@ -6665,6 +6623,25 @@ export default function HomePage() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Seitliches Panel: Mit mehreren Bausteinen arbeiten */}
+      {showMultiBausteinMode && (
+        <div className={`
+          fixed left-0 top-[18vh] z-40 hidden md:flex items-start
+          ${liveEditorWidth === 'full' ? 'left-0' : 'left-0'}
+        `}>
+          <div className="flex items-start">
+            <BausteinPalette
+              templates={availableTemplates.map((t) => ({ id: t.id, name: t.name, content: t.content }))}
+              onAddBaustein={(tpl) => {
+                const full = availableTemplates.find((t) => t.id === tpl.id);
+                if (full) handleTemplateSelection(full);
+              }}
+              onClose={() => setShowMultiBausteinMode(false)}
+            />
           </div>
         </div>
       )}

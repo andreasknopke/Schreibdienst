@@ -1071,7 +1071,13 @@ export default function HomePage() {
     ),
   );
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  const activeBlockIdRef = useRef<string | null>(null);
+  activeBlockIdRef.current = activeBlockId;
   const [showMultiBausteinMode, setShowMultiBausteinMode] = useState(false);
+  const showMultiBausteinModeRef = useRef(false);
+  showMultiBausteinModeRef.current = showMultiBausteinMode;
+  const editorBlocksByFieldRef = useRef<EditorBlocksByField>(editorBlocksByField);
+  editorBlocksByFieldRef.current = editorBlocksByField;
   const templateSelectRef = useRef<HTMLSelectElement | null>(null);
 
   // Aktuelles aktives Feld für Befund-Modus
@@ -1877,6 +1883,8 @@ export default function HomePage() {
   const activeTemplateContextRef = useRef(activeTemplateContext);
   activeTemplateContextRef.current = activeTemplateContext;
   const applyTemplateChangesRef = useRef<((template: Template, changesOverride?: string) => Promise<boolean>) | null>(null);
+  // Ref für den Block-Diktat-Pfad im Multi-Baustein-Modus.
+  const processBlockDictationRef = useRef<((spoken: string) => Promise<void>) | null>(null);
   // Sammelt im Auto-Einarbeiten-Modus den gesprochenen Text, bis die Aufnahme endet.
   const templateAudioBufferRef = useRef('');
   // Markiert, dass nach dem Leeren der VAD-Commit-Queue in den Baustein eingearbeitet werden soll.
@@ -1987,6 +1995,78 @@ export default function HomePage() {
     }
   }, [cloneRichTextRanges, getFieldRichTextFormats, getTextForBefundField, getAuthHeader, getDbTokenHeader, username, methodik, transcript, beurteilung, setFieldTextWithFormats, templateContradictionMode]);
   applyTemplateChangesRef.current = applyTemplateChanges;
+
+  /**
+   * Verarbeitet Diktat-Text im Multi-Baustein-Modus in den aktiven Block.
+   * - Freitext-Block: Text wird direkt angehängt.
+   * - Baustein-Block: Text wird via /api/templates/adapt in den Block eingearbeitet.
+   */
+  const processBlockDictation = useCallback(async (spoken: string) => {
+    if (!showMultiBausteinModeRef.current || !activeBlockIdRef.current) return;
+
+    const field = activeFieldRef.current;
+    const blockId = activeBlockIdRef.current;
+    const allBlocks = editorBlocksByFieldRef.current[field];
+    const activeBlock = allBlocks.find((b) => b.id === blockId);
+    if (!activeBlock) return;
+
+    if (activeBlock.type === 'freitext') {
+      // Freitext: Diktat direkt anhängen
+      const newText = activeBlock.currentText
+        ? activeBlock.currentText + ' ' + spoken
+        : spoken;
+      setEditorBlocksByField((prev) => ({
+        ...prev,
+        [field]: prev[field].map((b) =>
+          b.id === blockId ? { ...b, currentText: newText } : b,
+        ),
+      }));
+      return;
+    }
+
+    // Baustein: LLM-Adaption aufrufen
+    const baseText = activeBlock.currentText || activeBlock.originalContent;
+    try {
+      const res = await fetch('/api/templates/adapt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader(),
+        },
+        body: JSON.stringify({
+          template: baseText,
+          changes: spoken,
+          field: activeBlock.field,
+          username,
+          contradictionMode: templateContradictionMode,
+          formatRanges: activeBlock.formatRanges,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Template-Anpassung fehlgeschlagen');
+      }
+
+      const data = await res.json();
+      const nextText = data.adaptedText || baseText;
+      const serverFormats = data.formatRanges as RichTextFormatRange[] | undefined;
+      const nextFormats = serverFormats ?? remapRichTextRanges(baseText, nextText, activeBlock.formatRanges);
+
+      setEditorBlocksByField((prev) => ({
+        ...prev,
+        [field]: prev[field].map((b) =>
+          b.id === blockId ? { ...b, currentText: nextText, formatRanges: nextFormats } : b,
+        ),
+      }));
+      setError(null);
+    } catch (err: any) {
+      console.error('[BlockDictation] Error:', err);
+      setError(err.message || 'Fehler bei Block-Diktat');
+    }
+  }, [getAuthHeader, getDbTokenHeader, username, templateContradictionMode]);
+  processBlockDictationRef.current = processBlockDictation;
 
   const applySelectedTemplate = useCallback(async (changesOverride?: string) => {
     if (!selectedTemplate) {
@@ -3052,6 +3132,26 @@ export default function HomePage() {
         // Der gesprochene Text wird nur gesammelt und erst beim Stoppen der Aufnahme
         // über die LLM-Anpassung an die richtige Stelle im Baustein eingearbeitet.
         templateAudioBufferRef.current = committed[0] || '';
+      } else if (showMultiBausteinModeRef.current && activeBlockIdRef.current) {
+        // Multi-Baustein-Modus
+        const blockId = activeBlockIdRef.current;
+        const field = activeFieldRef.current;
+        const blocks = editorBlocksByFieldRef.current[field];
+        const activeBlock = blocks.find((b) => b.id === blockId);
+
+        if (activeBlock?.type === 'baustein') {
+          // Bei Baustein-Blöcken: Text nur sammeln, LLM-Adaption erfolgt beim Stopp.
+          templateAudioBufferRef.current = committed[0] || '';
+        } else {
+          // Freitext: direkter Text-Ersatz.
+          const fullText = committed[0] || '';
+          setEditorBlocksByField((prev) => ({
+            ...prev,
+            [field]: prev[field].map((b) =>
+              b.id === blockId ? { ...b, currentText: fullText } : b,
+            ),
+          }));
+        }
       } else {
         // Transcript-State synchronisieren (für Export, Korrektur etc.).
         // committed enthält im VAD-Pfad bereits den vollständigen aktuellen Textzustand,
@@ -3073,13 +3173,27 @@ export default function HomePage() {
       if (autoIntegrateTemplateAudioRef.current && activeTemplateContextRef.current) {
         // Gesprochenen Text als Vorschau anzeigen, solange noch diktiert wird.
         setTentativeText(templateAudioBufferRef.current);
+      } else if (showMultiBausteinModeRef.current && activeBlockIdRef.current) {
+        // Im Multi-Baustein-Modus den gesammelten Text als Vorschau anzeigen.
+        setTentativeText(templateAudioBufferRef.current || committedUtterancesRef.current.join(' '));
       } else {
         setTentativeText('');
       }
 
       // Aufnahme wurde gestoppt und alle Utterances sind verarbeitet:
-      // jetzt einmalig den gesammelten Text in den Baustein einarbeiten.
-      if (
+      // jetzt einmalig den gesammelten Text verarbeiten.
+      if (showMultiBausteinModeRef.current && activeBlockIdRef.current) {
+        // Multi-Baustein-Modus: Diktat in den aktiven Block einarbeiten.
+        if (pendingTemplateIntegrationRef.current && processBlockDictationRef.current) {
+          pendingTemplateIntegrationRef.current = false;
+          const spoken = templateAudioBufferRef.current.trim();
+          templateAudioBufferRef.current = '';
+          setTentativeText('');
+          if (spoken) {
+            void processBlockDictationRef.current(spoken);
+          }
+        }
+      } else if (
         pendingTemplateIntegrationRef.current &&
         autoIntegrateTemplateAudioRef.current &&
         activeTemplateContextRef.current &&
@@ -4612,6 +4726,13 @@ export default function HomePage() {
       // geflushten letzten Utterance) wird der gesammelte Text in den Baustein eingearbeitet.
       if (autoIntegrateTemplateAudio && activeTemplateContext) {
         pendingTemplateIntegrationRef.current = true;
+      } else if (showMultiBausteinMode && activeBlockId) {
+        // Im Multi-Baustein-Modus vor dem Stoppen den aktuellen Block prüfen.
+        const fieldBlocks = editorBlocksByField[activeField] ?? [];
+        const block = fieldBlocks.find((b) => b.id === activeBlockId);
+        if (block?.type === 'baustein') {
+          pendingTemplateIntegrationRef.current = true;
+        }
       }
       await vad.stop();
       setAudioLevel(0);
@@ -4631,6 +4752,22 @@ export default function HomePage() {
         setTentativeText('');
         if (spoken) {
           await applyTemplateChanges(activeTemplateContext, spoken);
+        }
+      } else if (
+        pendingTemplateIntegrationRef.current &&
+        showMultiBausteinMode &&
+        activeBlockId &&
+        vadInFlightCountRef.current === 0 &&
+        vadPendingResultsRef.current.size === 0
+      ) {
+        // Multi-Baustein-Modus: Diktat direkt an den aktiven Baustein-Block übergeben.
+        pendingTemplateIntegrationRef.current = false;
+        const spoken = committedUtterancesRef.current.join(' ').trim();
+        committedUtterancesRef.current = [];
+        setCommittedUtterances([]);
+        setTentativeText('');
+        if (spoken && processBlockDictationRef.current) {
+          await processBlockDictationRef.current(spoken);
         }
       } else if (!pendingTemplateIntegrationRef.current) {
         setTentativeText('');
@@ -6272,7 +6409,17 @@ export default function HomePage() {
                     caretPosition={caretOverlays.methodik}
                     placeholder="Methodik..."
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
-                    onChange={(value, editor) => handleRichTextEditorChange('methodik', value, setMethodik, editor)}
+                    onChange={(value, editor) => {
+                      handleRichTextEditorChange('methodik', value, setMethodik, editor);
+                      if (showMultiBausteinMode && activeBlockId) {
+                        setEditorBlocksByField((prev) => ({
+                          ...prev,
+                          methodik: prev.methodik.map((b) =>
+                            b.id === activeBlockId ? { ...b, currentText: value } : b,
+                          ),
+                        }));
+                      }
+                    }}
                     onFocus={(editor) => { setActiveField('methodik'); setFocusedTextField('methodik'); handleRichTextSelectionChange('methodik', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'methodik' ? null : current)}
                     onSelectionChange={(editor) => handleRichTextSelectionChange('methodik', editor)}
@@ -6359,7 +6506,17 @@ export default function HomePage() {
                     caretPosition={caretOverlays.befund}
                     placeholder="Befund..."
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
-                    onChange={(value, editor) => handleRichTextEditorChange('befund', value, setTranscript, editor)}
+                    onChange={(value, editor) => {
+                      handleRichTextEditorChange('befund', value, setTranscript, editor);
+                      if (showMultiBausteinMode && activeBlockId) {
+                        setEditorBlocksByField((prev) => ({
+                          ...prev,
+                          befund: prev.befund.map((b) =>
+                            b.id === activeBlockId ? { ...b, currentText: value } : b,
+                          ),
+                        }));
+                      }
+                    }}
                     onFocus={(editor) => { setActiveField('befund'); setFocusedTextField('befund'); handleRichTextSelectionChange('befund', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'befund' ? null : current)}
                     onSelectionChange={(editor) => handleRichTextSelectionChange('befund', editor)}
@@ -6462,7 +6619,17 @@ export default function HomePage() {
                     caretPosition={caretOverlays.beurteilung}
                     placeholder="Zusammenfassung..."
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
-                    onChange={(value, editor) => handleRichTextEditorChange('beurteilung', value, setBeurteilung, editor)}
+                    onChange={(value, editor) => {
+                      handleRichTextEditorChange('beurteilung', value, setBeurteilung, editor);
+                      if (showMultiBausteinMode && activeBlockId) {
+                        setEditorBlocksByField((prev) => ({
+                          ...prev,
+                          beurteilung: prev.beurteilung.map((b) =>
+                            b.id === activeBlockId ? { ...b, currentText: value } : b,
+                          ),
+                        }));
+                      }
+                    }}
                     onFocus={(editor) => { setActiveField('beurteilung'); setFocusedTextField('beurteilung'); handleRichTextSelectionChange('beurteilung', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'beurteilung' ? null : current)}
                     onSelectionChange={(editor) => handleRichTextSelectionChange('beurteilung', editor)}

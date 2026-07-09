@@ -23,6 +23,7 @@ import TemplateRichTextEditor from '@/components/TemplateRichTextEditor';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import TemplatesManager from '@/components/TemplatesManager';
 import BausteinPalette from '@/components/BausteinPalette';
+import MultiBlockEditor from '@/components/MultiBlockEditor';
 import BracketHighlight from '@/components/BracketHighlight';
 import { createPortal } from 'react-dom';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
@@ -6235,32 +6236,26 @@ export default function HomePage() {
                     />
                   </div>
                 )}
-                <div className="relative">
-                  <RichTextDictationEditor
+                  <MultiBlockEditor
+                    blocks={editorBlocksByField.methodik}
+                    activeBlockId={activeBlockId}
                     editorRef={methodikTextareaRef}
-                    value={methodik}
-                    formats={getFieldRichTextFormats('methodik')}
+                    fieldFormats={getFieldRichTextFormats('methodik')}
                     selection={textSelections.methodik ?? null}
                     className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    isProcessing={isProcessing}
+                    recording={recording}
+                    focused={focusedTextField === 'methodik'}
+                    showPersistentCaret={showPersistentCaret}
+                    caretPosition={caretOverlays.methodik}
+                    placeholder="Methodik..."
+                    onBlockActivate={(blockId) => setActiveBlockId(blockId)}
                     onChange={(value, editor) => handleRichTextEditorChange('methodik', value, setMethodik, editor)}
                     onFocus={(editor) => { setActiveField('methodik'); setFocusedTextField('methodik'); handleRichTextSelectionChange('methodik', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'methodik' ? null : current)}
                     onSelectionChange={(editor) => handleRichTextSelectionChange('methodik', editor)}
                     onWordDoubleClick={(info) => handleRichTextWordDoubleClick('methodik', info)}
-                    placeholder="Methodik..."
-                    readOnly={isProcessing}
                   />
-                  {showPersistentCaret && focusedTextField !== 'methodik' && caretOverlays.methodik.visible && (
-                    <div
-                      className="pointer-events-none absolute w-0.5 rounded-full bg-blue-500/80"
-                      style={{
-                        top: caretOverlays.methodik.top,
-                        left: caretOverlays.methodik.left,
-                        height: caretOverlays.methodik.height,
-                      }}
-                    />
-                  )}
-                </div>
                 {manualCorrectionSuggestions.methodik && (
                   <ManualCorrectionSuggestion
                     originalWord={manualCorrectionSuggestions.methodik.originalWord}
@@ -6328,32 +6323,26 @@ export default function HomePage() {
                     />
                   </div>
                 )}
-                <div className="relative">
-                  <RichTextDictationEditor
+                  <MultiBlockEditor
+                    blocks={editorBlocksByField.befund}
+                    activeBlockId={activeBlockId}
                     editorRef={befundTextareaRef}
-                    value={transcript}
-                    formats={getFieldRichTextFormats('befund')}
+                    fieldFormats={getFieldRichTextFormats('befund')}
                     selection={textSelections.befund ?? null}
                     className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    isProcessing={isProcessing}
+                    recording={recording}
+                    focused={focusedTextField === 'befund'}
+                    showPersistentCaret={showPersistentCaret}
+                    caretPosition={caretOverlays.befund}
+                    placeholder="Befund..."
+                    onBlockActivate={(blockId) => setActiveBlockId(blockId)}
                     onChange={(value, editor) => handleRichTextEditorChange('befund', value, setTranscript, editor)}
                     onFocus={(editor) => { setActiveField('befund'); setFocusedTextField('befund'); handleRichTextSelectionChange('befund', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'befund' ? null : current)}
                     onSelectionChange={(editor) => handleRichTextSelectionChange('befund', editor)}
                     onWordDoubleClick={(info) => handleRichTextWordDoubleClick('befund', info)}
-                    placeholder="Befund..."
-                    readOnly={isProcessing}
                   />
-                  {showPersistentCaret && focusedTextField !== 'befund' && caretOverlays.befund.visible && (
-                    <div
-                      className="pointer-events-none absolute w-0.5 rounded-full bg-blue-500/80"
-                      style={{
-                        top: caretOverlays.befund.top,
-                        left: caretOverlays.befund.left,
-                        height: caretOverlays.befund.height,
-                      }}
-                    />
-                  )}
-                </div>
                 {manualCorrectionSuggestions.befund && (
                   <ManualCorrectionSuggestion
                     originalWord={manualCorrectionSuggestions.befund.originalWord}
@@ -6437,32 +6426,26 @@ export default function HomePage() {
                     />
                   </div>
                 )}
-                <div className="relative">
-                  <RichTextDictationEditor
+                  <MultiBlockEditor
+                    blocks={editorBlocksByField.beurteilung}
+                    activeBlockId={activeBlockId}
                     editorRef={beurteilungTextareaRef}
-                    value={beurteilung}
-                    formats={getFieldRichTextFormats('beurteilung')}
+                    fieldFormats={getFieldRichTextFormats('beurteilung')}
                     selection={textSelections.beurteilung ?? null}
                     className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    isProcessing={isProcessing}
+                    recording={recording}
+                    focused={focusedTextField === 'beurteilung'}
+                    showPersistentCaret={showPersistentCaret}
+                    caretPosition={caretOverlays.beurteilung}
+                    placeholder="Zusammenfassung..."
+                    onBlockActivate={(blockId) => setActiveBlockId(blockId)}
                     onChange={(value, editor) => handleRichTextEditorChange('beurteilung', value, setBeurteilung, editor)}
                     onFocus={(editor) => { setActiveField('beurteilung'); setFocusedTextField('beurteilung'); handleRichTextSelectionChange('beurteilung', editor); }}
                     onBlur={() => setFocusedTextField((current) => current === 'beurteilung' ? null : current)}
                     onSelectionChange={(editor) => handleRichTextSelectionChange('beurteilung', editor)}
                     onWordDoubleClick={(info) => handleRichTextWordDoubleClick('beurteilung', info)}
-                    placeholder="Zusammenfassung..."
-                    readOnly={isProcessing}
                   />
-                  {showPersistentCaret && focusedTextField !== 'beurteilung' && caretOverlays.beurteilung.visible && (
-                    <div
-                      className="pointer-events-none absolute w-0.5 rounded-full bg-blue-500/80"
-                      style={{
-                        top: caretOverlays.beurteilung.top,
-                        left: caretOverlays.beurteilung.left,
-                        height: caretOverlays.beurteilung.height,
-                      }}
-                    />
-                  )}
-                </div>
                 {manualCorrectionSuggestions.beurteilung && (
                   <ManualCorrectionSuggestion
                     originalWord={manualCorrectionSuggestions.beurteilung.originalWord}

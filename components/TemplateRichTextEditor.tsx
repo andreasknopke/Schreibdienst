@@ -14,6 +14,9 @@ import {
 
 type RichTextFormatKey = 'bold' | 'italic' | 'underline';
 
+const BRACKET_OPEN = '[';
+const BRACKET_CLOSE = ']';
+
 interface TemplateRichTextEditorProps {
   value: string;
   formats: RichTextFormatRange[];
@@ -121,6 +124,37 @@ export default function TemplateRichTextEditor({
     }));
   }, [onChange, syncSelection]);
 
+  const handleBracketAction = useCallback(() => {
+    const currentValue = valueRef.current;
+    const liveSelection = editorRef.current ? getRichTextSelection(editorRef.current) : null;
+    const nextSelection = liveSelection ?? selectionRef.current ?? getDefaultSelection(currentValue);
+    const { start, end } = getRichTextSelectionBounds(nextSelection);
+
+    if (end <= start) return; // Nichts selektiert
+
+    const newText =
+      currentValue.slice(0, start) +
+      BRACKET_OPEN +
+      currentValue.slice(start, end) +
+      BRACKET_CLOSE +
+      currentValue.slice(end);
+
+    const shiftedFormats = remapRichTextRanges(currentValue, newText, formatsRef.current);
+
+    valueRef.current = newText;
+    formatsRef.current = shiftedFormats;
+
+    // Selection auf den eingeklammerten Bereich setzen
+    const bracketSel: RichTextSelection = {
+      start: start + 1,
+      end: end + 1,
+      direction: 'none',
+    };
+    syncSelection(bracketSel);
+
+    onChange(newText, shiftedFormats);
+  }, [onChange, syncSelection]);
+
   const buttons = useMemo<Array<{ key: RichTextFormatKey; label: string; className: string; title: string }>>(() => ([
     { key: 'bold', label: 'B', className: 'font-bold', title: 'Fett' },
     { key: 'italic', label: 'I', className: 'italic', title: 'Kursiv' },
@@ -170,6 +204,20 @@ export default function TemplateRichTextEditor({
             </button>
           );
         })}
+        <span className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
+        <button
+          type="button"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            handleBracketAction();
+          }}
+          disabled={disabled}
+          className="inline-flex h-7 items-center gap-1 rounded border border-gray-300 bg-white px-2 text-xs text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+          title="Markierten Text in [Optionen] setzen"
+        >
+          <span className="bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 rounded px-0.5 font-medium">[ ]</span>
+          Optionen
+        </button>
       </div>
 
       <RichTextDictationEditor

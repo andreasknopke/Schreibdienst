@@ -48,6 +48,28 @@ export function createFreitextBlock(
 }
 
 /**
+ * Create an initial `EditorBlock` of type `baustein` from a template.
+ */
+export function createBausteinBlock(
+  field: BefundField,
+  templateId: number,
+  name: string,
+  content: string,
+  formatRanges?: RichTextFormatRange[],
+): EditorBlock {
+  return {
+    id: crypto.randomUUID(),
+    type: 'baustein',
+    name,
+    templateId,
+    field,
+    originalContent: content,
+    currentText: content,
+    formatRanges: formatRanges ?? [],
+  };
+}
+
+/**
  * Return an empty `EditorBlocksByField` map.
  */
 export function emptyEditorBlocksByField(): EditorBlocksByField {

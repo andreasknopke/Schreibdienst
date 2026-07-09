@@ -34,6 +34,7 @@ import { useMicrophone } from '@/lib/MicrophoneContext';
 import { normalizeRichTextRanges, remapRichTextRanges, buildRichTextHtml, type RichTextFormatRange } from '@/lib/richTextFormatting';
 import {
   initializeBlocksFromText,
+  createBausteinBlock,
   type EditorBlocksByField,
 } from '@/lib/editorBlocks';
 
@@ -2061,6 +2062,27 @@ export default function HomePage() {
 
     await applyTemplateChanges(template, existingText);
   }, [applyTemplateChanges, getTextForBefundField, insertTemplateIntoField]);
+
+  /**
+   * Im Multi-Baustein-Modus: Hängt einen Template-Baustein als neuen
+   * EditorBlock an, statt ihn in das Feld zu mergen.
+   * Nur genutzt, wenn showMultiBausteinMode aktiv ist.
+   */
+  const addBausteinAsNewBlock = useCallback((template: Template) => {
+    const field = template.field;
+    const newBlock = createBausteinBlock(
+      field,
+      template.id,
+      template.name,
+      template.content,
+      template.formatRanges ?? [],
+    );
+    setEditorBlocksByField((prev) => ({
+      ...prev,
+      [field]: [...prev[field], newBlock],
+    }));
+    setActiveBlockId(newBlock.id);
+  }, []);
 
   // Templates laden
   const fetchTemplates = useCallback(async () => {
@@ -6621,7 +6643,7 @@ export default function HomePage() {
               templates={availableTemplates.map((t) => ({ id: t.id, name: t.name, content: t.content }))}
               onAddBaustein={(tpl) => {
                 const full = availableTemplates.find((t) => t.id === tpl.id);
-                if (full) handleTemplateSelection(full);
+                if (full) addBausteinAsNewBlock(full);
               }}
               onClose={() => setShowMultiBausteinMode(false)}
             />

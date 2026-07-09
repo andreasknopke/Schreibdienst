@@ -96,26 +96,29 @@ export default function MultiBlockEditor({
 
         if (isActive) {
           return (
-            <div key={block.id} className="group rounded-md border border-blue-300 dark:border-blue-700 overflow-hidden">
+            <div
+              key={block.id}
+              className="group rounded-md border border-blue-300 dark:border-blue-700 overflow-hidden"
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const draggedId = e.dataTransfer.getData('text/plain');
+                if (!draggedId || draggedId === block.id) return;
+                const ids = blocks.map((b) => b.id);
+                const fromIdx = ids.indexOf(draggedId);
+                const toIdx = ids.indexOf(block.id);
+                if (fromIdx === -1 || toIdx === -1) return;
+                ids.splice(fromIdx, 1);
+                ids.splice(toIdx, 0, draggedId);
+                onReorderBlocks(ids);
+              }}
+            >
               <div
                 className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 dark:bg-blue-900/30 border-b border-blue-200 dark:border-blue-800 rounded-t-md cursor-grab active:cursor-grabbing"
                 draggable
                 onDragStart={(e) => {
                   e.dataTransfer.setData('text/plain', block.id);
                   e.dataTransfer.effectAllowed = 'move';
-                }}
-                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const draggedId = e.dataTransfer.getData('text/plain');
-                  if (!draggedId || draggedId === block.id) return;
-                  const ids = blocks.map((b) => b.id);
-                  const fromIdx = ids.indexOf(draggedId);
-                  const toIdx = ids.indexOf(block.id);
-                  if (fromIdx === -1 || toIdx === -1) return;
-                  ids.splice(fromIdx, 1);
-                  ids.splice(toIdx, 0, draggedId);
-                  onReorderBlocks(ids);
                 }}
               >
                 <span className="text-xs leading-none">{getBlockIcon(block.type)}</span>
@@ -194,6 +197,19 @@ export default function MultiBlockEditor({
           <div
             key={block.id}
             className="group rounded-md border border-gray-200 dark:border-gray-700 opacity-35 select-none hover:opacity-50 transition-opacity"
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const draggedId = e.dataTransfer.getData('text/plain');
+              if (!draggedId || draggedId === block.id) return;
+              const ids = blocks.map((b) => b.id);
+              const fromIdx = ids.indexOf(draggedId);
+              const toIdx = ids.indexOf(block.id);
+              if (fromIdx === -1 || toIdx === -1) return;
+              ids.splice(fromIdx, 1);
+              ids.splice(toIdx, 0, draggedId);
+              onReorderBlocks(ids);
+            }}
           >
             <div
               className="flex items-center gap-1.5 px-2 py-1 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700 rounded-t-md cursor-grab active:cursor-grabbing"
@@ -203,19 +219,6 @@ export default function MultiBlockEditor({
               onDragStart={(e) => {
                 e.dataTransfer.setData('text/plain', block.id);
                 e.dataTransfer.effectAllowed = 'move';
-              }}
-              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-              onDrop={(e) => {
-                e.preventDefault();
-                const draggedId = e.dataTransfer.getData('text/plain');
-                if (!draggedId || draggedId === block.id) return;
-                const ids = blocks.map((b) => b.id);
-                const fromIdx = ids.indexOf(draggedId);
-                const toIdx = ids.indexOf(block.id);
-                if (fromIdx === -1 || toIdx === -1) return;
-                ids.splice(fromIdx, 1);
-                ids.splice(toIdx, 0, draggedId);
-                onReorderBlocks(ids);
               }}
             >
               <span className="text-xs leading-none">{getBlockIcon(block.type)}</span>

@@ -455,28 +455,32 @@ function EnterKeyPlugin() {
 }
 
 // ─── Bracket Highlight (mehrere Editoren via Shared-Highlight-Singleton) ───
+// Farben: erste Option grün, zweite gelb/amber, dritte+ rot
 
-const SHARED_HIGHLIGHT_NAME = 'bracket-highlight';
+const BRACKET_OPT_COUNT = 3;
+const BRACKET_OPT_NAMES = ['bracket-opt-0', 'bracket-opt-1', 'bracket-opt-2'];
 
 interface BracketRangeEntry {
-  ranges: Range[];
-  /** Wird bei rebuild() auf false gesetzt; beim nächsten update() wieder true */
+  ranges: Range[][]; // pro Highlight-Name ein Array
   dirty: boolean;
 }
 
 const bracketEntries = new Map<number, BracketRangeEntry>();
-let bracketHighlightSingleton: Highlight | null = null;
+const bracketOptHighlights: (Highlight | null)[] = [null, null, null];
 let nextBracketEntryId = 0;
 let bracketRebuildPending = false;
 
-function ensureBracketHighlight(): Highlight {
-  if (!bracketHighlightSingleton) {
-    bracketHighlightSingleton = new Highlight();
-    if (typeof CSS !== 'undefined' && CSS.highlights) {
-      CSS.highlights.set(SHARED_HIGHLIGHT_NAME, bracketHighlightSingleton);
+function ensureBracketOptHighlights(): Highlight[] {
+  if (typeof CSS === 'undefined' || !CSS.highlights) return [];
+  const result: Highlight[] = [];
+  for (let i = 0; i < BRACKET_OPT_COUNT; i++) {
+    if (!bracketOptHighlights[i]) {
+      bracketOptHighlights[i] = new Highlight();
+      CSS.highlights.set(BRACKET_OPT_NAMES[i], bracketOptHighlights[i]!);
     }
+    result.push(bracketOptHighlights[i]!);
   }
-  return bracketHighlightSingleton;
+  return result;
 }
 
 function scheduleBracketRebuild() {
@@ -484,21 +488,25 @@ function scheduleBracketRebuild() {
   bracketRebuildPending = true;
   requestAnimationFrame(() => {
     bracketRebuildPending = false;
-    const highlight = ensureBracketHighlight();
-    highlight.clear();
+    const highlights = ensureBracketOptHighlights();
+    if (highlights.length === 0) return;
+    for (const h of highlights) h.clear();
     for (const entry of bracketEntries.values()) {
       if (!entry.dirty) continue;
-      for (const range of entry.ranges) {
-        try { highlight.add(range); } catch { /* ignore */ }
+      for (let i = 0; i < BRACKET_OPT_COUNT && i < entry.ranges.length; i++) {
+        for (const range of entry.ranges[i]) {
+          try { highlights[i].add(range); } catch { /* ignore */ }
+        }
       }
     }
   });
 }
 
 /**
- * Hebt Text in [eckigen Klammern] mit grünem Hintergrund hervor.
+ * Hebt Optionen in [eckigen Klammern] mehrfarbig hervor:
+ *   [gut/schlecht/mittel] → grün / rot / gelb
  * Nutzt die CSS Custom Highlight API – keine DOM-Manipulation.
- * Singleton: alle Editor-Instanzen teilen sich ein Highlight-Objekt.
+ * Singleton: alle Editor-Instanzen teilen sich die Highlight-Objekte.
  */
 function BracketHighlightPlugin() {
   const [editor] = useLexicalComposerContext();
@@ -509,11 +517,14 @@ function BracketHighlightPlugin() {
     const entryId = nextBracketEntryId++;
     entryIdRef.current = entryId;
 
-    const entry: BracketRangeEntry = { ranges: [], dirty: false };
+    const entry: BracketRangeEntry = {
+      ranges: [new Array<Range>(), new Array<Range>(), new Array<Range>()],
+      dirty: false,
+    };
     bracketEntries.set(entryId, entry);
 
     const update = () => {
-      entry.ranges = [];
+      for (const arr of entry.ranges) arr.length = 0;
       const root = editor.getRootElement();
       if (!root) {
         entry.dirty = false;
@@ -524,16 +535,29 @@ function BracketHighlightPlugin() {
       let node: Text | null;
       while ((node = treeWalker.nextNode() as Text | null)) {
         const text = node.textContent || '';
-        const regex = /\[[^\]]*\]/g;
+        const bracketRegex = /\[([^\]]*)\]/g;
         let match;
-        while ((match = regex.exec(text)) !== null) {
-          try {
-            const range = new Range();
-            range.setStart(node, match.index);
-            range.setEnd(node, match.index + match[0].length);
-            entry.ranges.push(range);
-          } catch {
-            // Range ungültig – Knoten wurde zwischenzeitlich entfernt
+        while ((match = bracketRegex.exec(text)) !== null) {
+          const fullStart = match.index;
+          const inner = match[1]; // Inhalt zwischen [ und ]
+          const options = inner.split('/').map(o => o.trim());
+
+          let posInBracket = 1; // nach öffnender Klammer
+          for (let optIdx = 0; optIdx < options.length; optIdx++) {
+            const opt = options[optIdx];
+            if (!opt) continue;
+            const optStart = fullStart + posInBracket;
+            const optEnd = optStart + opt.length;
+            const highlightIdx = optIdx % BRACKET_OPT_COUNT;
+            try {
+              const range = new Range();
+              range.setStart(node, optStart);
+              range.setEnd(node, optEnd);
+              entry.ranges[highlightIdx].push(range);
+            } catch {
+              // Range ungültig
+            }
+            posInBracket += opt.length + 1; // +1 für / oder ]
           }
         }
       }

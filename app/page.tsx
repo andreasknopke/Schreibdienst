@@ -35,6 +35,7 @@ import { normalizeRichTextRanges, remapRichTextRanges, buildRichTextHtml, type R
 import {
   initializeBlocksFromText,
   createBausteinBlock,
+  createFreitextBlock,
   ensureFieldHasBlocks,
   type EditorBlocksByField,
 } from '@/lib/editorBlocks';
@@ -6430,6 +6431,27 @@ export default function HomePage() {
                     contradictionMode={templateContradictionMode}
                     onContradictionModeChange={setTemplateContradictionMode}
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
+                    onDeleteBlock={(blockId) => {
+                      setEditorBlocksByField((prev) => {
+                        const remaining = prev.methodik.filter((b) => b.id !== blockId);
+                        if (remaining.length === 0) {
+                          return {
+                            ...prev,
+                            methodik: [createFreitextBlock('methodik', methodik, getFieldRichTextFormats('methodik'))],
+                          };
+                        }
+                        return { ...prev, methodik: remaining };
+                      });
+                      if (activeBlockId === blockId) {
+                        setActiveBlockId(null);
+                      }
+                    }}
+                    onReorderBlocks={(blockIds) => {
+                      setEditorBlocksByField((prev) => {
+                        const reordered = blockIds.map((id) => prev.methodik.find((b) => b.id === id)!).filter(Boolean);
+                        return { ...prev, methodik: reordered };
+                      });
+                    }}
                     onChange={(value, editor) => {
                       handleRichTextEditorChange('methodik', value, setMethodik, editor);
                       if (showMultiBausteinMode && activeBlockId) {
@@ -6529,6 +6551,27 @@ export default function HomePage() {
                     contradictionMode={templateContradictionMode}
                     onContradictionModeChange={setTemplateContradictionMode}
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
+                    onDeleteBlock={(blockId) => {
+                      setEditorBlocksByField((prev) => {
+                        const remaining = prev.befund.filter((b) => b.id !== blockId);
+                        if (remaining.length === 0) {
+                          return {
+                            ...prev,
+                            befund: [createFreitextBlock('befund', transcript, getFieldRichTextFormats('befund'))],
+                          };
+                        }
+                        return { ...prev, befund: remaining };
+                      });
+                      if (activeBlockId === blockId) {
+                        setActiveBlockId(null);
+                      }
+                    }}
+                    onReorderBlocks={(blockIds) => {
+                      setEditorBlocksByField((prev) => {
+                        const reordered = blockIds.map((id) => prev.befund.find((b) => b.id === id)!).filter(Boolean);
+                        return { ...prev, befund: reordered };
+                      });
+                    }}
                     onChange={(value, editor) => {
                       handleRichTextEditorChange('befund', value, setTranscript, editor);
                       if (showMultiBausteinMode && activeBlockId) {
@@ -6644,6 +6687,27 @@ export default function HomePage() {
                     contradictionMode={templateContradictionMode}
                     onContradictionModeChange={setTemplateContradictionMode}
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
+                    onDeleteBlock={(blockId) => {
+                      setEditorBlocksByField((prev) => {
+                        const remaining = prev.beurteilung.filter((b) => b.id !== blockId);
+                        if (remaining.length === 0) {
+                          return {
+                            ...prev,
+                            beurteilung: [createFreitextBlock('beurteilung', beurteilung, getFieldRichTextFormats('beurteilung'))],
+                          };
+                        }
+                        return { ...prev, beurteilung: remaining };
+                      });
+                      if (activeBlockId === blockId) {
+                        setActiveBlockId(null);
+                      }
+                    }}
+                    onReorderBlocks={(blockIds) => {
+                      setEditorBlocksByField((prev) => {
+                        const reordered = blockIds.map((id) => prev.beurteilung.find((b) => b.id === id)!).filter(Boolean);
+                        return { ...prev, beurteilung: reordered };
+                      });
+                    }}
                     onChange={(value, editor) => {
                       handleRichTextEditorChange('beurteilung', value, setBeurteilung, editor);
                       if (showMultiBausteinMode && activeBlockId) {

@@ -22,6 +22,7 @@ import RichTextDictationEditor, { getRichTextSelection } from '@/components/Rich
 import TemplateRichTextEditor from '@/components/TemplateRichTextEditor';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import TemplatesManager from '@/components/TemplatesManager';
+import EditorBlockSidebar from '@/components/EditorBlockSidebar';
 import BracketHighlight from '@/components/BracketHighlight';
 import { createPortal } from 'react-dom';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
@@ -30,6 +31,12 @@ import { checkInjectorAvailability, injectToActiveWindow, registerGlobalHotkeys,
 import { replaceAllInText } from '@/lib/replaceText';
 import { useMicrophone } from '@/lib/MicrophoneContext';
 import { normalizeRichTextRanges, remapRichTextRanges, buildRichTextHtml, type RichTextFormatRange } from '@/lib/richTextFormatting';
+import {
+  initializeBlocksFromText,
+  createFreitextBlock,
+  type EditorBlock,
+  type EditorBlocksByField,
+} from '@/lib/editorBlocks';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 const UNRECOGNIZED_UTTERANCE_PLACEHOLDER = '[nicht verstanden]';
@@ -1054,6 +1061,18 @@ export default function HomePage() {
   // Befund-spezifische Felder
   const [methodik, setMethodikState] = useState("");
   const [beurteilung, setBeurteilungState] = useState("");
+
+  // EditorBlock-Modell: parallele Abstraktion über die Feld-States.
+  // Wird schrittweise die direkte Nutzung von transcript/methodik/beurteilung ersetzen.
+  const [editorBlocksByField, setEditorBlocksByField] = useState<EditorBlocksByField>(() =>
+    initializeBlocksFromText(
+      { methodik: '', befund: '', beurteilung: '' },
+      { methodik: [], befund: [], beurteilung: [] },
+    ),
+  );
+  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  const templateSelectRef = useRef<HTMLSelectElement | null>(null);
+
   // Aktuelles aktives Feld für Befund-Modus
   const [activeField, setActiveField] = useState<BefundField>('befund');
   // Spiegel von activeField als Ref, damit asynchrone VAD-Commits (Voxtral online)
@@ -1064,6 +1083,40 @@ export default function HomePage() {
   useEffect(() => { textValueRefs.current.transcript = transcript; }, [transcript]);
   useEffect(() => { textValueRefs.current.methodik = methodik; }, [methodik]);
   useEffect(() => { textValueRefs.current.beurteilung = beurteilung; }, [beurteilung]);
+
+  // Sync: EditorBlock-Modell bei Änderung der Feld-States aktuell halten.
+  // Ändert sich der Text eines Feldes, wird der erste Freitext-Block aktualisiert.
+  // Existiert noch kein Block für das Feld, wird einer angelegt.
+  useEffect(() => {
+    setEditorBlocksByField((prev) => {
+      const field: BefundField = 'befund';
+      const blocks = prev[field];
+      if (blocks.length === 1 && blocks[0].type === 'freitext') {
+        return { ...prev, [field]: [{ ...blocks[0], currentText: transcript }] };
+      }
+      return prev;
+    });
+  }, [transcript]);
+  useEffect(() => {
+    setEditorBlocksByField((prev) => {
+      const field: BefundField = 'methodik';
+      const blocks = prev[field];
+      if (blocks.length === 1 && blocks[0].type === 'freitext') {
+        return { ...prev, [field]: [{ ...blocks[0], currentText: methodik }] };
+      }
+      return prev;
+    });
+  }, [methodik]);
+  useEffect(() => {
+    setEditorBlocksByField((prev) => {
+      const field: BefundField = 'beurteilung';
+      const blocks = prev[field];
+      if (blocks.length === 1 && blocks[0].type === 'freitext') {
+        return { ...prev, [field]: [{ ...blocks[0], currentText: beurteilung }] };
+      }
+      return prev;
+    });
+  }, [beurteilung]);
 
   const markRichTextHandledForNextTextChange = useCallback((stateKey: TextStateKey) => {
     skipAutoRichTextSyncRef.current[stateKey] = true;
@@ -5783,6 +5836,7 @@ export default function HomePage() {
             <div className="flex-1 flex items-center justify-end">
               <div className="flex items-center gap-1">
                 <select
+                  ref={templateSelectRef}
                   className={`select h-9 text-sm w-44 ${templateMode ? 'border-orange-400 ring-1 ring-orange-300' : ''}`}
                   value={selectedTemplate?.id || ''}
                   onChange={(e) => {
@@ -6122,7 +6176,22 @@ export default function HomePage() {
         <div className="space-y-3">
           {/* Methodik-Feld mit Action-Buttons */}
           <div className="card">
-              <div className="card-body py-3 space-y-2">
+              <div className="card-body py-3 flex flex-row">
+                <EditorBlockSidebar
+                  blocks={editorBlocksByField.methodik}
+                  activeBlockId={activeBlockId}
+                  fieldLabel="Methodik"
+                  onAddBaustein={() => templateSelectRef.current?.focus()}
+                  onBlockSelect={(blockId) => setActiveBlockId(blockId)}
+                  onDeleteBlock={(blockId) => {
+                    setEditorBlocksByField((prev) => ({
+                      ...prev,
+                      methodik: prev.methodik.filter((b) => b.id !== blockId),
+                    }));
+                    if (activeBlockId === blockId) setActiveBlockId(null);
+                  }}
+                />
+                <div className="flex-1 min-w-0 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium flex items-center gap-2">
                     Methodik
@@ -6211,11 +6280,27 @@ export default function HomePage() {
                   />
                 )}
               </div>
+              </div>
           </div>
 
           {/* Befund-Feld (Hauptfeld) mit Action-Buttons */}
           <div className="card">
-              <div className="card-body py-3 space-y-2">
+              <div className="card-body py-3 flex flex-row">
+                <EditorBlockSidebar
+                  blocks={editorBlocksByField.befund}
+                  activeBlockId={activeBlockId}
+                  fieldLabel="Befund"
+                  onAddBaustein={() => templateSelectRef.current?.focus()}
+                  onBlockSelect={(blockId) => setActiveBlockId(blockId)}
+                  onDeleteBlock={(blockId) => {
+                    setEditorBlocksByField((prev) => ({
+                      ...prev,
+                      befund: prev.befund.filter((b) => b.id !== blockId),
+                    }));
+                    if (activeBlockId === blockId) setActiveBlockId(null);
+                  }}
+                />
+                <div className="flex-1 min-w-0 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium flex items-center gap-2">
                     Befund
@@ -6310,6 +6395,7 @@ export default function HomePage() {
                   </div>
                 )}
               </div>
+              </div>
           </div>
 
           {/* Warnbanner bei signifikanten Änderungen */}
@@ -6319,7 +6405,22 @@ export default function HomePage() {
 
           {/* Beurteilung-Feld mit Action-Buttons */}
           <div className="card">
-              <div className="card-body py-3 space-y-2">
+              <div className="card-body py-3 flex flex-row">
+                <EditorBlockSidebar
+                  blocks={editorBlocksByField.beurteilung}
+                  activeBlockId={activeBlockId}
+                  fieldLabel="Beurteilung"
+                  onAddBaustein={() => templateSelectRef.current?.focus()}
+                  onBlockSelect={(blockId) => setActiveBlockId(blockId)}
+                  onDeleteBlock={(blockId) => {
+                    setEditorBlocksByField((prev) => ({
+                      ...prev,
+                      beurteilung: prev.beurteilung.filter((b) => b.id !== blockId),
+                    }));
+                    if (activeBlockId === blockId) setActiveBlockId(null);
+                  }}
+                />
+                <div className="flex-1 min-w-0 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <label className="text-xs font-medium flex items-center gap-2">
@@ -6423,6 +6524,7 @@ export default function HomePage() {
                     '✨ Zusammenfassung erstellen'
                   )}
                 </button>
+              </div>
               </div>
           </div>
 

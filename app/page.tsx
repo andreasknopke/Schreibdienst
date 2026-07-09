@@ -6442,8 +6442,8 @@ export default function HomePage() {
                         }
                         return { ...prev, methodik: remaining };
                       });
-                      if (activeBlockId === blockId) {
-                        setActiveBlockId(null);
+                      if (activeBlockId === blockId && remaining.length > 0) {
+                        setActiveBlockId(remaining[0].id);
                       }
                     }}
                     onReorderBlocks={(blockIds) => {
@@ -6562,8 +6562,8 @@ export default function HomePage() {
                         }
                         return { ...prev, befund: remaining };
                       });
-                      if (activeBlockId === blockId) {
-                        setActiveBlockId(null);
+                      if (activeBlockId === blockId && remaining.length > 0) {
+                        setActiveBlockId(remaining[0].id);
                       }
                     }}
                     onReorderBlocks={(blockIds) => {
@@ -6698,8 +6698,8 @@ export default function HomePage() {
                         }
                         return { ...prev, beurteilung: remaining };
                       });
-                      if (activeBlockId === blockId) {
-                        setActiveBlockId(null);
+                      if (activeBlockId === blockId && remaining.length > 0) {
+                        setActiveBlockId(remaining[0].id);
                       }
                     }}
                     onReorderBlocks={(blockIds) => {

@@ -34,13 +34,32 @@ html, body, #__next {
 }
 
 /* Bracket-Highlight in Lexical-Editoren (via CSS Custom Highlight API) */
-::highlight(bracket-highlight) {
+/* Option 0 – erste Option (grün) */
+::highlight(bracket-opt-0) {
   background-color: #dcfce7;
   color: #166534;
 }
-.dark ::highlight(bracket-highlight) {
+.dark ::highlight(bracket-opt-0) {
   background-color: rgba(34, 197, 94, 0.35);
   color: #bbf7d0;
+}
+/* Option 1 – zweite Option (gelb/amber) */
+::highlight(bracket-opt-1) {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+.dark ::highlight(bracket-opt-1) {
+  background-color: rgba(251, 191, 36, 0.3);
+  color: #fde68a;
+}
+/* Option 2 – dritte und weitere Optionen (rot) */
+::highlight(bracket-opt-2) {
+  background-color: #fecaca;
+  color: #991b1b;
+}
+.dark ::highlight(bracket-opt-2) {
+  background-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
 }
 
 body {

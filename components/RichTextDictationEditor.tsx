@@ -454,23 +454,71 @@ function EnterKeyPlugin() {
   return null;
 }
 
+// ─── Bracket Highlight (mehrere Editoren via Shared-Highlight-Singleton) ───
+
+const SHARED_HIGHLIGHT_NAME = 'bracket-highlight';
+
+interface BracketRangeEntry {
+  ranges: Range[];
+  /** Wird bei rebuild() auf false gesetzt; beim nächsten update() wieder true */
+  dirty: boolean;
+}
+
+const bracketEntries = new Map<number, BracketRangeEntry>();
+let bracketHighlightSingleton: Highlight | null = null;
+let nextBracketEntryId = 0;
+let bracketRebuildPending = false;
+
+function ensureBracketHighlight(): Highlight {
+  if (!bracketHighlightSingleton) {
+    bracketHighlightSingleton = new Highlight();
+    if (typeof CSS !== 'undefined' && CSS.highlights) {
+      CSS.highlights.set(SHARED_HIGHLIGHT_NAME, bracketHighlightSingleton);
+    }
+  }
+  return bracketHighlightSingleton;
+}
+
+function scheduleBracketRebuild() {
+  if (bracketRebuildPending) return;
+  bracketRebuildPending = true;
+  requestAnimationFrame(() => {
+    bracketRebuildPending = false;
+    const highlight = ensureBracketHighlight();
+    highlight.clear();
+    for (const entry of bracketEntries.values()) {
+      if (!entry.dirty) continue;
+      for (const range of entry.ranges) {
+        try { highlight.add(range); } catch { /* ignore */ }
+      }
+    }
+  });
+}
+
 /**
  * Hebt Text in [eckigen Klammern] mit grünem Hintergrund hervor.
  * Nutzt die CSS Custom Highlight API – keine DOM-Manipulation.
+ * Singleton: alle Editor-Instanzen teilen sich ein Highlight-Objekt.
  */
 function BracketHighlightPlugin() {
   const [editor] = useLexicalComposerContext();
+  const entryIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (typeof CSS === 'undefined' || !CSS.highlights) return;
+    const entryId = nextBracketEntryId++;
+    entryIdRef.current = entryId;
 
-    const highlight = new Highlight();
-    CSS.highlights.set('bracket-highlight', highlight);
+    const entry: BracketRangeEntry = { ranges: [], dirty: false };
+    bracketEntries.set(entryId, entry);
 
     const update = () => {
-      highlight.clear();
+      entry.ranges = [];
       const root = editor.getRootElement();
-      if (!root) return;
+      if (!root) {
+        entry.dirty = false;
+        return;
+      }
 
       const treeWalker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       let node: Text | null;
@@ -483,12 +531,15 @@ function BracketHighlightPlugin() {
             const range = new Range();
             range.setStart(node, match.index);
             range.setEnd(node, match.index + match[0].length);
-            highlight.add(range);
+            entry.ranges.push(range);
           } catch {
             // Range ungültig – Knoten wurde zwischenzeitlich entfernt
           }
         }
       }
+
+      entry.dirty = true;
+      scheduleBracketRebuild();
     };
 
     const unregister = editor.registerUpdateListener(() => {
@@ -499,7 +550,8 @@ function BracketHighlightPlugin() {
 
     return () => {
       unregister();
-      CSS.highlights.delete('bracket-highlight');
+      bracketEntries.delete(entryId);
+      scheduleBracketRebuild();
     };
   }, [editor]);
 

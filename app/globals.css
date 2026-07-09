@@ -33,6 +33,16 @@ html, body, #__next {
   height: 100%;
 }
 
+/* Bracket-Highlight in Lexical-Editoren (via CSS Custom Highlight API) */
+::highlight(bracket-highlight) {
+  background-color: #dcfce7;
+  color: #166534;
+}
+.dark ::highlight(bracket-highlight) {
+  background-color: rgba(34, 197, 94, 0.35);
+  color: #bbf7d0;
+}
+
 body {
   color: rgb(var(--fg));
   background: rgb(var(--bg));

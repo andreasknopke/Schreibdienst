@@ -454,6 +454,58 @@ function EnterKeyPlugin() {
   return null;
 }
 
+/**
+ * Hebt Text in [eckigen Klammern] mit grünem Hintergrund hervor.
+ * Nutzt die CSS Custom Highlight API – keine DOM-Manipulation.
+ */
+function BracketHighlightPlugin() {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    if (typeof CSS === 'undefined' || !CSS.highlights) return;
+
+    const highlight = new Highlight();
+    CSS.highlights.set('bracket-highlight', highlight);
+
+    const update = () => {
+      highlight.clear();
+      const root = editor.getRootElement();
+      if (!root) return;
+
+      const treeWalker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node: Text | null;
+      while ((node = treeWalker.nextNode() as Text | null)) {
+        const text = node.textContent || '';
+        const regex = /\[[^\]]*\]/g;
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+          try {
+            const range = new Range();
+            range.setStart(node, match.index);
+            range.setEnd(node, match.index + match[0].length);
+            highlight.add(range);
+          } catch {
+            // Range ungültig – Knoten wurde zwischenzeitlich entfernt
+          }
+        }
+      }
+    };
+
+    const unregister = editor.registerUpdateListener(() => {
+      update();
+    });
+
+    update();
+
+    return () => {
+      unregister();
+      CSS.highlights.delete('bracket-highlight');
+    };
+  }, [editor]);
+
+  return null;
+}
+
 function EditorSurface({
   className,
   placeholder,
@@ -577,6 +629,7 @@ export default function RichTextDictationEditor({
           suppressOnChangeRef={suppressOnChangeRef}
         />
         <EnterKeyPlugin />
+        <BracketHighlightPlugin />
         <HistoryPlugin />
         <OnChangePlugin
           ignoreSelectionChange={true}

@@ -38,6 +38,8 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
   
   // Edit state
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [editScope, setEditScope] = useState<'private' | 'group' | null>(null);
+  const [editAddToGroup, setEditAddToGroup] = useState(false);
   const [editName, setEditName] = useState('');
   const [editContent, setEditContent] = useState('');
   const [editContentFormats, setEditContentFormats] = useState<RichTextFormatRange[]>([]);
@@ -121,6 +123,8 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
 
   const handleEdit = (template: Template) => {
     setEditingId(template.id);
+    setEditScope(template.scope || null);
+    setEditAddToGroup(false);
     setEditName(template.name);
     setEditContent(template.content);
     setEditContentFormats(template.formatRanges ?? []);
@@ -129,6 +133,8 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
 
   const handleCancelEdit = () => {
     setEditingId(null);
+    setEditScope(null);
+    setEditAddToGroup(false);
     setEditName('');
     setEditContent('');
     setEditContentFormats([]);
@@ -137,6 +143,13 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
 
   const handleSaveEdit = async () => {
     if (!editingId) return;
+
+    // Confirm bei Gruppen-Bausteinen
+    if (editScope === 'group') {
+      if (!confirm('Baustein für alle Gruppenmitglieder verändern?')) {
+        return;
+      }
+    }
     
     setError('');
     setSuccess('');
@@ -154,6 +167,8 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
           name: editName, 
           content: editContent,
           field: editField,
+          scope: editScope,
+          addToGroup: editAddToGroup,
           formatRanges: normalizeRichTextRanges(editContentFormats, editContent.length),
         })
       });
@@ -178,7 +193,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
     }
   };
 
-  const handleDelete = async (id: number, templateName: string) => {
+  const handleDelete = async (id: number, templateName: string, scope?: string) => {
     if (!confirm(`Textbaustein "${templateName}" wirklich löschen?`)) {
       return;
     }
@@ -194,7 +209,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
           'Authorization': getAuthHeader(),
           ...getDbTokenHeader()
         },
-        body: JSON.stringify({ id })
+        body: JSON.stringify({ id, scope })
       });
 
       const data = await response.json();
@@ -334,6 +349,22 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
                     }}
                     className="w-full px-2 py-1 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 bg-white h-full min-h-0"
                   />
+                  {template.scope === 'group' ? (
+                    <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded flex-shrink-0">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                      <span>Abteilungs-Baustein – Änderung gilt für alle Gruppenmitglieder</span>
+                    </div>
+                  ) : (
+                    <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer flex-shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={editAddToGroup}
+                        onChange={(e) => setEditAddToGroup(e.target.checked)}
+                        className="rounded border-gray-300 dark:border-gray-600"
+                      />
+                      <span>ins Abteilungs-Bausteinpool übernehmen</span>
+                    </label>
+                  )}
                   <div id="tm-edit-actions" className="flex gap-2 flex-shrink-0">
                     <button
                       onClick={handleSaveEdit}
@@ -387,7 +418,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
                       </svg>
                     </button>
                     <button
-                      onClick={() => handleDelete(template.id, template.name)}
+                      onClick={() => handleDelete(template.id, template.name, template.scope)}
                       className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
                       title="Löschen"
                     >

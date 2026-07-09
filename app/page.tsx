@@ -6432,18 +6432,13 @@ export default function HomePage() {
                     onContradictionModeChange={setTemplateContradictionMode}
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
                     onDeleteBlock={(blockId) => {
-                      setEditorBlocksByField((prev) => {
-                        const remaining = prev.methodik.filter((b) => b.id !== blockId);
-                        if (remaining.length === 0) {
-                          return {
-                            ...prev,
-                            methodik: [createFreitextBlock('methodik', methodik, getFieldRichTextFormats('methodik'))],
-                          };
-                        }
-                        return { ...prev, methodik: remaining };
-                      });
-                      if (activeBlockId === blockId && remaining.length > 0) {
-                        setActiveBlockId(remaining[0].id);
+                      const updated = editorBlocksByField.methodik.filter((b) => b.id !== blockId);
+                      const nextBlocks = updated.length === 0
+                        ? [createFreitextBlock('methodik', methodik, getFieldRichTextFormats('methodik'))]
+                        : updated;
+                      setEditorBlocksByField((prev) => ({ ...prev, methodik: nextBlocks }));
+                      if (activeBlockId === blockId && updated.length > 0) {
+                        setActiveBlockId(updated[0].id);
                       }
                     }}
                     onReorderBlocks={(blockIds) => {
@@ -6552,18 +6547,13 @@ export default function HomePage() {
                     onContradictionModeChange={setTemplateContradictionMode}
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
                     onDeleteBlock={(blockId) => {
-                      setEditorBlocksByField((prev) => {
-                        const remaining = prev.befund.filter((b) => b.id !== blockId);
-                        if (remaining.length === 0) {
-                          return {
-                            ...prev,
-                            befund: [createFreitextBlock('befund', transcript, getFieldRichTextFormats('befund'))],
-                          };
-                        }
-                        return { ...prev, befund: remaining };
-                      });
-                      if (activeBlockId === blockId && remaining.length > 0) {
-                        setActiveBlockId(remaining[0].id);
+                      const updated = editorBlocksByField.befund.filter((b) => b.id !== blockId);
+                      const nextBlocks = updated.length === 0
+                        ? [createFreitextBlock('befund', transcript, getFieldRichTextFormats('befund'))]
+                        : updated;
+                      setEditorBlocksByField((prev) => ({ ...prev, befund: nextBlocks }));
+                      if (activeBlockId === blockId && updated.length > 0) {
+                        setActiveBlockId(updated[0].id);
                       }
                     }}
                     onReorderBlocks={(blockIds) => {
@@ -6688,18 +6678,13 @@ export default function HomePage() {
                     onContradictionModeChange={setTemplateContradictionMode}
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
                     onDeleteBlock={(blockId) => {
-                      setEditorBlocksByField((prev) => {
-                        const remaining = prev.beurteilung.filter((b) => b.id !== blockId);
-                        if (remaining.length === 0) {
-                          return {
-                            ...prev,
-                            beurteilung: [createFreitextBlock('beurteilung', beurteilung, getFieldRichTextFormats('beurteilung'))],
-                          };
-                        }
-                        return { ...prev, beurteilung: remaining };
-                      });
-                      if (activeBlockId === blockId && remaining.length > 0) {
-                        setActiveBlockId(remaining[0].id);
+                      const updated = editorBlocksByField.beurteilung.filter((b) => b.id !== blockId);
+                      const nextBlocks = updated.length === 0
+                        ? [createFreitextBlock('beurteilung', beurteilung, getFieldRichTextFormats('beurteilung'))]
+                        : updated;
+                      setEditorBlocksByField((prev) => ({ ...prev, beurteilung: nextBlocks }));
+                      if (activeBlockId === blockId && updated.length > 0) {
+                        setActiveBlockId(updated[0].id);
                       }
                     }}
                     onReorderBlocks={(blockIds) => {

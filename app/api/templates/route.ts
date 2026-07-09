@@ -9,6 +9,12 @@ import {
 } from '@/lib/templatesDb';
 import { authenticateUserWithRequest } from '@/lib/usersDb';
 import { parseBasicAuth } from '@/lib/apiHelpers';
+import { getPoolForRequest } from '@/lib/db';
+import {
+  upsertTemplateGroupEntryWithRequest,
+  removeTemplateGroupEntryWithRequest,
+  getUserTemplateGroupIds,
+} from '@/lib/templateGroupDb';
 
 interface AuthResult {
   username: string;
@@ -118,17 +124,45 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { id, name, content, field, formatRanges, username: targetUsername } = body;
+    const { id, name, content, field, formatRanges, username: targetUsername, scope, addToGroup } = body;
     
     if (!id || !name || !content) {
       return NextResponse.json({ success: false, error: 'ID, Name und Inhalt erforderlich' }, { status: 400 });
     }
     
     const username = (auth.canViewAllDictations && targetUsername) ? targetUsername : auth.username;
+
+    // Gruppen-Template: Mitglieder dürfen bearbeiten
+    if (scope === 'group') {
+      const pool = await getPoolForRequest(request);
+      const [entries] = await pool.query<any[]>(
+        `SELECT e.group_id FROM template_group_entries e
+         JOIN dictionary_group_members m ON m.group_id = e.group_id
+         WHERE e.id = ? AND m.username = ?`,
+        [id, username]
+      );
+      if (!entries || entries.length === 0) {
+        return NextResponse.json({ success: false, error: 'Textbaustein nicht gefunden' }, { status: 404 });
+      }
+      const groupId = entries[0].group_id;
+      await upsertTemplateGroupEntryWithRequest(
+        request, groupId, name, content, field || 'befund', formatRanges || [], username
+      );
+      return NextResponse.json({ success: true, message: 'Textbaustein aktualisiert' });
+    }
     
     const result = await updateTemplateWithRequest(request, username, id, name, content, field || 'befund', formatRanges || []);
     
     if (result.success) {
+      // Optional: auch in alle Gruppen des Users übernehmen
+      if (addToGroup) {
+        const groupIds = await getUserTemplateGroupIds(request, username);
+        for (const groupId of groupIds) {
+          await upsertTemplateGroupEntryWithRequest(
+            request, groupId, name, content, field || 'befund', formatRanges || [], username
+          );
+        }
+      }
       return NextResponse.json({ success: true, message: 'Textbaustein aktualisiert' });
     }
     
@@ -149,13 +183,29 @@ export async function DELETE(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { id, username: targetUsername } = body;
+    const { id, username: targetUsername, scope } = body;
     
     if (!id) {
       return NextResponse.json({ success: false, error: 'ID erforderlich' }, { status: 400 });
     }
     
     const username = (auth.canViewAllDictations && targetUsername) ? targetUsername : auth.username;
+
+    // Gruppen-Template: Mitglieder dürfen löschen
+    if (scope === 'group') {
+      const pool = await getPoolForRequest(request);
+      const [entries] = await pool.query<any[]>(
+        `SELECT e.group_id, e.name FROM template_group_entries e
+         JOIN dictionary_group_members m ON m.group_id = e.group_id
+         WHERE e.id = ? AND m.username = ?`,
+        [id, username]
+      );
+      if (!entries || entries.length === 0) {
+        return NextResponse.json({ success: false, error: 'Textbaustein nicht gefunden' }, { status: 404 });
+      }
+      await removeTemplateGroupEntryWithRequest(request, entries[0].group_id, entries[0].name);
+      return NextResponse.json({ success: true, message: 'Textbaustein gelöscht' });
+    }
     
     const result = await deleteTemplateWithRequest(request, username, id);
     

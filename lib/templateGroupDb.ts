@@ -288,7 +288,7 @@ export async function upsertTemplateGroupEntryWithRequest(
     await db.execute(
       `INSERT INTO template_group_entries (group_id, name, content, field, format_ranges, added_by)
        VALUES (?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE content = VALUES(content), field = VALUES(field), format_ranges = VALUES(format_ranges), added_by = VALUES(added_by), updated_at = CURRENT_TIMESTAMP`,
+       ON DUPLICATE KEY UPDATE content = VALUES(content), field = VALUES(field), format_ranges = VALUES(format_ranges), updated_at = CURRENT_TIMESTAMP`,
       [groupId, nameTrimmed, contentTrimmed, field, serialized, addedBy]
     );
 

@@ -540,14 +540,20 @@ function BracketHighlightPlugin() {
         while ((match = bracketRegex.exec(text)) !== null) {
           const fullStart = match.index;
           const inner = match[1]; // Inhalt zwischen [ und ]
-          const options = inner.split('/').map(o => o.trim());
 
+          // Roh-Segmente (mit Leerzeichen) für Positionen, getrimmt für Highlight
+          const rawOptions = inner.split('/');
           let posInBracket = 1; // nach öffnender Klammer
-          for (let optIdx = 0; optIdx < options.length; optIdx++) {
-            const opt = options[optIdx];
-            if (!opt) continue;
-            const optStart = fullStart + posInBracket;
-            const optEnd = optStart + opt.length;
+          for (let optIdx = 0; optIdx < rawOptions.length; optIdx++) {
+            const raw = rawOptions[optIdx];
+            const trimmed = raw.trim();
+            if (!trimmed) {
+              posInBracket += raw.length + 1;
+              continue;
+            }
+            const leadingSpaces = raw.length - raw.trimStart().length;
+            const optStart = fullStart + posInBracket + leadingSpaces;
+            const optEnd = optStart + trimmed.length;
             const highlightIdx = optIdx % BRACKET_OPT_COUNT;
             try {
               const range = new Range();
@@ -557,7 +563,7 @@ function BracketHighlightPlugin() {
             } catch {
               // Range ungültig
             }
-            posInBracket += opt.length + 1; // +1 für / oder ]
+            posInBracket += raw.length + 1; // +1 für /
           }
         }
       }

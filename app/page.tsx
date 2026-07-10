@@ -2789,7 +2789,22 @@ export default function HomePage() {
     explicitFormats?: RichTextFormatRange[],
   ) => {
     const stateKey = fieldToStateKey(field);
-    const previousText = getFieldTextValue(field);
+
+    // Im Multi-Baustein-Modus die Block-Texte als Baseline nehmen
+    let previousText: string;
+    let baseline: string;
+    if (showMultiBausteinMode && activeBlockIdRef.current) {
+      const befundField: BefundField = field === 'methodik' ? 'methodik' : field === 'beurteilung' ? 'beurteilung' : 'befund';
+      const block = editorBlocksByFieldRef.current[befundField]?.find(
+        (b) => b.id === activeBlockIdRef.current,
+      );
+      previousText = block?.currentText ?? getFieldTextValue(field);
+      baseline = previousText;
+    } else {
+      previousText = getFieldTextValue(field);
+      baseline = machineBaselineRef.current[stateKey];
+    }
+
     const previousSelection = getStoredSelection(field, previousText);
     const nextSelection = selection ?? getDefaultSelection(value);
     const replacedLength = Math.max(0, previousSelection.end - previousSelection.start);
@@ -2829,7 +2844,6 @@ export default function HomePage() {
     const existingDebounce = manualSuggestDebounceRef.current[field];
     if (existingDebounce) clearTimeout(existingDebounce);
     manualSuggestDebounceRef.current[field] = setTimeout(() => {
-      const baseline = machineBaselineRef.current[stateKey];
       const detectedChange = extractLastManualWordChange(baseline, value);
       setManualCorrectionSuggestions((current) => ({
         ...current,
@@ -2837,7 +2851,7 @@ export default function HomePage() {
       }));
       delete manualSuggestDebounceRef.current[field];
     }, 900);
-  }, [getFieldTextValue, getStoredSelection, logManualCorrection, markRichTextHandledForNextTextChange, syncSelectionState]);
+  }, [getFieldTextValue, getStoredSelection, logManualCorrection, markRichTextHandledForNextTextChange, syncSelectionState, showMultiBausteinMode]);
 
   const handleRichTextSelectionChange = useCallback((field: TextInsertionTarget, editor: HTMLDivElement) => {
     const nextSelection = getRichTextSelection(editor) ?? getDefaultSelection(getFieldTextValue(field));

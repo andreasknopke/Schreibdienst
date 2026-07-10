@@ -1109,6 +1109,7 @@ export default function HomePage() {
   const [showMultiBausteinMode, setShowMultiBausteinMode] = useState(false);
   const showMultiBausteinModeRef = useRef(false);
   showMultiBausteinModeRef.current = showMultiBausteinMode;
+  const [complexTemplateFilterIds, setComplexTemplateFilterIds] = useState<number[] | null>(null);
   const editorBlocksByFieldRef = useRef<EditorBlocksByField>(editorBlocksByField);
   editorBlocksByFieldRef.current = editorBlocksByField;
   const templateSelectRef = useRef<HTMLSelectElement | null>(null);
@@ -2212,31 +2213,15 @@ export default function HomePage() {
     setActiveBlockId(newBlock.id);
   }, []);
 
-  /** Lädt einen Komplexbaustein: öffnet Multi-Baustein-Modus und fügt alle enthaltenen Bausteine als Blöcke ein. */
+  /**
+   * Öffnet den Multi-Baustein-Modus und filtert die Baustein-Palette
+   * auf die im Komplexbaustein definierten Bausteine.
+   */
   const handleLoadComplexTemplate = useCallback(async (templateIds: number[]) => {
     if (!username || templateIds.length === 0) return;
-    try {
-      const res = await fetch('/api/templates', {
-        headers: { 'Authorization': getAuthHeader(), ...getDbTokenHeader() },
-      });
-      const data = await res.json();
-      const allTemplates: Template[] = data.templates || [];
-      const selected = allTemplates.filter((t) => templateIds.includes(t.id) && t.field === currentTemplateField);
-      if (selected.length === 0) return;
-
-      setShowMultiBausteinMode(true);
-      const field = currentTemplateField;
-      setEditorBlocksByField((prev) => {
-        const newBlocks = selected.map((t) =>
-          createBausteinBlock(field, t.id, t.name, t.content, t.formatRanges ?? []),
-        );
-        return { ...prev, [field]: [...prev[field], ...newBlocks] };
-      });
-    } catch (err) {
-      console.error('[ComplexTemplate] Load error:', err);
-      setError('Fehler beim Laden des Komplexbausteins');
-    }
-  }, [username, getAuthHeader, getDbTokenHeader, currentTemplateField]);
+    setShowMultiBausteinMode(true);
+    setComplexTemplateFilterIds(templateIds);
+  }, [username]);
 
   /** Lädt die Liste der Komplexbausteine vom Server. */
   const fetchComplexTemplates = useCallback(async () => {
@@ -3756,6 +3741,7 @@ export default function HomePage() {
     ));
     setActiveBlockId(null);
     setShowMultiBausteinMode(false);
+    setComplexTemplateFilterIds(null);
     setBefundChangeScores({ methodik: 0, befund: 0, beurteilung: 0 });
     setApplyFormatting(true); // Reset auf Standard
     setShowDiffView(false); // Reset diff view
@@ -6199,10 +6185,17 @@ export default function HomePage() {
                     }
                     if (val === '__multi__') {
                       setShowMultiBausteinMode((prev) => !prev);
+                      setComplexTemplateFilterIds(null);
                       return;
                     }
                     if (val === '__complex__') {
                       setShowComplexTemplateManager(true);
+                      return;
+                    }
+                    if (typeof val === 'string' && val.startsWith('__complex__')) {
+                      const id = parseInt(val.replace('__complex__', ''), 10);
+                      const ct = complexTemplates.find((c) => c.id === id);
+                      if (ct) handleLoadComplexTemplate(ct.templateIds);
                       return;
                     }
                     const id = parseInt(val);
@@ -6221,6 +6214,15 @@ export default function HomePage() {
                     {showMultiBausteinMode ? '✓ Mit mehreren Bausteinen arbeiten' : '⊞ Mit mehreren Bausteinen arbeiten'}
                   </option>
                   <option value="__complex__" className="font-medium text-indigo-600 dark:text-indigo-400">🧩 Komplexbaustein definieren</option>
+                  {complexTemplates.length > 0 && (
+                    <optgroup label="🗂️ Komplexbausteine">
+                      {complexTemplates.map((ct) => (
+                        <option key={`__complex__${ct.id}`} value={`__complex__${ct.id}`} className="text-indigo-600 dark:text-indigo-400">
+                          {ct.name.length > 22 ? ct.name.substring(0, 22) + '…' : ct.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                   {availableTemplates.map(t => (
                     <option key={t.id} value={t.id}>
                       {t.name.length > 20 ? t.name.substring(0, 20) + '…' : t.name}
@@ -7111,12 +7113,16 @@ export default function HomePage() {
         `}>
           <div className="flex items-start">
             <BausteinPalette
-              templates={availableTemplates.map((t) => ({ id: t.id, name: t.name, content: t.content }))}
+              templates={(
+                complexTemplateFilterIds
+                  ? availableTemplates.filter((t) => complexTemplateFilterIds.includes(t.id))
+                  : availableTemplates
+              ).map((t) => ({ id: t.id, name: t.name, content: t.content }))}
               onAddBaustein={(tpl) => {
                 const full = availableTemplates.find((t) => t.id === tpl.id);
                 if (full) addBausteinAsNewBlock(full);
               }}
-              onClose={() => setShowMultiBausteinMode(false)}
+              onClose={() => { setShowMultiBausteinMode(false); setComplexTemplateFilterIds(null); }}
             />
           </div>
         </div>

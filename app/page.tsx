@@ -236,6 +236,23 @@ function fieldToStateKey(field: TextInsertionTarget): TextStateKey {
   return 'transcript';
 }
 
+/** Fasst zwei Korrektur-Arrays zusammen (dedupliziert nach originalWord). */
+function mergeCorrections(
+  base: WordCorrectionInfo[],
+  extra: WordCorrectionInfo[] | undefined | null,
+): WordCorrectionInfo[] {
+  if (!extra || extra.length === 0) return base;
+  const known = new Set(base.map((c) => c.originalWord.toLowerCase()));
+  const merged = [...base];
+  for (const c of extra) {
+    if (!known.has(c.originalWord.toLowerCase())) {
+      known.add(c.originalWord.toLowerCase());
+      merged.push(c);
+    }
+  }
+  return merged;
+}
+
 /** Prüft, ob der Text Online-Steuerbefehle enthält, die einen Löschvorgang auslösen. */
 function hasOnlineCommand(text: string): boolean {
   if (!text) return false;
@@ -2411,13 +2428,22 @@ export default function HomePage() {
     const methodikResult = applyDictionaryToTextWithCorrections(methodik);
     const beurteilungResult = applyDictionaryToTextWithCorrections(beurteilung);
     const transcriptResult = applyDictionaryToTextWithCorrections(transcript);
+
+    // Multi-Baustein-Modus: Auch Block-Texte der Korrekturerkennung zuführen
+    const befundBlockText = editorBlocksByField.befund.map((b) => b.currentText).filter(Boolean).join(' ');
+    const methodikBlockText = editorBlocksByField.methodik.map((b) => b.currentText).filter(Boolean).join(' ');
+    const beurteilungBlockText = editorBlocksByField.beurteilung.map((b) => b.currentText).filter(Boolean).join(' ');
+    const befundBlockResult = befundBlockText !== transcript ? applyDictionaryToTextWithCorrections(befundBlockText) : null;
+    const methodikBlockResult = methodikBlockText !== methodik ? applyDictionaryToTextWithCorrections(methodikBlockText) : null;
+    const beurteilungBlockResult = beurteilungBlockText !== beurteilung ? applyDictionaryToTextWithCorrections(beurteilungBlockText) : null;
+
     setFieldCorrections({
-      methodik: methodikResult.corrections,
-      beurteilung: beurteilungResult.corrections,
-      befund: transcriptResult.corrections,
-      transcript: transcriptResult.corrections,
+      methodik: mergeCorrections(methodikResult.corrections, methodikBlockResult?.corrections),
+      beurteilung: mergeCorrections(beurteilungResult.corrections, beurteilungBlockResult?.corrections),
+      befund: mergeCorrections(transcriptResult.corrections, befundBlockResult?.corrections),
+      transcript: mergeCorrections(transcriptResult.corrections, befundBlockResult?.corrections),
     });
-  }, [methodik, beurteilung, transcript, dictionaryEntries, applyDictionaryToTextWithCorrections]);
+  }, [methodik, beurteilung, transcript, dictionaryEntries, applyDictionaryToTextWithCorrections, editorBlocksByField]);
 
   // Doppelklick auf ein Wort: Popup mit passenden Aktionen öffnen
   const getWordAtCursor = useCallback((textarea: HTMLTextAreaElement): { word: string; start: number; end: number } | null => {

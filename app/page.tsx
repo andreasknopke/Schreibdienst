@@ -6808,32 +6808,54 @@ export default function HomePage() {
             
             <div>
               <div>
-                <div className="relative">
-                  <RichTextDictationEditor
-                    editorRef={transcriptTextareaRef}
-                    value={transcript}
-                    formats={getFieldRichTextFormats('transcript')}
-                    selection={textSelections.transcript ?? null}
-                    className={`textarea font-mono text-sm min-h-40 w-full ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    onChange={(value, editor) => handleRichTextEditorChange('transcript', value, setTranscript, editor)}
-                    onFocus={(editor) => { setFocusedTextField('transcript'); handleRichTextSelectionChange('transcript', editor); }}
-                    onBlur={() => setFocusedTextField((current) => current === 'transcript' ? null : current)}
-                    onSelectionChange={(editor) => handleRichTextSelectionChange('transcript', editor)}
-                    onWordDoubleClick={(info) => handleRichTextWordDoubleClick('transcript', info)}
-                    placeholder="Text erscheint hier..."
-                    readOnly={isProcessing}
-                  />
-                  {showPersistentCaret && focusedTextField !== 'transcript' && caretOverlays.transcript.visible && (
-                    <div
-                      className="pointer-events-none absolute w-0.5 rounded-full bg-blue-500/80"
-                      style={{
-                        top: caretOverlays.transcript.top,
-                        left: caretOverlays.transcript.left,
-                        height: caretOverlays.transcript.height,
-                      }}
-                    />
-                  )}
-                </div>
+                <MultiBlockEditor
+                  blocks={editorBlocksByField.befund}
+                  activeBlockId={activeBlockId}
+                  editorRef={transcriptTextareaRef}
+                  fieldFormats={getFieldRichTextFormats('befund')}
+                  selection={textSelections.transcript ?? null}
+                  className={`textarea font-mono text-sm min-h-40 w-full ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  isProcessing={isProcessing}
+                  recording={recording}
+                  focused={focusedTextField === 'transcript'}
+                  showPersistentCaret={showPersistentCaret}
+                  caretPosition={caretOverlays.transcript}
+                  placeholder="Text erscheint hier..."
+                  contradictionMode={templateContradictionMode}
+                  onContradictionModeChange={setTemplateContradictionMode}
+                  onBlockActivate={(blockId) => setActiveBlockId(blockId)}
+                  onDeleteBlock={(blockId) => {
+                    const updated = editorBlocksByField.befund.filter((b) => b.id !== blockId);
+                    const nextBlocks = updated.length === 0
+                      ? [createFreitextBlock('befund', transcript, getFieldRichTextFormats('befund'))]
+                      : updated;
+                    setEditorBlocksByField((prev) => ({ ...prev, befund: nextBlocks }));
+                    if (activeBlockId === blockId && updated.length > 0) {
+                      setActiveBlockId(updated[0].id);
+                    }
+                  }}
+                  onReorderBlocks={(blockIds) => {
+                    setEditorBlocksByField((prev) => {
+                      const reordered = blockIds.map((id) => prev.befund.find((b) => b.id === id)!).filter(Boolean);
+                      return { ...prev, befund: reordered };
+                    });
+                  }}
+                  onChange={(value, editor) => {
+                    handleRichTextEditorChange('transcript', value, setTranscript, editor);
+                    if (showMultiBausteinMode && activeBlockId) {
+                      setEditorBlocksByField((prev) => ({
+                        ...prev,
+                        befund: prev.befund.map((b) =>
+                          b.id === activeBlockId ? { ...b, currentText: value } : b,
+                        ),
+                      }));
+                    }
+                  }}
+                  onFocus={(editor) => { setFocusedTextField('transcript'); setActiveField('befund'); handleRichTextSelectionChange('transcript', editor); }}
+                  onBlur={() => setFocusedTextField((current) => current === 'transcript' ? null : current)}
+                  onSelectionChange={(editor) => handleRichTextSelectionChange('transcript', editor)}
+                  onWordDoubleClick={(info) => handleRichTextWordDoubleClick('transcript', info)}
+                />
                 {templateUnusedText && (templateMode || activeTemplateContext) && (
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
                     <label className="mb-1 block text-xs font-medium text-amber-800 dark:text-amber-200">

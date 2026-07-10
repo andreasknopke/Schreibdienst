@@ -2902,22 +2902,15 @@ export default function HomePage() {
       setEditorBlocksByField((prev) => {
         const block = prev[befundField].find((b) => b.id === activeBlockId);
         if (!block) return prev;
+        const blockText = block.currentText;
         const enabled = !isFormatActiveAcrossSelection(block.formatRanges, start, end, key);
         return {
           ...prev,
           [befundField]: prev[befundField].map((b) =>
             b.id === activeBlockId
-              ? { ...b, formatRanges: setFormatForSelection(block.formatRanges, text.length, start, end, key, enabled) }
+              ? { ...b, formatRanges: setFormatForSelection(block.formatRanges, blockText.length, start, end, key, enabled) }
               : b,
           ),
-        };
-      });
-      // Auch global aktualisieren für Konsistenz
-      setRichTextFormats((current) => {
-        const enabled = !isFormatActiveAcrossSelection(current[stateKey], start, end, key);
-        return {
-          ...current,
-          [stateKey]: setFormatForSelection(current[stateKey], text.length, start, end, key, enabled),
         };
       });
       return;

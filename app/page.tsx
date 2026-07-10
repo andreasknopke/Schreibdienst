@@ -37,6 +37,7 @@ import {
   createBausteinBlock,
   createFreitextBlock,
   ensureFieldHasBlocks,
+  emptyEditorBlocksByField,
   type EditorBlocksByField,
 } from '@/lib/editorBlocks';
 
@@ -179,6 +180,9 @@ interface TextHistorySnapshot {
   methodik: string;
   beurteilung: string;
   richTextFormats: RichTextState;
+  editorBlocksByField: EditorBlocksByField;
+  activeBlockId: string | null;
+  showMultiBausteinMode: boolean;
 }
 
 const LIVE_EDITOR_WIDTH_OPTIONS: Array<{ value: LiveEditorWidth; label: string }> = [
@@ -279,6 +283,9 @@ function areTextHistorySnapshotsEqual(a: TextHistorySnapshot, b: TextHistorySnap
     && a.methodik === b.methodik
     && a.beurteilung === b.beurteilung
     && JSON.stringify(a.richTextFormats) === JSON.stringify(b.richTextFormats)
+    && JSON.stringify(a.editorBlocksByField) === JSON.stringify(b.editorBlocksByField)
+    && a.activeBlockId === b.activeBlockId
+    && a.showMultiBausteinMode === b.showMultiBausteinMode
   );
 }
 
@@ -295,12 +302,18 @@ function createTextHistorySnapshot(
   methodik: string,
   beurteilung: string,
   richTextFormats: RichTextState,
+  editorBlocksByField?: EditorBlocksByField,
+  activeBlockId?: string | null,
+  showMultiBausteinMode?: boolean,
 ): TextHistorySnapshot {
   return {
     transcript,
     methodik,
     beurteilung,
     richTextFormats: cloneRichTextState(richTextFormats),
+    editorBlocksByField: editorBlocksByField ?? emptyEditorBlocksByField(),
+    activeBlockId: activeBlockId ?? null,
+    showMultiBausteinMode: showMultiBausteinMode ?? false,
   };
 }
 
@@ -1216,10 +1229,13 @@ export default function HomePage() {
     setMethodikState(snapshot.methodik);
     setBeurteilungState(snapshot.beurteilung);
     setRichTextFormats(cloneRichTextState(snapshot.richTextFormats));
+    setEditorBlocksByField(snapshot.editorBlocksByField);
+    setActiveBlockId(snapshot.activeBlockId);
+    setShowMultiBausteinMode(snapshot.showMultiBausteinMode);
   }, []);
 
   useEffect(() => {
-    const nextSnapshot = createTextHistorySnapshot(transcript, methodik, beurteilung, richTextFormats);
+    const nextSnapshot = createTextHistorySnapshot(transcript, methodik, beurteilung, richTextFormats, editorBlocksByField, activeBlockId, showMultiBausteinMode);
     const currentSnapshot = currentTextHistorySnapshotRef.current;
 
     if (areTextHistorySnapshotsEqual(currentSnapshot, nextSnapshot)) {
@@ -1237,7 +1253,7 @@ export default function HomePage() {
     textHistoryFutureRef.current = [];
     currentTextHistorySnapshotRef.current = nextSnapshot;
     updateTextHistoryAvailability();
-  }, [beurteilung, methodik, richTextFormats, transcript, updateTextHistoryAvailability]);
+  }, [beurteilung, methodik, richTextFormats, transcript, editorBlocksByField, activeBlockId, showMultiBausteinMode, updateTextHistoryAvailability]);
 
   const handleUndoTextHistory = useCallback(() => {
     if (isProcessing) {
@@ -3638,6 +3654,12 @@ export default function HomePage() {
     templateAudioBufferRef.current = '';
     pendingTemplateIntegrationRef.current = false;
     setChangeScore(null);
+    setEditorBlocksByField(initializeBlocksFromText(
+      { methodik: '', befund: '', beurteilung: '' },
+      { methodik: [], befund: [], beurteilung: [] },
+    ));
+    setActiveBlockId(null);
+    setShowMultiBausteinMode(false);
     setBefundChangeScores({ methodik: 0, befund: 0, beurteilung: 0 });
     setApplyFormatting(true); // Reset auf Standard
     setShowDiffView(false); // Reset diff view
@@ -3651,12 +3673,6 @@ export default function HomePage() {
     vadInFlightCountRef.current = 0;
     vadPendingResultsRef.current.clear();
     setVadFailedUtterances([]);
-    setEditorBlocksByField(initializeBlocksFromText(
-      { methodik: '', befund: '', beurteilung: '' },
-      { methodik: [], befund: [], beurteilung: [] },
-    ));
-    setActiveBlockId(null);
-    setShowMultiBausteinMode(false);
   }, [beurteilung, methodik, richTextFormats, transcript]);
 
   // Revert-Funktion: Stellt den Text vor der letzten Korrektur wieder her

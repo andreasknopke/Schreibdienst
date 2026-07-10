@@ -219,22 +219,14 @@ function stripIntroducedMarkdown(original: string, adapted: string): string {
   return result;
 }
 
-// Entfernt geschweifte Klammern {…} aus dem LLM-Ergebnis.
-// Die {…} sind reine Steuer-Marker fuer die Wiederholungslogik und gehoeren
-// nicht in den Endtext.
-function stripCurlyBraces(text: string): string {
-  return text.replace(/\{([^}]*)\}/g, '$1');
-}
-
 /**
- * Nach dem Standard-Remap: Findet Format-Ranges fuer duplizierte Absaetze.
+ * Erweitert Format-Ranges auf duplizierte Absaetze.
  *
- * Das Standard-remapRichTextRanges bildet Format-Ranges 1:1 von Original auf
- * Zieltext ab – wenn das LLM aber einen Absatz dupliziert hat (z. B. weil
- * ein {-Marker wiederholt wurde), bekommt die Kopie keine Format-Ranges.
- *
- * Diese Funktion sucht nach unformatierten Textabschnitten und kopiert
- * Format-Ranges aus inhaltlich passenden Quellen.
+ * Das inhalts-basierte Remap findet formatierte Segmente im neuen Text.
+ * Wenn das LLM einen Absatz dupliziert hat, bekommt die Kopie jedoch
+ * keine Formatierung. Diese Funktion sucht nach unformatierten
+ * Textabschnitten und kopiert Format-Ranges aus inhaltlich passenden
+ * Quellen.
  */
 function applyFormatRangesToDuplications(
   originalText: string,
@@ -390,7 +382,6 @@ Gib den vollständigen angepassten Text zurück:`;
     // wieder entfernen, damit das ursprüngliche Layout des Bausteins erhalten bleibt
     // (z. B. "**Teil 1**" -> "Teil 1").
     adaptedText = stripIntroducedMarkdown(template, adaptedText);
-    adaptedText = stripCurlyBraces(adaptedText);
     unusedText = unusedText.trim();
     
     // Format-Ranges fuer den adaptierten Text berechnen

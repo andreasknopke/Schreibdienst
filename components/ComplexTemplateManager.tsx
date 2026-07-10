@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
 import Spinner from '@/components/Spinner';
 
 interface ComplexTemplate {
@@ -24,10 +23,10 @@ interface ComplexTemplateManagerProps {
   onClose: () => void;
   availableTemplates: AvailableTemplate[];
   currentField: string;
-  /** Wird nach Speichern/Löschen aufgerufen, damit der Parent die Liste neu lädt */
   onChanged: () => void;
-  /** Wird beim Laden eines Komplexbausteins aufgerufen */
   onLoadComplex: (templateIds: number[]) => void;
+  /** Custom fetch function that includes auth headers */
+  apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
 }
 
 export default function ComplexTemplateManager({
@@ -37,6 +36,7 @@ export default function ComplexTemplateManager({
   currentField,
   onChanged,
   onLoadComplex,
+  apiFetch,
 }: ComplexTemplateManagerProps) {
   const [complexTemplates, setComplexTemplates] = useState<ComplexTemplate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -50,7 +50,7 @@ export default function ComplexTemplateManager({
   const fetchComplexTemplates = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetchWithDbToken('/api/templates/complex');
+      const res = await apiFetch('/api/templates/complex');
       const data = await res.json();
       if (data.success) {
         setComplexTemplates(data.complexTemplates || []);
@@ -92,7 +92,7 @@ export default function ComplexTemplateManager({
   const handleDelete = useCallback(async (id: number) => {
     if (!window.confirm('Wirklich löschen?')) return;
     try {
-      const res = await fetchWithDbToken('/api/templates/complex', {
+      const res = await apiFetch('/api/templates/complex', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
@@ -122,13 +122,13 @@ export default function ComplexTemplateManager({
       const ids = Array.from(selectedIds);
       let res;
       if (editId) {
-        res = await fetchWithDbToken('/api/templates/complex', {
+        res = await apiFetch('/api/templates/complex', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: editId, name: name.trim(), field: currentField, templateIds: ids }),
         });
       } else {
-        res = await fetchWithDbToken('/api/templates/complex', {
+        res = await apiFetch('/api/templates/complex', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: name.trim(), field: currentField, templateIds: ids }),

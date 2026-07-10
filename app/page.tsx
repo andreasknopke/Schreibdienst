@@ -1895,6 +1895,16 @@ export default function HomePage() {
   const [templateContradictionMode, setTemplateContradictionMode] = useState<'genau' | 'einfach' | 'aus' | 'optionen'>('genau');
   const [showComplexTemplateManager, setShowComplexTemplateManager] = useState(false);
   const [complexTemplates, setComplexTemplates] = useState<Array<{ id: number; name: string; templateIds: number[] }>>([]);
+  const apiFetchWithAuth = useCallback(async (url: string, options: RequestInit = {}) => {
+    return fetch(url, {
+      ...options,
+      headers: {
+        ...options.headers,
+        'Authorization': getAuthHeader(),
+        ...getDbTokenHeader(),
+      },
+    });
+  }, [getAuthHeader, getDbTokenHeader]);
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   // Lade disabledAbbreviations aus der DB (für applyAbbreviations)
@@ -2232,7 +2242,9 @@ export default function HomePage() {
   const fetchComplexTemplates = useCallback(async () => {
     if (!username) return;
     try {
-      const res = await fetchWithDbToken('/api/templates/complex');
+      const res = await fetch('/api/templates/complex', {
+        headers: { 'Authorization': getAuthHeader(), ...getDbTokenHeader() },
+      });
       const data = await res.json();
       if (data.success) {
         setComplexTemplates(data.complexTemplates || []);
@@ -2240,7 +2252,7 @@ export default function HomePage() {
     } catch {
       // silent
     }
-  }, [username]);
+  }, [username, getAuthHeader, getDbTokenHeader]);
 
   // Templates laden
   const fetchTemplates = useCallback(async () => {
@@ -7493,6 +7505,7 @@ export default function HomePage() {
         currentField={currentTemplateField}
         onChanged={fetchComplexTemplates}
         onLoadComplex={handleLoadComplexTemplate}
+        apiFetch={apiFetchWithAuth}
       />
     </div>
   );

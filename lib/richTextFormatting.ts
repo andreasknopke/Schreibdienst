@@ -316,18 +316,55 @@ export function remapRichTextRanges(
 }
 
 /**
+ * Generiert Suchvarianten für ein Text-Segment, das Template-Optionen
+ * in der Form `[Option1/Option2]` enthalten kann.
+ *
+ * Das LLM löst solche Option-Marker typischerweise auf, z.B.:
+ *   `[Linker/Rechter] Fuß` → `Linker Fuß` oder `Rechter Fuß`
+ *
+ * Strategien (in dieser Reihenfolge):
+ * 1. Original-Text (exakt)
+ * 2. Ohne Klammern, aber mit Inhalt: `Linker/Rechter Fuß`
+ * 3. Jede einzelne Option mit dem restlichen Text: `Linker Fuß`, `Rechter Fuß`
+ * 4. Ohne den gesamten `[...]`-Block inkl. Inhalt: ` Fuß` → getrimmt: `Fuß`
+ */
+function* generateSegmentVariants(text: string): Generator<string> {
+  // 1. Original
+  yield text;
+
+  // 2. Ohne umschließende Klammern «[» / «]», Inhalt bleibt
+  const noBrackets = text.replace(/\[([^\]]*)\]/g, '$1');
+  if (noBrackets !== text) yield noBrackets;
+
+  // 3. Für jede Option im Marker: Option + Rest
+  //    Z. B. «[Linker/Rechter] Fuß» → «Linker Fuß», «Rechter Fuß»
+  const optionMatch = text.match(/\[([^\]]+)\]/);
+  if (optionMatch) {
+    const before = text.slice(0, optionMatch.index);
+    const after = text.slice(optionMatch.index! + optionMatch[0].length);
+    const options = optionMatch[1].split('/').map((s) => s.trim()).filter(Boolean);
+    for (const opt of options) {
+      yield (before + opt + after).replace(/\s+/g, ' ').trim();
+    }
+  }
+
+  // 4. Kompletten «[…]»-Block entfernen (Inhalt + Klammern)
+  const stripped = text.replace(/\[[^\]]*\]\s*/g, '').trim();
+  if (stripped && stripped !== text) yield stripped;
+}
+
+/**
  * Inhalts-basierte Format-Übertragung für LLM-adaptierte Texte.
  *
  * Sucht für jede Format-Range das originale Text-Segment im neuen Text und
  * überträgt die Formatierung an die gefundene Position. Segmente, die das
  * LLM entfernt oder stark verändert hat, verlieren ihre Formatierung.
  *
- * Vorteil gegenüber offset-basiertem remapRichTextRanges:
- * - Formate bleiben erhalten, wenn das LLM Text umstrukturiert
- *   (z. B. Sätze umstellt, Einschübe hinzufügt)
- * - Line-Breaks werden korrekt zugeordnet, solange sie im neuen Text
- *   an ähnlicher Position vorkommen
- * - Formatierung auf duplizierten Absätzen wird automatisch erkannt
+ * Behandelt LLM-typische Textveränderungen:
+ * - Auflösung von Template-Optionen `[a/b]` → `a` oder `b`
+ * - Umstellung von Sätzen/Absätzen
+ * - Einschübe von Zusatztext (z. B. Widerspruchs-Prüfung)
+ * - Zeilenumbruch-Erhaltung
  *
  * @param previousText – Originaltext (mit Formatierung)
  * @param nextText     – LLM-Output (adaptierter Text)
@@ -347,74 +384,122 @@ export function remapRichTextRangesByContent(
   // Sortierte Arbeitskopie der Ranges
   const sorted = [...ranges].sort((a, b) => a.start - b.start);
 
-  // Segment-Grenzen: Lücken zwischen Ranges als unformatierte Segmente
-  // (werden beim ersten Durchlauf ignoriert – wir suchen nur formatierte)
+  // Segment-Grenzen berechnen
   const segments: Array<{
     text: string;
-    start: number;
-    end: number;
     range: RichTextFormatRange | null;
   }> = [];
 
   let cursor = 0;
   for (const r of sorted) {
     if (r.start > cursor) {
-      segments.push({ text: previousText.slice(cursor, r.start), start: cursor, end: r.start, range: null });
+      segments.push({ text: previousText.slice(cursor, r.start), range: null });
     }
-    segments.push({ text: previousText.slice(r.start, r.end), start: r.start, end: r.end, range: r });
+    segments.push({ text: previousText.slice(r.start, r.end), range: r });
     cursor = r.end;
   }
   if (cursor < previousText.length) {
-    segments.push({ text: previousText.slice(cursor), start: cursor, end: previousText.length, range: null });
+    segments.push({ text: previousText.slice(cursor), range: null });
   }
 
-  // Für jedes formatierte Segment: im neuen Text suchen
-  let nextSearchPos = 0;
+  // Freitext-Segmente zwischen formatierten Blöcken sammeln für Kontext
   for (const seg of segments) {
-    if (!seg.range) continue; // unformatierte Segmente überspringen
-    const text = seg.text;
+    if (!seg.range) continue;
 
-    // 1. Exakte Suche ab currentSearchPos
-    let foundAt = nextText.indexOf(text, nextSearchPos);
-    if (foundAt === -1) {
-      // 2. Fallback: Suche ab Position 0 (Segment wurde evtl. vorher eingefügt)
-      foundAt = nextText.indexOf(text, 0);
-    }
-    if (foundAt === -1 && text.length > 2) {
-      // 3. Relaxierter Fallback: Whitespace-normalisiert suchen
-      const normalized = text.replace(/\s+/g, ' ');
-      const nextNormalized = nextText.replace(/\s+/g, ' ');
-      let normPos = 0;
-      let segmentFound = false;
-      while ((normPos = nextNormalized.indexOf(normalized, normPos)) !== -1) {
-        // Zurück zum Original-Text mappen (einfach durch Zählen, etwas grob)
-        const beforeOrig = nextText.slice(0, normPos);
-        const origNewlines = (beforeOrig.match(/\n/g) || []).length;
-        const normNewlines = (beforeOrig.replace(/\s+/g, ' ').match(/\n/g) || []).length;
-        // Schätze Original-Position
-        const origPos = normPos + (beforeOrig.length - beforeOrig.replace(/\s+/g, ' ').length);
-        result.push({
-          start: origPos,
-          end: origPos + text.length,
-          bold: seg.range.bold,
-          italic: seg.range.italic,
-          underline: seg.range.underline,
-        });
-        normPos += normalized.length;
-        segmentFound = true;
+    // Versuche alle Suchvarianten
+    let bestMatch: { start: number; end: number } | null = null;
+
+    for (const variant of generateSegmentVariants(seg.text)) {
+      if (!variant) continue;
+
+      // Exakte Suche im gesamten nextText
+      let pos = nextText.indexOf(variant);
+      if (pos !== -1) {
+        bestMatch = { start: pos, end: pos + variant.length };
         break;
       }
-      if (segmentFound) continue;
+
+      // Whitespace-tolerant: Mehrfach-Leerzeichen normalisieren
+      const normVariant = variant.replace(/\s+/g, ' ');
+      const normNext = nextText.replace(/\s+/g, ' ');
+      pos = normNext.indexOf(normVariant);
+      if (pos !== -1) {
+        // Position zurück in den Original-Text mappen
+        const beforeOrig = nextText.slice(0, pos);
+        const approxPos = pos + (beforeOrig.length - beforeOrig.replace(/\s+/g, ' ').length);
+        bestMatch = { start: approxPos, end: approxPos + variant.length };
+        break;
+      }
+
+      // Similaritäts-Fallback für kurze Texte (einzelne Wörter)
+      if (variant.length >= 3) {
+        // Suche nach dem längsten gemeinsamen Wort-Ende
+        const words = variant.split(/\s+/);
+        if (words.length >= 2) {
+          // Versuche, den letzten Teil des Varianten zu matchen
+          const lastWords = words.slice(-Math.min(2, words.length)).join(' ');
+          pos = nextText.indexOf(lastWords);
+          if (pos !== -1) {
+            // Rückwärts expandieren: schauen ob wir den Anfang auch finden
+            const startWord = words.slice(0, -Math.min(2, words.length));
+            if (startWord.length > 0) {
+              const beforeText = nextText.slice(0, pos);
+              const beforeWords = beforeText.split(/\s+/);
+              const lastBefore = beforeWords[beforeWords.length - 1];
+              if (lastBefore && startWord.includes(lastBefore)) {
+                const approxStart = pos - lastBefore.length - 1;
+                if (approxStart >= 0) {
+                  bestMatch = { start: approxStart, end: pos + lastWords.length };
+                  break;
+                }
+              }
+            }
+            if (!bestMatch) {
+              bestMatch = { start: pos, end: pos + lastWords.length };
+              break;
+            }
+          }
+        }
+      }
     }
-    if (foundAt !== -1) {
+
+    // Fallback: Similaritäts-Suche im gesamten nextText
+    if (!bestMatch && seg.text.length >= 3) {
+      let bestScore = 0.6; // Mindest-Ähnlichkeit
+      // Suche nach dem längsten Wort des Segments
+      const words = seg.text.split(/[\s,;.]+/).filter((w) => w.length >= 3);
+      for (const word of words) {
+        const cleanWord = word.replace(/[[\]/]/g, '');
+        if (!cleanWord || cleanWord.length < 3) continue;
+        // Finde das Wort im nextText (es könnte leicht angepasst sein)
+        const wordPattern = cleanWord.toLowerCase();
+        const nextLower = nextText.toLowerCase();
+        let searchFrom = 0;
+        while (searchFrom < nextLower.length) {
+          const idx = nextLower.indexOf(wordPattern, searchFrom);
+          if (idx === -1) break;
+          // Prüfe ob es ein ganzer Wort-Treffer ist
+          const before = idx > 0 ? nextText[idx - 1] : ' ';
+          const afterIdx = idx + wordPattern.length;
+          const after = afterIdx < nextText.length ? nextText[afterIdx] : ' ';
+          if (/\s/.test(before) && /\s/.test(after)) {
+            bestMatch = { start: idx, end: afterIdx };
+            break;
+          }
+          searchFrom = idx + 1;
+        }
+        if (bestMatch) break;
+      }
+    }
+
+    if (bestMatch) {
       result.push({
-        start: foundAt,
-        end: foundAt + text.length,
+        start: bestMatch.start,
+        end: bestMatch.end,
         bold: seg.range.bold,
         italic: seg.range.italic,
         underline: seg.range.underline,
       });
-      nextSearchPos = foundAt + text.length;
     }
     // Nicht gefunden: Formatierung verfällt (LLM hat den Inhalt geändert)
   }

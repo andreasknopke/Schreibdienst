@@ -3618,7 +3618,7 @@ export default function HomePage() {
 
   // Funktion zum Zurücksetzen aller Felder (New-Button) - hier oben für Hotkey-Unterstützung
   const handleReset = useCallback(() => {
-    const currentSnapshot = createTextHistorySnapshot(transcript, methodik, beurteilung, richTextFormats);
+    const currentSnapshot = createTextHistorySnapshot(transcript, methodik, beurteilung, richTextFormats, editorBlocksByField, activeBlockId, showMultiBausteinMode);
     const emptySnapshot = createTextHistorySnapshot('', '', '', EMPTY_RICH_TEXT_RANGES);
     const resettingNonEmptyDocument = !areTextHistorySnapshotsEqual(currentSnapshot, emptySnapshot);
 
@@ -3673,7 +3673,7 @@ export default function HomePage() {
     vadInFlightCountRef.current = 0;
     vadPendingResultsRef.current.clear();
     setVadFailedUtterances([]);
-  }, [beurteilung, methodik, richTextFormats, transcript]);
+  }, [beurteilung, methodik, richTextFormats, transcript, editorBlocksByField, activeBlockId, showMultiBausteinMode]);
 
   // Revert-Funktion: Stellt den Text vor der letzten Korrektur wieder her
   const handleRevert = useCallback(() => {

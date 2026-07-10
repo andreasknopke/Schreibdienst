@@ -7,7 +7,7 @@ import { CONTRADICTION_EINFACH } from '@/prompts/templates/contradiction-einfach
 import { CONTRADICTION_OPTIONEN } from '@/prompts/templates/contradiction-optionen';
 import { TEMPLATE_NIEMALS } from '@/prompts/templates/template-niemals';
 import { getEffectivePrompt } from '@/lib/promptOverrides';
-import { remapRichTextRanges, normalizeRichTextRanges, type RichTextFormatRange } from '@/lib/richTextFormatting';
+import { remapRichTextRangesByContent, normalizeRichTextRanges, type RichTextFormatRange } from '@/lib/richTextFormatting';
 
 export const runtime = 'nodejs';
 
@@ -397,8 +397,10 @@ Gib den vollständigen angepassten Text zurück:`;
     const inputFormats = (formatRanges as RichTextFormatRange[] | undefined) ?? [];
     let adaptedFormats: RichTextFormatRange[] = [];
     if (inputFormats.length > 0) {
-      // Schritt 1: Standard-Remap vom Original-Template zum LLM-Output
-      let remapped = remapRichTextRanges(template, adaptedText, inputFormats);
+      // Schritt 1: Inhalts-basiertes Remap – sucht formatierte Segmente im
+      // LLM-Output anhand ihres Textinhalts. Erhält Formatierung auch bei
+      // Umstellungen, Einschüben oder Duplikationen durch das LLM.
+      let remapped = remapRichTextRangesByContent(template, adaptedText, inputFormats);
       // Schritt 2: Duplikations-Erkennung – kopiert Ranges auf wiederholte Absätze
       remapped = applyFormatRangesToDuplications(template, adaptedText, inputFormats, remapped);
       adaptedFormats = remapped;

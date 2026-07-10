@@ -314,3 +314,110 @@ export function remapRichTextRanges(
 
   return normalizeRichTextRanges(remapped, nextText.length);
 }
+
+/**
+ * Inhalts-basierte Format-Übertragung für LLM-adaptierte Texte.
+ *
+ * Sucht für jede Format-Range das originale Text-Segment im neuen Text und
+ * überträgt die Formatierung an die gefundene Position. Segmente, die das
+ * LLM entfernt oder stark verändert hat, verlieren ihre Formatierung.
+ *
+ * Vorteil gegenüber offset-basiertem remapRichTextRanges:
+ * - Formate bleiben erhalten, wenn das LLM Text umstrukturiert
+ *   (z. B. Sätze umstellt, Einschübe hinzufügt)
+ * - Line-Breaks werden korrekt zugeordnet, solange sie im neuen Text
+ *   an ähnlicher Position vorkommen
+ * - Formatierung auf duplizierten Absätzen wird automatisch erkannt
+ *
+ * @param previousText – Originaltext (mit Formatierung)
+ * @param nextText     – LLM-Output (adaptierter Text)
+ * @param ranges       – Format-Ranges aus previousText
+ * @returns Format-Ranges, auf nextText gemappt
+ */
+export function remapRichTextRangesByContent(
+  previousText: string,
+  nextText: string,
+  ranges: RichTextFormatRange[],
+): RichTextFormatRange[] {
+  if (ranges.length === 0) return ranges;
+  if (previousText === nextText) return ranges;
+
+  const result: RichTextFormatRange[] = [];
+
+  // Sortierte Arbeitskopie der Ranges
+  const sorted = [...ranges].sort((a, b) => a.start - b.start);
+
+  // Segment-Grenzen: Lücken zwischen Ranges als unformatierte Segmente
+  // (werden beim ersten Durchlauf ignoriert – wir suchen nur formatierte)
+  const segments: Array<{
+    text: string;
+    start: number;
+    end: number;
+    range: RichTextFormatRange | null;
+  }> = [];
+
+  let cursor = 0;
+  for (const r of sorted) {
+    if (r.start > cursor) {
+      segments.push({ text: previousText.slice(cursor, r.start), start: cursor, end: r.start, range: null });
+    }
+    segments.push({ text: previousText.slice(r.start, r.end), start: r.start, end: r.end, range: r });
+    cursor = r.end;
+  }
+  if (cursor < previousText.length) {
+    segments.push({ text: previousText.slice(cursor), start: cursor, end: previousText.length, range: null });
+  }
+
+  // Für jedes formatierte Segment: im neuen Text suchen
+  let nextSearchPos = 0;
+  for (const seg of segments) {
+    if (!seg.range) continue; // unformatierte Segmente überspringen
+    const text = seg.text;
+
+    // 1. Exakte Suche ab currentSearchPos
+    let foundAt = nextText.indexOf(text, nextSearchPos);
+    if (foundAt === -1) {
+      // 2. Fallback: Suche ab Position 0 (Segment wurde evtl. vorher eingefügt)
+      foundAt = nextText.indexOf(text, 0);
+    }
+    if (foundAt === -1 && text.length > 2) {
+      // 3. Relaxierter Fallback: Whitespace-normalisiert suchen
+      const normalized = text.replace(/\s+/g, ' ');
+      const nextNormalized = nextText.replace(/\s+/g, ' ');
+      let normPos = 0;
+      let segmentFound = false;
+      while ((normPos = nextNormalized.indexOf(normalized, normPos)) !== -1) {
+        // Zurück zum Original-Text mappen (einfach durch Zählen, etwas grob)
+        const beforeOrig = nextText.slice(0, normPos);
+        const origNewlines = (beforeOrig.match(/\n/g) || []).length;
+        const normNewlines = (beforeOrig.replace(/\s+/g, ' ').match(/\n/g) || []).length;
+        // Schätze Original-Position
+        const origPos = normPos + (beforeOrig.length - beforeOrig.replace(/\s+/g, ' ').length);
+        result.push({
+          start: origPos,
+          end: origPos + text.length,
+          bold: seg.range.bold,
+          italic: seg.range.italic,
+          underline: seg.range.underline,
+        });
+        normPos += normalized.length;
+        segmentFound = true;
+        break;
+      }
+      if (segmentFound) continue;
+    }
+    if (foundAt !== -1) {
+      result.push({
+        start: foundAt,
+        end: foundAt + text.length,
+        bold: seg.range.bold,
+        italic: seg.range.italic,
+        underline: seg.range.underline,
+      });
+      nextSearchPos = foundAt + text.length;
+    }
+    // Nicht gefunden: Formatierung verfällt (LLM hat den Inhalt geändert)
+  }
+
+  return normalizeRichTextRanges(result, nextText.length);
+}

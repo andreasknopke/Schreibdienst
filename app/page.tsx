@@ -25,6 +25,7 @@ import TemplatesManager from '@/components/TemplatesManager';
 import BausteinPalette from '@/components/BausteinPalette';
 import MultiBlockEditor from '@/components/MultiBlockEditor';
 import BracketHighlight from '@/components/BracketHighlight';
+import ComplexTemplateManager from '@/components/ComplexTemplateManager';
 import { createPortal } from 'react-dom';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
@@ -1892,6 +1893,8 @@ export default function HomePage() {
   const [activeTemplateContext, setActiveTemplateContext] = useState<Template | null>(null);
   const [autoIntegrateTemplateAudio, setAutoIntegrateTemplateAudio] = useState(false);
   const [templateContradictionMode, setTemplateContradictionMode] = useState<'genau' | 'einfach' | 'aus' | 'optionen'>('genau');
+  const [showComplexTemplateManager, setShowComplexTemplateManager] = useState(false);
+  const [complexTemplates, setComplexTemplates] = useState<Array<{ id: number; name: string; templateIds: number[] }>>([]);
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   // Lade disabledAbbreviations aus der DB (für applyAbbreviations)
@@ -2198,6 +2201,46 @@ export default function HomePage() {
     }));
     setActiveBlockId(newBlock.id);
   }, []);
+
+  /** Lädt einen Komplexbaustein: öffnet Multi-Baustein-Modus und fügt alle enthaltenen Bausteine als Blöcke ein. */
+  const handleLoadComplexTemplate = useCallback(async (templateIds: number[]) => {
+    if (!username || templateIds.length === 0) return;
+    try {
+      const res = await fetch('/api/templates', {
+        headers: { 'Authorization': getAuthHeader(), ...getDbTokenHeader() },
+      });
+      const data = await res.json();
+      const allTemplates: Template[] = data.templates || [];
+      const selected = allTemplates.filter((t) => templateIds.includes(t.id) && t.field === currentTemplateField);
+      if (selected.length === 0) return;
+
+      setShowMultiBausteinMode(true);
+      const field = currentTemplateField;
+      setEditorBlocksByField((prev) => {
+        const newBlocks = selected.map((t) =>
+          createBausteinBlock(field, t.id, t.name, t.content, t.formatRanges ?? []),
+        );
+        return { ...prev, [field]: [...prev[field], ...newBlocks] };
+      });
+    } catch (err) {
+      console.error('[ComplexTemplate] Load error:', err);
+      setError('Fehler beim Laden des Komplexbausteins');
+    }
+  }, [username, getAuthHeader, getDbTokenHeader, currentTemplateField]);
+
+  /** Lädt die Liste der Komplexbausteine vom Server. */
+  const fetchComplexTemplates = useCallback(async () => {
+    if (!username) return;
+    try {
+      const res = await fetchWithDbToken('/api/templates/complex');
+      const data = await res.json();
+      if (data.success) {
+        setComplexTemplates(data.complexTemplates || []);
+      }
+    } catch {
+      // silent
+    }
+  }, [username]);
 
   // Templates laden
   const fetchTemplates = useCallback(async () => {
@@ -2669,8 +2712,9 @@ export default function HomePage() {
   useEffect(() => {
     if (username) {
       fetchTemplates();
+      fetchComplexTemplates();
     }
-  }, [username, fetchTemplates]);
+  }, [username, fetchTemplates, fetchComplexTemplates]);
 
   // Wörterbuch beim Start laden (für Echtzeit-Korrektur bei Fast Whisper)
   useEffect(() => {
@@ -6145,6 +6189,10 @@ export default function HomePage() {
                       setShowMultiBausteinMode((prev) => !prev);
                       return;
                     }
+                    if (val === '__complex__') {
+                      setShowComplexTemplateManager(true);
+                      return;
+                    }
                     const id = parseInt(val);
                     const template = availableTemplates.find(t => t.id === id);
                     handleTemplateSelection(template || null);
@@ -6160,6 +6208,7 @@ export default function HomePage() {
                   <option value="__multi__" className={`font-medium ${showMultiBausteinMode ? 'text-green-600 dark:text-green-400' : 'text-purple-600 dark:text-purple-400'}`}>
                     {showMultiBausteinMode ? '✓ Mit mehreren Bausteinen arbeiten' : '⊞ Mit mehreren Bausteinen arbeiten'}
                   </option>
+                  <option value="__complex__" className="font-medium text-indigo-600 dark:text-indigo-400">🧩 Komplexbaustein definieren</option>
                   {availableTemplates.map(t => (
                     <option key={t.id} value={t.id}>
                       {t.name.length > 20 ? t.name.substring(0, 20) + '…' : t.name}
@@ -7435,6 +7484,16 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      {/* Komplexbaustein-Manager */}
+      <ComplexTemplateManager
+        open={showComplexTemplateManager}
+        onClose={() => { setShowComplexTemplateManager(false); setError(null); }}
+        availableTemplates={templates.map((t) => ({ id: t.id, name: t.name, content: t.content, field: t.field }))}
+        currentField={currentTemplateField}
+        onChanged={fetchComplexTemplates}
+        onLoadComplex={handleLoadComplexTemplate}
+      />
     </div>
   );
 }

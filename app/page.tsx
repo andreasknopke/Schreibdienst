@@ -3658,6 +3658,12 @@ export default function HomePage() {
     vadInFlightCountRef.current = 0;
     vadPendingResultsRef.current.clear();
     setVadFailedUtterances([]);
+    setEditorBlocksByField(initializeBlocksFromText(
+      { methodik: '', befund: '', beurteilung: '' },
+      { methodik: [], befund: [], beurteilung: [] },
+    ));
+    setActiveBlockId(null);
+    setShowMultiBausteinMode(false);
   }, [beurteilung, methodik, richTextFormats, transcript]);
 
   // Revert-Funktion: Stellt den Text vor der letzten Korrektur wieder her
@@ -6469,23 +6475,6 @@ export default function HomePage() {
                     >
                       🖨️
                     </button>
-                    <button 
-                      className="text-sm text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30" 
-                      onClick={() => {
-                        if (window.confirm('Wirklich die gesamte Methodik inkl. aller Bausteine löschen?')) {
-                          setMethodik('');
-                          setEditorBlocksByField((prev) => ({
-                            ...prev,
-                            methodik: [createFreitextBlock('methodik', '', [])],
-                          }));
-                          setActiveBlockId(null);
-                        }
-                      }}
-                      disabled={!methodik && !showMultiBausteinMode}
-                      title="Feld leeren"
-                    >
-                      🗑️
-                    </button>
                     <CustomActionButtons
                       currentField="methodik"
                       getText={() => methodik}
@@ -6612,23 +6601,7 @@ export default function HomePage() {
                     >
                       🖨️
                     </button>
-                    <button 
-                      className="text-sm text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30" 
-                      onClick={() => {
-                        if (window.confirm('Wirklich den gesamten Befund inkl. aller Bausteine löschen?')) {
-                          setTranscript('');
-                          setEditorBlocksByField((prev) => ({
-                            ...prev,
-                            befund: [createFreitextBlock('befund', '', [])],
-                          }));
-                          setActiveBlockId(null);
-                        }
-                      }}
-                      disabled={!transcript && !showMultiBausteinMode}
-                      title="Feld leeren"
-                    >
-                      🗑️
-                    </button>
+
                     <CustomActionButtons
                       currentField="befund"
                       getText={() => transcript}
@@ -6770,23 +6743,6 @@ export default function HomePage() {
                       title="Drucken"
                     >
                       🖨️
-                    </button>
-                    <button 
-                      className="text-sm text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30" 
-                      onClick={() => {
-                        if (window.confirm('Wirklich die gesamte Zusammenfassung inkl. aller Bausteine löschen?')) {
-                          setBeurteilung('');
-                          setEditorBlocksByField((prev) => ({
-                            ...prev,
-                            beurteilung: [createFreitextBlock('beurteilung', '', [])],
-                          }));
-                          setActiveBlockId(null);
-                        }
-                      }}
-                      disabled={!beurteilung && !showMultiBausteinMode}
-                      title="Feld leeren"
-                    >
-                      🗑️
                     </button>
                     <CustomActionButtons
                       currentField="beurteilung"
@@ -6930,23 +6886,7 @@ export default function HomePage() {
                 >
                   🖨️
                 </button>
-                <button 
-                  className="text-sm text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30" 
-                  onClick={() => {
-                    if (window.confirm('Wirklich den gesamten Text inkl. aller Bausteine löschen?')) {
-                      setTranscript('');
-                      setEditorBlocksByField((prev) => ({
-                        ...prev,
-                        befund: [createFreitextBlock('befund', '', [])],
-                      }));
-                      setActiveBlockId(null);
-                    }
-                  }}
-                  disabled={!transcript && !showMultiBausteinMode}
-                  title="Feld leeren"
-                >
-                  🗑️
-                </button>
+
                 <CustomActionButtons
                   currentField="transcript"
                   getText={() => transcript}

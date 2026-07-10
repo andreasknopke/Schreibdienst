@@ -23,6 +23,7 @@ import TemplateRichTextEditor from '@/components/TemplateRichTextEditor';
 import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio';
 import TemplatesManager from '@/components/TemplatesManager';
 import BausteinPalette from '@/components/BausteinPalette';
+import TemplateSelectorPopover from '@/components/TemplateSelectorPopover';
 import MultiBlockEditor from '@/components/MultiBlockEditor';
 import BracketHighlight from '@/components/BracketHighlight';
 import ComplexTemplateManager from '@/components/ComplexTemplateManager';
@@ -108,6 +109,8 @@ interface Template {
   content: string;
   field: BefundField;
   formatRanges?: RichTextFormatRange[];
+  scope?: 'private' | 'group';
+  groupName?: string;
 }
 
 interface PendingTemplateInsertChoice {
@@ -1112,7 +1115,6 @@ export default function HomePage() {
   const [complexTemplateFilterIds, setComplexTemplateFilterIds] = useState<number[] | null>(null);
   const editorBlocksByFieldRef = useRef<EditorBlocksByField>(editorBlocksByField);
   editorBlocksByFieldRef.current = editorBlocksByField;
-  const templateSelectRef = useRef<HTMLSelectElement | null>(null);
 
   // Aktuelles aktives Feld für Befund-Modus
   const [activeField, setActiveField] = useState<BefundField>('befund');
@@ -6167,81 +6169,30 @@ export default function HomePage() {
             {/* Rechts: Bausteine — breit genug zum Lesen */}
             <div className="flex-1 flex items-center justify-end">
               <div className="flex items-center gap-1">
-                <select
-                  ref={templateSelectRef}
-                  className={`select h-9 text-sm w-44 ${templateMode ? 'border-orange-400 ring-1 ring-orange-300' : ''}`}
-                  value={selectedTemplate?.id || ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === '__new__') {
-                      setTemplateManagerMode('create');
-                      setShowTemplatesManager(true);
-                      return;
-                    }
-                    if (val === '__manage__') {
-                      setTemplateManagerMode('manage');
-                      setShowTemplatesManager(true);
-                      return;
-                    }
-                    if (val === '__multi__') {
-                      setShowMultiBausteinMode((prev) => !prev);
-                      setComplexTemplateFilterIds(null);
-                      return;
-                    }
-                    if (val === '__complex__') {
-                      setShowComplexTemplateManager(true);
-                      return;
-                    }
-                    if (typeof val === 'string' && val.startsWith('__complex__')) {
-                      const id = parseInt(val.replace('__complex__', ''), 10);
-                      const ct = complexTemplates.find((c) => c.id === id);
-                      if (ct) handleLoadComplexTemplate(ct.templateIds);
-                      return;
-                    }
-                    const id = parseInt(val);
-                    const template = availableTemplates.find(t => t.id === id);
-                    handleTemplateSelection(template || null);
+                <TemplateSelectorPopover
+                  templates={templates}
+                  complexTemplates={complexTemplates}
+                  selectedTemplate={selectedTemplate}
+                  showMultiBausteinMode={showMultiBausteinMode}
+                  templateMode={templateMode}
+                  loadingTemplates={loadingTemplates}
+                  currentField={currentTemplateField}
+                  onSelectTemplate={handleTemplateSelection}
+                  onManageTemplates={(mode) => {
+                    setTemplateManagerMode(mode);
+                    setShowTemplatesManager(true);
                   }}
-                  title={mode === 'befund'
-                    ? 'Textbaustein für das aktive Feld auswählen - diktieren Sie nur die Änderungen'
-                    : 'Textbaustein für den Arztbrief auswählen - diktieren Sie nur die Änderungen'}
-                  disabled={loadingTemplates}
-                >
-                  <option value="">{loadingTemplates ? 'Lade Bausteine...' : '📝 Bausteine'}</option>
-                  <option value="__manage__" className="font-medium text-orange-600 dark:text-orange-400">📂 Meine Bausteine</option>
-                  <option value="__new__" className="border-t border-gray-300 dark:border-gray-600 font-medium text-blue-600 dark:text-blue-400">➕ Neuen Baustein anlegen</option>
-                  <option value="__multi__" className={`font-medium ${showMultiBausteinMode ? 'text-green-600 dark:text-green-400' : 'text-purple-600 dark:text-purple-400'}`}>
-                    {showMultiBausteinMode ? '✓ Mit mehreren Bausteinen arbeiten' : '⊞ Mit mehreren Bausteinen arbeiten'}
-                  </option>
-                  <option value="__complex__" className="font-medium text-indigo-600 dark:text-indigo-400">🧩 Komplexbaustein definieren</option>
-                  {complexTemplates.length > 0 && (
-                    <optgroup label="🗂️ Komplexbausteine">
-                      {complexTemplates.map((ct) => (
-                        <option key={`__complex__${ct.id}`} value={`__complex__${ct.id}`} className="text-indigo-600 dark:text-indigo-400">
-                          {ct.name.length > 22 ? ct.name.substring(0, 22) + '…' : ct.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {availableTemplates.map(t => (
-                    <option key={t.id} value={t.id}>
-                      {t.name.length > 20 ? t.name.substring(0, 20) + '…' : t.name}
-                    </option>
-                  ))}
-                </select>
-                {templateMode && selectedTemplate && (
-                  <button
-                    onClick={() => {
-                      setSelectedTemplate(null);
-                      setTemplateMode(false);
-                    }}
-                    className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 px-1"
-                    title="Textbaustein-Modus beenden"
-                  >
-                    ✕
-                  </button>
-                )}
-
+                  onToggleMultiMode={() => {
+                    setShowMultiBausteinMode((prev) => !prev);
+                    setComplexTemplateFilterIds(null);
+                  }}
+                  onOpenComplexManager={() => setShowComplexTemplateManager(true)}
+                  onLoadComplexTemplate={handleLoadComplexTemplate}
+                  onExitTemplateMode={() => {
+                    setSelectedTemplate(null);
+                    setTemplateMode(false);
+                  }}
+                />
               </div>
             </div>
           </div>
@@ -7117,7 +7068,7 @@ export default function HomePage() {
                 complexTemplateFilterIds
                   ? availableTemplates.filter((t) => complexTemplateFilterIds.includes(t.id))
                   : availableTemplates
-              ).map((t) => ({ id: t.id, name: t.name, content: t.content }))}
+              ).map((t) => ({ id: t.id, name: t.name, content: t.content, scope: t.scope }))}
               onAddBaustein={(tpl) => {
                 const full = availableTemplates.find((t) => t.id === tpl.id);
                 if (full) addBausteinAsNewBlock(full);

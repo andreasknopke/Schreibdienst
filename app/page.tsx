@@ -2810,7 +2810,18 @@ export default function HomePage() {
     formats?: RichTextFormatRange[],
   ) => {
     handleManualTextChange(field, value, setter, getRichTextSelection(editor), formats);
-  }, [handleManualTextChange]);
+
+    // Multi-Baustein-Modus: Formate im aktiven Block aktualisieren
+    if (showMultiBausteinMode && activeBlockId && formats) {
+      const befundField: BefundField = field === 'methodik' ? 'methodik' : field === 'beurteilung' ? 'beurteilung' : 'befund';
+      setEditorBlocksByField((prev) => ({
+        ...prev,
+        [befundField]: prev[befundField].map((b) =>
+          b.id === activeBlockId ? { ...b, currentText: value, formatRanges: formats } : b,
+        ),
+      }));
+    }
+  }, [handleManualTextChange, showMultiBausteinMode, activeBlockId]);
 
   /**
    * Wird beim Fokussieren eines Feldes aufgerufen. Stellt sicher, dass
@@ -2885,6 +2896,33 @@ export default function HomePage() {
     const { start, end } = getSelectionBounds(selection);
     const stateKey = getRichTextStateKey(field);
 
+    // Multi-Baustein-Modus: Format auf aktiven Block anwenden
+    if (showMultiBausteinMode && activeBlockId && end > start) {
+      const befundField: BefundField = field === 'methodik' ? 'methodik' : field === 'beurteilung' ? 'beurteilung' : 'befund';
+      setEditorBlocksByField((prev) => {
+        const block = prev[befundField].find((b) => b.id === activeBlockId);
+        if (!block) return prev;
+        const enabled = !isFormatActiveAcrossSelection(block.formatRanges, start, end, key);
+        return {
+          ...prev,
+          [befundField]: prev[befundField].map((b) =>
+            b.id === activeBlockId
+              ? { ...b, formatRanges: setFormatForSelection(block.formatRanges, text.length, start, end, key, enabled) }
+              : b,
+          ),
+        };
+      });
+      // Auch global aktualisieren für Konsistenz
+      setRichTextFormats((current) => {
+        const enabled = !isFormatActiveAcrossSelection(current[stateKey], start, end, key);
+        return {
+          ...current,
+          [stateKey]: setFormatForSelection(current[stateKey], text.length, start, end, key, enabled),
+        };
+      });
+      return;
+    }
+
     if (end > start) {
       setRichTextFormats((current) => {
         const enabled = !isFormatActiveAcrossSelection(current[stateKey], start, end, key);
@@ -2903,7 +2941,7 @@ export default function HomePage() {
         [key]: !current[stateKey][key],
       },
     }));
-  }, [getFieldTextValue, getRichTextStateKey, getStoredSelection]);
+  }, [getFieldTextValue, getRichTextStateKey, getStoredSelection, showMultiBausteinMode, activeBlockId]);
 
   const isToolbarButtonActive = useCallback((field: TextInsertionTarget, key: RichTextFormatKey) => {
     const text = getFieldTextValue(field);
@@ -2912,11 +2950,19 @@ export default function HomePage() {
     const stateKey = getRichTextStateKey(field);
 
     if (end > start) {
+      // Multi-Baustein-Modus: aus aktiven Block lesen
+      if (showMultiBausteinMode && activeBlockId) {
+        const befundField: BefundField = field === 'methodik' ? 'methodik' : field === 'beurteilung' ? 'beurteilung' : 'befund';
+        const block = editorBlocksByField[befundField]?.find((b) => b.id === activeBlockId);
+        if (block) {
+          return isFormatActiveAcrossSelection(block.formatRanges, start, end, key);
+        }
+      }
       return isFormatActiveAcrossSelection(richTextFormats[stateKey], start, end, key);
     }
 
     return richTextToggles[stateKey][key];
-  }, [getFieldTextValue, getRichTextStateKey, getStoredSelection, richTextFormats, richTextToggles]);
+  }, [getFieldTextValue, getRichTextStateKey, getStoredSelection, richTextFormats, richTextToggles, showMultiBausteinMode, activeBlockId, editorBlocksByField]);
 
   const renderRichTextToolbar = useCallback((field: TextInsertionTarget) => {
     const buttons: Array<{ key: RichTextFormatKey; label: string; className: string }> = [
@@ -5388,6 +5434,16 @@ export default function HomePage() {
   }
 
   function handleCopy() {
+    if (showMultiBausteinMode) {
+      const blocks = editorBlocksByField.befund;
+      if (blocks.length > 0) {
+        const combinedText = blocks.map((b) => b.currentText).filter(Boolean).join('\n\n');
+        const combinedHtml = blocks.map((b) => buildRichTextHtml(b.currentText, b.formatRanges)).filter(Boolean).join('<br/><br/>');
+        copyRichTextToClipboard(combinedText, combinedHtml);
+        showToast('✅ Kopiert!');
+        return;
+      }
+    }
     copyRichTextToClipboard(transcript, buildRichTextHtml(transcript, richTextFormats.transcript ?? []));
     showToast('✅ Kopiert!');
   }
@@ -6380,19 +6436,55 @@ export default function HomePage() {
                     {renderRichTextToolbar('methodik')}
                     <button 
                       className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => { copyRichTextToClipboard(methodik, buildRichTextHtml(methodik, getFieldRichTextFormats('methodik'))); showToast('✅ Kopiert!'); }}
-                      disabled={!methodik}
+                      onClick={() => {
+                        if (showMultiBausteinMode) {
+                          const blocks = editorBlocksByField.methodik;
+                          const t = blocks.map((b) => b.currentText).filter(Boolean).join('\n\n');
+                          const h = blocks.map((b) => buildRichTextHtml(b.currentText, b.formatRanges)).filter(Boolean).join('<br/><br/>');
+                          copyRichTextToClipboard(t, h);
+                        } else {
+                          copyRichTextToClipboard(methodik, buildRichTextHtml(methodik, getFieldRichTextFormats('methodik')));
+                        }
+                        showToast('✅ Kopiert!');
+                      }}
+                      disabled={!methodik && !showMultiBausteinMode}
                       title="Kopieren"
                     >
                       📋
                     </button>
                     <button 
                       className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => printRichText(methodik, buildRichTextHtml(methodik, getFieldRichTextFormats('methodik')), 'Methodik')}
-                      disabled={!methodik}
+                      onClick={() => {
+                        if (showMultiBausteinMode) {
+                          const blocks = editorBlocksByField.methodik;
+                          const t = blocks.map((b) => b.currentText).filter(Boolean).join('\n\n');
+                          const h = blocks.map((b) => buildRichTextHtml(b.currentText, b.formatRanges)).filter(Boolean).join('<br/><br/>');
+                          printRichText(t, h, 'Methodik');
+                        } else {
+                          printRichText(methodik, buildRichTextHtml(methodik, getFieldRichTextFormats('methodik')), 'Methodik');
+                        }
+                      }}
+                      disabled={!methodik && !showMultiBausteinMode}
                       title="Drucken"
                     >
                       🖨️
+                    </button>
+                    <button 
+                      className="text-sm text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30" 
+                      onClick={() => {
+                        if (window.confirm('Wirklich die gesamte Methodik inkl. aller Bausteine löschen?')) {
+                          setMethodik('');
+                          setEditorBlocksByField((prev) => ({
+                            ...prev,
+                            methodik: [createFreitextBlock('methodik', '', [])],
+                          }));
+                          setActiveBlockId(null);
+                        }
+                      }}
+                      disabled={!methodik && !showMultiBausteinMode}
+                      title="Feld leeren"
+                    >
+                      🗑️
                     </button>
                     <CustomActionButtons
                       currentField="methodik"
@@ -6447,16 +6539,8 @@ export default function HomePage() {
                         return { ...prev, methodik: reordered };
                       });
                     }}
-                    onChange={(value, editor) => {
-                      handleRichTextEditorChange('methodik', value, setMethodik, editor);
-                      if (showMultiBausteinMode && activeBlockId) {
-                        setEditorBlocksByField((prev) => ({
-                          ...prev,
-                          methodik: prev.methodik.map((b) =>
-                            b.id === activeBlockId ? { ...b, currentText: value } : b,
-                          ),
-                        }));
-                      }
+                    onChange={(value, editor, formats) => {
+                      handleRichTextEditorChange('methodik', value, setMethodik, editor, formats);
                     }}
                     onFocus={(editor) => handleFieldActivation('methodik', editor)}
                     onBlur={() => setFocusedTextField((current) => current === 'methodik' ? null : current)}
@@ -6495,19 +6579,55 @@ export default function HomePage() {
                     {renderRichTextToolbar('befund')}
                     <button 
                       className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => { copyRichTextToClipboard(transcript, buildRichTextHtml(transcript, getFieldRichTextFormats('befund'))); showToast('✅ Kopiert!'); }}
-                      disabled={!transcript}
+                      onClick={() => {
+                        if (showMultiBausteinMode) {
+                          const blocks = editorBlocksByField.befund;
+                          const t = blocks.map((b) => b.currentText).filter(Boolean).join('\n\n');
+                          const h = blocks.map((b) => buildRichTextHtml(b.currentText, b.formatRanges)).filter(Boolean).join('<br/><br/>');
+                          copyRichTextToClipboard(t, h);
+                        } else {
+                          copyRichTextToClipboard(transcript, buildRichTextHtml(transcript, getFieldRichTextFormats('befund')));
+                        }
+                        showToast('✅ Kopiert!');
+                      }}
+                      disabled={!transcript && !showMultiBausteinMode}
                       title="Kopieren"
                     >
                       📋
                     </button>
                     <button 
                       className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => printRichText(transcript, buildRichTextHtml(transcript, getFieldRichTextFormats('befund')), 'Befund')}
-                      disabled={!transcript}
+                      onClick={() => {
+                        if (showMultiBausteinMode) {
+                          const blocks = editorBlocksByField.befund;
+                          const t = blocks.map((b) => b.currentText).filter(Boolean).join('\n\n');
+                          const h = blocks.map((b) => buildRichTextHtml(b.currentText, b.formatRanges)).filter(Boolean).join('<br/><br/>');
+                          printRichText(t, h, 'Befund');
+                        } else {
+                          printRichText(transcript, buildRichTextHtml(transcript, getFieldRichTextFormats('befund')), 'Befund');
+                        }
+                      }}
+                      disabled={!transcript && !showMultiBausteinMode}
                       title="Drucken"
                     >
                       🖨️
+                    </button>
+                    <button 
+                      className="text-sm text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30" 
+                      onClick={() => {
+                        if (window.confirm('Wirklich den gesamten Befund inkl. aller Bausteine löschen?')) {
+                          setTranscript('');
+                          setEditorBlocksByField((prev) => ({
+                            ...prev,
+                            befund: [createFreitextBlock('befund', '', [])],
+                          }));
+                          setActiveBlockId(null);
+                        }
+                      }}
+                      disabled={!transcript && !showMultiBausteinMode}
+                      title="Feld leeren"
+                    >
+                      🗑️
                     </button>
                     <CustomActionButtons
                       currentField="befund"
@@ -6562,16 +6682,8 @@ export default function HomePage() {
                         return { ...prev, befund: reordered };
                       });
                     }}
-                    onChange={(value, editor) => {
-                      handleRichTextEditorChange('befund', value, setTranscript, editor);
-                      if (showMultiBausteinMode && activeBlockId) {
-                        setEditorBlocksByField((prev) => ({
-                          ...prev,
-                          befund: prev.befund.map((b) =>
-                            b.id === activeBlockId ? { ...b, currentText: value } : b,
-                          ),
-                        }));
-                      }
+                    onChange={(value, editor, formats) => {
+                      handleRichTextEditorChange('befund', value, setTranscript, editor, formats);
                     }}
                     onFocus={(editor) => handleFieldActivation('befund', editor)}
                     onBlur={() => setFocusedTextField((current) => current === 'befund' ? null : current)}
@@ -6626,19 +6738,55 @@ export default function HomePage() {
                     {renderRichTextToolbar('beurteilung')}
                     <button 
                       className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => { copyRichTextToClipboard(beurteilung, buildRichTextHtml(beurteilung, getFieldRichTextFormats('beurteilung'))); showToast('✅ Kopiert!'); }}
-                      disabled={!beurteilung}
+                      onClick={() => {
+                        if (showMultiBausteinMode) {
+                          const blocks = editorBlocksByField.beurteilung;
+                          const t = blocks.map((b) => b.currentText).filter(Boolean).join('\n\n');
+                          const h = blocks.map((b) => buildRichTextHtml(b.currentText, b.formatRanges)).filter(Boolean).join('<br/><br/>');
+                          copyRichTextToClipboard(t, h);
+                        } else {
+                          copyRichTextToClipboard(beurteilung, buildRichTextHtml(beurteilung, getFieldRichTextFormats('beurteilung')));
+                        }
+                        showToast('✅ Kopiert!');
+                      }}
+                      disabled={!beurteilung && !showMultiBausteinMode}
                       title="Kopieren"
                     >
                       📋
                     </button>
                     <button 
                       className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                      onClick={() => printRichText(beurteilung, buildRichTextHtml(beurteilung, getFieldRichTextFormats('beurteilung')), 'Zusammenfassung')}
-                      disabled={!beurteilung}
+                      onClick={() => {
+                        if (showMultiBausteinMode) {
+                          const blocks = editorBlocksByField.beurteilung;
+                          const t = blocks.map((b) => b.currentText).filter(Boolean).join('\n\n');
+                          const h = blocks.map((b) => buildRichTextHtml(b.currentText, b.formatRanges)).filter(Boolean).join('<br/><br/>');
+                          printRichText(t, h, 'Zusammenfassung');
+                        } else {
+                          printRichText(beurteilung, buildRichTextHtml(beurteilung, getFieldRichTextFormats('beurteilung')), 'Zusammenfassung');
+                        }
+                      }}
+                      disabled={!beurteilung && !showMultiBausteinMode}
                       title="Drucken"
                     >
                       🖨️
+                    </button>
+                    <button 
+                      className="text-sm text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30" 
+                      onClick={() => {
+                        if (window.confirm('Wirklich die gesamte Zusammenfassung inkl. aller Bausteine löschen?')) {
+                          setBeurteilung('');
+                          setEditorBlocksByField((prev) => ({
+                            ...prev,
+                            beurteilung: [createFreitextBlock('beurteilung', '', [])],
+                          }));
+                          setActiveBlockId(null);
+                        }
+                      }}
+                      disabled={!beurteilung && !showMultiBausteinMode}
+                      title="Feld leeren"
+                    >
+                      🗑️
                     </button>
                     <CustomActionButtons
                       currentField="beurteilung"
@@ -6693,16 +6841,8 @@ export default function HomePage() {
                         return { ...prev, beurteilung: reordered };
                       });
                     }}
-                    onChange={(value, editor) => {
-                      handleRichTextEditorChange('beurteilung', value, setBeurteilung, editor);
-                      if (showMultiBausteinMode && activeBlockId) {
-                        setEditorBlocksByField((prev) => ({
-                          ...prev,
-                          beurteilung: prev.beurteilung.map((b) =>
-                            b.id === activeBlockId ? { ...b, currentText: value } : b,
-                          ),
-                        }));
-                      }
+                    onChange={(value, editor, formats) => {
+                      handleRichTextEditorChange('beurteilung', value, setBeurteilung, editor, formats);
                     }}
                     onFocus={(editor) => handleFieldActivation('beurteilung', editor)}
                     onBlur={() => setFocusedTextField((current) => current === 'beurteilung' ? null : current)}
@@ -6768,18 +6908,44 @@ export default function HomePage() {
                 <button 
                   className="text-base text-gray-500 hover:text-gray-700 px-3 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
                   onClick={handleCopy}
-                  disabled={!transcript}
+                  disabled={!transcript && !showMultiBausteinMode}
                   title="Kopieren"
                 >
                   📋
                 </button>
                 <button 
                   className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
-                  onClick={() => printRichText(transcript, buildRichTextHtml(transcript, getFieldRichTextFormats('transcript')), 'Arztbrief')}
-                  disabled={!transcript}
+                  onClick={() => {
+                    if (showMultiBausteinMode) {
+                      const blocks = editorBlocksByField.befund;
+                      const t = blocks.map((b) => b.currentText).filter(Boolean).join('\n\n');
+                      const h = blocks.map((b) => buildRichTextHtml(b.currentText, b.formatRanges)).filter(Boolean).join('<br/><br/>');
+                      printRichText(t, h, 'Arztbrief');
+                    } else {
+                      printRichText(transcript, buildRichTextHtml(transcript, getFieldRichTextFormats('transcript')), 'Arztbrief');
+                    }
+                  }}
+                  disabled={!transcript && !showMultiBausteinMode}
                   title="Drucken"
                 >
                   🖨️
+                </button>
+                <button 
+                  className="text-sm text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30" 
+                  onClick={() => {
+                    if (window.confirm('Wirklich den gesamten Text inkl. aller Bausteine löschen?')) {
+                      setTranscript('');
+                      setEditorBlocksByField((prev) => ({
+                        ...prev,
+                        befund: [createFreitextBlock('befund', '', [])],
+                      }));
+                      setActiveBlockId(null);
+                    }
+                  }}
+                  disabled={!transcript && !showMultiBausteinMode}
+                  title="Feld leeren"
+                >
+                  🗑️
                 </button>
                 <CustomActionButtons
                   currentField="transcript"
@@ -6840,16 +7006,8 @@ export default function HomePage() {
                       return { ...prev, befund: reordered };
                     });
                   }}
-                  onChange={(value, editor) => {
-                    handleRichTextEditorChange('transcript', value, setTranscript, editor);
-                    if (showMultiBausteinMode && activeBlockId) {
-                      setEditorBlocksByField((prev) => ({
-                        ...prev,
-                        befund: prev.befund.map((b) =>
-                          b.id === activeBlockId ? { ...b, currentText: value } : b,
-                        ),
-                      }));
-                    }
+                  onChange={(value, editor, formats) => {
+                    handleRichTextEditorChange('transcript', value, setTranscript, editor, formats);
                   }}
                   onFocus={(editor) => { setFocusedTextField('transcript'); setActiveField('befund'); handleRichTextSelectionChange('transcript', editor); }}
                   onBlur={() => setFocusedTextField((current) => current === 'transcript' ? null : current)}

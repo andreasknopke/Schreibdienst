@@ -24,7 +24,7 @@ interface MultiBlockEditorProps {
   onBlockActivate: (blockId: string) => void;
   onDeleteBlock: (blockId: string) => void;
   onReorderBlocks: (blockIds: string[]) => void;
-  onChange: (value: string, editor: HTMLDivElement) => void;
+  onChange: (value: string, editor: HTMLDivElement, formats?: RichTextFormatRange[]) => void;
   onFocus: (editor: HTMLDivElement) => void;
   onBlur: () => void;
   onSelectionChange: (editor: HTMLDivElement) => void;
@@ -71,7 +71,7 @@ export default function MultiBlockEditor({
           formats={fieldFormats}
           selection={selection}
           className={className}
-          onChange={onChange}
+          onChange={(value, editor, formats) => onChange(value, editor, formats)}
           onFocus={onFocus}
           onBlur={onBlur}
           onSelectionChange={onSelectionChange}
@@ -177,10 +177,10 @@ export default function MultiBlockEditor({
               <RichTextDictationEditor
                 editorRef={editorRef}
                 value={block.currentText}
-                formats={fieldFormats}
+                formats={block.formatRanges}
                 selection={selection}
                 className={className}
-                onChange={onChange}
+                onChange={(value, editor, formats) => onChange(value, editor, formats)}
                 onFocus={onFocus}
                 onBlur={onBlur}
                 onSelectionChange={onSelectionChange}

@@ -14,6 +14,10 @@ coverage/
 dist/
 out/
 *.local
+database/
+data/
+training/.venv-export/
+training/__pycache__/
 native-host/build/
 native-host/build3/
 native-host/build-win/

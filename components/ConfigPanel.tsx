@@ -70,6 +70,7 @@ export default function ConfigPanel() {
   const [success, setSuccess] = useState('');
   const [migrationStatus, setMigrationStatus] = useState<MigrationStatus | null>(null);
   const [runningMigration, setRunningMigration] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   const fetchConfig = async () => {
     try {
@@ -581,6 +582,71 @@ export default function ConfigPanel() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Datenbank Download - nur für root */}
+      {isRoot && (
+        <div className="space-y-3">
+          <h4 className="font-medium text-sm flex items-center gap-2">
+            <span>💾</span>
+            <span>Datenbank Export</span>
+          </h4>
+          <p className="text-xs text-gray-500">
+            Lade die gesamte Datenbank als SQL-Datei herunter. Enthält alle Tabellen, Strukturen und Daten.
+            Der Export wird im Klartext erstellt und kann mit jedem SQL-Editor oder via mysql importiert werden.
+          </p>
+          <button
+            onClick={async () => {
+              if (downloading) return;
+              setError('');
+              setSuccess('');
+              setDownloading(true);
+              try {
+                const response = await fetch('/api/admin/db-download', {
+                  headers: {
+                    'Authorization': getAuthHeader(),
+                    ...getDbTokenHeader()
+                  }
+                });
+                if (!response.ok) {
+                  const data = await response.json();
+                  setError(data.error || 'Fehler beim Download');
+                  return;
+                }
+                // Blob herunterladen
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `schreibdienst-db-${new Date().toISOString().slice(0, 10)}.sql`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                setSuccess('Datenbank-Export erfolgreich heruntergeladen');
+                setTimeout(() => setSuccess(''), 5000);
+              } catch (err: any) {
+                setError('Fehler beim Download: ' + (err.message || 'Unbekannt'));
+              } finally {
+                setDownloading(false);
+              }
+            }}
+            disabled={downloading}
+            className="w-full px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {downloading ? (
+              <>
+                <span className="animate-spin">⏳</span>
+                <span>Export wird erstellt...</span>
+              </>
+            ) : (
+              <>
+                <span>⬇️</span>
+                <span>Datenbank als SQL herunterladen</span>
+              </>
+            )}
+          </button>
         </div>
       )}
 

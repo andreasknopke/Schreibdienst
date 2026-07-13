@@ -2614,10 +2614,12 @@ void handleClient(SOCKET client) {
                 hidDiagnostic("  -> VID=0x%04X PID=0x%04X name=\"%ls\" pressed=%d",
                     dev.vendorId, dev.productId, dev.deviceName.c_str(), dev.recordPressed ? 1 : 0);
             }
+            size_t clientCount = 0;
             {
                 std::lock_guard<std::mutex> lock(g_clientsMutex);
-                hidDiagnostic("Clients verbunden: %zu (vor start-hid)", g_wsClients.size());
+                clientCount = g_wsClients.size();
             }
+            hidDiagnostic("Clients verbunden: %zu (vor start-hid)", clientCount);
 
             registerHidRawInputDevices();
 

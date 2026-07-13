@@ -175,7 +175,7 @@ export async function injectToActiveWindow({
   charDelayMs = 2,
   fallbackToClipboard = true,
 }: InjectRequest): Promise<InjectResult> {
-  if (!text.trim() && !/\n/.test(text)) {
+  if (!text.trim()) {
     return { ok: false, error: 'Kein Text zum Einfügen vorhanden' };
   }
 

@@ -54,6 +54,7 @@ const NORDIC_DICTATION_VENDOR_ID = 0x1915;
 const NORDIC_DICTATION_PRODUCT_ID = 0x1025;
 const NORDIC_DICTATION_RECORD_REPORT_ID = 0x02;
 const NORDIC_DICTATION_RECORD_USAGE = 0x00CF;
+const NORDIC_DICTATION_FRIENDLY_NAME = 'KSR Stationsmikrofon';
 
 const HID_USAGE_BY_ACTION: Record<HidMediaControlAction, string> = {
   play: '0xB0',
@@ -183,6 +184,14 @@ function isNordicDictationDevice(device: WebHidDevice): boolean {
 
 function isSupportedWebHidDevice(device: WebHidDevice): boolean {
   return isGrundigSonicMic(device) || isPhilipsSpeechMikeIII(device) || isNordicDictationDevice(device);
+}
+
+/** Ersetzt generische HID-Produktnamen durch benutzerfreundliche Bezeichnungen. */
+function getFriendlyDeviceName(device: WebHidDevice): string {
+  if (isNordicDictationDevice(device)) {
+    return NORDIC_DICTATION_FRIENDLY_NAME;
+  }
+  return device.productName;
 }
 
 function inputReportBytes(data: DataView): number[] {
@@ -385,7 +394,7 @@ async function connectWebHidDevice(
   if (!device.opened) {
     await device.open();
     console.info('[HID] Device geöffnet: %s (VID=0x%04X PID=0x%04X)',
-      device.productName, device.vendorId, device.productId);
+      getFriendlyDeviceName(device), device.vendorId, device.productId);
   }
 
   const state: ConnectedWebHidDevice = {
@@ -396,9 +405,10 @@ async function connectWebHidDevice(
   const handleInputReport = (event: Event) => {
     const inputEvent = event as WebHidInputReportEvent;
     const rawBytes = inputReportBytes(inputEvent.data);
+    const friendlyName = getFriendlyDeviceName(inputEvent.device);
     console.debug(
       '[HID] inputreport: device=%s reportId=0x%02X bytes=[%s] (%d bytes)',
-      inputEvent.device.productName,
+      friendlyName,
       inputEvent.reportId,
       rawBytes.map(b => b.toString(16).padStart(2, '0')).join(' '),
       rawBytes.length,
@@ -414,7 +424,7 @@ async function connectWebHidDevice(
         code: 'MediaRecord',
         phase: 'keydown',
         source: 'webhid',
-        deviceName: inputEvent.device.productName,
+        deviceName: friendlyName,
       }, onEvent);
       return;
     }
@@ -428,7 +438,7 @@ async function connectWebHidDevice(
         code: 'MediaRecord',
         phase: 'keyup',
         source: 'webhid',
-        deviceName: inputEvent.device.productName,
+        deviceName: friendlyName,
       }, onEvent);
     }
   };
@@ -486,7 +496,7 @@ export function getHidMediaControlStatus(): HidMediaControlStatusDetail {
   return {
     supported: getWebHidApi() !== null,
     connected: connectedWebHidDevices.size > 0,
-    deviceName: firstDevice?.productName,
+    deviceName: firstDevice ? getFriendlyDeviceName(firstDevice) : undefined,
     connectedDeviceCount: connectedWebHidDevices.size,
   };
 }

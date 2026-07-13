@@ -271,7 +271,23 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       // Nicht kritisch – Audio Level funktioniert halt nicht
     }
 
-    await vad.start();
+    // Bei der ersten Benutzung kann die Mikrofon-Permission/Stream-Akquise
+    // laenger dauern als MicVAD.new() braucht. In diesem Fall schlaegt
+    // vad.start() mit "MicVAD has null stream, audio context, or processor
+    // adapter" fehl. Ein kurzer Retry gibt dem internen Setup Zeit.
+    let startAttempts = 0;
+    const maxStartAttempts = 3;
+    while (startAttempts < maxStartAttempts) {
+      try {
+        await vad.start();
+        break; // Erfolg – Schleife verlassen
+      } catch (err) {
+        startAttempts++;
+        if (startAttempts >= maxStartAttempts) throw err;
+        console.warn(`[VAD] start() attempt ${startAttempts} failed – retrying in 400ms...`);
+        await new Promise(r => setTimeout(r, 400));
+      }
+    }
     if (sessionId !== sessionIdRef.current) {
       await vad.destroy();
       return;

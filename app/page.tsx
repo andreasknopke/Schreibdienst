@@ -4706,7 +4706,11 @@ export default function HomePage() {
         setRecording(true);
       } catch (err: any) {
         console.error('[VAD] Start error:', err);
-        setError('VAD Mikrofon-Zugriff fehlgeschlagen: ' + err.message);
+        const msg = err?.message || String(err);
+        const hint = msg.includes('null stream') || msg.includes('audio context')
+          ? ' – Bitte erneut versuchen (Mikrofon war noch nicht bereit)'
+          : '';
+        setError('VAD Mikrofon-Zugriff fehlgeschlagen: ' + msg + hint);
       }
       return;
     }

@@ -1823,7 +1823,9 @@ export default function HomePage() {
     appendAdminConsoleEntry('pipeline', `replaceTextAtEndOrInsertDelta (${field})`, formatPipelineDetails({ fullText: fullText.slice(0, 300), delta: incomingDelta, liveInject: liveInjectEnabledRef.current }));
 
     if (liveInjectEnabledRef.current) {
-      applyLiveChunkPreview(field, incomingDelta && incomingDelta.trim() ? incomingDelta : fullText);
+      // Textfeld im Browser zeigt den vollständigen Text, nicht nur den letzten Chunk.
+      // Der Injektor (queueLiveInject oben) überträgt unabhängig davon die Deltas an die Ziel-App.
+      setFieldText(field, fullText);
       return;
     }
 
@@ -3611,71 +3613,43 @@ export default function HomePage() {
             // Verteile Text auf die entsprechenden Felder
             if (parsed.methodik !== null) {
               lastMethodikRef.current = parsed.methodik;
-              if (liveInjectEnabledRef.current) {
-                applyLiveChunkPreview('methodik', parsed.methodik);
-              } else {
-                appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (methodik)', formatPipelineDetails({ newText: parsed.methodik }));
-                setMethodik(combineTextForField('methodik', methodik, parsed.methodik));
-              }
+              appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (methodik)', formatPipelineDetails({ newText: parsed.methodik }));
+              setMethodik(combineTextForField('methodik', methodik, parsed.methodik));
             }
             if (parsed.befund !== null) {
-              if (liveInjectEnabledRef.current) {
-                applyLiveChunkPreview('befund', parsed.befund);
-              } else {
-                appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (befund)', formatPipelineDetails({ newText: parsed.befund }));
-                setTranscript(combineTextForField('befund', transcript, parsed.befund));
-              }
+              appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (befund)', formatPipelineDetails({ newText: parsed.befund }));
+              setTranscript(combineTextForField('befund', transcript, parsed.befund));
             }
             if (parsed.beurteilung !== null) {
               lastBeurteilungRef.current = parsed.beurteilung;
-              if (liveInjectEnabledRef.current) {
-                applyLiveChunkPreview('beurteilung', parsed.beurteilung);
-              } else {
-                appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (beurteilung)', formatPipelineDetails({ newText: parsed.beurteilung }));
-                setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung));
-              }
+              appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (beurteilung)', formatPipelineDetails({ newText: parsed.beurteilung }));
+              setBeurteilung(combineTextForField('beurteilung', beurteilung, parsed.beurteilung));
             }
           } else {
             // Kein Steuerbefehl - Text geht ins aktive Feld
             switch (activeField) {
               case 'methodik':
                 lastMethodikRef.current = preparedDelta;
-                if (liveInjectEnabledRef.current) {
-                  applyLiveChunkPreview('methodik', preparedDelta);
-                } else {
-                  appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (methodik, kein Feldbefehl)', formatPipelineDetails({ delta: preparedDelta }));
-                  setMethodik(combineTextForField('methodik', methodik, preparedDelta));
-                }
+                appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (methodik, kein Feldbefehl)', formatPipelineDetails({ delta: preparedDelta }));
+                setMethodik(combineTextForField('methodik', methodik, preparedDelta));
                 break;
               case 'beurteilung':
                 lastBeurteilungRef.current = preparedDelta;
-                if (liveInjectEnabledRef.current) {
-                  applyLiveChunkPreview('beurteilung', preparedDelta);
-                } else {
-                  appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (beurteilung, kein Feldbefehl)', formatPipelineDetails({ delta: preparedDelta }));
-                  setBeurteilung(combineTextForField('beurteilung', beurteilung, preparedDelta));
-                }
+                appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (beurteilung, kein Feldbefehl)', formatPipelineDetails({ delta: preparedDelta }));
+                setBeurteilung(combineTextForField('beurteilung', beurteilung, preparedDelta));
                 break;
               case 'befund':
               default:
-                if (liveInjectEnabledRef.current) {
-                  applyLiveChunkPreview('befund', preparedDelta);
-                } else {
-                  appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (befund, kein Feldbefehl)', formatPipelineDetails({ delta: preparedDelta }));
-                  setTranscript(combineTextForField('befund', transcript, preparedDelta));
-                }
+                appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (befund, kein Feldbefehl)', formatPipelineDetails({ delta: preparedDelta }));
+                setTranscript(combineTextForField('befund', transcript, preparedDelta));
                 break;
             }
           }
         } else {
           // Im Arztbrief-Modus: Normales Verhalten
-          if (liveInjectEnabledRef.current) {
-            applyLiveChunkPreview('transcript', preparedDelta);
-          } else {
-            appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (arztbrief)', formatPipelineDetails({ delta: preparedDelta }));
-            const fullText = combineTextForField('transcript', transcript, preparedDelta);
-            setTranscript(fullText);
-          }
+          appendAdminConsoleEntry('pipeline', 'Live → combineTextForField (arztbrief)', formatPipelineDetails({ delta: preparedDelta }));
+          const fullText = combineTextForField('transcript', transcript, preparedDelta);
+          setTranscript(fullText);
         }
       }
     } finally {

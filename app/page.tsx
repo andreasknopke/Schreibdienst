@@ -1706,7 +1706,10 @@ export default function HomePage() {
     // automatisch mit einem Buchstaben/Zahl an, ohne an einem vorherigen
     // Satzzeichen "anzukleben". Das gilt gleichermassen fuer VAD-Pausen-
     // Auto-Chunking wie fuer manuell angehaengte Satzzeichen ("Punkt", "!").
-    let normalizedText = text.replace(/^\s+/, '');
+    // Wichtig: Führende horizontale Whitespace-Zeichen (Leerzeichen, Tabs) werden
+    // entfernt, aber Zeilenumbrueche (\\n) bleiben erhalten, da sie als Enter-
+    // Tasten an die Ziel-App gesendet werden (z. B. "neuer Absatz" → "\\n\\n").
+    let normalizedText = text.replace(/^[^\S\n]+/, '');
 
     if (!liveInjectEnabledRef.current) return;
 

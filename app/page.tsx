@@ -1708,7 +1708,11 @@ export default function HomePage() {
     // Auto-Chunking wie fuer manuell angehaengte Satzzeichen ("Punkt", "!").
     let normalizedText = text.replace(/^\s+/, '');
 
-    if (!liveInjectEnabledRef.current || !normalizedText.trim()) return;
+    if (!liveInjectEnabledRef.current) return;
+
+    // Text ohne druckbare Zeichen trotzdem senden, wenn er Zeilenumbrüche
+    // enthält (z. B. "neuer Absatz" → "\n\n" als eigener Chunk).
+    if (!normalizedText.trim() && !/\n/.test(normalizedText)) return;
 
     // Vorhandene Zeilenumbrueche am Ende erhalten (z. B. "neuer Absatz"),
     // aber alle anderen trailing-Whitespace-Zeichen verwerfen und genau ein

@@ -266,6 +266,20 @@ export async function getUserTemplateGroupIds(request: NextRequest, username: st
   return rows.map((row: any) => Number(row.group_id)).filter((id: number) => Number.isFinite(id));
 }
 
+export async function getUserTemplateGroupsWithNames(request: NextRequest, username: string): Promise<{ id: number; name: string }[]> {
+  await ensureTemplateGroupTables(request);
+  const db = await getPoolForRequest(request);
+  const [rows] = await db.execute<any[]>(
+    `SELECT g.id, g.name
+     FROM dictionary_groups g
+     JOIN dictionary_group_members m ON m.group_id = g.id
+     WHERE m.username = ?
+     ORDER BY g.name ASC`,
+    [username.toLowerCase()]
+  );
+  return rows.map((row: any) => ({ id: Number(row.id), name: row.name }));
+}
+
 export async function upsertTemplateGroupEntryWithRequest(
   request: NextRequest,
   groupId: number,

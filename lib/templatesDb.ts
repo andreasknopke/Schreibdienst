@@ -150,7 +150,7 @@ export async function addTemplateWithRequest(
   content: string,
   field: 'methodik' | 'befund' | 'beurteilung' = 'befund',
   formatRanges: RichTextFormatRange[] = [],
-  addToGroup: boolean = false,
+  groupIds: boolean | number[] = false,
 ): Promise<{ success: boolean; error?: string; id?: number }> {
   if (!name?.trim() || !content?.trim()) {
     return { success: false, error: 'Name und Inhalt müssen ausgefüllt sein' };
@@ -179,20 +179,20 @@ export async function addTemplateWithRequest(
     
     console.log('[Templates] Added template for', username, ':', nameTrimmed);
 
-    // Optional: auch in alle Gruppen des Users übernehmen
-    if (addToGroup) {
-      const groupIds = await getUserTemplateGroupIds(request, username);
-      for (const groupId of groupIds) {
-        await upsertTemplateGroupEntryWithRequest(
-          request,
-          groupId,
-          nameTrimmed,
-          contentTrimmed,
-          field,
-          formatRanges,
-          username
-        );
-      }
+    // Optional: in bestimmte Gruppen übernehmen
+    const targetGroupIds = Array.isArray(groupIds) ? groupIds
+      : groupIds ? await getUserTemplateGroupIds(request, username)
+      : [];
+    for (const groupId of targetGroupIds) {
+      await upsertTemplateGroupEntryWithRequest(
+        request,
+        groupId,
+        nameTrimmed,
+        contentTrimmed,
+        field,
+        formatRanges,
+        username
+      );
     }
 
     return { success: true, id: result.insertId };

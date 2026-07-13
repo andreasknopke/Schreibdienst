@@ -246,6 +246,7 @@ export async function initDatabase(): Promise<void> {
     { column: 'auto_correct', sql: 'ADD COLUMN auto_correct BOOLEAN DEFAULT TRUE' },
     { column: 'dictionary_set', sql: "ADD COLUMN dictionary_set ENUM('alltag', 'medical') DEFAULT 'medical'" },
     { column: 'default_mode', sql: "ADD COLUMN default_mode ENUM('befund', 'arztbrief') DEFAULT 'befund'" },
+    { column: 'department', sql: "ADD COLUMN department VARCHAR(255) DEFAULT ''" },
   ];
   
   for (const migration of userMigrations) {
@@ -323,6 +324,7 @@ export async function initDatabaseWithRequest(request: NextRequest): Promise<voi
     { column: 'auto_correct', sql: 'ADD COLUMN auto_correct BOOLEAN DEFAULT TRUE' },
     { column: 'dictionary_set', sql: "ADD COLUMN dictionary_set ENUM('alltag', 'medical') DEFAULT 'medical'" },
     { column: 'default_mode', sql: "ADD COLUMN default_mode ENUM('befund', 'arztbrief') DEFAULT 'befund'" },
+    { column: 'department', sql: "ADD COLUMN department VARCHAR(255) DEFAULT ''" },
   ];
   
   for (const migration of userMigrations) {

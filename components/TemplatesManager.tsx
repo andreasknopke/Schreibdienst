@@ -34,12 +34,15 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
   const [contentFormats, setContentFormats] = useState<RichTextFormatRange[]>([]);
   const [field, setField] = useState<'methodik' | 'befund' | 'beurteilung'>('befund');
   const [adding, setAdding] = useState(false);
-  const [addToGroup, setAddToGroup] = useState(false);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(new Set());
+  
+  // User-Gruppen (für Gruppenauswahl)
+  const [userGroups, setUserGroups] = useState<{ id: number; name: string }[]>([]);
   
   // Edit state
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editScope, setEditScope] = useState<'private' | 'group' | null>(null);
-  const [editAddToGroup, setEditAddToGroup] = useState(false);
+  const [editSelectedGroupIds, setEditSelectedGroupIds] = useState<Set<number>>(new Set());
   const [editName, setEditName] = useState('');
   const [editContent, setEditContent] = useState('');
   const [editContentFormats, setEditContentFormats] = useState<RichTextFormatRange[]>([]);
@@ -66,7 +69,25 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
 
   useEffect(() => {
     fetchTemplates();
+    fetchUserGroups();
   }, []);
+
+  const fetchUserGroups = async () => {
+    try {
+      const response = await fetch('/api/templates/my-groups', {
+        headers: {
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        }
+      });
+      const data = await response.json();
+      if (data.success && data.groups) {
+        setUserGroups(data.groups);
+      }
+    } catch {
+      // Gruppen sind optional, kein Fehler nötig
+    }
+  };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,7 +108,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
           content,
           field,
           formatRanges: normalizeRichTextRanges(contentFormats, content.length),
-          addToGroup,
+          groupIds: selectedGroupIds.size > 0 ? Array.from(selectedGroupIds) : false,
         })
       });
 
@@ -109,6 +130,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
         setContent('');
         setContentFormats([]);
         setField('befund');
+        setSelectedGroupIds(new Set());
         await fetchTemplates();
         // Event senden um andere Komponenten zu aktualisieren
         window.dispatchEvent(new CustomEvent('templates-changed'));
@@ -124,7 +146,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
   const handleEdit = (template: Template) => {
     setEditingId(template.id);
     setEditScope(template.scope || null);
-    setEditAddToGroup(false);
+    setEditSelectedGroupIds(new Set());
     setEditName(template.name);
     setEditContent(template.content);
     setEditContentFormats(template.formatRanges ?? []);
@@ -134,7 +156,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
   const handleCancelEdit = () => {
     setEditingId(null);
     setEditScope(null);
-    setEditAddToGroup(false);
+    setEditSelectedGroupIds(new Set());
     setEditName('');
     setEditContent('');
     setEditContentFormats([]);
@@ -168,7 +190,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
           content: editContent,
           field: editField,
           scope: editScope,
-          addToGroup: editAddToGroup,
+          groupIds: editSelectedGroupIds.size > 0 ? Array.from(editSelectedGroupIds) : false,
           formatRanges: normalizeRichTextRanges(editContentFormats, editContent.length),
         })
       });
@@ -181,6 +203,20 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
       }
 
       if (data.success) {
+        // Wenn ein privater Baustein als Gruppenbaustein übernommen wurde,
+        // den privaten Baustein löschen, damit er nicht doppelt angezeigt wird.
+        if (editSelectedGroupIds.size > 0 && editScope !== 'group') {
+          await fetch('/api/templates', {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': getAuthHeader(),
+              ...getDbTokenHeader()
+            },
+            body: JSON.stringify({ id: editingId })
+          });
+        }
+
         setSuccess('Textbaustein aktualisiert');
         handleCancelEdit();
         await fetchTemplates();
@@ -277,15 +313,41 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
             className="w-full px-3 py-2 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 bg-white h-full min-h-0"
             disabled={adding}
           />
-          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer flex-shrink-0">
-            <input
-              type="checkbox"
-              checked={addToGroup}
-              onChange={(e) => setAddToGroup(e.target.checked)}
-              className="rounded border-gray-300 dark:border-gray-600"
-            />
-            <span>ins Abteilungs-Bausteinpool übernehmen</span>
-          </label>
+          {userGroups.length > 0 && (
+            <div className="flex flex-col gap-1.5 flex-shrink-0">
+              <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">In Abteilungs-Bausteinpool übernehmen:</span>
+              <div className="flex flex-wrap gap-2">
+                {userGroups.map((g) => {
+                  const checked = selectedGroupIds.has(g.id);
+                  return (
+                    <label
+                      key={g.id}
+                      className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer transition-colors ${
+                        checked
+                          ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          const next = new Set(selectedGroupIds);
+                          if (next.has(g.id)) next.delete(g.id); else next.add(g.id);
+                          setSelectedGroupIds(next);
+                        }}
+                        className="sr-only"
+                      />
+                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="flex-shrink-0">
+                        <path d="M20 6 9 17l-5-5"/>
+                      </svg>
+                      <span>{g.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <button
             type="submit"
             disabled={adding || !name.trim() || !content.trim()}
@@ -354,17 +416,41 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
                       <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                       <span>Abteilungs-Baustein – Änderung gilt für alle Gruppenmitglieder</span>
                     </div>
-                  ) : (
-                    <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer flex-shrink-0">
-                      <input
-                        type="checkbox"
-                        checked={editAddToGroup}
-                        onChange={(e) => setEditAddToGroup(e.target.checked)}
-                        className="rounded border-gray-300 dark:border-gray-600"
-                      />
-                      <span>ins Abteilungs-Bausteinpool übernehmen</span>
-                    </label>
-                  )}
+                  ) : userGroups.length > 0 ? (
+                    <div className="flex flex-col gap-1.5 flex-shrink-0">
+                      <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">In Abteilungs-Bausteinpool übernehmen:</span>
+                      <div className="flex flex-wrap gap-2">
+                        {userGroups.map((g) => {
+                          const checked = editSelectedGroupIds.has(g.id);
+                          return (
+                            <label
+                              key={g.id}
+                              className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer transition-colors ${
+                                checked
+                                  ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
+                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  const next = new Set(editSelectedGroupIds);
+                                  if (next.has(g.id)) next.delete(g.id); else next.add(g.id);
+                                  setEditSelectedGroupIds(next);
+                                }}
+                                className="sr-only"
+                              />
+                              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="flex-shrink-0">
+                                <path d="M20 6 9 17l-5-5"/>
+                              </svg>
+                              <span>{g.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
                   <div id="tm-edit-actions" className="flex gap-2 flex-shrink-0">
                     <button
                       onClick={handleSaveEdit}
@@ -399,7 +485,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
                       </span>
                       {template.scope === 'group' && (
                         <span className="text-xs px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded" title={template.groupName ? `Gruppe: ${template.groupName}` : 'Abteilungs-Baustein'}>
-                          Gruppe
+                          {template.groupName || 'Gruppe'}
                         </span>
                       )}
                     </div>

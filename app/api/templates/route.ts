@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, content, field, formatRanges, username: targetUsername, addToGroup } = body;
+    const { name, content, field, formatRanges, username: targetUsername, groupIds } = body;
     
     if (!name || !content) {
       return NextResponse.json({ success: false, error: 'Name und Inhalt müssen ausgefüllt sein' }, { status: 400 });
@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
     // Secretariat users can add to other users' templates
     const username = (auth.canViewAllDictations && targetUsername) ? targetUsername : auth.username;
     
-    const result = await addTemplateWithRequest(request, username, name, content, field || 'befund', formatRanges || [], Boolean(addToGroup));
+    const result = await addTemplateWithRequest(request, username, name, content, field || 'befund', formatRanges || [], groupIds ?? false);
     
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Textbaustein hinzugefügt', id: result.id });
@@ -124,7 +124,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { id, name, content, field, formatRanges, username: targetUsername, scope, addToGroup } = body;
+    const { id, name, content, field, formatRanges, username: targetUsername, scope, groupIds } = body;
     
     if (!id || !name || !content) {
       return NextResponse.json({ success: false, error: 'ID, Name und Inhalt erforderlich' }, { status: 400 });
@@ -154,14 +154,14 @@ export async function PUT(request: NextRequest) {
     const result = await updateTemplateWithRequest(request, username, id, name, content, field || 'befund', formatRanges || []);
     
     if (result.success) {
-      // Optional: auch in alle Gruppen des Users übernehmen
-      if (addToGroup) {
-        const groupIds = await getUserTemplateGroupIds(request, username);
-        for (const groupId of groupIds) {
-          await upsertTemplateGroupEntryWithRequest(
-            request, groupId, name, content, field || 'befund', formatRanges || [], username
-          );
-        }
+      // Optional: in bestimmte Gruppen übernehmen
+      const targetGroupIds = Array.isArray(groupIds) ? groupIds
+        : groupIds ? await getUserTemplateGroupIds(request, username)
+        : [];
+      for (const groupId of targetGroupIds) {
+        await upsertTemplateGroupEntryWithRequest(
+          request, groupId, name, content, field || 'befund', formatRanges || [], username
+        );
       }
       return NextResponse.json({ success: true, message: 'Textbaustein aktualisiert' });
     }

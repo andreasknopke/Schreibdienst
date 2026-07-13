@@ -271,15 +271,31 @@ function isPhilipsSpeechMikeRecordReport(reportId: number, bytes: number[]): boo
 
 function isNordicDictationRecordReport(reportId: number, bytes: number[]): boolean {
   // Consumer Control report 0x02: 16-bit little-endian usage value
-  // Record-Taste gedrückt = Usage 0x00CF (Bytes [0xCF, 0x00])
+  // Record-Taste gedrueckt = Usage 0x00CF
+  //
+  // WICHTIG: Auf Windows enthaelt event.data KEIN Report-ID-Byte!
+  // Chrome/Win liefert nur die Payload: [0xCF, 0x00] (2 Bytes)
+  // Chrome/Linux/Mac KANN das Report-ID-Byte enthalten: [0x02, 0xCF, 0x00] (3 Bytes)
+  // Wir pruefen beide Varianten.
   if (reportId !== NORDIC_DICTATION_RECORD_REPORT_ID) {
     return false;
   }
 
-  // bytes[0] = reportId (0x02), bytes[1..2] = 16-bit LE value
-  if (bytes.length < 3) return false;
-  const usage = bytes[1] | (bytes[2] << 8);
-  return usage === NORDIC_DICTATION_RECORD_USAGE;
+  if (bytes.length === 0) return false;
+
+  // Fall 1: Report-ID ist im ersten Byte enthalten (Linux/Mac, manchmal Win)
+  if (bytes[0] === 0x02 && bytes.length >= 3) {
+    const usage = bytes[1] | (bytes[2] << 8);
+    if (usage === NORDIC_DICTATION_RECORD_USAGE) return true;
+  }
+
+  // Fall 2: Reine Payload ohne Report-ID (Windows, haeufigster Fall)
+  if (bytes.length >= 2) {
+    const usage = bytes[0] | (bytes[1] << 8);
+    if (usage === NORDIC_DICTATION_RECORD_USAGE) return true;
+  }
+
+  return false;
 }
 
 const SUPPORTED_WEBHID_DEVICES: SupportedWebHidDeviceDefinition[] = [
@@ -368,6 +384,8 @@ async function connectWebHidDevice(
 
   if (!device.opened) {
     await device.open();
+    console.info('[HID] Device geöffnet: %s (VID=0x%04X PID=0x%04X)',
+      device.productName, device.vendorId, device.productId);
   }
 
   const state: ConnectedWebHidDevice = {
@@ -377,7 +395,15 @@ async function connectWebHidDevice(
 
   const handleInputReport = (event: Event) => {
     const inputEvent = event as WebHidInputReportEvent;
-    const recordPressed = deviceDefinition.matchesRecordReport(inputEvent.reportId, inputReportBytes(inputEvent.data));
+    const rawBytes = inputReportBytes(inputEvent.data);
+    console.debug(
+      '[HID] inputreport: device=%s reportId=0x%02X bytes=[%s] (%d bytes)',
+      inputEvent.device.productName,
+      inputEvent.reportId,
+      rawBytes.map(b => b.toString(16).padStart(2, '0')).join(' '),
+      rawBytes.length,
+    );
+    const recordPressed = deviceDefinition.matchesRecordReport(inputEvent.reportId, rawBytes);
 
     if (recordPressed && !state.recordPressed) {
       state.recordPressed = true;

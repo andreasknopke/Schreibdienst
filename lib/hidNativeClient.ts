@@ -30,7 +30,7 @@ export interface NativeHidDeviceStatus {
 
 const WS_URL = 'ws://localhost:58765';
 const WS_CONNECT_TIMEOUT_MS = 2000;
-const HID_CONFIRM_TIMEOUT_MS = 2000;
+const HID_CONFIRM_TIMEOUT_MS = 5000;
 const WS_PING_INTERVAL_MS = 30000;
 
 type HidEventCallback = (event: NativeHidEvent) => void;
@@ -160,6 +160,16 @@ function getSharedWs(): Promise<WebSocket> {
           if (data.type === 'hid-diagnostic') {
             console.info('[HID-Diag]', data.message);
           }
+          // hid-listener-ready oder hid-status lösen sofort die Bestätigung aus,
+          // noch bevor der confirmHandler läuft – das verhindert das
+          // Timeout-Rennen bei langsamer Injector-Enumeration.
+          if (data.type === 'hid-listener-ready' || data.type === 'hid-status') {
+            if (confirmTimeoutLocal !== null) {
+              clearTimeout(confirmTimeoutLocal);
+              confirmTimeoutLocal = null;
+            }
+            confirmPayloadLocal = data;
+          }
         } catch {
           // ignore
         }
@@ -169,35 +179,40 @@ function getSharedWs(): Promise<WebSocket> {
       // HID beim Native Host aktivieren und auf Bestätigung warten.
       // Alter Injector (v0.1.12) hat noch kein HID-Support und antwortet
       // nicht auf start-hid → Timeout → Fallback auf WebHID.
-      let confirmTimeout: ReturnType<typeof setTimeout> | null = null;
+      let confirmTimeoutLocal: ReturnType<typeof setTimeout> | null = null;
+      let confirmPayloadLocal: any = null;
       let confirmed = false;
+
+      const doConfirm = (data: any) => {
+        confirmed = true;
+        ws.removeEventListener('message', earlyHandler);
+        ws.removeEventListener('message', confirmHandler);
+        setupMessageHandler(ws);
+        g_ws = ws;
+        g_wsReady = null;
+        g_hidConfirmed = true;
+        updateDeviceStatus({
+          supported: true,
+          connected: data.connected === true,
+          deviceName: data.deviceName,
+        });
+        startPing(ws);
+        resolve(ws);
+        console.info('[HID-Native] HID-Unterstützung bestätigt (neuer Injector)');
+      };
 
       const confirmHandler = (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
-          // Auch waehrend des Handshakes hid-diagnostic durchlassen
           if (data.type === 'hid-diagnostic') {
             console.info('[HID-Diag]', data.message);
             return;
           }
-          if (data.type === 'hid-status') {
-            confirmed = true;
-            if (confirmTimeout !== null) clearTimeout(confirmTimeout);
-            // Early-Handler entfernen, dafuer SetupMessageHandler installieren
-            ws.removeEventListener('message', earlyHandler);
-            ws.removeEventListener('message', confirmHandler);
-            setupMessageHandler(ws);
-            g_ws = ws;
-            g_wsReady = null;
-            g_hidConfirmed = true;
-            updateDeviceStatus({
-              supported: true,
-              connected: data.connected === true,
-              deviceName: data.deviceName,
-            });
-            startPing(ws);
-            resolve(ws);
-            console.info('[HID-Native] HID-Unterstützung bestätigt (neuer Injector)');
+          // hid-listener-ready (neuer Injector) oder hid-status (bisheriger
+          // Bestätigungsweg) – beides ist ein gültiger Handshake.
+          if (data.type === 'hid-listener-ready' || data.type === 'hid-status') {
+            if (confirmTimeoutLocal !== null) clearTimeout(confirmTimeoutLocal);
+            doConfirm(data);
           }
         } catch {
           // Not JSON — ignore during handshake
@@ -206,9 +221,15 @@ function getSharedWs(): Promise<WebSocket> {
 
       ws.addEventListener('message', confirmHandler);
 
-      confirmTimeout = setTimeout(() => {
+      confirmTimeoutLocal = setTimeout(() => {
         if (confirmed) return;
+        // Prüfen, ob earlyHandler bereits eine Bestätigung empfangen hat
+        if (confirmPayloadLocal) {
+          doConfirm(confirmPayloadLocal);
+          return;
+        }
         ws.removeEventListener('message', confirmHandler);
+        ws.removeEventListener('message', earlyHandler);
         console.warn('[HID-Native] Keine HID-Bestätigung – alter Injector erkannt, Fallback auf WebHID');
         try { ws.close(); } catch {}
         g_ws = null;

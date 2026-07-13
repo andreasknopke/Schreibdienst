@@ -50,6 +50,11 @@ const PHILIPS_SPEECHMIKE_VENDOR_ID = 0x0911;
 const PHILIPS_SPEECHMIKE_III_PRODUCT_ID = 0x0c1c;
 const PHILIPS_SPEECHMIKE_III_RECORD_REPORT_ID = 0x00;
 
+const NORDIC_DICTATION_VENDOR_ID = 0x1915;
+const NORDIC_DICTATION_PRODUCT_ID = 0x1025;
+const NORDIC_DICTATION_RECORD_REPORT_ID = 0x02;
+const NORDIC_DICTATION_RECORD_USAGE = 0x00CF;
+
 const HID_USAGE_BY_ACTION: Record<HidMediaControlAction, string> = {
   play: '0xB0',
   pause: '0xB1',
@@ -103,7 +108,7 @@ interface WebHidConnectionEvent extends Event {
 
 interface WebHidApi extends EventTarget {
   getDevices: () => Promise<WebHidDevice[]>;
-  requestDevice: (options: { filters: Array<{ vendorId: number; productId?: number }> }) => Promise<WebHidDevice[]>;
+  requestDevice: (options: { filters: Array<{ vendorId?: number; productId?: number; usagePage?: number; usage?: number }> }) => Promise<WebHidDevice[]>;
 }
 
 interface ConnectedWebHidDevice {
@@ -116,6 +121,9 @@ interface SupportedWebHidDeviceDefinition {
   productId: number;
   hidUsage: string;
   matchesRecordReport: (reportId: number, bytes: number[]) => boolean;
+  /** Alternative Filter-Methode: usagePage (z.B. 0x000C für Consumer Control),
+   *  falls das Gerät von Windows als Maus/Tastatur blockiert wird. */
+  usagePage?: number;
 }
 
 const connectedWebHidDevices = new Map<WebHidDevice, ConnectedWebHidDevice>();
@@ -169,8 +177,12 @@ function isPhilipsSpeechMikeIII(device: WebHidDevice): boolean {
   return device.vendorId === PHILIPS_SPEECHMIKE_VENDOR_ID && device.productId === PHILIPS_SPEECHMIKE_III_PRODUCT_ID;
 }
 
+function isNordicDictationDevice(device: WebHidDevice): boolean {
+  return device.vendorId === NORDIC_DICTATION_VENDOR_ID && device.productId === NORDIC_DICTATION_PRODUCT_ID;
+}
+
 function isSupportedWebHidDevice(device: WebHidDevice): boolean {
-  return isGrundigSonicMic(device) || isPhilipsSpeechMikeIII(device);
+  return isGrundigSonicMic(device) || isPhilipsSpeechMikeIII(device) || isNordicDictationDevice(device);
 }
 
 function inputReportBytes(data: DataView): number[] {
@@ -257,6 +269,19 @@ function isPhilipsSpeechMikeRecordReport(reportId: number, bytes: number[]): boo
   return false;
 }
 
+function isNordicDictationRecordReport(reportId: number, bytes: number[]): boolean {
+  // Consumer Control report 0x02: 16-bit little-endian usage value
+  // Record-Taste gedrückt = Usage 0x00CF (Bytes [0xCF, 0x00])
+  if (reportId !== NORDIC_DICTATION_RECORD_REPORT_ID) {
+    return false;
+  }
+
+  // bytes[0] = reportId (0x02), bytes[1..2] = 16-bit LE value
+  if (bytes.length < 3) return false;
+  const usage = bytes[1] | (bytes[2] << 8);
+  return usage === NORDIC_DICTATION_RECORD_USAGE;
+}
+
 const SUPPORTED_WEBHID_DEVICES: SupportedWebHidDeviceDefinition[] = [
   {
     vendorId: GRUNDIG_SONICMIC_VENDOR_ID,
@@ -269,6 +294,13 @@ const SUPPORTED_WEBHID_DEVICES: SupportedWebHidDeviceDefinition[] = [
     productId: PHILIPS_SPEECHMIKE_III_PRODUCT_ID,
     hidUsage: '0xFFA1:0x0003/0x0004',
     matchesRecordReport: isPhilipsSpeechMikeRecordReport,
+  },
+  {
+    vendorId: NORDIC_DICTATION_VENDOR_ID,
+    productId: NORDIC_DICTATION_PRODUCT_ID,
+    hidUsage: '0x000C:0x0001/0x02',
+    matchesRecordReport: isNordicDictationRecordReport,
+    usagePage: 0x000C, // Consumer Control – umgeht Windows-Maus-Blockierung
   },
 ];
 
@@ -444,14 +476,35 @@ export async function connectDictationMicrophone(options: HidMediaControlsOption
   }
 
   const target = options.target ?? window;
-  const selectedDevices = await hid.requestDevice({
-    filters: SUPPORTED_WEBHID_DEVICES.map((definition) => ({
-      vendorId: definition.vendorId,
-      productId: definition.productId,
-    })),
-  });
+
+  // Baue Filter: vendorId+productId (Standard) UND vendorId+usagePage (Fallback
+  // für Geräte, die von Windows als Maus/Tastatur blockiert werden).
+  // Beide Filter-Typen für jedes Gerät, damit Chrome über beide Collections
+  // matchen kann.
+  const filters: Array<{ vendorId?: number; productId?: number; usagePage?: number }> = [];
+  for (const def of SUPPORTED_WEBHID_DEVICES) {
+    // Primär-Filter: vendorId + productId
+    filters.push({ vendorId: def.vendorId, productId: def.productId });
+    // Fallback-Filter: vendorId + usagePage (umgeht Windows-Maus-Blockierung)
+    if (def.usagePage !== undefined) {
+      filters.push({ vendorId: def.vendorId, usagePage: def.usagePage });
+    }
+  }
+
+  console.info('[HID] requestDevice mit %d Filtern: %o', filters.length, filters);
+  const selectedDevices = await hid.requestDevice({ filters });
+  console.info('[HID] requestDevice zurück: %d Gerät(e)', selectedDevices.length);
+
+  if (selectedDevices.length === 0) {
+    console.warn('[HID] Kein Gerät ausgewählt. Mögliche Ursachen:');
+    console.warn('[HID]  - Gerät wird von Windows als Maus/Tastatur blockiert → Native Host nutzen');
+    console.warn('[HID]  - chrome://device-log prüfen');
+  }
+
   const grantedDevices = await hid.getDevices();
   const devices = grantedDevices.filter(isSupportedWebHidDevice);
+  console.info('[HID] Bereits genehmigte Geräte: %d, davon unterstützt: %d',
+    grantedDevices.length, devices.length);
 
   await Promise.all(devices.map((device) => connectWebHidDevice(device, target, options.onEvent)));
   dispatchStatusEvent(target);

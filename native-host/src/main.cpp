@@ -219,6 +219,8 @@ constexpr uint16_t GRUNDIG_SONICMIC_VENDOR_ID = 0x15D8;
 constexpr uint16_t GRUNDIG_SONICMIC_PRODUCT_ID = 0x0025;
 constexpr uint16_t PHILIPS_SPEECHMIKE_VENDOR_ID = 0x0911;
 constexpr uint16_t PHILIPS_SPEECHMIKE_III_PRODUCT_ID = 0x0C1C;
+constexpr uint16_t NORDIC_DICTATION_VENDOR_ID = 0x1915;
+constexpr uint16_t NORDIC_DICTATION_PRODUCT_ID = 0x1025;
 
 // HID-Diagnose-Logging: Wird als hid-diagnostic per WebSocket an den Browser
 // gesendet, damit Fehler in der Browser-Konsole sichtbar sind.
@@ -316,7 +318,8 @@ void enumerateAllRawInputDevices() {
                          i, list[i].hDevice, name.c_str());
         } else if (info.dwType == RIM_TYPEHID) {
             const bool supported = (info.hid.dwVendorId == 0x15D8 && info.hid.dwProductId == 0x0025) ||
-                                   (info.hid.dwVendorId == 0x0911 && info.hid.dwProductId == 0x0C1C);
+                                   (info.hid.dwVendorId == 0x0911 && info.hid.dwProductId == 0x0C1C) ||
+                                   (info.hid.dwVendorId == 0x1915 && info.hid.dwProductId == 0x1025);
             hidDiagnostic("  [%u] HID VID=0x%04X PID=0x%04X UsagePage=0x%04X Usage=0x%04X %s name=\"%ls\"",
                          i,
                          info.hid.dwVendorId,
@@ -920,8 +923,32 @@ bool isPhilipsSpeechMikeDevice(uint16_t vendorId, uint16_t productId) {
     return vendorId == PHILIPS_SPEECHMIKE_VENDOR_ID && productId == PHILIPS_SPEECHMIKE_III_PRODUCT_ID;
 }
 
+bool isNordicDictationDevice(uint16_t vendorId, uint16_t productId) {
+    return vendorId == NORDIC_DICTATION_VENDOR_ID && productId == NORDIC_DICTATION_PRODUCT_ID;
+}
+
 bool isSupportedHidDevice(uint16_t vendorId, uint16_t productId) {
-    return isGrundigDevice(vendorId, productId) || isPhilipsSpeechMikeDevice(vendorId, productId);
+    return isGrundigDevice(vendorId, productId) || isPhilipsSpeechMikeDevice(vendorId, productId) || isNordicDictationDevice(vendorId, productId);
+}
+
+bool isNordicDictationRecordPayload(const uint8_t* data, size_t size) {
+    // Consumer Control report: 16-bit little-endian usage value
+    // Record-Taste gedrueckt = Usage 0x00CF (Bytes [0xCF, 0x00])
+    // Der Report kann mit oder ohne Report-ID-Byte (0x02) kommen.
+
+    // Ohne Report-ID (2 Bytes minimum)
+    if (size >= 2) {
+        uint16_t usage = data[0] | (static_cast<uint16_t>(data[1]) << 8);
+        if (usage == 0x00CF) return true;
+    }
+
+    // Mit Report-ID (3 Bytes minimum, Report-ID = 0x02)
+    if (size >= 3 && data[0] == 0x02) {
+        uint16_t usage = data[1] | (static_cast<uint16_t>(data[2]) << 8);
+        if (usage == 0x00CF) return true;
+    }
+
+    return false;
 }
 
 bool detectRecordPress(uint16_t vendorId, uint16_t productId, const uint8_t* data, size_t size) {
@@ -930,6 +957,9 @@ bool detectRecordPress(uint16_t vendorId, uint16_t productId, const uint8_t* dat
     }
     if (isPhilipsSpeechMikeDevice(vendorId, productId)) {
         return isPhilipsSpeechMikeRecordPayload(data, size);
+    }
+    if (isNordicDictationDevice(vendorId, productId)) {
+        return isNordicDictationRecordPayload(data, size);
     }
     return false;
 }
@@ -1806,7 +1836,9 @@ void handleRawInputRecordPress(HRAWINPUT hRawInput) {
     if (deviceName.empty()) {
         deviceName = isGrundigDevice(vendorId, productId)
             ? L"Grundig SonicMic"
-            : L"Philips SpeechMike III";
+            : isPhilipsSpeechMikeDevice(vendorId, productId)
+                ? L"Philips SpeechMike III"
+                : L"USB Diktiermikrofon (Nordic)";
     }
 
     // Report-Daten prüfen
@@ -1828,18 +1860,27 @@ void handleRawInputRecordPress(HRAWINPUT hRawInput) {
         // Wenn eines der Bytes 0xB2 ist, ist Record gedrueckt.
         // Bei 0x0000 ist losgelassen.
         hidDiagnostic("handleRawInput: Consumer-Control-Report (0x000C:0x0001)");
-        bool anyNonZero = false;
-        for (DWORD i = 0; i < reportSize; ++i) {
-            if (reportData[i] == 0xB2) {
-                recordPressed = true;
-                hidDiagnostic("handleRawInput: Consumer Record (0xB2) detected");
-                break;
+
+        // Nordic-Diktiermikrofon: sendet 16-bit Usage 0x00CF statt 0xB2
+        if (isNordicDictationDevice(vendorId, productId)) {
+            recordPressed = isNordicDictationRecordPayload(reportData, reportSize);
+            if (recordPressed) {
+                hidDiagnostic("handleRawInput: Nordic Record (0x00CF) detected");
             }
-            if (reportData[i] != 0x00) anyNonZero = true;
-        }
-        // Wenn unerwartete Bytes kommen, logge sie zur Diagnose
-        if (anyNonZero && !recordPressed) {
-            hidDiagnostic("handleRawInput: Unbekannter Consumer-Control-Code (nicht Record)");
+        } else {
+            bool anyNonZero = false;
+            for (DWORD i = 0; i < reportSize; ++i) {
+                if (reportData[i] == 0xB2) {
+                    recordPressed = true;
+                    hidDiagnostic("handleRawInput: Consumer Record (0xB2) detected");
+                    break;
+                }
+                if (reportData[i] != 0x00) anyNonZero = true;
+            }
+            // Wenn unerwartete Bytes kommen, logge sie zur Diagnose
+            if (anyNonZero && !recordPressed) {
+                hidDiagnostic("handleRawInput: Unbekannter Consumer-Control-Code (nicht Record)");
+            }
         }
     } else {
         // Vendor-definierte Seiten (0xFF00 Grundig, 0xFFA0 Philips):

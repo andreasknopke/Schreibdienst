@@ -9,6 +9,7 @@ interface MultiBlockEditorProps {
   blocks: EditorBlock[];
   activeBlockId: string | null;
   editorRef: RefObject<HTMLDivElement | null>;
+  value: string;
   /** Global field-level format ranges (used for the active block). */
   fieldFormats: RichTextFormatRange[];
   selection: RichTextSelection | null;
@@ -39,6 +40,7 @@ export default function MultiBlockEditor({
   blocks,
   activeBlockId,
   editorRef,
+  value,
   fieldFormats,
   selection,
   className,
@@ -67,7 +69,7 @@ export default function MultiBlockEditor({
       <div className="relative">
         <RichTextDictationEditor
           editorRef={editorRef}
-          value={blocks[0]?.currentText ?? ''}
+          value={value}
           formats={fieldFormats}
           selection={selection}
           className={className}

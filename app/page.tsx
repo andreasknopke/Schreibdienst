@@ -6570,6 +6570,7 @@ export default function HomePage() {
                     blocks={editorBlocksByField.methodik}
                     activeBlockId={activeBlockId}
                     editorRef={methodikTextareaRef}
+                    value={methodik}
                     fieldFormats={getFieldRichTextFormats('methodik')}
                     selection={textSelectionsRef.current.methodik ?? null}
                     className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
@@ -6697,6 +6698,7 @@ export default function HomePage() {
                     blocks={editorBlocksByField.befund}
                     activeBlockId={activeBlockId}
                     editorRef={befundTextareaRef}
+                    value={transcript}
                     fieldFormats={getFieldRichTextFormats('befund')}
                     selection={textSelectionsRef.current.befund ?? null}
                     className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
@@ -6839,6 +6841,7 @@ export default function HomePage() {
                     blocks={editorBlocksByField.beurteilung}
                     activeBlockId={activeBlockId}
                     editorRef={beurteilungTextareaRef}
+                    value={beurteilung}
                     fieldFormats={getFieldRichTextFormats('beurteilung')}
                     selection={textSelectionsRef.current.beurteilung ?? null}
                     className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
@@ -6988,6 +6991,7 @@ export default function HomePage() {
                   blocks={editorBlocksByField.befund}
                   activeBlockId={activeBlockId}
                   editorRef={transcriptTextareaRef}
+                  value={transcript}
                   fieldFormats={getFieldRichTextFormats('befund')}
                   selection={textSelectionsRef.current.transcript ?? null}
                   className={`textarea font-mono text-sm min-h-40 w-full ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}

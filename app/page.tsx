@@ -1823,7 +1823,7 @@ export default function HomePage() {
   ) => {
     const stateKey = getRichTextStateKey(field);
 
-    if (incomingDelta && incomingDelta.trim()) {
+    if (incomingDelta && (incomingDelta.trim() || incomingDelta.includes('\n'))) {
       queueLiveInject(incomingDelta);
     }
 
@@ -1842,7 +1842,7 @@ export default function HomePage() {
     setFieldText(field, (currentText) => {
       // Neu transkribierter Text wird an der aktuellen Cursor-Position eingefuegt,
       // nie per Vollersetzung des Feldinhalts.
-      if (incomingDelta && incomingDelta.trim()) {
+      if (incomingDelta && (incomingDelta.trim() || incomingDelta.includes('\n'))) {
         return combineTextForField(field, currentText, incomingDelta);
       }
 

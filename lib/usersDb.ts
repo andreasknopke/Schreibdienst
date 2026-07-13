@@ -11,6 +11,7 @@ export interface User {
   auto_correct: boolean;
   dictionary_set?: 'alltag' | 'medical';
   default_mode: 'befund' | 'arztbrief';
+  department?: string;
   created_at: Date;
   created_by: string;
 }
@@ -463,11 +464,11 @@ export async function updateUserSettingsWithRequest(
 }
 
 // List users with Request context
-export async function listUsersWithRequest(request: NextRequest): Promise<{ username: string; isAdmin: boolean; canViewAllDictations: boolean; defaultMode: 'befund' | 'arztbrief'; createdAt: string; createdBy: string }[]> {
+export async function listUsersWithRequest(request: NextRequest): Promise<{ username: string; isAdmin: boolean; canViewAllDictations: boolean; defaultMode: 'befund' | 'arztbrief'; department: string; createdAt: string; createdBy: string }[]> {
   try {
     const db = await getPoolForRequest(request);
     const [rows] = await db.execute<any[]>(
-      'SELECT username, is_admin, can_view_all_dictations, default_mode, created_at, created_by FROM users ORDER BY created_at DESC'
+      'SELECT username, is_admin, can_view_all_dictations, default_mode, department, created_at, created_by FROM users ORDER BY created_at DESC'
     );
     
     return (rows as User[]).map(u => ({
@@ -475,6 +476,7 @@ export async function listUsersWithRequest(request: NextRequest): Promise<{ user
       isAdmin: u.is_admin,
       canViewAllDictations: u.can_view_all_dictations || u.is_admin,
       defaultMode: u.default_mode || 'befund',
+      department: u.department || '',
       createdAt: u.created_at?.toISOString() || new Date().toISOString(),
       createdBy: u.created_by || 'system'
     }));
@@ -491,7 +493,8 @@ export async function createUserWithRequest(
   password: string, 
   isAdmin: boolean, 
   createdBy: string, 
-  canViewAllDictations: boolean = false
+  canViewAllDictations: boolean = false,
+  department: string = ''
 ): Promise<{ success: boolean; error?: string }> {
   if (!username || !password) {
     return { success: false, error: 'Benutzername und Passwort erforderlich' };
@@ -520,8 +523,8 @@ export async function createUserWithRequest(
     
     // Create user
     await db.execute(
-      'INSERT INTO users (username, password_hash, is_admin, can_view_all_dictations, created_by) VALUES (?, ?, ?, ?, ?)',
-      [username, hashPassword(password), isAdmin, canViewAllDictations || isAdmin, createdBy]
+      'INSERT INTO users (username, password_hash, is_admin, can_view_all_dictations, created_by, department) VALUES (?, ?, ?, ?, ?, ?)',
+      [username, hashPassword(password), isAdmin, canViewAllDictations || isAdmin, createdBy, department]
     );
     
     console.log('[Users] Created user (with request):', username);
@@ -675,7 +678,7 @@ export async function renameUserWithRequest(
 export async function updateUserPermissionsWithRequest(
   request: NextRequest,
   username: string, 
-  permissions: { isAdmin?: boolean; canViewAllDictations?: boolean; defaultMode?: 'befund' | 'arztbrief' }
+  permissions: { isAdmin?: boolean; canViewAllDictations?: boolean; defaultMode?: 'befund' | 'arztbrief'; department?: string }
 ): Promise<{ success: boolean; error?: string }> {
   if (username.toLowerCase() === 'root') {
     return { success: false, error: 'Root-Benutzer kann nicht geändert werden' };
@@ -696,6 +699,10 @@ export async function updateUserPermissionsWithRequest(
     if (permissions.defaultMode !== undefined) {
       updates.push('default_mode = ?');
       params.push(permissions.defaultMode);
+    }
+    if (permissions.department !== undefined) {
+      updates.push('department = ?');
+      params.push(permissions.department);
     }
     
     if (updates.length === 0) {

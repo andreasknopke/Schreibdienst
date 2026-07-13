@@ -174,6 +174,23 @@ export default function StatsPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [period, setPeriod] = useState<PeriodKey>('today');
   const [selectedMonth, setSelectedMonth] = useState<string>(() => currentMonthKey());
+  const [showDepartments, setShowDepartments] = useState(false);
+  const [deptStats, setDeptStats] = useState<any[] | null>(null);
+  const [deptLoading, setDeptLoading] = useState(false);
+
+  const fetchDeptStats = async () => {
+    setDeptLoading(true);
+    try {
+      const res = await fetchWithDbToken('/api/stats/department', { cache: 'no-store' });
+      if (!res.ok) throw new Error('Abteilungsstatistiken konnten nicht geladen werden');
+      const data = await res.json();
+      setDeptStats(data.departments || []);
+    } catch (err: any) {
+      setError(err.message || 'Unbekannter Fehler');
+    } finally {
+      setDeptLoading(false);
+    }
+  };
 
   const fetchStats = async (monthKey: string) => {
     setLoading(true);
@@ -240,12 +257,19 @@ export default function StatsPage() {
         {PERIOD_OPTIONS.map((option) => (
           <button
             key={option.key}
-            onClick={() => setPeriod(option.key)}
-            className={`rounded-full px-4 py-2 text-sm font-medium transition ${period === option.key ? 'bg-blue-600 text-white shadow' : 'bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50 dark:bg-zinc-900 dark:text-gray-300 dark:ring-zinc-800'}`}
+            onClick={() => { setPeriod(option.key); setShowDepartments(false); }}
+            className={`rounded-full px-4 py-2 text-sm font-medium transition ${period === option.key && !showDepartments ? 'bg-blue-600 text-white shadow' : 'bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50 dark:bg-zinc-900 dark:text-gray-300 dark:ring-zinc-800'}`}
           >
             {option.label}
           </button>
         ))}
+
+        <button
+          onClick={() => { setShowDepartments(true); if (!deptStats) fetchDeptStats(); }}
+          className={`rounded-full px-4 py-2 text-sm font-medium transition ${showDepartments ? 'bg-emerald-600 text-white shadow' : 'bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50 dark:bg-zinc-900 dark:text-gray-300 dark:ring-zinc-800'}`}
+        >
+          Abteilungen
+        </button>
 
         {period === 'month' && (
           <div className="ml-auto inline-flex items-center gap-2 rounded-full bg-white px-2 py-1 text-sm text-gray-700 ring-1 ring-gray-200 shadow-sm dark:bg-zinc-900 dark:text-gray-200 dark:ring-zinc-800">
@@ -290,7 +314,54 @@ export default function StatsPage() {
         )}
       </div>
 
-      {activePeriod ? (
+      {showDepartments ? (
+        <div className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="border-b border-gray-100 p-4 dark:border-zinc-800">
+            <h2 className="font-semibold text-gray-900 dark:text-white">Abteilungsstatistik</h2>
+            <p className="text-xs text-gray-500 mt-1">Nutzer, Diktierzeit und Inhalte pro Abteilung (Gesamt)</p>
+          </div>
+          {deptLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Spinner className="h-6 w-6 text-blue-500" />
+            </div>
+          ) : deptStats && deptStats.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-zinc-800/70">
+                  <tr>
+                    <th className="px-4 py-3">Abteilung</th>
+                    <th className="px-4 py-3 text-right">Nutzer</th>
+                    <th className="px-4 py-3 text-right">Diktierzeit</th>
+                    <th className="px-4 py-3 text-right">Wörter</th>
+                    <th className="px-4 py-3 text-right">Äußerungen</th>
+                    <th className="px-4 py-3 text-right">Wörterbuch</th>
+                    <th className="px-4 py-3 text-right">Bausteine</th>
+                    <th className="px-4 py-3 text-right">Gruppen-Baust.</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
+                  {deptStats.map((dept: any) => (
+                    <tr key={dept.department} className="hover:bg-gray-50 dark:hover:bg-zinc-800/50">
+                      <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{dept.department}</td>
+                      <td className="px-4 py-3 text-right">{formatNumber(dept.user_count)}</td>
+                      <td className="px-4 py-3 text-right">{formatMinutes(dept.total_audio_duration_seconds / 60)}</td>
+                      <td className="px-4 py-3 text-right">{formatNumber(dept.total_word_count)}</td>
+                      <td className="px-4 py-3 text-right">{formatNumber(dept.total_utterances)}</td>
+                      <td className="px-4 py-3 text-right">{formatNumber(dept.dictionary_entry_count)}</td>
+                      <td className="px-4 py-3 text-right">{formatNumber(dept.template_count)}</td>
+                      <td className="px-4 py-3 text-right">{formatNumber(dept.group_template_count)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="px-4 py-8 text-center text-sm text-gray-500">
+              {deptStats ? 'Keine Abteilungsdaten vorhanden. Weisen Sie Benutzern eine Abteilung zu.' : 'Fehler beim Laden.'}
+            </div>
+          )}
+        </div>
+      ) : activePeriod ? (
         <>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
             <StatCard label="Aktive Nutzer" value={formatNumber(activePeriod.totals.users)} hint={activePeriod.label} color="bg-blue-500" />

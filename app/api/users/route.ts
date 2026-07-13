@@ -58,9 +58,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Nur für Administratoren' }, { status: 403 });
     }
 
-    const { username, password, isAdmin: makeAdmin = false, canViewAllDictations = false } = await request.json();
+    const { username, password, isAdmin: makeAdmin = false, canViewAllDictations = false, department = '' } = await request.json();
     
-    const result = await createUserWithRequest(request, username, password, makeAdmin, auth.username!, canViewAllDictations);
+    const result = await createUserWithRequest(request, username, password, makeAdmin, auth.username!, canViewAllDictations, department);
     
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Benutzer erstellt' });
@@ -117,7 +117,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ success: false, error: result.error }, { status: 400 });
     }
     
-    // If permissions update
+    // If permissions update (including department)
     if (permissions) {
       const result = await updateUserPermissionsWithRequest(request, username, permissions);
       

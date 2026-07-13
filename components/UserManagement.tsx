@@ -8,6 +8,7 @@ interface User {
   isAdmin: boolean;
   canViewAllDictations: boolean;
   defaultMode: 'befund' | 'arztbrief';
+  department: string;
   createdAt: string;
   createdBy: string;
 }
@@ -28,12 +29,14 @@ export default function UserManagement() {
   const [newPassword, setNewPassword] = useState('');
   const [newIsAdmin, setNewIsAdmin] = useState(false);
   const [newCanViewAll, setNewCanViewAll] = useState(false);
+  const [newDepartment, setNewDepartment] = useState('');
   const [creating, setCreating] = useState(false);
 
   // Edit state
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [editNewUsername, setEditNewUsername] = useState('');
   const [editNewPassword, setEditNewPassword] = useState('');
+  const [editDepartment, setEditDepartment] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
   const fetchUsers = async () => {
@@ -88,7 +91,8 @@ export default function UserManagement() {
           username: newUsername,
           password: newPassword,
           isAdmin: newIsAdmin,
-          canViewAllDictations: newCanViewAll || newIsAdmin
+          canViewAllDictations: newCanViewAll || newIsAdmin,
+          department: newDepartment
         })
       });
 
@@ -100,6 +104,7 @@ export default function UserManagement() {
         setNewPassword('');
         setNewIsAdmin(false);
         setNewCanViewAll(false);
+        setNewDepartment('');
         fetchUsers();
       } else {
         setError(data.error || 'Fehler beim Erstellen');
@@ -251,6 +256,7 @@ export default function UserManagement() {
     setEditingUser(user.username);
     setEditNewUsername(user.username);
     setEditNewPassword('');
+    setEditDepartment(user.department || '');
     setError('');
     setSuccess('');
   };
@@ -259,6 +265,42 @@ export default function UserManagement() {
     setEditingUser(null);
     setEditNewUsername('');
     setEditNewPassword('');
+    setEditDepartment('');
+  };
+
+  const handleDepartmentChange = async (username: string) => {
+    setError('');
+    setSuccess('');
+    setSavingEdit(true);
+
+    try {
+      const response = await fetch('/api/users', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader()
+        },
+        body: JSON.stringify({
+          username,
+          permissions: { department: editDepartment }
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSuccess(`Abteilung für "${username}" aktualisiert`);
+        fetchUsers();
+        setTimeout(() => setSuccess(''), 3000);
+      } else {
+        setError(data.error || 'Fehler beim Speichern der Abteilung');
+      }
+    } catch {
+      setError('Verbindungsfehler');
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   if (!isAdmin) {
@@ -336,6 +378,13 @@ export default function UserManagement() {
                 />
                 Alle Diktate sehen
               </label>
+              <input
+                type="text"
+                className="input text-sm max-w-[200px]"
+                placeholder="Fachabteilung"
+                value={newDepartment}
+                onChange={(e) => setNewDepartment(e.target.value)}
+              />
             </div>
             <button type="submit" className="btn btn-primary text-sm" disabled={creating}>
               {creating ? 'Erstelle...' : 'Erstellen'}
@@ -386,6 +435,11 @@ export default function UserManagement() {
                     <span className="text-xs text-gray-500">
                       von {user.createdBy}
                     </span>
+                    {user.department && (
+                      <span className="text-xs px-1.5 py-0.5 bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 rounded">
+                        {user.department}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1">
                     <button
@@ -461,6 +515,26 @@ export default function UserManagement() {
                           disabled={savingEdit || !editNewPassword || editNewPassword.length < 4}
                         >
                           {savingEdit ? '...' : 'Passwort setzen'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="border-t dark:border-gray-600 pt-3">
+                      <label className="text-xs text-gray-500 block mb-1">Fachabteilung</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          className="input text-sm flex-1"
+                          value={editDepartment}
+                          onChange={(e) => setEditDepartment(e.target.value)}
+                          placeholder="z. B. Radiologie"
+                        />
+                        <button
+                          onClick={() => handleDepartmentChange(user.username)}
+                          className="btn btn-primary text-xs"
+                          disabled={savingEdit || editDepartment === (user.department || '')}
+                        >
+                          {savingEdit ? '...' : 'Speichern'}
                         </button>
                       </div>
                     </div>

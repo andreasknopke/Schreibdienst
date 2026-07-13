@@ -2000,6 +2000,12 @@ struct ClipboardSnapshot {
     std::wstring text;
 };
 
+// Maximale Anzahl Versuche, den eigenen Text in der Zwischenablage zu
+// verifizieren. Clipboard-Manager (Ditto, Win+V-Verlauf, …) können den
+// Text zwischen writeClipboardText und Ctrl+V überschreiben.
+constexpr int CLIPBOARD_VERIFY_RETRIES = 5;
+constexpr std::uint32_t CLIPBOARD_VERIFY_DELAY_MS = 10;
+
 ClipboardSnapshot readClipboardText() {
     ClipboardSnapshot snapshot;
     if (!OpenClipboard(nullptr)) {
@@ -2071,6 +2077,47 @@ bool restoreClipboardText(const ClipboardSnapshot& snapshot) {
     return writeClipboardText(snapshot.text);
 }
 
+// Schreibt text in die Zwischenablage und verifiziert, dass der Text dort
+// auch tatsächlich ankommt. Clipboard-Manager oder andere Überwachungs-
+// tools können den Inhalt zwischen write und read überschreiben, was
+// dazu führt, dass später der falsche Text eingefügt wird.
+bool writeClipboardTextWithVerify(const std::wstring& text) {
+    for (int attempt = 0; attempt < CLIPBOARD_VERIFY_RETRIES; ++attempt) {
+        if (!writeClipboardText(text)) {
+            logLine("[INJECT] writeClipboardTextWithVerify attempt %d: writeClipboardText failed\n", attempt);
+            fflush(stdout);
+            std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_VERIFY_DELAY_MS));
+            continue;
+        }
+
+        // Kurz warten, bis die Zwischenablage aktualisiert ist
+        std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_READY_DELAY_MS));
+
+        // Verifizieren: Zurücklesen und vergleichen
+        const ClipboardSnapshot verify = readClipboardText();
+        if (verify.hasText && verify.text == text) {
+            return true; // Erfolg – Text ist wie erwartet in der Zwischenablage
+        }
+
+        if (verify.hasText) {
+            logLine("[INJECT] writeClipboardTextWithVerify attempt %d: INHALT ÜBERSCHRIEBEN (expected=\"%ls\", actual=\"%ls\")\n",
+                   attempt,
+                   text.substr(0, 60).c_str(),
+                   verify.text.substr(0, 60).c_str());
+        } else {
+            logLine("[INJECT] writeClipboardTextWithVerify attempt %d: clipboard leer nach write\n", attempt);
+        }
+        fflush(stdout);
+
+        // Nächster Versuch – die Zwischenablage wurde inzwischen manipuliert
+        std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_VERIFY_DELAY_MS));
+    }
+
+    logLine("[INJECT] writeClipboardTextWithVerify FAILED after %d attempts\n", CLIPBOARD_VERIFY_RETRIES);
+    fflush(stdout);
+    return false;
+}
+
 bool sendPasteShortcut() {
     const std::vector<INPUT> inputs = {
         makeVirtualKeyInput(VK_CONTROL, false),
@@ -2087,17 +2134,21 @@ PasteOutcome pasteClipboardText(const std::wstring& text) {
     fflush(stdout);
 
     // 1) Aktuelle Zwischenablage sichern
-    ClipboardSnapshot snapshot = readClipboardText();
+    const ClipboardSnapshot snapshot = readClipboardText();
 
-    // 2) Neuen Text in die Zwischenablage schreiben
-    if (!writeClipboardText(text)) {
-        logLine("[INJECT] pasteClipboardText FAILED: writeClipboardText → ClipboardBlocked\n");
+    // 2) Neuen Text in die Zwischenablage schreiben MIT VERIFIKATION.
+    //    Clipboard-Manager (Ditto, Win+V, …) können den Text zwischen
+    //    write und Ctrl+V überschreiben. writeClipboardTextWithVerify
+    //    liest zurück und wiederholt bei Konflikt.
+    if (!writeClipboardTextWithVerify(text)) {
+        logLine("[INJECT] pasteClipboardText FAILED: writeClipboardTextWithVerify → ClipboardBlocked\n");
         fflush(stdout);
+        // Bei Fehlschlag alte Zwischenablage wiederherstellen, damit der
+        // User keinen Datenverlust erleidet – selbst wenn ein Clipboard-
+        // Manager aktiv war, ist das besser als die aktuelle (fremde) data.
+        restoreClipboardText(snapshot);
         return PasteOutcome::ClipboardBlocked;
     }
-
-    // Kurz warten, bis die Zwischenablage aktualisiert ist
-    std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_READY_DELAY_MS));
 
     // 3) Ctrl+V senden
     if (!sendPasteShortcut()) {

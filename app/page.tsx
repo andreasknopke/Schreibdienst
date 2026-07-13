@@ -1030,7 +1030,7 @@ export default function HomePage() {
   const befundTextareaRef = useRef<HTMLDivElement | null>(null);
   const beurteilungTextareaRef = useRef<HTMLDivElement | null>(null);
   const transcriptTextareaRef = useRef<HTMLDivElement | null>(null);
-  const [textSelections, setTextSelections] = useState<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
+  const [, setTextSelections] = useState<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
   const textSelectionsRef = useRef<Partial<Record<TextInsertionTarget, CaretSelection>>>({});
   const [richTextFormats, setRichTextFormats] = useState<RichTextState>(EMPTY_RICH_TEXT_RANGES);
   const [richTextToggles, setRichTextToggles] = useState<RichTextToggleState>(EMPTY_RICH_TEXT_TOGGLES);
@@ -1385,6 +1385,13 @@ export default function HomePage() {
         [field]: nextSelection,
       };
     });
+  }, []);
+
+  const syncSelectionRef = useCallback((field: TextInsertionTarget, nextSelection: CaretSelection) => {
+    textSelectionsRef.current = {
+      ...textSelectionsRef.current,
+      [field]: nextSelection,
+    };
   }, []);
 
   const syncTextSelection = useCallback((field: TextInsertionTarget, textarea: HTMLTextAreaElement) => {
@@ -1874,7 +1881,7 @@ export default function HomePage() {
       befund: hiddenCaretOverlay(),
       beurteilung: hiddenCaretOverlay(),
     });
-  }, [transcript, methodik, beurteilung, textSelections, showPersistentCaret, getStoredSelection]);
+  }, [transcript, methodik, beurteilung, showPersistentCaret, getStoredSelection]);
 
   // SpeaKING Import State
   const [speakingMetadata, setSpeakingMetadata] = useState<SpeaKINGMetadata | null>(null);
@@ -2898,8 +2905,8 @@ export default function HomePage() {
 
   const handleRichTextSelectionChange = useCallback((field: TextInsertionTarget, editor: HTMLDivElement) => {
     const nextSelection = getRichTextSelection(editor) ?? getDefaultSelection(getFieldTextValue(field));
-    syncSelectionState(field, nextSelection);
-  }, [getFieldTextValue, syncSelectionState]);
+    syncSelectionRef(field, nextSelection);
+  }, [getFieldTextValue, syncSelectionRef]);
 
   const handleRichTextEditorChange = useCallback((
     field: TextInsertionTarget,
@@ -6564,7 +6571,7 @@ export default function HomePage() {
                     activeBlockId={activeBlockId}
                     editorRef={methodikTextareaRef}
                     fieldFormats={getFieldRichTextFormats('methodik')}
-                    selection={textSelections.methodik ?? null}
+                    selection={textSelectionsRef.current.methodik ?? null}
                     className={`textarea font-mono text-sm min-h-20 ${activeField === 'methodik' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                     isProcessing={isProcessing}
                     recording={recording}
@@ -6691,7 +6698,7 @@ export default function HomePage() {
                     activeBlockId={activeBlockId}
                     editorRef={befundTextareaRef}
                     fieldFormats={getFieldRichTextFormats('befund')}
-                    selection={textSelections.befund ?? null}
+                    selection={textSelectionsRef.current.befund ?? null}
                     className={`textarea font-mono text-sm min-h-32 ${activeField === 'befund' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                     isProcessing={isProcessing}
                     recording={recording}
@@ -6833,7 +6840,7 @@ export default function HomePage() {
                     activeBlockId={activeBlockId}
                     editorRef={beurteilungTextareaRef}
                     fieldFormats={getFieldRichTextFormats('beurteilung')}
-                    selection={textSelections.beurteilung ?? null}
+                    selection={textSelectionsRef.current.beurteilung ?? null}
                     className={`textarea font-mono text-sm min-h-20 ${activeField === 'beurteilung' && recording ? 'ring-2 ring-green-500' : ''} ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                     isProcessing={isProcessing}
                     recording={recording}
@@ -6982,7 +6989,7 @@ export default function HomePage() {
                   activeBlockId={activeBlockId}
                   editorRef={transcriptTextareaRef}
                   fieldFormats={getFieldRichTextFormats('befund')}
-                  selection={textSelections.transcript ?? null}
+                  selection={textSelectionsRef.current.transcript ?? null}
                   className={`textarea font-mono text-sm min-h-40 w-full ${isProcessing ? 'opacity-60 cursor-not-allowed' : ''}`}
                   isProcessing={isProcessing}
                   recording={recording}

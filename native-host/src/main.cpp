@@ -2233,13 +2233,30 @@ bool activatePreviousWindow(std::uint32_t delayMs) {
 bool sendUnicodeText(const std::wstring& text, std::uint32_t charDelayMs) {
     if (charDelayMs > 0) {
         for (const wchar_t unit : text) {
-            const std::vector<INPUT> inputs = {
-                makeUnicodeInput(unit, false),
-                makeUnicodeInput(unit, true),
-            };
+            // Zeilenumbruch (\\n) muss als Enter-Taste (VK_RETURN) gesendet werden,
+            // da KEYEVENTF_UNICODE mit 0x0A von den meisten Ziel-Apps nicht als
+            // Zeilenumbruch interpretiert wird.
+            if (unit == L'\n') {
+                const std::vector<INPUT> inputs = {
+                    makeVirtualKeyInput(VK_RETURN, false),
+                    makeVirtualKeyInput(VK_RETURN, true),
+                };
+                if (!sendInputs(inputs)) {
+                    return false;
+                }
+            } else if (unit == L'\r') {
+                // Wagenrücklauf überspringen – \\n\\n oder \\r\\n würden sonst
+                // doppelte Zeilenumbrüche erzeugen.
+                continue;
+            } else {
+                const std::vector<INPUT> inputs = {
+                    makeUnicodeInput(unit, false),
+                    makeUnicodeInput(unit, true),
+                };
 
-            if (!sendInputs(inputs)) {
-                return false;
+                if (!sendInputs(inputs)) {
+                    return false;
+                }
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(charDelayMs));
@@ -2252,8 +2269,15 @@ bool sendUnicodeText(const std::wstring& text, std::uint32_t charDelayMs) {
     inputs.reserve(text.size() * 2);
 
     for (const wchar_t unit : text) {
-        inputs.push_back(makeUnicodeInput(unit, false));
-        inputs.push_back(makeUnicodeInput(unit, true));
+        if (unit == L'\n') {
+            inputs.push_back(makeVirtualKeyInput(VK_RETURN, false));
+            inputs.push_back(makeVirtualKeyInput(VK_RETURN, true));
+        } else if (unit == L'\r') {
+            continue;
+        } else {
+            inputs.push_back(makeUnicodeInput(unit, false));
+            inputs.push_back(makeUnicodeInput(unit, true));
+        }
     }
 
     const bool ok = sendInputs(inputs);

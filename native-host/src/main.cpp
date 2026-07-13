@@ -2483,6 +2483,7 @@ std::string handleRequest(const std::string& message) {
 // ─── WebSocket client handler ───────────────────────────────────
 
 void handleClient(SOCKET client) {
+    try {
     logLine("[WS] handleClient NEW connection\n");
     fflush(stdout);
 
@@ -2661,6 +2662,24 @@ void handleClient(SOCKET client) {
     // damit das REC-Overlay nicht mehr angezeigt wird.
     g_frontendTargetMode.store(false);
     closesocket(client);
+
+    } catch (const std::exception& e) {
+        logLine("[WS] handleClient CRASH (exception): %s\n", e.what());
+        fflush(stdout);
+        {
+            std::lock_guard<std::mutex> lock(g_clientsMutex);
+            g_wsClients.erase(client);
+        }
+        closesocket(client);
+    } catch (...) {
+        logLine("[WS] handleClient CRASH (unknown exception)\n");
+        fflush(stdout);
+        {
+            std::lock_guard<std::mutex> lock(g_clientsMutex);
+            g_wsClients.erase(client);
+        }
+        closesocket(client);
+    }
 }
 
 // ─── WebSocket server thread ────────────────────────────────────

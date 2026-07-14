@@ -190,16 +190,19 @@ export default function TrainingMarker({
    */
   const prefillDraftFromRange = useCallback(
     (startTime: number, endTime: number, editId: number | null, note = '') => {
+      // Guard against inverted ranges: keep canonical [lo, hi].
+      const lo = Math.min(startTime, endTime);
+      const hi = Math.max(startTime, endTime);
       const voxtralSlice = flatWords
-        .filter((x) => x.start >= startTime - 0.001 && x.end <= endTime + 0.001)
+        .filter((x) => x.start >= lo - 0.001 && x.end <= hi + 0.001)
         .map((x) => x.word)
         .join(' ');
       const correctedSlice =
-        extractCorrectedSliceForTimeRange(segments, defaultCorrectedText, startTime, endTime) ||
+        extractCorrectedSliceForTimeRange(segments, defaultCorrectedText, lo, hi) ||
         defaultCorrectedText.slice(0, 200);
       setDraft({
-        startTime,
-        endTime,
+        startTime: lo,
+        endTime: hi,
         voxtralRaw: voxtralSlice,
         corrected: correctedSlice,
         note,
@@ -504,7 +507,7 @@ export default function TrainingMarker({
                 {hasTimedWords && (
                   <div>
                     <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      Wortauswahl (klick = Bereich bis hier auswählen). Voxtral-Original und korrigierter Zieltext werden automatisch passend zum Zeitbereich übernommen.
+                      Wortauswahl (klick = Bereich anpassen). Klick vor/hinter dem Bereich vergrößert; Klick innerhalb des Bereichs verschiebt die nähere Grenze. Voxtral-Original und korrigierter Zieltext werden automatisch passend zum Zeitbereich übernommen.
                     </div>
                     <div className="max-h-44 overflow-y-auto rounded border border-gray-200 dark:border-gray-700 p-2 text-sm leading-relaxed bg-gray-50 dark:bg-gray-800 flex flex-wrap gap-0.5">
                       {flatWords.map((w, i) => {
@@ -517,12 +520,26 @@ export default function TrainingMarker({
                               if (i === 0) return;
                               const wordEnd = flatWords[i].end;
                               const wordStart = flatWords[i].start;
-                              // Extend end if clicking beyond current end,
-                              // otherwise move start to the clicked word.
-                              const newStart = wordEnd >= draft.endTime ? draft.startTime : wordStart;
-                              const newEnd = wordEnd >= draft.endTime ? wordEnd : draft.endTime;
-                              // Keep an existing editor note + editId; only sync
-                              // voxtralRaw/corrected to the new time range.
+                              let newStart = draft.startTime;
+                              let newEnd = draft.endTime;
+                              if (wordEnd < draft.startTime - 0.001) {
+                                // Word entirely before range → extend start leftward.
+                                newStart = wordStart;
+                              } else if (wordStart > draft.endTime + 0.001) {
+                                // Word entirely after range → extend end rightward.
+                                newEnd = wordEnd;
+                              } else {
+                                // Word inside range → move the NEARER boundary
+                                // to this word. Left half moves start (rightward),
+                                // right half moves end (leftward), so clicks on
+                                // the tail shrink the end rather than extend it.
+                                const mid = (draft.startTime + draft.endTime) / 2;
+                                if (wordStart < mid) {
+                                  newStart = wordStart;
+                                } else {
+                                  newEnd = wordEnd;
+                                }
+                              }
                               prefillDraftFromRange(newStart, newEnd, draft.editId, draft.note);
                             }}
                             title={`${w.start.toFixed(2)}–${w.end.toFixed(2)}s`}
@@ -541,7 +558,14 @@ export default function TrainingMarker({
                 )}
 
                 <label className="text-xs block">
-                  <span className="text-gray-500 dark:text-gray-400 mb-0.5 block">🎤 Voxtral-Original (was das Modell gemacht hat)</span>
+                  <span className="text-gray-500 dark:text-gray-400 mb-0.5 flex items-center justify-between gap-2">
+                    <span>🎤 Voxtral-Original (was das Modell gemacht hat)</span>
+                    <button
+                      className="btn btn-xs btn-ghost"
+                      onClick={() => prefillDraftFromRange(draft.startTime, draft.endTime, draft.editId, draft.note)}
+                      title="Voxtral-Original und korrigierten Zieltext aus dem aktuellen Zeitbereich neu übernehmen (überschreibt manuelle Eingaben)"
+                    >🔄 Aus Zeitbereich neu laden</button>
+                  </span>
                   <textarea
                     className="textarea textarea-bordered w-full text-sm font-mono"
                     rows={3}

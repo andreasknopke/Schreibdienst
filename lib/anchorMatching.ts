@@ -573,3 +573,113 @@ export function computeMatchQuality(results: AnchorTimestampResult[]): number {
   const matched = results.filter(r => !r.isInterpolated).length;
   return Math.round((matched / results.length) * 100);
 }
+
+// ---------- Time-range → corrected-text slice (for training marker) ----------
+
+/**
+ * Lightweight word normalization for anchor matching (subset of EditableTextWithMitlesen logic).
+ * - Lowercases, strips punctuation but keeps umlauts/digits.
+ * - Tokens containing digits keep only the digits (helps match spoken numbers/dates).
+ */
+function normalizeForAnchor(word: string): string {
+  const lower = word.toLowerCase().trim();
+  if (/\d/.test(lower)) {
+    const digitsOnly = lower.replace(/\D/g, '');
+    if (digitsOnly.length > 0) return digitsOnly;
+  }
+  return lower.replace(/[.,!?;:\u201c\u201d\u201e\u2018\u2019()\[\]<>\u00ab\u00bb\u2013\u2014\-\/\\@#$%^&*+=|~`]/g, '').trim();
+}
+
+interface AnchorParsedWord {
+  word: string;
+  normalized: string;
+  charPos: number;
+}
+
+/**
+ * Parse a text into words (non-whitespace tokens) with their normalized form
+ * and absolute character position in the source text.
+ */
+function parseAnchorWords(text: string): AnchorParsedWord[] {
+  const out: AnchorParsedWord[] = [];
+  const regex = /\S+/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    out.push({
+      word: match[0],
+      normalized: normalizeForAnchor(match[0]),
+      charPos: match.index,
+    });
+  }
+  return out;
+}
+
+/**
+ * Extract the substring of `correctedText` that corresponds to the
+ * voxtral time window [startTime, endTime]. Uses the same anchor-point
+ * matching as Mitlesen to map each corrected word to a timestamp, then
+ * returns the (character-extent) slice covering the matching words.
+ *
+ * Falls back gracefully:
+ *   - no timestamps in segments → returns '' (caller decides fallback)
+ *   - no overlap with window → returns ''
+ *   - partial overlap → expands to the first/last overlapping word
+ *
+ * @param segments   Voxtral segments with `.words[].{word,start,end}`
+ * @param correctedText  The final corrected manuscript text
+ * @param startTime  Window start (seconds, inclusive)
+ * @param endTime    Window end (seconds, inclusive)
+ * @param padding    Extra characters to keep on each side of the matched
+ *                   word span (default 0). Mirrors the exact spacing of
+ *                   the source; trimming is left to the caller.
+ */
+export function extractCorrectedSliceForTimeRange(
+  segments: Array<{ words?: Array<{ word: string; start?: number; end?: number }> }>,
+  correctedText: string,
+  startTime: number,
+  endTime: number,
+  padding = 0
+): string {
+  if (!correctedText || !segments || segments.length === 0) return '';
+  if (!(endTime > startTime)) return '';
+
+  // Collect timestamped voxtral original words.
+  const original: AnchorOriginalWord[] = [];
+  for (const seg of segments) {
+    if (!seg.words) continue;
+    for (const w of seg.words) {
+      if (typeof w.start === 'number' && typeof w.end === 'number') {
+        original.push({
+          normalized: normalizeForAnchor(w.word),
+          start: w.start,
+          end: w.end,
+        });
+      }
+    }
+  }
+  if (original.length === 0) return '';
+
+  const corrected = parseAnchorWords(correctedText);
+  if (corrected.length === 0) return '';
+
+  const audioDuration = original[original.length - 1].end;
+  const table = buildAnchorTimestampTable(original, corrected, audioDuration);
+
+  // Find the first and last corrected word whose [start,end] interval
+  // overlaps [startTime, endTime]. A word overlaps if its start is <= endTime
+  // and its end is >= startTime.
+  let firstIdx = -1;
+  let lastIdx = -1;
+  for (let i = 0; i < table.length; i++) {
+    const t = table[i];
+    if (t.end < startTime || t.start > endTime) continue;
+    if (firstIdx === -1) firstIdx = i;
+    lastIdx = i;
+  }
+  if (firstIdx === -1) return '';
+
+  const startChar = Math.max(0, table[firstIdx].charPos - padding);
+  const endWord = table[lastIdx];
+  const endChar = Math.min(correctedText.length, endWord.charPos + endWord.word.length + padding);
+  return correctedText.slice(startChar, endChar).trim();
+}

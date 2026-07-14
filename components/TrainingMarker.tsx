@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchWithDbToken } from '@/lib/fetchWithDbToken';
+import { extractCorrectedSliceForTimeRange } from '@/lib/anchorMatching';
 import { useAuth } from './AuthProvider';
 import Spinner from './Spinner';
 
@@ -170,17 +171,43 @@ export default function TrainingMarker({
         editId: null,
       });
     } else {
-      setDraft({
-        startTime: flatWords[0].start,
-        endTime: flatWords[Math.min(flatWords.length - 1, 4)].end,
-        voxtralRaw: flatWords.slice(0, 5).map((w) => w.word).join(' '),
-        corrected: '',
-        note: '',
-        editId: null,
-      });
+      // Default window = first ~5 timestamped words.
+      const startTime = flatWords[0].start;
+      const endTime = flatWords[Math.min(flatWords.length - 1, 4)].end;
+      prefillDraftFromRange(startTime, endTime, null);
     }
     setShowModal(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flatWords, hasTimedWords, defaultCorrectedText]);
+
+  /**
+   * Build a draft with voxtralRaw + corrected auto-filled from the [startTime, endTime] window:
+   *   - voxtralRaw = joined words from segments within the window (what voxtral produced)
+   *   - corrected  = matching section of the FINAL corrected manuscript (Ziel)
+   * If `editId` is null a new draft is created; otherwise an existing one is populated.
+   * Falls back to defaultCorrectedText[0..200] when anchor matching finds no overlap
+   * (e.g. empty corrected text or wildly mismatched transcripts).
+   */
+  const prefillDraftFromRange = useCallback(
+    (startTime: number, endTime: number, editId: number | null, note = '') => {
+      const voxtralSlice = flatWords
+        .filter((x) => x.start >= startTime - 0.001 && x.end <= endTime + 0.001)
+        .map((x) => x.word)
+        .join(' ');
+      const correctedSlice =
+        extractCorrectedSliceForTimeRange(segments, defaultCorrectedText, startTime, endTime) ||
+        defaultCorrectedText.slice(0, 200);
+      setDraft({
+        startTime,
+        endTime,
+        voxtralRaw: voxtralSlice,
+        corrected: correctedSlice,
+        note,
+        editId,
+      });
+    },
+    [flatWords, segments, defaultCorrectedText]
+  );
 
   const editExisting = useCallback(
     (s: TrainingSample) => {
@@ -477,7 +504,7 @@ export default function TrainingMarker({
                 {hasTimedWords && (
                   <div>
                     <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      Wortauswahl (klick = Bereich bis hier auswählen). Die Wörter innerhalb des Bereichs werden automatisch als Voxtral-Original übernommen.
+                      Wortauswahl (klick = Bereich bis hier auswählen). Voxtral-Original und korrigierter Zieltext werden automatisch passend zum Zeitbereich übernommen.
                     </div>
                     <div className="max-h-44 overflow-y-auto rounded border border-gray-200 dark:border-gray-700 p-2 text-sm leading-relaxed bg-gray-50 dark:bg-gray-800 flex flex-wrap gap-0.5">
                       {flatWords.map((w, i) => {
@@ -488,28 +515,15 @@ export default function TrainingMarker({
                             key={i}
                             onClick={() => {
                               if (i === 0) return;
-                              const newEnd = flatWords[i].end;
-                              // If clicking beyond current end, extend; if before start, set start.
-                              if (newEnd >= draft.endTime) {
-                                setDraft({
-                                  ...draft,
-                                  endTime: newEnd,
-                                  voxtralRaw: flatWords
-                                    .filter((x) => x.start >= draft.startTime - 0.001 && x.end <= newEnd + 0.001)
-                                    .map((x) => x.word)
-                                    .join(' '),
-                                });
-                              } else {
-                                const newStart = flatWords[i].start;
-                                setDraft({
-                                  ...draft,
-                                  startTime: newStart,
-                                  voxtralRaw: flatWords
-                                    .filter((x) => x.start >= newStart - 0.001 && x.end <= draft.endTime + 0.001)
-                                    .map((x) => x.word)
-                                    .join(' '),
-                                });
-                              }
+                              const wordEnd = flatWords[i].end;
+                              const wordStart = flatWords[i].start;
+                              // Extend end if clicking beyond current end,
+                              // otherwise move start to the clicked word.
+                              const newStart = wordEnd >= draft.endTime ? draft.startTime : wordStart;
+                              const newEnd = wordEnd >= draft.endTime ? wordEnd : draft.endTime;
+                              // Keep an existing editor note + editId; only sync
+                              // voxtralRaw/corrected to the new time range.
+                              prefillDraftFromRange(newStart, newEnd, draft.editId, draft.note);
                             }}
                             title={`${w.start.toFixed(2)}–${w.end.toFixed(2)}s`}
                             className={`px-1 rounded hover:bg-blue-100 dark:hover:bg-blue-900 ${
@@ -538,7 +552,7 @@ export default function TrainingMarker({
 
                 <label className="text-xs block">
                   <span className="text-gray-500 dark:text-gray-400 mb-0.5 block">
-                    ✓ Korrigierter Text (Ziel) – entspricht dem finalen Manuskriptabschnitt
+                    ✓ Korrigierter Text (Ziel) – wird automatisch aus dem finalen Manuskript für den gewählten Zeitbereich übernommen
                   </span>
                   <textarea
                     className="textarea textarea-bordered w-full text-sm"
@@ -546,13 +560,6 @@ export default function TrainingMarker({
                     value={draft.corrected}
                     onChange={(e) => setDraft({ ...draft, corrected: e.target.value })}
                   />
-                  <div className="flex items-center gap-2 mt-1">
-                    <button
-                      className="btn btn-xs btn-ghost"
-                      onClick={() => setDraft({ ...draft, corrected: defaultCorrectedText })}
-                      title="Gesamten korrigierten Text übernehmen"
-                    >📄 Gesamttext übernehmen</button>
-                  </div>
                 </label>
 
                 <label className="text-xs block">

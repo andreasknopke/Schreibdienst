@@ -177,11 +177,39 @@ export default function StatsPage() {
   const [showDepartments, setShowDepartments] = useState(false);
   const [deptStats, setDeptStats] = useState<any[] | null>(null);
   const [deptLoading, setDeptLoading] = useState(false);
+  const [deptSortColumn, setDeptSortColumn] = useState<string>('department');
+  const [deptSortDirection, setDeptSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [deptPeriod, setDeptPeriod] = useState<'month' | 'year' | 'all'>('all');
+  const [deptSelectedMonth, setDeptSelectedMonth] = useState<string>(() => currentMonthKey());
 
-  const fetchDeptStats = async () => {
+  const handleDeptSort = (column: string) => {
+    setDeptSortDirection((prev) => (deptSortColumn === column && prev === 'asc' ? 'desc' : 'asc'));
+    setDeptSortColumn(column);
+  };
+
+  const sortedDeptStats = useMemo(() => {
+    if (!deptStats) return null;
+    const sorted = [...deptStats];
+    sorted.sort((a: any, b: any) => {
+      const aVal = a[deptSortColumn] ?? '';
+      const bVal = b[deptSortColumn] ?? '';
+      const compare = typeof aVal === 'number' ? aVal - bVal : String(aVal).localeCompare(String(bVal));
+      return deptSortDirection === 'asc' ? compare : -compare;
+    });
+    return sorted;
+  }, [deptStats, deptSortColumn, deptSortDirection]);
+
+  const deptPeriodCaption = useMemo(() => {
+    if (deptPeriod === 'all') return 'Gesamt';
+    if (deptPeriod === 'year') return `Jahr ${deptSelectedMonth.split('-')[0]}`;
+    return formatMonthLabel(deptSelectedMonth);
+  }, [deptPeriod, deptSelectedMonth]);
+
+  const fetchDeptStats = async (monthParam?: string) => {
     setDeptLoading(true);
     try {
-      const res = await fetchWithDbToken('/api/stats/department', { cache: 'no-store' });
+      const params = monthParam ? `?month=${encodeURIComponent(monthParam)}` : '';
+      const res = await fetchWithDbToken(`/api/stats/department${params}`, { cache: 'no-store' });
       if (!res.ok) throw new Error('Abteilungsstatistiken konnten nicht geladen werden');
       const data = await res.json();
       setDeptStats(data.departments || []);
@@ -190,6 +218,77 @@ export default function StatsPage() {
     } finally {
       setDeptLoading(false);
     }
+  };
+
+  const loadDeptStats = (period: 'month' | 'year' | 'all', monthKey: string) => {
+    setDeptPeriod(period);
+    if (period === 'all') {
+      fetchDeptStats(undefined);
+    } else if (period === 'year') {
+      const year = monthKey.split('-')[0];
+      fetchDeptStats(`year-${year}`);
+    } else {
+      fetchDeptStats(monthKey);
+    }
+  };
+
+  const deptGoToPrevMonth = () => {
+    setDeptSelectedMonth((current) => {
+      const prev = shiftMonthKey(current, -1);
+      loadDeptStats(deptPeriod, prev);
+      return prev;
+    });
+  };
+
+  const deptGoToNextMonth = () => {
+    setDeptSelectedMonth((current) => {
+      const next = shiftMonthKey(current, 1);
+      if (isFutureMonth(next)) return current;
+      loadDeptStats(deptPeriod, next);
+      return next;
+    });
+  };
+
+  const deptIsNextMonthDisabled = isFutureMonth(shiftMonthKey(deptSelectedMonth, 1));
+
+  const exportDeptToCSV = () => {
+    if (!sortedDeptStats || sortedDeptStats.length === 0) return;
+    const rows = [
+      ['Abteilung', 'Nutzer', 'Diktierzeit (h)', 'Wörter', 'Äußerungen', 'Wörterbuch', 'Bausteine', 'Gruppen-Baust.'],
+      ...sortedDeptStats.map((d: any) => [
+        d.department,
+        d.user_count,
+        (d.total_audio_duration_seconds / 3600).toFixed(1),
+        d.total_word_count,
+        d.total_utterances,
+        d.dictionary_entry_count,
+        d.template_count,
+        d.group_template_count,
+      ]),
+    ];
+    const csv =
+      '\uFEFF' +
+      rows
+        .map((row) =>
+          row
+            .map((cell) => {
+              const str = String(cell ?? '');
+              return str.includes(';') || str.includes('"') || str.includes('\n')
+                ? `"${str.replace(/"/g, '""')}"`
+                : str;
+            })
+            .join(';')
+        )
+        .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Abteilungsstatistik_${deptPeriodCaption.replace(/\s+/g, '_')}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const fetchStats = async (monthKey: string) => {
@@ -265,7 +364,7 @@ export default function StatsPage() {
         ))}
 
         <button
-          onClick={() => { setShowDepartments(true); if (!deptStats) fetchDeptStats(); }}
+          onClick={() => { setShowDepartments(true); if (!deptStats) loadDeptStats(deptPeriod, deptSelectedMonth); }}
           className={`rounded-full px-4 py-2 text-sm font-medium transition ${showDepartments ? 'bg-emerald-600 text-white shadow' : 'bg-white text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50 dark:bg-zinc-900 dark:text-gray-300 dark:ring-zinc-800'}`}
         >
           Abteilungen
@@ -317,34 +416,134 @@ export default function StatsPage() {
       {showDepartments ? (
         <div className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
           <div className="border-b border-gray-100 p-4 dark:border-zinc-800">
-            <h2 className="font-semibold text-gray-900 dark:text-white">Abteilungsstatistik</h2>
-            <p className="text-xs text-gray-500 mt-1">Nutzer, Diktierzeit und Inhalte pro Abteilung (Gesamt)</p>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-semibold text-gray-900 dark:text-white">Abteilungsstatistik</h2>
+                <p className="text-xs text-gray-500 mt-1">Nutzer, Diktierzeit und Inhalte pro Abteilung</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {([
+                  { key: 'month' as const, label: 'Monat' },
+                  { key: 'year' as const, label: 'Jahr' },
+                  { key: 'all' as const, label: 'Gesamt' },
+                ]).map((opt) => (
+                  <button
+                    key={opt.key}
+                    onClick={() => {
+                      setDeptPeriod(opt.key);
+                      if (opt.key === 'all') {
+                        fetchDeptStats(undefined);
+                      } else if (opt.key === 'year') {
+                        const year = deptSelectedMonth.split('-')[0];
+                        fetchDeptStats(`year-${year}`);
+                      } else {
+                        fetchDeptStats(deptSelectedMonth);
+                      }
+                    }}
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                      deptPeriod === opt.key
+                        ? 'bg-emerald-600 text-white shadow'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+
+                {deptPeriod === 'month' && (
+                  <div className="ml-2 inline-flex items-center gap-1 rounded-full bg-gray-100 px-1.5 py-1 text-xs dark:bg-zinc-800">
+                    <button
+                      type="button"
+                      onClick={deptGoToPrevMonth}
+                      className="rounded-full p-0.5 text-gray-500 transition hover:bg-gray-200 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-zinc-700 dark:hover:text-white"
+                      aria-label="Vorheriger Monat"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                        <path fillRule="evenodd" d="M12.79 5.23a.75.75 0 0 1 0 1.06L9.06 10l3.73 3.71a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                    <span className="px-1 text-xs font-medium text-gray-700 dark:text-gray-200">{formatMonthLabel(deptSelectedMonth)}</span>
+                    <button
+                      type="button"
+                      onClick={deptGoToNextMonth}
+                      disabled={deptIsNextMonthDisabled}
+                      className="rounded-full p-0.5 text-gray-500 transition hover:bg-gray-200 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-400 dark:hover:bg-zinc-700 dark:hover:text-white"
+                      aria-label="Nächster Monat"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                        <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 0 1 0-1.06L10.94 10 7.21 6.29a.75.75 0 1 1 1.06-1.06l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0Z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+
+                {deptPeriod === 'year' && (
+                  <span className="ml-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    {deptSelectedMonth.split('-')[0]}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-gray-400 mt-2">Zeitraum: <span className="font-medium">{deptPeriodCaption}</span></p>
+              <button
+                onClick={exportDeptToCSV}
+                disabled={!sortedDeptStats || sortedDeptStats.length === 0}
+                className="ml-auto mt-2 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-800 dark:text-gray-300 dark:hover:bg-zinc-700 dark:hover:text-white"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                  <path fillRule="evenodd" d="M3 3.5A1.5 1.5 0 0 1 4.5 2h6.879a1.5 1.5 0 0 1 1.06.44l4.122 4.12A1.5 1.5 0 0 1 17 7.622V16.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 16.5v-13Zm10.857 5.691a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 0 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clipRule="evenodd" />
+                </svg>
+                CSV exportieren
+              </button>
+            </div>
           </div>
           {deptLoading ? (
             <div className="flex items-center justify-center py-12">
               <Spinner className="h-6 w-6 text-blue-500" />
             </div>
-          ) : deptStats && deptStats.length > 0 ? (
+          ) : sortedDeptStats && sortedDeptStats.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500 dark:bg-zinc-800/70">
                   <tr>
-                    <th className="px-4 py-3">Abteilung</th>
-                    <th className="px-4 py-3 text-right">Nutzer</th>
-                    <th className="px-4 py-3 text-right">Diktierzeit</th>
-                    <th className="px-4 py-3 text-right">Wörter</th>
-                    <th className="px-4 py-3 text-right">Äußerungen</th>
-                    <th className="px-4 py-3 text-right">Wörterbuch</th>
-                    <th className="px-4 py-3 text-right">Bausteine</th>
-                    <th className="px-4 py-3 text-right">Gruppen-Baust.</th>
+                    {[
+                      { key: 'department', label: 'Abteilung', right: false },
+                      { key: 'user_count', label: 'Nutzer', right: true },
+                      { key: 'total_audio_duration_seconds', label: 'Diktierzeit (h)', right: true },
+                      { key: 'total_word_count', label: 'Wörter', right: true },
+                      { key: 'total_utterances', label: 'Äußerungen', right: true },
+                      { key: 'dictionary_entry_count', label: 'Wörterbuch', right: true },
+                      { key: 'template_count', label: 'Bausteine', right: true },
+                      { key: 'group_template_count', label: 'Gruppen-Baust.', right: true },
+                    ].map((col) => (
+                      <th
+                        key={col.key}
+                        onClick={() => handleDeptSort(col.key)}
+                        className={`px-4 py-3 cursor-pointer select-none transition hover:text-gray-700 dark:hover:text-gray-300 ${col.right ? 'text-right' : ''}`}
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          {col.label}
+                          {deptSortColumn === col.key && (
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 transition">
+                              {deptSortDirection === 'asc' ? (
+                                <path fillRule="evenodd" d="M10 17a.75.75 0 0 1-.75-.75V5.612L5.29 9.77a.75.75 0 0 1-1.08-1.04l5.25-5.5a.75.75 0 0 1 1.08 0l5.25 5.5a.75.75 0 1 1-1.08 1.04l-3.96-4.158V16.25A.75.75 0 0 1 10 17Z" clipRule="evenodd" />
+                              ) : (
+                                <path fillRule="evenodd" d="M10 3a.75.75 0 0 1 .75.75v10.638l3.96-4.158a.75.75 0 1 1 1.08 1.04l-5.25 5.5a.75.75 0 0 1-1.08 0l-5.25-5.5a.75.75 0 1 1 1.08-1.04l3.96 4.158V3.75A.75.75 0 0 1 10 3Z" clipRule="evenodd" />
+                              )}
+                            </svg>
+                          )}
+                        </span>
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
-                  {deptStats.map((dept: any) => (
+                  {sortedDeptStats.map((dept: any) => (
                     <tr key={dept.department} className="hover:bg-gray-50 dark:hover:bg-zinc-800/50">
                       <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{dept.department}</td>
                       <td className="px-4 py-3 text-right">{formatNumber(dept.user_count)}</td>
-                      <td className="px-4 py-3 text-right">{formatMinutes(dept.total_audio_duration_seconds / 60)}</td>
+                      <td className="px-4 py-3 text-right">{(dept.total_audio_duration_seconds / 3600).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h</td>
                       <td className="px-4 py-3 text-right">{formatNumber(dept.total_word_count)}</td>
                       <td className="px-4 py-3 text-right">{formatNumber(dept.total_utterances)}</td>
                       <td className="px-4 py-3 text-right">{formatNumber(dept.dictionary_entry_count)}</td>

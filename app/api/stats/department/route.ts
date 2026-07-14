@@ -9,11 +9,55 @@ function toNumber(value: unknown): number {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function pad2(value: number): string {
+    return String(value).padStart(2, '0');
+}
+
+/**
+ * Baut eine WHERE-Klausel für den Zeitfilter.
+ * Unterstützte Modi:
+ *   - Kein Param / 'all' / 'gesamt' → kein Filter (alle Zeiten)
+ *   - 'year-YYYY' → filtert auf das Jahr
+ *   - 'YYYY-MM' → filtert auf den Monat
+ */
+function buildTimeFilter(monthParam: string | null): { clause: string; params: string[] } {
+    if (!monthParam || monthParam === 'all' || monthParam === 'gesamt') {
+        return { clause: '1=1', params: [] };
+    }
+
+    // year-2026 → Jahresfilter
+    const yearMatch = /^year-(\d{4})$/.exec(monthParam);
+    if (yearMatch) {
+        const year = yearMatch[1];
+        return {
+            clause: 'o.created_at >= ? AND o.created_at < ?',
+            params: [`${year}-01-01 00:00:00`, `${Number(year) + 1}-01-01 00:00:00`],
+        };
+    }
+
+    // YYYY-MM → Monatsfilter
+    const monthMatch = /^(\d{4})-(\d{2})$/.exec(monthParam);
+    if (monthMatch) {
+        const [_, year, month] = monthMatch;
+        const nextMonth = Number(month) === 12 ? `01` : pad2(Number(month) + 1);
+        const nextYear = Number(month) === 12 ? String(Number(year) + 1) : year;
+        return {
+            clause: 'o.created_at >= ? AND o.created_at < ?',
+            params: [`${year}-${month}-01 00:00:00`, `${nextYear}-${nextMonth}-01 00:00:00`],
+        };
+    }
+
+    return { clause: '1=1', params: [] };
+}
+
 export async function GET(req: NextRequest) {
     try {
         const db = await getPoolForRequest(req);
+        const { searchParams } = new URL(req.url);
+        const monthParam = searchParams.get('month');
+        const timeFilter = buildTimeFilter(monthParam);
 
-        // Nutzer pro Abteilung zählen
+        // Nutzer pro Abteilung zählen (immer alle Nutzer, unabhängig vom Zeitfilter)
         const [userRows] = await db.execute<any[]>(`
             SELECT
                 COALESCE(NULLIF(TRIM(u.department), ''), '(ohne Abteilung)') AS department,
@@ -23,8 +67,9 @@ export async function GET(req: NextRequest) {
             ORDER BY department ASC
         `);
 
-        // Diktierzeit (online_usage_events) und Wörterbuch-Einträge pro Abteilung
-        const [usageRows] = await db.execute<any[]>(`
+        // Diktierzeit (online_usage_events) mit optionalem Zeitfilter
+        const [usageRows] = await db.execute<any[]>(
+            `
             SELECT
                 COALESCE(NULLIF(TRIM(u.department), ''), '(ohne Abteilung)') AS department,
                 COALESCE(SUM(o.audio_duration_seconds), 0) AS total_audio_duration_seconds,
@@ -32,9 +77,12 @@ export async function GET(req: NextRequest) {
                 COALESCE(SUM(o.utterance_count), 0) AS total_utterances
             FROM users u
             LEFT JOIN online_usage_events o ON LOWER(o.username) = LOWER(u.username)
+                AND ${timeFilter.clause}
             GROUP BY department
             ORDER BY department ASC
-        `);
+        `,
+            timeFilter.params
+        );
 
         // Wörterbuch-Einträge pro Abteilung
         const [dictRows] = await db.execute<any[]>(`
@@ -59,7 +107,6 @@ export async function GET(req: NextRequest) {
         `);
 
         // Gruppen-Bausteine pro Abteilung
-        // Zähle template_group_entries für Gruppen, deren Mitglieder in der Abteilung sind
         const [groupTemplateRows] = await db.execute<any[]>(`
             SELECT
                 COALESCE(NULLIF(TRIM(u.department), ''), '(ohne Abteilung)') AS department,
@@ -109,6 +156,7 @@ export async function GET(req: NextRequest) {
 
         return NextResponse.json({
             timestamp: new Date().toISOString(),
+            period: monthParam || 'all',
             departments,
         });
     } catch (error: any) {

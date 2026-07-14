@@ -9,6 +9,11 @@ import EditableTextWithMitlesen from './EditableTextWithMitlesen';
 import TrainingMarker from './TrainingMarker';
 import { preprocessTranscription } from '@/lib/textFormatting';
 
+// Persists the last-opened archive dictation id so the user can re-find it
+// after closing the detail panel or reloading. Separate from the queue's key
+// so queue and archive track the 'last opened' row independently.
+const LAST_OPENED_ARCHIVE_DICTATION_STORAGE_KEY = 'offline-last-opened-archive-dictation-id';
+
 // Segment interface for word-level highlighting (Mitlesen)
 interface TranscriptSegment {
   start: number;
@@ -60,6 +65,27 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // Remembers the most recently opened archive dictation so its row stays
+  // highlighted (amber) even after the detail panel is closed. Independent
+  // from `selectedId`, mirroring the behaviour of the queue.
+  const [lastOpenedDictationId, setLastOpenedDictationId] = useState<number | null>(null);
+
+  const rememberLastOpenedDictation = useCallback((dictationId: number) => {
+    setLastOpenedDictationId(dictationId);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LAST_OPENED_ARCHIVE_DICTATION_STORAGE_KEY, String(dictationId));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedValue = window.localStorage.getItem(LAST_OPENED_ARCHIVE_DICTATION_STORAGE_KEY);
+    if (!storedValue) return;
+    const parsed = Number(storedValue);
+    if (Number.isInteger(parsed) && parsed > 0) {
+      setLastOpenedDictationId(parsed);
+    }
+  }, []);
   const [showCorrectionLog, setShowCorrectionLog] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<number | null>(null);
   const [showAllLayers, setShowAllLayers] = useState(false);
@@ -506,10 +532,22 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
                   dictations.map((dict) => (
                     <tr
                       key={dict.id}
-                      className={`hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer ${
-                        selectedId === dict.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                      className={`cursor-pointer transition-colors ${
+                        selectedId === dict.id
+                          ? 'bg-blue-50 dark:bg-blue-900/20'
+                          : !selectedId && lastOpenedDictationId === dict.id
+                            ? 'bg-amber-50 dark:bg-amber-900/20 ring-1 ring-inset ring-amber-200 dark:ring-amber-800'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-800'
                       }`}
-                      onClick={() => setSelectedId(selectedId === dict.id ? null : dict.id)}
+                      onClick={() => {
+                        if (selectedId === dict.id) {
+                          // Closing the detail panel keeps the last-opened mark.
+                          setSelectedId(null);
+                        } else {
+                          rememberLastOpenedDictation(dict.id);
+                          setSelectedId(dict.id);
+                        }
+                      }}
                     >
                       <td className="px-3 py-2 font-mono text-xs">{dict.order_number}</td>
                       <td className="px-3 py-2">

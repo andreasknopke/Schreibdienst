@@ -69,6 +69,10 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
   // Audio player state
   const audioRef = useRef<HTMLAudioElement>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  // Mirror of audioUrl so other effects/handlers can read its current value
+  // without depending on the state itself (avoids stale closures & re-runs).
+  const audioUrlRef = useRef<string | null>(null);
+  useEffect(() => { audioUrlRef.current = audioUrl; }, [audioUrl]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioCurrentTime, setAudioCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -77,6 +81,8 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
   
   // Mitlesen state
   const [showMitlesen, setShowMitlesen] = useState(false);
+  const [rawTranscriptCollapsed, setRawTranscriptCollapsed] = useState(false);
+  const parsedSegmentsRef = useRef<HTMLDivElement>(null);
   const [parsedSegments, setParsedSegments] = useState<TranscriptSegment[]>([]);
   const [formattedRawText, setFormattedRawText] = useState('');
   
@@ -129,6 +135,26 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
   
   // Load detail data on demand when a dictation is selected
   useEffect(() => {
+    // Reset audio state when switching dictations (or closing detail).
+    // Without this, the audio element keeps pointing at the previous
+    // dictation's blob URL and the player shows stale state.
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.removeAttribute('src');
+      audioRef.current.load?.();
+    }
+    const prevUrl = audioUrlRef.current;
+    if (prevUrl) {
+      URL.revokeObjectURL(prevUrl);
+    }
+    setAudioUrl(null);
+    setAudioError(null);
+    setAudioCurrentTime(0);
+    setAudioDuration(0);
+    setIsPlaying(false);
+    setShowMitlesen(false);
+    setRawTranscriptCollapsed(false);
+
     if (!selectedId) {
       setDetailData(null);
       setParsedSegments([]);
@@ -204,6 +230,11 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
 
   const seekToStart = () => { if (audioRef.current) audioRef.current.currentTime = 0; };
 
+  // Seek audio to start of a word (used by Mitlesen original-transcript panel)
+  const seekToWord = (time: number) => {
+    if (audioRef.current) audioRef.current.currentTime = time;
+  };
+
   // Jump audio player to a specific time (used by TrainingMarker)
   const seekToTime = useCallback((seconds: number) => {
     const apply = () => {
@@ -236,6 +267,77 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
     const m = Math.floor(secs / 60); const s = Math.floor(secs % 60);
     return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
   };
+
+  // Collapsible panel showing the original (raw) Whisper transcript with
+  // word-level Mitlesen highlighting. Mirrors DictationQueue's compact panel.
+  const renderOriginalTranscriptPanel = useCallback(() => {
+    if (!showMitlesen || parsedSegments.length === 0) return null;
+    return (
+      <div
+        ref={parsedSegmentsRef}
+        className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 border border-yellow-200 dark:border-yellow-800"
+      >
+        <div
+          className="text-sm font-medium flex items-center justify-between cursor-pointer select-none"
+          onClick={() => setRawTranscriptCollapsed(!rawTranscriptCollapsed)}
+        >
+          <div className="flex items-center gap-2">
+            <span className={`transform transition-transform ${rawTranscriptCollapsed ? '' : 'rotate-90'}`}>▶</span>
+            <span>📖 Originaltranskript (Mitlesen)</span>
+            <span className="text-xs text-gray-500">- Klicke auf ein Wort zum Springen</span>
+          </div>
+          <span className="text-xs text-gray-400">
+            {rawTranscriptCollapsed ? '(eingeklappt)' : '(einklappen)'}
+          </span>
+        </div>
+        {!rawTranscriptCollapsed && (
+          <div className="text-sm leading-relaxed mt-2 overflow-auto max-h-48">
+            {parsedSegments.map((segment, segIdx) => (
+              <span key={segIdx}>
+                {segment.words ? (
+                  segment.words.map((word, wordIdx) => {
+                    if (word.start === undefined || word.end === undefined) {
+                      return <span key={`${segIdx}-${wordIdx}`}>{word.word}{' '}</span>;
+                    }
+                    const isCurrentWord = audioCurrentTime >= word.start && audioCurrentTime < word.end;
+                    return (
+                      <span
+                        key={`${segIdx}-${wordIdx}`}
+                        className={`cursor-pointer rounded px-0.5 transition-colors duration-100 ${
+                          isCurrentWord
+                            ? 'bg-yellow-300 dark:bg-yellow-600 font-medium'
+                            : audioCurrentTime > word.end
+                              ? 'text-gray-500 dark:text-gray-500'
+                              : 'hover:bg-yellow-200 dark:hover:bg-yellow-700'
+                        }`}
+                        onClick={() => seekToWord(word.start)}
+                        title={`${word.start.toFixed(1)}s - ${word.end.toFixed(1)}s`}
+                      >
+                        {word.word}{' '}
+                      </span>
+                    );
+                  })
+                ) : (
+                  <span
+                    className={`cursor-pointer rounded px-0.5 transition-colors duration-100 ${
+                      audioCurrentTime >= segment.start && audioCurrentTime < segment.end
+                        ? 'bg-yellow-300 dark:bg-yellow-600 font-medium'
+                        : audioCurrentTime > segment.end
+                          ? 'text-gray-500 dark:text-gray-500'
+                          : 'hover:bg-yellow-200 dark:hover:bg-yellow-700'
+                    }`}
+                    onClick={() => seekToWord(segment.start)}
+                  >
+                    {segment.text}{' '}
+                  </span>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }, [showMitlesen, parsedSegments, audioCurrentTime, rawTranscriptCollapsed]);
 
   const handleUnarchive = async (id: number) => {
     if (!confirm('Diktat wirklich wiederherstellen?')) return;
@@ -547,6 +649,10 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
                 </div>
               )}
             </div>
+
+            {/* Original transcript panel (Mitlesen) - shows raw transcription
+                alongside the corrected text, like in the queue view */}
+            {renderOriginalTranscriptPanel()}
 
             {/* EditableTextWithMitlesen — read-only with audio sync */}
             {detailData && (

@@ -99,8 +99,16 @@ export default function TrainingMarker({
   defaultCorrectedText,
   onSeek,
 }: Props) {
-  const { username } = useAuth();
+  const { username, getAuthHeader } = useAuth();
   const isRoot = (username || '').toLowerCase() === 'root';
+
+  // Wrapper: fetchWithDbToken already injects X-DB-Token, but root-only API
+  // routes additionally require `Authorization: Basic ...` (see getAuthenticatedRoot).
+  const authFetch = (url: string, opts: RequestInit = {}) =>
+    fetchWithDbToken(url, {
+      ...opts,
+      headers: { ...opts.headers, Authorization: getAuthHeader() },
+    });
 
   const [samples, setSamples] = useState<TrainingSample[]>([]);
   const [loading, setLoading] = useState(false);
@@ -133,7 +141,7 @@ export default function TrainingMarker({
     try {
       setLoading(true);
       setError(null);
-      const res = await fetchWithDbToken(`/api/training-samples?dictationId=${dictationId}`);
+      const res = await authFetch(`/api/training-samples?dictationId=${dictationId}`);
       if (!res.ok) throw new Error(`Laden fehlgeschlagen (${res.status})`);
       const data = await res.json();
       setSamples(data.samples || []);
@@ -193,7 +201,7 @@ export default function TrainingMarker({
     async (id: number) => {
       if (!confirm('Trainingsmarkierung wirklich löschen?')) return;
       try {
-        const res = await fetchWithDbToken(`/api/training-samples?id=${id}`, { method: 'DELETE' });
+        const res = await authFetch(`/api/training-samples?id=${id}`, { method: 'DELETE' });
         if (!res.ok) throw new Error('Löschen fehlgeschlagen');
         await loadSamples();
       } catch (err: any) {
@@ -223,7 +231,7 @@ export default function TrainingMarker({
         end_time: draft.endTime,
         note: draft.note || undefined,
       };
-      const res = await fetchWithDbToken('/api/training-samples', {
+      const res = await authFetch('/api/training-samples', {
         method: draft.editId ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: draft.editId ? JSON.stringify({ id: draft.editId, ...body }) : JSON.stringify(body),
@@ -246,7 +254,7 @@ export default function TrainingMarker({
     async (id: number) => {
       try {
         setVerifyingId(id);
-        const res = await fetchWithDbToken('/api/training-samples/verify', {
+        const res = await authFetch('/api/training-samples/verify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id }),
@@ -266,7 +274,7 @@ export default function TrainingMarker({
 
   const playSlice = useCallback(async (s: TrainingSample) => {
     try {
-      const res = await fetchWithDbToken(`/api/training-samples/audio?id=${s.id}`);
+      const res = await authFetch(`/api/training-samples/audio?id=${s.id}`);
       if (!res.ok) throw new Error(`Audio-Laden fehlgeschlagen (${res.status})`);
       const buf = await res.arrayBuffer();
       const blob = new Blob([buf], { type: 'audio/wav' });

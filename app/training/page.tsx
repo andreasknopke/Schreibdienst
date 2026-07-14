@@ -95,8 +95,16 @@ function formatPercent(value: number | null | undefined): string {
 // ── Component ────────────────────────────────────────────────────────────
 
 export default function TrainingView() {
-  const { username } = useAuth();
+  const { username, getAuthHeader } = useAuth();
   const isRoot = (username || '').toLowerCase() === 'root';
+
+  // Wrapper: fetchWithDbToken already injects X-DB-Token, but root-only API
+  // routes additionally require `Authorization: Basic ...` (see getAuthenticatedRoot).
+  const authFetch = (url: string, opts: RequestInit = {}) =>
+    fetchWithDbToken(url, {
+      ...opts,
+      headers: { ...opts.headers, Authorization: getAuthHeader() },
+    });
 
   const [stats, setStats] = useState<TrainingStats | null>(null);
   const [samples, setSamples] = useState<TrainingSample[]>([]);
@@ -114,8 +122,8 @@ export default function TrainingView() {
       setLoading(true);
       setError(null);
       const [statsRes, listRes] = await Promise.all([
-        fetchWithDbToken('/api/training-samples?stats=true'),
-        fetchWithDbToken('/api/training-samples'),
+        authFetch('/api/training-samples?stats=true'),
+        authFetch('/api/training-samples'),
       ]);
       if (!statsRes.ok) throw new Error(`Stats laden fehlgeschlagen (${statsRes.status})`);
       if (!listRes.ok) throw new Error(`Liste laden fehlgeschlagen (${listRes.status})`);
@@ -138,7 +146,7 @@ export default function TrainingView() {
     try {
       setVerifyingId(id);
       setExpandedId(id);
-      const res = await fetchWithDbToken('/api/training-samples/verify', {
+      const res = await authFetch('/api/training-samples/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
@@ -159,7 +167,7 @@ export default function TrainingView() {
     if (!confirm(`Alle ${samples.length} Markierungen prüfen? Das kann mehrere Minuten dauern.`)) return;
     try {
       setVerifyingAll(true);
-      const res = await fetchWithDbToken('/api/training-samples/verify', {
+      const res = await authFetch('/api/training-samples/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ all: true }),
@@ -179,7 +187,7 @@ export default function TrainingView() {
 
   const playSlice = useCallback(async (s: TrainingSample) => {
     try {
-      const res = await fetchWithDbToken(`/api/training-samples/audio?id=${s.id}`);
+      const res = await authFetch(`/api/training-samples/audio?id=${s.id}`);
       if (!res.ok) throw new Error(`Audio-Laden fehlgeschlagen (${res.status})`);
       const buf = await res.arrayBuffer();
       const blob = new Blob([buf], { type: 'audio/wav' });
@@ -195,7 +203,7 @@ export default function TrainingView() {
   const deleteSample = useCallback(async (id: number) => {
     if (!confirm('Trainingsmarkierung löschen?')) return;
     try {
-      const res = await fetchWithDbToken(`/api/training-samples?id=${id}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/training-samples?id=${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Löschen fehlgeschlagen');
       await loadAll();
     } catch (err: any) {

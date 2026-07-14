@@ -31,6 +31,7 @@ function getLiveEditorWidthClass(width: LiveEditorWidth): string {
 function LayoutContent({ children }: { children: ReactNode }) {
   const { isLoggedIn, canViewAllDictations, username, isAdmin } = useAuth();
   const pathname = usePathname();
+  const isRoot = (username || '').toLowerCase() === 'root';
   const [liveEditorWidth, setLiveEditorWidth] = React.useState<LiveEditorWidth>('small');
 
   useEffect(() => {
@@ -59,7 +60,7 @@ function LayoutContent({ children }: { children: ReactNode }) {
 
   const pageWidthClass = pathname === '/'
     ? getLiveEditorWidthClass(liveEditorWidth)
-    : pathname === '/offline' || pathname === '/stats'
+    : pathname === '/offline' || pathname === '/stats' || pathname === '/training'
       ? 'w-full'
       : 'max-w-2xl';
 
@@ -148,6 +149,18 @@ function LayoutContent({ children }: { children: ReactNode }) {
                 }`}
               >
                 📊 Stats
+              </Link>
+            )}
+            {isRoot && (
+              <Link
+                href="/training"
+                className={`flex-1 py-1.5 px-3 text-center text-sm font-medium rounded-md transition-all ${
+                  pathname === '/training'
+                    ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                }`}
+              >
+                🎓 Training
               </Link>
             )}
           </div>

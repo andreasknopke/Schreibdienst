@@ -6,6 +6,7 @@ import Spinner from './Spinner';
 import { ChangeIndicator } from './ChangeIndicator';
 import CorrectionLogViewer from './CorrectionLogViewer';
 import EditableTextWithMitlesen from './EditableTextWithMitlesen';
+import TrainingMarker from './TrainingMarker';
 import { preprocessTranscription } from '@/lib/textFormatting';
 
 // Segment interface for word-level highlighting (Mitlesen)
@@ -202,6 +203,30 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
   };
 
   const seekToStart = () => { if (audioRef.current) audioRef.current.currentTime = 0; };
+
+  // Jump audio player to a specific time (used by TrainingMarker)
+  const seekToTime = useCallback((seconds: number) => {
+    const apply = () => {
+      if (!audioRef.current) return false;
+      try {
+        audioRef.current.currentTime = Math.max(0, seconds);
+        audioRef.current.play().catch(() => {});
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (audioRef.current) {
+      apply();
+      return;
+    }
+    // Auto-load audio first if not yet loaded, then seek.
+    if (selectedId) {
+      loadAudio(selectedId).then(() => {
+        setTimeout(apply, 200);
+      });
+    }
+  }, [selectedId, loadAudio]);
   const seekRelative = (s: number) => {
     if (audioRef.current) audioRef.current.currentTime = Math.max(0, Math.min(audioDuration, audioRef.current.currentTime + s));
   };
@@ -588,6 +613,15 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
               <button className="btn btn-sm btn-outline" onClick={() => setShowCorrectionLog(true)}>📋 Protokoll</button>
               <button className="btn btn-sm btn-outline" onClick={() => handleUnarchive(selectedDictation.id)}>↩️ Wiederherstellen</button>
             </div>
+
+            {detailData && (
+              <TrainingMarker
+                dictationId={detailData.id}
+                segments={parsedSegments}
+                defaultCorrectedText={detailData.corrected_text || detailData.transcript || ''}
+                onSeek={seekToTime}
+              />
+            )}
           </div>
         </div>
       )}

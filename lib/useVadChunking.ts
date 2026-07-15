@@ -103,7 +103,17 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
 
   const start = useCallback(async () => {
     if (stopPromiseRef.current) {
-      await stopPromiseRef.current;
+      // Timeout für ausstehendes Destroy, damit die Record-Taste nicht blockiert
+      const DESTROY_TIMEOUT_MS = 5000;
+      await Promise.race([
+        stopPromiseRef.current,
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('Destroy-Timeout nach ' + DESTROY_TIMEOUT_MS + 'ms')), DESTROY_TIMEOUT_MS)
+        ),
+      ]).catch((err) => {
+        console.warn('[VAD] stopPromiseRef.current timeout – force-clearing:', err?.message || err);
+        stopPromiseRef.current = null;
+      });
     }
 
     const sessionId = sessionIdRef.current + 1;
@@ -345,7 +355,17 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
 
     const stopPromise = (async () => {
       if (currentVad) {
-        await currentVad.destroy();
+        // Timeout für destroy(), damit die Aufnahme auch dann sauber endet,
+        // wenn das Silero-Modell/AudioContext hängt (z.B. bei Nordic-Geräten
+        // nach längerer Diktat-Pause).
+        await Promise.race([
+          currentVad.destroy(),
+          new Promise<void>((_, reject) =>
+            setTimeout(() => reject(new Error('VAD destroy timeout')), 3000)
+          ),
+        ]).catch(err => {
+          console.warn('[VAD] destroy error/timeout:', err?.message || err);
+        });
       }
       analyserRef.current = null;
     })().finally(() => {

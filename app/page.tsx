@@ -4673,6 +4673,29 @@ export default function HomePage() {
     
     if (useVadMode) {
       // VAD-Modus: Kein MediaRecorder, VAD übernimmt Mikrofon und liefert Utterances
+      // Vor der neuen Session: Warte auf alte Pending-Transkriptionen.
+      // Dies verhindert, dass die Session-ID-Weiterschaltung (vadSessionIdRef.current += 1)
+      // die noch vom vorherigen Stop geflushten Utterances als "stale" verwirft.
+      if (vadInFlightCountRef.current > 0 || vadPendingResultsRef.current.size > 0) {
+        console.log(
+          `[VAD] Draining stale session: inFlight=${vadInFlightCountRef.current} pending=${vadPendingResultsRef.current.size}`
+        );
+        const drainStart = Date.now();
+        while (
+          (vadInFlightCountRef.current > 0 || vadPendingResultsRef.current.size > 0) &&
+          Date.now() - drainStart < 5000
+        ) {
+          await new Promise<void>(r => setTimeout(r, 100));
+        }
+        // Force-clear, falls trotz Timeout noch Einträge übrig sind
+        if (vadInFlightCountRef.current > 0 || vadPendingResultsRef.current.size > 0) {
+          console.warn(
+            `[VAD] Force-clear stale session: inFlight=${vadInFlightCountRef.current} pending=${vadPendingResultsRef.current.size}`
+          );
+          vadPendingResultsRef.current.clear();
+          vadInFlightCountRef.current = 0;
+        }
+      }
       vadSessionIdRef.current += 1;
       // Im Befund-Modus startet der Kontext-Buffer mit dem Inhalt des aktuell
       // aktiven Feldes (methodik / befund / beurteilung), damit Online-Steuerwörter
@@ -4702,12 +4725,20 @@ export default function HomePage() {
       setVadFailedUtterances([]);
 
       try {
-        await vad.start();
+        // Timeout für VAD-Start, damit die Record-Taste nicht für immer blockiert,
+        // falls das VAD-Destroy aus einer vorherigen Session hängt.
+        const VAD_START_TIMEOUT_MS = 10000;
+        const vadStartPromise = vad.start();
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('VAD-Start-Timeout nach ' + VAD_START_TIMEOUT_MS + 'ms')), VAD_START_TIMEOUT_MS)
+        );
+        await Promise.race([vadStartPromise, timeoutPromise]);
         setRecording(true);
       } catch (err: any) {
         console.error('[VAD] Start error:', err);
         const msg = err?.message || String(err);
-        const hint = msg.includes('null stream') || msg.includes('audio context')
+        const isTimeout = msg.includes('Timeout');
+        const hint = !isTimeout && (msg.includes('null stream') || msg.includes('audio context'))
           ? ' – Bitte erneut versuchen (Mikrofon war noch nicht bereit)'
           : '';
         setError('VAD Mikrofon-Zugriff fehlgeschlagen: ' + msg + hint);
@@ -4886,8 +4917,37 @@ export default function HomePage() {
       }
       await vad.stop();
       setAudioLevel(0);
-      setRecording(false);
       recordingStartedAtRef.current = null;
+
+      // WICHTIG: Auf Abschluss aller noch laufenden Transkriptionen warten.
+      // vad.stop() flushed die letzten Audio-Frames als onUtterance(). Deren
+      // handleVadUtterance läuft asynchron – stopRecording() muss warten,
+      // sonst geht der letzte Chunk verloren, sobald startRecording()
+      // die Session-ID weiterschaltet.
+      {
+        const waitStart = Date.now();
+        const MAX_VAD_WAIT_MS = 15000;
+        while (
+          (vadInFlightCountRef.current > 0 || vadPendingResultsRef.current.size > 0) &&
+          Date.now() - waitStart < MAX_VAD_WAIT_MS
+        ) {
+          console.log(
+            `[VAD] Wait for pending utterances: inFlight=${vadInFlightCountRef.current} pending=${vadPendingResultsRef.current.size} (${Date.now() - waitStart}ms)`
+          );
+          await new Promise<void>(r => setTimeout(r, 150));
+        }
+        if (vadInFlightCountRef.current > 0 || vadPendingResultsRef.current.size > 0) {
+          console.warn(
+            `[VAD] Timeout – force-clear ${vadInFlightCountRef.current} inFlight, ${vadPendingResultsRef.current.size} pending after ${Date.now() - waitStart}ms`
+          );
+          vadPendingResultsRef.current.clear();
+          vadInFlightCountRef.current = 0;
+        } else {
+          console.log(`[VAD] All utterances processed (${Date.now() - waitStart}ms)`);
+        }
+      }
+
+      setRecording(false);
       // Falls beim Stop keine Utterance mehr aussteht, kann direkt eingearbeitet werden.
       if (
         pendingTemplateIntegrationRef.current &&

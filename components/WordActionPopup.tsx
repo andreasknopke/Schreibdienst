@@ -39,11 +39,13 @@ export default function WordActionPopup({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [correctValue, setCorrectValue] = useState(word);
+  const [addToGroup, setAddToGroup] = useState(false);
 
   useEffect(() => {
     setMode('menu');
     setError('');
     setCorrectValue(word);
+    setAddToGroup(false);
   }, [word]);
 
   useEffect(() => {
@@ -79,7 +81,7 @@ export default function WordActionPopup({
           wrong: word,
           correct: correctValue.trim(),
           username: targetUsername,
-          groupId,
+          groupId: addToGroup ? groupId : undefined,
         }),
       });
       const data = await response.json();
@@ -213,9 +215,9 @@ export default function WordActionPopup({
                 className="w-full rounded px-3 py-2 text-left text-sm transition-colors hover:bg-blue-50 dark:hover:bg-blue-950/40"
                 disabled={isSubmitting}
               >
-                <div className="font-medium">📖 In Wörterbuch aufnehmen</div>
+                <div className="font-medium">✎ Korrektur im Wörterbuch speichern</div>
                 <div className="text-xs text-gray-500">
-                  Als self-mapping oder mit anderer korrekter Schreibweise speichern
+                  Korrigierte Schreibweise eingeben und ins Wörterbuch übernehmen
                 </div>
               </button>
             )}
@@ -298,6 +300,19 @@ export default function WordActionPopup({
                 className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm font-mono focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-900"
               />
             </div>
+            {groupId != null && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={addToGroup}
+                  onChange={(e) => setAddToGroup(e.target.checked)}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600"
+                />
+                <span className="text-gray-700 dark:text-gray-300">
+                  Ins Abteilungswörterbuch übernehmen
+                </span>
+              </label>
+            )}
             {error && (
               <div className="text-xs text-red-700 dark:text-red-300">{error}</div>
             )}

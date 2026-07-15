@@ -327,14 +327,11 @@ AUSGABEFORMAT:
 
     let userMessage: string;
     if (isOptionenMode) {
-      userMessage = `TEXTBAUSTEIN MIT OPTIONEN (wähle aus den [Optionen] basierend auf den Änderungen):
+      userMessage = `TEXTBAUSTEIN MIT OPTIONEN:
 ${cleanedTemplate}
 
-DIKTIERTE ÄNDERUNGEN (ordne diese den [Optionen] im Textbaustein zu):
+DIKTIERTE ÄNDERUNGEN (prüfe, ob eine Änderung EXAKT mit einer [Option] übereinstimmt):
 ${changes}
-
-WICHTIG: {…} am Absatzanfang sind Wiederholungs-Marker, KEINE Optionen.
-Absätze mit {…} können mehrfach vorkommen, Absätze ohne {…} nicht.
 
 Gib den vollständigen angepassten Text zurück:`;
     } else {
@@ -343,9 +340,6 @@ ${cleanedTemplate}
 
 DIKTIERTE ÄNDERUNGEN (füge diese an der semantisch passenden Stelle ein, NICHT mitten in einen Satz):
 ${changes}
-
-WICHTIG: {…} am Absatzanfang sind Wiederholungs-Marker, KEINE Optionen.
-Absätze mit {…} können mehrfach vorkommen, Absätze ohne {…} nicht.
 
 Gib den vollständigen angepassten Text zurück:`;
     }

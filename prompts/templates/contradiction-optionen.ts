@@ -1,11 +1,14 @@
 export const CONTRADICTION_OPTIONEN = `
 Der Textbaustein enthält Wahlmöglichkeiten in [eckigen Klammern], z. B. "[Option A/Option B]".
 
-DEINE AUFGABE FUER [ECKIGE KLAMMERN]:
-- Waehle aus den Optionen in [Klammern] diejenige aus, die der diktierten Aenderung am naechsten kommt
-- Ersetze die gesamte eckige Klammer inklusive Inhalt durch die gewaehlte Option
-- Stimmt KEINE der Optionen mit der diktierten Aenderung ueberein, lasse die Klammer unveraendert
-- Widerspruchsprufung ist in diesem Modus NICKT noetig – die Optionen definieren die
+DEINE AUFGABE FUER [ECKIGE KLAMMERN] (STRENG NACH PRIORITAET):
+1. Pruefe, ob die diktierte Aenderung EXAKT mit einer der Optionen uebereinstimmt
+   (auch synonymisch, z.B. "rechte Seite" = "rechts").
+2. Nur bei exakter Uebereinstimmung: Ersetze die gesamte eckige Klammer
+   inklusive Inhalt durch diese Option.
+3. Stimmt KEINE Option exakt ueberein: Lasse die Klammer UNVERAENDERT.
+   Waehle NICHT die "am naechsten liegende" Option als Kompromiss.
+- Widerspruchsprufung ist in diesem Modus NICHT noetig – die Optionen definieren die
   gueltigen Alternativen bereits
 
 UNUSED-TEXT (SEHR WICHTIG):

@@ -81,6 +81,35 @@ interface EditableTextWithMitlesenProps {
   className?: string;
   disabled?: boolean;
   dictionaryTargetUsername?: string;
+
+  // Inline training-data selection (used by archive view for root users).
+  // When enabled, the user can select text directly here; the selection's
+  // character range is mapped to overlapping timestamped words and reported
+  // back via onTrainingSelection so the parent can store a training sample
+  // without a separate editor modal.
+  enableTrainingSelection?: boolean;
+  onTrainingSelection?: (selection: {
+    correctedText: string;
+    startTime: number;
+    endTime: number;
+  }) => void;
+}
+
+/**
+ * Compute the character offset of (node, offset) inside `container` by
+ * building a Range from the container's start to (node, offset). The
+ * concatenated text length of that range equals the position inside the
+ * rendered (whitespace-preserving) text content.
+ */
+function getCharOffsetInContainer(container: Node, node: Node, offset: number): number {
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    range.setEnd(node, offset);
+    return range.toString().length;
+  } catch {
+    return -1;
+  }
 }
 
 interface ManualWordChange {
@@ -345,6 +374,8 @@ export default function EditableTextWithMitlesen({
   className = '',
   disabled = false,
   dictionaryTargetUsername,
+  enableTrainingSelection = false,
+  onTrainingSelection,
 }: EditableTextWithMitlesenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editableRef = useRef<HTMLDivElement>(null);
@@ -648,6 +679,88 @@ export default function EditableTextWithMitlesen({
   const closeWordPopup = useCallback(() => {
     setWordPopup(null);
   }, []);
+  
+  // ── Inline training selection ────────────────────────────────────────
+  // Lets the user select representative sentences directly in the final
+  // manuscript while Mitlesen is active. The selection is mapped to the
+  // overlapping timestamped words (start of first ↔ end of last) and the
+  // selected text is reported back. The parent (ArchiveView) then derives
+  // the voxtral original and stores the sample directly — no modal needed.
+  interface TrainingSelectionState {
+    text: string;
+    startTime: number;
+    endTime: number;
+    rect: { top: number; left: number };
+  }
+  const [trainingSelection, setTrainingSelection] = useState<TrainingSelectionState | null>(null);
+
+  const handleMouseUp = useCallback(() => {
+    if (!enableTrainingSelection || !onTrainingSelection) {
+      setTrainingSelection(null);
+      return;
+    }
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+      setTrainingSelection(null);
+      return;
+    }
+    const selectedText = selection.toString().trim();
+    if (selectedText.length < 2) {
+      setTrainingSelection(null);
+      return;
+    }
+
+    const container = editableRef.current;
+    if (!container) return;
+
+    const range = selection.getRangeAt(0);
+    // Only handle selections fully inside the editor.
+    if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) {
+      setTrainingSelection(null);
+      return;
+    }
+
+    // Compute char offsets in the rendered text.
+    const startOffset = getCharOffsetInContainer(container, range.startContainer, range.startOffset);
+    const endOffset = getCharOffsetInContainer(container, range.endContainer, range.endOffset);
+    if (startOffset < 0 || endOffset <= startOffset) {
+      setTrainingSelection(null);
+      return;
+    }
+    const lo = Math.min(startOffset, endOffset);
+    const hi = Math.max(startOffset, endOffset);
+
+    // Find overlapping timestamped words (by charPos) to derive time range.
+    const overlapping = timestampedWords.filter(
+      (w) => w.charPos + w.word.length > lo && w.charPos < hi
+    );
+    if (overlapping.length === 0) {
+      setTrainingSelection(null);
+      return;
+    }
+    const startTime = overlapping[0].start;
+    const endTime = overlapping[overlapping.length - 1].end;
+
+    const rect = range.getBoundingClientRect();
+    setTrainingSelection({
+      text: selectedText,
+      startTime,
+      endTime,
+      rect: { top: rect.top, left: rect.left + rect.width / 2 },
+    });
+  }, [enableTrainingSelection, onTrainingSelection, timestampedWords]);
+
+  const confirmTrainingSelection = useCallback(() => {
+    if (!trainingSelection || !onTrainingSelection) return;
+    onTrainingSelection({
+      correctedText: trainingSelection.text,
+      startTime: trainingSelection.startTime,
+      endTime: trainingSelection.endTime,
+    });
+    setTrainingSelection(null);
+    // Clear the native selection so the floating button disappears.
+    window.getSelection()?.removeAllRanges();
+  }, [trainingSelection, onTrainingSelection]);
   
   // Listen for dictionary changes and apply replacements to text (like online mode)
   useEffect(() => {
@@ -992,9 +1105,20 @@ export default function EditableTextWithMitlesen({
           className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none min-h-[200px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 ${className}`}
           style={{ whiteSpace: 'pre-wrap' }}
           onDoubleClick={handleWordDoubleClick}
+          onMouseUp={handleMouseUp}
         >
           {localText}
         </div>
+        {trainingSelection && (
+          <button
+            onClick={confirmTrainingSelection}
+            style={{ position: 'fixed', top: trainingSelection.rect.top - 48, left: trainingSelection.rect.left }}
+            className="z-[70] -translate-x-1/2 px-3 py-1.5 text-xs font-medium rounded-lg shadow-lg bg-purple-600 hover:bg-purple-700 text-white whitespace-nowrap"
+            title="Auswahl als Trainingsbeispiel speichern"
+          >
+            🎯 Als Trainingsbeispiel
+          </button>
+        )}
         {lastManualChange && !disabled && (
           <ManualCorrectionSuggestion
             originalWord={lastManualChange.originalWord}
@@ -1064,9 +1188,20 @@ export default function EditableTextWithMitlesen({
         className={`w-full p-3 rounded-lg text-sm leading-relaxed border outline-none overflow-auto min-h-[200px] max-h-[400px] bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 ${className}`}
         style={{ whiteSpace: 'pre-wrap' }}
         onDoubleClick={handleWordDoubleClick}
+        onMouseUp={handleMouseUp}
       >
         {renderContent()}
       </div>
+      {trainingSelection && (
+        <button
+          onClick={confirmTrainingSelection}
+          style={{ position: 'fixed', top: trainingSelection.rect.top - 48, left: trainingSelection.rect.left }}
+          className="z-[70] -translate-x-1/2 px-3 py-1.5 text-xs font-medium rounded-lg shadow-lg bg-purple-600 hover:bg-purple-700 text-white whitespace-nowrap"
+          title="Auswahl als Trainingsbeispiel speichern"
+        >
+          🎯 Als Trainingsbeispiel
+        </button>
+      )}
       {lastManualChange && !disabled && (
         <ManualCorrectionSuggestion
           originalWord={lastManualChange.originalWord}

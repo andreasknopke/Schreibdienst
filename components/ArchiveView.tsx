@@ -60,7 +60,8 @@ interface ArchiveViewProps {
 }
 
 export default function ArchiveView({ username, canViewAll = false }: ArchiveViewProps) {
-  const { getAuthHeader } = useAuth();
+  const { username: authedUsername, getAuthHeader } = useAuth();
+  const isRoot = (authedUsername || '').toLowerCase() === 'root';
   const [dictations, setDictations] = useState<ArchivedDictation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -284,6 +285,61 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
       });
     }
   }, [selectedId, loadAudio]);
+
+  // External reload trigger for TrainingMarker, incremented after an inline
+  // training selection has been stored directly (without opening the modal).
+  const [trainingRefreshSignal, setTrainingRefreshSignal] = useState(0);
+  const [trainingSaving, setTrainingSaving] = useState(false);
+
+  /**
+   * Stores a training sample directly from a text selection made inside the
+   * final manuscript (instead of opening the TrainingMarker modal). Derives
+   * the voxtral original from the segments overlapping the time range.
+   */
+  const handleTrainingSelection = useCallback(
+    async (sel: { correctedText: string; startTime: number; endTime: number }) => {
+      if (!selectedId || !detailData) return;
+      const dictationId = detailData.id;
+      const lo = Math.min(sel.startTime, sel.endTime);
+      const hi = Math.max(sel.startTime, sel.endTime);
+      // Voxtral original = words from segments that fall inside the time range.
+      const voxtralSlice: string[] = [];
+      for (const seg of parsedSegments) {
+        if (!seg.words) continue;
+        for (const w of seg.words) {
+          if (typeof w.start === 'number' && typeof w.end === 'number' &&
+              w.start >= lo - 0.001 && w.end <= hi + 0.001) {
+            voxtralSlice.push(w.word);
+          }
+        }
+      }
+      try {
+        setTrainingSaving(true);
+        const res = await fetchWithDbToken('/api/training-samples', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: getAuthHeader() },
+          body: JSON.stringify({
+            dictation_id: dictationId,
+            voxtral_raw_text: voxtralSlice.join(' ').trim() || sel.correctedText,
+            corrected_text: sel.correctedText,
+            start_time: lo,
+            end_time: hi,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `Speichern fehlgeschlagen (${res.status})`);
+        }
+        // Tell TrainingMarker to reload its list.
+        setTrainingRefreshSignal((n) => n + 1);
+      } catch (err: any) {
+        alert(`Trainingsmarkierung konnte nicht gespeichert werden: ${err.message}`);
+      } finally {
+        setTrainingSaving(false);
+      }
+    },
+    [selectedId, detailData, parsedSegments, getAuthHeader]
+  );
   const seekRelative = (s: number) => {
     if (audioRef.current) audioRef.current.currentTime = Math.max(0, Math.min(audioDuration, audioRef.current.currentTime + s));
   };
@@ -684,6 +740,12 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
                   ) : (
                     <span className="text-xs text-gray-400">ℹ️ Mitlesen nicht verfügbar (keine Wort-Zeitstempel)</span>
                   )}
+                  {isRoot && parsedSegments.length > 0 && (
+                    <span className="text-xs text-gray-500 dark:text-gray-400 ml-auto">
+                      💡 Text markieren → <span className="font-medium text-purple-600 dark:text-purple-400">🎯 Als Trainingsbeispiel</span>
+                      {trainingSaving && <span className="ml-2 text-blue-500">speichert…</span>}
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -711,6 +773,8 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
                     disabled={true}
                     className="min-h-[40vh]"
                     dictionaryTargetUsername={selectedDictation.username}
+                    enableTrainingSelection={isRoot && parsedSegments.length > 0}
+                    onTrainingSelection={handleTrainingSelection}
                     onChange={() => {}}
                   />
                 )}
@@ -764,6 +828,7 @@ export default function ArchiveView({ username, canViewAll = false }: ArchiveVie
                 segments={parsedSegments}
                 defaultCorrectedText={detailData.corrected_text || detailData.transcript || ''}
                 onSeek={seekToTime}
+                refreshSignal={trainingRefreshSignal}
               />
             )}
           </div>

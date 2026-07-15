@@ -79,10 +79,15 @@ function formatPercent(value: number | null | undefined): string {
 interface Props {
   dictationId: number;
   segments: Segment[];
-  /** whole corrected text of the dictation (prefill for new sample) */
+  /** whole corrected text of the dictation (used as fallback) */
   defaultCorrectedText: string;
   /** allow navigation: jump audio to a timestamp */
   onSeek?: (seconds: number) => void;
+  /**
+   * Increment to force a reload of samples. Used by the parent after an
+   * inline training selection has been stored directly (without the modal).
+   */
+  refreshSignal?: number;
 }
 
 interface DraftState {
@@ -99,6 +104,7 @@ export default function TrainingMarker({
   segments,
   defaultCorrectedText,
   onSeek,
+  refreshSignal = 0,
 }: Props) {
   const { username, getAuthHeader } = useAuth();
   const isRoot = (username || '').toLowerCase() === 'root';
@@ -157,28 +163,13 @@ export default function TrainingMarker({
     if (isRoot) loadSamples();
   }, [isRoot, loadSamples]);
 
-  // ── Handlers ──────────────────────────────────────────────────────────
-
-  const startNewDraft = useCallback(() => {
-    if (!hasTimedWords) {
-      // No timestamped words → fall back to numerical entry
-      setDraft({
-        startTime: 0,
-        endTime: 0,
-        voxtralRaw: '',
-        corrected: defaultCorrectedText.slice(0, 200),
-        note: '',
-        editId: null,
-      });
-    } else {
-      // Default window = first ~5 timestamped words.
-      const startTime = flatWords[0].start;
-      const endTime = flatWords[Math.min(flatWords.length - 1, 4)].end;
-      prefillDraftFromRange(startTime, endTime, null);
-    }
-    setShowModal(true);
+  // Reload when parent signals that a new sample was stored inline.
+  useEffect(() => {
+    if (isRoot && refreshSignal > 0) loadSamples();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flatWords, hasTimedWords, defaultCorrectedText]);
+  }, [refreshSignal]);
+
+  // ── Handlers ──────────────────────────────────────────────────────────
 
   /**
    * Build a draft with voxtralRaw + corrected auto-filled from the [startTime, endTime] window:
@@ -329,9 +320,11 @@ export default function TrainingMarker({
         </div>
         <div className="flex items-center gap-2">
           {loading && <Spinner size={14} />}
-          <button className="btn btn-xs btn-primary" onClick={startNewDraft} title="Abschnitt fürs Training markieren">
-            ➕ Für Training markieren
-          </button>
+          {hasTimedWords ? (
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              Zum Markieren Text oben auswählen → <span className="font-medium text-purple-600 dark:text-purple-400">🎯 Als Trainingsbeispiel</span>
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -339,7 +332,7 @@ export default function TrainingMarker({
 
       {!hasTimedWords && (
         <div className="text-xs text-amber-600 dark:text-amber-400">
-          ℹ️ Keine Wort-Zeitstempel vorhanden. Zeitbereich muss manuell eingetragen werden.
+          ℹ️ Keine Wort-Zeitstempel vorhanden – Markierungen direkt im Text sind für dieses Diktat nicht verfügbar.
         </div>
       )}
 
@@ -505,55 +498,8 @@ export default function TrainingMarker({
                 </div>
 
                 {hasTimedWords && (
-                  <div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                      Wortauswahl (klick = Bereich anpassen). Klick vor/hinter dem Bereich vergrößert; Klick innerhalb des Bereichs verschiebt die nähere Grenze. Voxtral-Original und korrigierter Zieltext werden automatisch passend zum Zeitbereich übernommen.
-                    </div>
-                    <div className="max-h-44 overflow-y-auto rounded border border-gray-200 dark:border-gray-700 p-2 text-sm leading-relaxed bg-gray-50 dark:bg-gray-800 flex flex-wrap gap-0.5">
-                      {flatWords.map((w, i) => {
-                        const inRange =
-                          w.start >= draft.startTime - 0.001 && w.end <= draft.endTime + 0.001;
-                        return (
-                          <button
-                            key={i}
-                            onClick={() => {
-                              if (i === 0) return;
-                              const wordEnd = flatWords[i].end;
-                              const wordStart = flatWords[i].start;
-                              let newStart = draft.startTime;
-                              let newEnd = draft.endTime;
-                              if (wordEnd < draft.startTime - 0.001) {
-                                // Word entirely before range → extend start leftward.
-                                newStart = wordStart;
-                              } else if (wordStart > draft.endTime + 0.001) {
-                                // Word entirely after range → extend end rightward.
-                                newEnd = wordEnd;
-                              } else {
-                                // Word inside range → move the NEARER boundary
-                                // to this word. Left half moves start (rightward),
-                                // right half moves end (leftward), so clicks on
-                                // the tail shrink the end rather than extend it.
-                                const mid = (draft.startTime + draft.endTime) / 2;
-                                if (wordStart < mid) {
-                                  newStart = wordStart;
-                                } else {
-                                  newEnd = wordEnd;
-                                }
-                              }
-                              prefillDraftFromRange(newStart, newEnd, draft.editId, draft.note);
-                            }}
-                            title={`${w.start.toFixed(2)}–${w.end.toFixed(2)}s`}
-                            className={`px-1 rounded hover:bg-blue-100 dark:hover:bg-blue-900 ${
-                              inRange
-                                ? 'bg-blue-200 dark:bg-blue-900 text-blue-900 dark:text-blue-100'
-                                : 'text-gray-700 dark:text-gray-300'
-                            }`}
-                          >
-                            {w.word}
-                          </button>
-                        );
-                      })}
-                    </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    ℹ️ Neue Markierungen werden direkt im Manuskript (Text markieren → 🎯 Als Trainingsbeispiel) erstellt. Dieses Fenster ist nur zum Bearbeiten vorhandener Einträge.
                   </div>
                 )}
 

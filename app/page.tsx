@@ -7219,7 +7219,9 @@ export default function HomePage() {
             <BausteinPalette
               templates={(
                 complexTemplateFilterIds
-                  ? availableTemplates.filter((t) => complexTemplateFilterIds.includes(t.id))
+                  ? complexTemplateFilterIds
+                      .map((id) => availableTemplates.find((t) => t.id === id))
+                      .filter((t): t is NonNullable<typeof t> => t != null)
                   : availableTemplates
               ).map((t) => ({ id: t.id, name: t.name, content: t.content, scope: t.scope }))}
               onAddBaustein={(tpl) => {

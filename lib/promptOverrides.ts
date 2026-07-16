@@ -69,16 +69,23 @@ const PROMPT_TEMPLATES: PromptTemplateMeta[] = [
   },
   {
     id: 'templates/contradiction-genau',
-    label: 'Widerspruchsprüfung (genau)',
+    label: 'Widerspruchsprüfung (genau) — nicht mehr verwendet',
     group: 'Textbausteine',
     file: 'prompts/templates/contradiction-genau.ts',
     defaultContent: '',
   },
   {
     id: 'templates/contradiction-einfach',
-    label: 'Widerspruchsprüfung (einfach)',
+    label: 'Widerspruchsprüfung (einfach) — nicht mehr verwendet',
     group: 'Textbausteine',
     file: 'prompts/templates/contradiction-einfach.ts',
+    defaultContent: '',
+  },
+  {
+    id: 'templates/contradiction-check',
+    label: 'Widerspruchsprüfung (separater Check)',
+    group: 'Textbausteine',
+    file: 'prompts/templates/contradiction-check.ts',
     defaultContent: '',
   },
   {

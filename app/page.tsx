@@ -3464,6 +3464,17 @@ export default function HomePage() {
     vadThreshold: roomNoiseThreshold,
   });
 
+  // VAD im Hintergrund vorwärmen, sobald die Seite geladen ist.
+  // Der Prewarm startet den Mikrofon-Stream, initialisiert die VAD und
+  // macht den Pre-Roll im Hintergrund – komplett still, der Nutzer merkt
+  // nichts davon. Wenn der Nutzer dann das erste Mal Record drückt, ist
+  // alles warm und die Aufnahme beginnt sofort (keine 3s Wartezeit).
+  useEffect(() => {
+    const t = setTimeout(() => { vad.prewarm(); }, 2000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Erkennt Steuerbefehle und teilt Text auf alle Felder auf
   const parseFieldCommands = useCallback((text: string): { 
     methodik: string | null; 

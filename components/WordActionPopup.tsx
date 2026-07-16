@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from './AuthProvider';
+import { addDictionaryEntry } from '@/lib/dictionaryApi';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 
@@ -70,23 +71,20 @@ export default function WordActionPopup({
     setIsSubmitting(true);
     setError('');
     try {
-      const response = await fetch('/api/dictionary', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': getAuthHeader(),
-          ...getDbTokenHeader(),
-        },
-        body: JSON.stringify({
+      const result = await addDictionaryEntry(
+        {
           wrong: word,
           correct: correctValue.trim(),
           username: targetUsername,
-          groupId: addToGroup ? groupId : undefined,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Fehler beim Speichern im Wörterbuch');
+          addToGroup,
+        },
+        {
+          'Authorization': getAuthHeader(),
+          ...getDbTokenHeader(),
+        },
+      );
+      if (!result.success) {
+        throw new Error(result.error || 'Fehler beim Speichern im Wörterbuch');
       }
       dispatchDictionaryChanged(word, correctValue.trim());
       onClose();

@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from './AuthProvider';
 import { areWordsPhoneticallySimilar } from '../lib/phoneticMatch';
+import { addDictionaryEntry } from '@/lib/dictionaryApi';
 
 interface DictionaryEntry {
   wrong: string;
@@ -79,49 +80,28 @@ export default function DictionaryManager({ initialWrong = '' }: DictionaryManag
     setNeedsPhoneticConfirmation(false);
 
     try {
-      const response = await fetch('/api/dictionary', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': getAuthHeader(),
-          ...getDbTokenHeader()
-        },
-        body: JSON.stringify({ wrong, correct, addToGroup })
-      });
+      const result = await addDictionaryEntry(
+        { wrong, correct, addToGroup },
+        { 'Authorization': getAuthHeader(), ...getDbTokenHeader() },
+      );
 
-      const data = await response.json();
-
-      if (response.status === 401) {
-        setError('Sitzung abgelaufen - bitte erneut anmelden');
+      if (!result.success) {
+        setError(result.error || 'Fehler beim Hinzufügen');
         return;
       }
 
-      if (response.status === 403) {
-        setError('Keine Berechtigung für diese Aktion');
-        return;
-      }
-
-      if (!response.ok) {
-        setError(data.error || `Fehler (${response.status})`);
-        return;
-      }
-
-      if (data.success) {
-        notifyDictionaryChanged({ scope: 'private', wrong, correct });
-        const successMsg = `"${wrong}" → "${correct}" hinzugefügt`;
-        setSuccess(successMsg);
-        if (data.warning) {
-          setWarning(data.warning);
-        } else {
-          setWarning('');
-        }
-        setWrong('');
-        setCorrect('');
-        setAddToGroup(false);
-        await fetchEntries();
+      notifyDictionaryChanged({ scope: 'private', wrong, correct });
+      const successMsg = `"${wrong}" → "${correct}" hinzugefügt`;
+      setSuccess(successMsg);
+      if (result.warning) {
+        setWarning(result.warning);
       } else {
-        setError(data.error || 'Fehler beim Hinzufügen');
+        setWarning('');
       }
+      setWrong('');
+      setCorrect('');
+      setAddToGroup(false);
+      await fetchEntries();
     } catch (err) {
       console.error('[DictionaryManager] Add error:', err);
       setError('Verbindungsfehler');

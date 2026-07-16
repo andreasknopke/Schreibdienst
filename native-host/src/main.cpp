@@ -2726,6 +2726,18 @@ void wsServerThread() {
         int noDelay = 1;
         setsockopt(client, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&noDelay), sizeof(noDelay));
 
+        // SO_SNDTIMEO verhindert, dass ein blockierter ::send()-Aufruf
+        // im WebSocket-Handler (broadcastToClients) den gesamten
+        // HiddenWindow-Message-Pump-Thread blockiert. Wenn der Browser-Tab
+        // langsam rendert und den TCP-Puffer nicht rechtzeitig leert,
+        // staute frueher der gesamte WM_INPUT-Queue – HID-Record-Events
+        // erschienen bis zu 10 s verspaetet. Mit 200 ms Timeout wird der
+        // Client stattdessen getrennt und das naechste WM_INPUT sofort
+        // verarbeitet.
+        DWORD sendTimeout = 200; // ms
+        setsockopt(client, SOL_SOCKET, SO_SNDTIMEO,
+                   reinterpret_cast<const char*>(&sendTimeout), sizeof(sendTimeout));
+
         std::thread(handleClient, client).detach();
     }
 

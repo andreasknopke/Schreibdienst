@@ -1736,9 +1736,28 @@ export default function HomePage() {
 
     console.log(`[LiveInject] queueLiveInject CALL text="${normalizedText.substring(0, 80)}${normalizedText.length > 80 ? '…' : ''}" len=${normalizedText.length}`);
 
+    // Session-Token für diese Aufnahme-Session capturen. Beim Start/Stop wird
+    // vadSessionIdRef hochgezählt. Eine verzögerte Transkription aus einer
+    // vorherigen Session (z. B. nach nochmaligem Toggle) wuerde sonst ihren
+    // Text in die Ziel-App pflanzen, obwohl der Nutzer bereits eine neue
+    // Aufnahme gestartet hat. Verwandtes Issue: "alter Chunk taucht ploetzlich
+    // in Ziel-App auf".
+    const sessionIdAtQueueTime = vadSessionIdRef.current;
+
     liveInjectQueueRef.current = liveInjectQueueRef.current
       .catch(() => undefined)
       .then(async () => {
+        // Session-Wechsel? Dann abbrechen: Der Nutzer hat inzwischen gestoppt
+        // und eventuell neu gestartet. Eine Injection aus der alten Session
+        // wuerde in der Ziel-App an der falschen Position landen oder Text
+        // duplizieren.
+        if (sessionIdAtQueueTime !== vadSessionIdRef.current) {
+          console.log(
+            `[LiveInject] DROP chunk aus alter session ${sessionIdAtQueueTime}` +
+            ` (aktuell ${vadSessionIdRef.current}) text="${normalizedText.substring(0, 60)}…"`
+          );
+          return;
+        }
         const shouldRestorePreviousWindow = typeof document !== 'undefined' && document.hasFocus();
         setLiveInjectStatus(shouldRestorePreviousWindow ? 'Sende an Ziel-App…' : 'Sende an aktive Ziel-App…');
 
@@ -3852,6 +3871,19 @@ export default function HomePage() {
   const recordingRef = useRef(recording);
   const injectorRecordingStateRef = useRef<boolean | null>(null);
 
+  // Re-Entrancy-Sperre fuer stopRecording(): Das VAD-Stoppen kann bis zu 15 s
+  // dauern (Flush der letzten Utterance + warten auf ausstehende
+  // Transkriptionen). Wenn der Nutzer in dieser Zeit erneut auf die Record-Taste
+  // klickt (weil die UI scheinbar nicht reagiert), wuerden zwei parallele
+  // stopRecording()-Auflaeufe die VAD-Session und die inject-Queue durcheinander
+  // bringen. stopRecordingRunningRef blockiert weitere Toggle-Versuche, bis der
+  // erste Stopp komplett abgearbeitet ist.
+  const stopRecordingRunningRef = useRef(false);
+  // Pending stop-Request: Wenn ein Toggle-Click waehrend des Stopp-Phasen-Fixups
+  // ankommt, merken wir ihn uns und starten nach dem Stopp automatisch eine neue
+  // Aufnahme. So bleibt das Toggle-Verhalten fuer den Nutzer intuitiv.
+  const pendingToggleAfterStopRef = useRef(false);
+
   const isFrontendVisibleForInjector = useCallback(() => {
     if (typeof document === 'undefined') {
       return true;
@@ -4042,6 +4074,21 @@ export default function HomePage() {
       }
 
       if (!detail || detail.phase !== 'keydown' || detail.action !== 'record') {
+        return;
+      }
+
+      // Re-Entrancy-Schutz: Wenn gerade ein Stopp laeuft (VAD-Flush kann bis zu
+      // 15 s dauern), ignorieren wir den Toggle-Click nicht still, sondern merken
+      // ihn als "nach Stopp sofort wieder starten" vor. Ohne diese Sperre wuerde
+      // jeder weitere Klick ein zweites, drittes ... stopRecording() anstossen,
+      // was zu Desync zwischen UI-Zustand und echtem Recorder fuehrt.
+      if (stopRecordingRunningRef.current) {
+        pendingToggleAfterStopRef.current = true;
+        appendAdminConsoleEntry(
+          'hid',
+          'HID keydown waehrend stopRecording – als Pending gemerkt',
+          formatHidConsoleDetails(detail),
+        );
         return;
       }
 
@@ -4802,6 +4849,32 @@ export default function HomePage() {
   }
 
   async function stopRecording() {
+    // Re-Entrancy-Sperre aktivieren: waehrend stopRecording laeuft, werden
+    // weitere Toggle-Versuche via pendingToggleAfterStopRef gepuffert.
+    // Verhindert mehrfach parallel laufende stopRecording-Aufrufe, die die
+    // VAD-Queue und inject-Pipeline desynchronisieren wuerden.
+    if (stopRecordingRunningRef.current) {
+      console.log('[stopRecording] bereits laufend – ignoriert (Desync-Schutz)');
+      return;
+    }
+    stopRecordingRunningRef.current = true;
+    try {
+      await stopRecordingImpl();
+    } finally {
+      stopRecordingRunningRef.current = false;
+
+      // Wenn waehrend des Stopp-Vorgangs ein Toggle-Click reingekommen ist,
+      // starten wir jetzt sofort eine neue Aufnahme. Das ist das vom Nutzer
+      // erwartete Toggle-Verhalten, obwohl der Stopp lange gedauert hat.
+      if (pendingToggleAfterStopRef.current) {
+        pendingToggleAfterStopRef.current = false;
+        console.log('[stopRecording] Starte gemerkte Folge-Aufnahme (Pending-Toggle)');
+        void startRecording();
+      }
+    }
+  }
+
+  async function stopRecordingImpl() {
     // Fast Whisper WebSocket Modus stoppen
     if (runtimeConfig?.transcriptionProvider === 'fast_whisper') {
       console.log('[FastWhisper] Stopping WebSocket recording');

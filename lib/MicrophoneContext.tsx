@@ -21,6 +21,13 @@ interface MicrophoneContextValue {
   favoriteDeviceId: string | null;
   /** Favorit setzen / entfernen */
   setFavoriteDeviceId: (deviceId: string | null) => void;
+  /**
+   * Mikrofon-Stream kurz öffnen und wieder schließen, damit der USB-Treiber
+   * des Geräts „warm“ ist. Nordic-USB-Mikrofone brauchen beim ersten
+   * getUserMedia() oft 200–800 ms, bis tatsächlich Audiodaten fließen.
+   * Ein Prewarm verhindert, dass das erste gesprochene Wort abgeschnitten wird.
+   */
+  prewarmMic: () => Promise<void>;
 }
 
 const MicrophoneContext = createContext<MicrophoneContextValue>({
@@ -32,6 +39,7 @@ const MicrophoneContext = createContext<MicrophoneContextValue>({
   getStream: async () => { throw new Error('Not initialized'); },
   favoriteDeviceId: null,
   setFavoriteDeviceId: () => {},
+  prewarmMic: async () => {},
 });
 
 export function MicrophoneProvider({ children }: { children: React.ReactNode }) {
@@ -118,6 +126,25 @@ export function MicrophoneProvider({ children }: { children: React.ReactNode }) 
     return navigator.mediaDevices.getUserMedia({ audio: constraints });
   }, [deviceId]);
 
+  // Mikrofon-Prewarm: Stream kurz öffnen und halten, damit USB-Treiber
+  // (insbesondere Nordic VID=0x1915) Zeit haben, ihre Audio-Pipeline zu
+  // initialisieren. Ohne Prewarm fehlen beim ersten getUserMedia-Aufruf
+  // oft die ersten 200-800 ms Audio – das erste gesprochene Wort wird
+  // dann unvollständig oder gar nicht transkribiert.
+  const prewarmMic = useCallback(async () => {
+    try {
+      const stream = await getStream({
+        channelCount: 1,
+        echoCancellation: true,
+        autoGainControl: true,
+        noiseSuppression: true,
+      });
+      // 500 ms warten, damit die USB-Audio-Pipeline stabil Daten liefert
+      await new Promise(r => setTimeout(r, 500));
+      stream.getTracks().forEach(t => t.stop());
+    } catch { /* Prewarm ist optional – bei Fehler keine Fehlermeldung */ }
+  }, [getStream]);
+
   // Initialisierung
   useEffect(() => {
     const init = async () => {
@@ -200,6 +227,7 @@ export function MicrophoneProvider({ children }: { children: React.ReactNode }) 
       getStream,
       favoriteDeviceId,
       setFavoriteDeviceId,
+      prewarmMic,
     }}>
       {children}
     </MicrophoneContext.Provider>

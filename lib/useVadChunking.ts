@@ -61,7 +61,7 @@ export interface UseVadChunkingReturn {
 
 export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingReturn {
   const { onUtterance, onSpeechStart, onAudioLevel, vadThreshold = 0.42 } = options;
-  const { getStream: getMicStream } = useMicrophone();
+  const { getStream: getMicStream, prewarmMic } = useMicrophone();
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const vadRef = useRef<any>(null);
@@ -69,6 +69,20 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
   const animFrameRef = useRef<number | null>(null);
   const sessionIdRef = useRef(0);
   const stopPromiseRef = useRef<Promise<void> | null>(null);
+
+  // Mikrofon-Prewarm beim ersten Mount: Nordic-USB-Mikrofone (VID=0x1915)
+  // und einige andere Geräte brauchen beim ersten getUserMedia() oft 200-800 ms,
+  // bis tatsächlich Audiodaten fließen. Ohne Prewarm wird das erste gesprochene
+  // Wort unvollständig oder gar nicht transkribiert.
+  const prewarmedRef = useRef(false);
+  useEffect(() => {
+    if (prewarmedRef.current) return;
+    prewarmedRef.current = true;
+    // Verzögert ausführen, damit die UI schon gerendert ist und die
+    // Permission-Abfrage nicht mit dem Seitenaufbau kollidiert.
+    const timer = setTimeout(() => { prewarmMic(); }, 800);
+    return () => clearTimeout(timer);
+  }, [prewarmMic]);
   
   // Ref für vadThreshold — immer aktuell, auch wenn start() schon via useCallback
   // eingefroren wurde. Der Wert wird bei MicVAD.new() gelesen, also beim Start

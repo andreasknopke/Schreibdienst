@@ -1734,20 +1734,20 @@ void handleHidRecordEvent(uint16_t vendorId, uint16_t productId,
         g_hidLastDeviceName = deviceName;
     }
 
+    // WICHTIG: Der Native Host toggelt g_recordingState hier NICHT mehr selbst.
+    // Frueher rief er setRecordingState(!g_recordingState, ...) auf und
+    // gleichzeitig hat das Frontend auf das weitergeleitete keydown-Event seinen
+    // eigenen State getoggelt. Das waren zwei unabhaengige Toggle-Zustandsmaschinen,
+    // die bei jedem Klick beide umschalteten und dauerhaft auseinander liefen,
+    // sobald das Frontend z. B. noch in einem langen stopRecording() (>15 s
+    // VAD-Flush) hing. Jetzt ist das Frontend die alleinige Source of Truth
+    // (genau wie im WebHID-Modus). Es meldet seinen recording-Status via
+    // reportInjectorRecordingState() an den Host zurueck, der dann Overlay und
+    // Tray-Icon konsistent setzt.
     if (pressed) {
-        // Record-Taste gedrückt → toggle recording state
-        const bool nowRecording = !g_recordingState.load();
-        // Overlay nur zeigen, wenn das Frontend im "Ziel-App"-Modus ist.
-        const bool showOverlay = g_frontendTargetMode.load();
-        setRecordingState(nowRecording, L"hid-mic", showOverlay);
-
-        // Broadcast als hid-event. Das Frontend hoert auf HID_MEDIA_CONTROL_EVENT
-        // und toggelt die Aufnahme. Kein zusaetzliches hotkey-event mehr noetig
-        // – das fuehrte zu doppeltem Toggle (einmal via hid-event, einmal via
-        // hotkey-event).
         dispatchHidActionEvent(deviceName, vendorId, productId, "keydown");
 
-        logLine("[HID] Record PRESS from device=\"%ls\" (vendor=0x%04X product=0x%04X)\n",
+        logLine("[HID] Record PRESS from device=\"%ls\" (vendor=0x%04X product=0x%4X)\n",
                deviceName.c_str(), vendorId, productId);
         fflush(stdout);
     } else {

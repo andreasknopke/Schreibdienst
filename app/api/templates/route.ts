@@ -15,6 +15,7 @@ import {
   removeTemplateGroupEntryWithRequest,
   getUserTemplateGroupIds,
 } from '@/lib/templateGroupDb';
+import { moveTemplateToFolder } from '@/lib/templateFoldersDb';
 
 interface AuthResult {
   username: string;
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, content, field, formatRanges, username: targetUsername, groupIds } = body;
+    const { name, content, field, formatRanges, username: targetUsername, groupIds, folderId } = body;
     
     if (!name || !content) {
       return NextResponse.json({ success: false, error: 'Name und Inhalt müssen ausgefüllt sein' }, { status: 400 });
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest) {
     // Secretariat users can add to other users' templates
     const username = (auth.canViewAllDictations && targetUsername) ? targetUsername : auth.username;
     
-    const result = await addTemplateWithRequest(request, username, name, content, field || 'befund', formatRanges || [], groupIds ?? false);
+    const result = await addTemplateWithRequest(request, username, name, content, field || 'befund', formatRanges || [], groupIds ?? false, folderId ?? null);
     
     if (result.success) {
       return NextResponse.json({ success: true, message: 'Textbaustein hinzugefügt', id: result.id });
@@ -124,7 +125,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { id, name, content, field, formatRanges, username: targetUsername, scope, groupIds } = body;
+    const { id, name, content, field, formatRanges, username: targetUsername, scope, groupIds, folderId } = body;
     
     if (!id || !name || !content) {
       return NextResponse.json({ success: false, error: 'ID, Name und Inhalt erforderlich' }, { status: 400 });
@@ -151,7 +152,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ success: true, message: 'Textbaustein aktualisiert' });
     }
     
-    const result = await updateTemplateWithRequest(request, username, id, name, content, field || 'befund', formatRanges || []);
+    const result = await updateTemplateWithRequest(request, username, id, name, content, field || 'befund', formatRanges || [], folderId ?? null);
     
     if (result.success) {
       // Optional: in bestimmte Gruppen übernehmen
@@ -216,6 +217,33 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ success: false, error: result.error }, { status: 400 });
   } catch (error) {
     console.error('[Templates DELETE] Error:', error);
+    return NextResponse.json({ success: false, error: 'Ungültige Anfrage' }, { status: 400 });
+  }
+}
+
+// PATCH /api/templates - Template in Ordner verschieben
+export async function PATCH(request: NextRequest) {
+  try {
+    const auth = await getAuthenticatedUser(request);
+    if (!auth) {
+      return NextResponse.json({ success: false, error: 'Nicht authentifiziert' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { id, folderId, scope } = body;
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'ID erforderlich' }, { status: 400 });
+    }
+
+    const result = await moveTemplateToFolder(request, id, folderId ?? null, scope || 'private');
+    if (!result.success) {
+      return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+    }
+
+    return NextResponse.json({ success: true, message: 'Baustein verschoben' });
+  } catch (error) {
+    console.error('[Templates PATCH] Error:', error);
     return NextResponse.json({ success: false, error: 'Ungültige Anfrage' }, { status: 400 });
   }
 }

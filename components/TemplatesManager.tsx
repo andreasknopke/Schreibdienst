@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from './AuthProvider';
 import TemplateRichTextEditor from './TemplateRichTextEditor';
 import BracketHighlight from './BracketHighlight';
+import FolderSelect from './FolderSelect';
 import { normalizeRichTextRanges, type RichTextFormatRange } from '@/lib/richTextFormatting';
 
 interface Template {
@@ -15,13 +16,15 @@ interface Template {
   updatedAt: string;
   scope?: 'private' | 'group';
   groupName?: string;
+  folderId?: number | null;
 }
 
 interface TemplatesManagerProps {
   mode?: 'create' | 'manage';
+  apiFetch?: (url: string, options?: RequestInit) => Promise<Response>;
 }
 
-export default function TemplatesManager({ mode = 'create' }: TemplatesManagerProps) {
+export default function TemplatesManager({ mode = 'create', apiFetch }: TemplatesManagerProps) {
   const { getAuthHeader, getDbTokenHeader } = useAuth();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,6 +38,8 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
   const [field, setField] = useState<'methodik' | 'befund' | 'beurteilung'>('befund');
   const [adding, setAdding] = useState(false);
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(new Set());
+  const [folderId, setFolderId] = useState<number | null>(null);
+  const [editFolderId, setEditFolderId] = useState<number | null>(null);
   
   // User-Gruppen (für Gruppenauswahl)
   const [userGroups, setUserGroups] = useState<{ id: number; name: string }[]>([]);
@@ -107,6 +112,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
           name,
           content,
           field,
+          folderId,
           formatRanges: normalizeRichTextRanges(contentFormats, content.length),
           groupIds: selectedGroupIds.size > 0 ? Array.from(selectedGroupIds) : false,
         })
@@ -130,6 +136,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
         setContent('');
         setContentFormats([]);
         setField('befund');
+        setFolderId(null);
         setSelectedGroupIds(new Set());
         await fetchTemplates();
         // Event senden um andere Komponenten zu aktualisieren
@@ -151,6 +158,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
     setEditContent(template.content);
     setEditContentFormats(template.formatRanges ?? []);
     setEditField(template.field);
+    setEditFolderId(template.folderId ?? null);
   };
 
   const handleCancelEdit = () => {
@@ -161,6 +169,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
     setEditContent('');
     setEditContentFormats([]);
     setEditField('befund');
+    setEditFolderId(null);
   };
 
   const handleSaveEdit = async () => {
@@ -190,6 +199,7 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
           content: editContent,
           field: editField,
           scope: editScope,
+          folderId: editFolderId,
           groupIds: editSelectedGroupIds.size > 0 ? Array.from(editSelectedGroupIds) : false,
           formatRanges: normalizeRichTextRanges(editContentFormats, editContent.length),
         })
@@ -301,6 +311,13 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
               <option value="befund">Befund</option>
               <option value="beurteilung">Beurteilung</option>
             </select>
+            {apiFetch && (
+              <FolderSelect
+                value={folderId}
+                onChange={setFolderId}
+                apiFetch={apiFetch}
+              />
+            )}
           </div>
           <TemplateRichTextEditor
             value={content}
@@ -401,6 +418,13 @@ export default function TemplatesManager({ mode = 'create' }: TemplatesManagerPr
                       <option value="befund">Befund</option>
                       <option value="beurteilung">Beurteilung</option>
                     </select>
+                    {apiFetch && (
+                      <FolderSelect
+                        value={editFolderId}
+                        onChange={setEditFolderId}
+                        apiFetch={apiFetch}
+                      />
+                    )}
                   </div>
                   <TemplateRichTextEditor
                     value={editContent}

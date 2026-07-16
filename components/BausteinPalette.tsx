@@ -97,6 +97,36 @@ export default function BausteinPalette({
     await loadFolders();
   }, [apiFetch, loadFolders]);
 
+  // Flache Ordner-Liste für PaletteRow-Verschieben
+  const flatFolders = useMemo(() => {
+    const flatten = (nodes: FolderNode[], depth: number): { id: number; name: string; depth: number }[] => {
+      const result: { id: number; name: string; depth: number }[] = [];
+      for (const n of nodes) {
+        result.push({ id: n.id, name: n.name, depth });
+        result.push(...flatten(n.children, depth + 1));
+      }
+      return result;
+    };
+    const all: { id: number; name: string; depth: number }[] = [];
+    all.push(...flatten(personalFolders, 0));
+    for (const gf of groupFolders) {
+      all.push(...flatten(gf.folders, 0));
+    }
+    return all;
+  }, [personalFolders, groupFolders]);
+
+  const handleMoveToFolder = useCallback(async (templateId: number, folderId: number | null) => {
+    if (!apiFetch) return;
+    try {
+      await apiFetch('/api/templates', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: templateId, folderId }),
+      });
+      await loadFolders();
+    } catch { /* silent */ }
+  }, [apiFetch, loadFolders]);
+
   // Templates nach ausgewähltem Ordner filtern
   const filteredTemplatesFromFolder = useMemo(() => {
     if (selectedFolderId === null) return null; // null = "Alle" → kein Filter
@@ -314,6 +344,8 @@ export default function BausteinPalette({
               key={tpl.id}
               template={tpl}
               onAdd={onAddBaustein}
+              folders={flatFolders}
+              onMoveToFolder={handleMoveToFolder}
             />
           ))}
           {!hasFolderFilter && (
@@ -324,7 +356,7 @@ export default function BausteinPalette({
                 </div>
               )}
               {templates.filter((t) => t.folderId === undefined || t.folderId === null).map((tpl) => (
-                <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} />
+                <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} folders={flatFolders} onMoveToFolder={handleMoveToFolder} />
               ))}
             </div>
           )}
@@ -371,6 +403,8 @@ export default function BausteinPalette({
                     key={tpl.id}
                     template={tpl}
                     onAdd={onAddBaustein}
+                    folders={flatFolders}
+                    onMoveToFolder={handleMoveToFolder}
                   />
                 ))}
               </div>
@@ -388,6 +422,8 @@ export default function BausteinPalette({
                     key={tpl.id}
                     template={tpl}
                     onAdd={onAddBaustein}
+                    folders={flatFolders}
+                    onMoveToFolder={handleMoveToFolder}
                   />
                 ))}
               </div>
@@ -452,35 +488,76 @@ function TabButton({
 function PaletteRow({
   template,
   onAdd,
+  folders,
+  onMoveToFolder,
 }: {
   template: BausteinTemplate;
   onAdd: (t: BausteinTemplate) => void;
+  folders?: { id: number; name: string; depth: number }[];
+  onMoveToFolder?: (templateId: number, folderId: number | null) => void;
 }) {
+  const [showMove, setShowMove] = useState(false);
+
   return (
-    <button
-      onClick={() => onAdd(template)}
-      className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors flex items-start gap-2"
-      title={`"${template.name}" einfügen`}
-    >
-      <span className="text-sm leading-none mt-0.5 shrink-0">
-        {template.scope === 'group' ? '👥' : '📋'}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">
-            {template.name}
-          </span>
-          {template.scope === 'group' && (
-            <span className="text-[9px] text-amber-500 dark:text-amber-400 shrink-0 bg-amber-50 dark:bg-amber-900/20 px-1 py-0.5 rounded">
-              Gruppe
+    <div className="relative group">
+      <button
+        onClick={() => onAdd(template)}
+        className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors flex items-start gap-2"
+        title={`"${template.name}" einfügen`}
+      >
+        <span className="text-sm leading-none mt-0.5 shrink-0">
+          {template.scope === 'group' ? '👥' : '📋'}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">
+              {template.name}
             </span>
-          )}
+            {template.scope === 'group' && (
+              <span className="text-[9px] text-amber-500 dark:text-amber-400 shrink-0 bg-amber-50 dark:bg-amber-900/20 px-1 py-0.5 rounded">
+                Gruppe
+              </span>
+            )}
+            {folders && onMoveToFolder && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowMove(!showMove); }}
+                className="opacity-0 group-hover:opacity-100 px-0.5 text-gray-400 hover:text-blue-600 text-[10px] transition-opacity shrink-0"
+                title="In Ordner verschieben"
+              >
+                📁
+              </button>
+            )}
+          </div>
+          <div className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 line-clamp-2 leading-relaxed">
+            {template.content.substring(0, 120)}
+            {template.content.length > 120 ? '…' : ''}
+          </div>
         </div>
-        <div className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 line-clamp-2 leading-relaxed">
-          {template.content.substring(0, 120)}
-          {template.content.length > 120 ? '…' : ''}
+      </button>
+      {showMove && folders && onMoveToFolder && (
+        <div className="absolute right-2 top-full z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1">
+          <select
+            className="text-[10px] px-1 py-0.5 border rounded dark:bg-gray-700"
+            value=""
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val !== '') {
+                onMoveToFolder(template.id, Number(val));
+              }
+              setShowMove(false);
+            }}
+            autoFocus
+            onBlur={() => setShowMove(false)}
+          >
+            <option value="">— Ordner wählen —</option>
+            {folders.map((f) => (
+              <option key={f.id} value={f.id}>
+                {'  '.repeat(f.depth)}{f.name}
+              </option>
+            ))}
+          </select>
         </div>
-      </div>
-    </button>
+      )}
+    </div>
   );
 }

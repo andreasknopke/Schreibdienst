@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import FolderExplorer, { type FolderNode } from './FolderExplorer';
 
 interface Template {
   id: number;
@@ -10,6 +11,7 @@ interface Template {
   formatRanges?: any[];
   scope?: 'private' | 'group';
   groupName?: string;
+  folderId?: number | null;
 }
 
 interface ComplexTemplate {
@@ -32,6 +34,8 @@ interface TemplateSelectorPopoverProps {
   onOpenComplexManager: () => void;
   onLoadComplexTemplate: (templateIds: number[]) => void;
   onExitTemplateMode: () => void;
+  apiFetch?: (url: string, options?: RequestInit) => Promise<Response>;
+  username?: string;
 }
 
 /**
@@ -58,10 +62,16 @@ export default function TemplateSelectorPopover({
   onOpenComplexManager,
   onLoadComplexTemplate,
   onExitTemplateMode,
+  apiFetch,
+  username: _username,
 }: TemplateSelectorPopoverProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'private' | 'group'>('all');
+  const [view, setView] = useState<'tree' | 'list'>('tree');
+  const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
+  const [personalFolders, setPersonalFolders] = useState<FolderNode[]>([]);
+  const [groupFolders, setGroupFolders] = useState<{ groupId: number; groupName: string; folders: FolderNode[] }[]>([]);
   const popoverRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -148,6 +158,80 @@ export default function TemplateSelectorPopover({
     setOpen(false);
     setSearch('');
   };
+
+  // ── Ordner-Struktur ──
+  const loadFolders = useCallback(async () => {
+    if (!apiFetch) return;
+    try {
+      const res = await apiFetch('/api/templates/folders', {});
+      const data = await res.json();
+      if (data.success && data.tree) {
+        setPersonalFolders(buildFolderTree(data.tree.personal || []));
+        setGroupFolders((data.tree.groups || []).map((g: any) => ({
+          groupId: g.groupId,
+          groupName: g.groupName,
+          folders: buildFolderTree(g.folders || []),
+        })));
+      }
+    } catch { /* silent */ }
+  }, [apiFetch]);
+
+  useEffect(() => { if (open && view === 'tree') loadFolders(); }, [open, view, loadFolders]);
+
+  const handleCreateFolder = useCallback(async (name: string, parentId: number | null) => {
+    if (!apiFetch) return;
+    await apiFetch('/api/templates/folders', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, parentId }),
+    });
+    await loadFolders();
+  }, [apiFetch, loadFolders]);
+
+  const handleRenameFolder = useCallback(async (id: number, name: string) => {
+    if (!apiFetch) return;
+    await apiFetch('/api/templates/folders', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, name }),
+    });
+    await loadFolders();
+  }, [apiFetch, loadFolders]);
+
+  const handleDeleteFolder = useCallback(async (id: number) => {
+    if (!apiFetch) return;
+    await apiFetch('/api/templates/folders', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    await loadFolders();
+  }, [apiFetch, loadFolders]);
+
+  // Nach Ordner gefilterte Templates
+  const folderFilteredTemplates = useMemo(() => {
+    if (selectedFolderId === null) return null;
+    const collectSubIds = (folders: FolderNode[], ids: Set<number>) => {
+      for (const f of folders) { ids.add(f.id); collectSubIds(f.children, ids); }
+    };
+    const allIds = new Set<number>();
+    collectSubIds(personalFolders, allIds);
+    for (const gf of groupFolders) collectSubIds(gf.folders, allIds);
+
+    if (!allIds.has(selectedFolderId)) return null;
+
+    const allSubIds = new Set<number>();
+    const findSubIds = (folders: FolderNode[]) => {
+      for (const f of folders) {
+        if (f.id === selectedFolderId || allSubIds.has(f.id)) {
+          allSubIds.add(f.id);
+          for (const c of f.children) collectSubIds([c], allSubIds);
+        }
+        findSubIds(f.children);
+      }
+    };
+    findSubIds(personalFolders);
+    for (const gf of groupFolders) findSubIds(gf.folders);
+
+    return fieldTemplates.filter((t) => t.folderId !== undefined && allSubIds.has(t.folderId!));
+  }, [selectedFolderId, personalFolders, groupFolders, fieldTemplates]);
 
   const hasTemplates = filteredTemplates.length > 0;
   const hasComplex = filteredComplex.length > 0 && !search;
@@ -244,7 +328,121 @@ export default function TemplateSelectorPopover({
             })}
           </div>
 
-          {/* Liste */}
+          {/* Ansicht-Umschalter */}
+          <div className="flex items-center gap-1 px-3 pb-1">
+            <button
+              onClick={() => setView('tree')}
+              className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
+                view === 'tree'
+                  ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                  : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+              }`}
+            >🗂️ Ordner</button>
+            <button
+              onClick={() => setView('list')}
+              className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
+                view === 'list'
+                  ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                  : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+              }`}
+            >📋 Liste</button>
+          </div>
+
+          {view === 'tree' ? (
+            /* ── Ordner-Ansicht ── */
+            <div className="overflow-y-auto" style={{ maxHeight: '50vh' }}>
+              {(personalFolders.length > 0 || groupFolders.length > 0) && (
+                <div className="px-1 pb-1">
+                  {/* "Alle" = kein Filter */}
+                  <div
+                    className={`flex items-center gap-1 px-2 py-1 rounded cursor-pointer text-xs transition-colors ${
+                      selectedFolderId === null
+                        ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-800/60 text-gray-600 dark:text-gray-400'
+                    }`}
+                    onClick={() => setSelectedFolderId(null)}
+                  >📁 <span className="font-medium">Alle Bausteine</span></div>
+
+                  <FolderExplorer
+                    folders={personalFolders}
+                    onSelectFolder={setSelectedFolderId}
+                    selectedFolderId={selectedFolderId}
+                    onCreateFolder={handleCreateFolder}
+                    onRenameFolder={handleRenameFolder}
+                    onDeleteFolder={handleDeleteFolder}
+                  />
+                  {groupFolders.map((gf) => (
+                    <div key={gf.groupId} className="mt-2">
+                      <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">👥 {gf.groupName}</div>
+                      <FolderExplorer
+                        folders={gf.folders}
+                        onSelectFolder={setSelectedFolderId}
+                        selectedFolderId={selectedFolderId}
+                        onCreateFolder={handleCreateFolder}
+                        onRenameFolder={handleRenameFolder}
+                        onDeleteFolder={handleDeleteFolder}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Templates im Ordner */}
+              {selectedFolderId !== null ? (
+                <div className="divide-y divide-gray-100 dark:divide-gray-800 border-t border-gray-100 dark:border-gray-800">
+                  {folderFilteredTemplates === null ? (
+                    <div className="px-3 py-4 text-xs text-gray-400 text-center">Bitte Ordner auswählen.</div>
+                  ) : folderFilteredTemplates.length === 0 ? (
+                    <div className="px-3 py-4 text-xs text-gray-400 text-center">Keine Bausteine in diesem Ordner.</div>
+                  ) : folderFilteredTemplates.map((tpl) => (
+                    <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
+                  ))}
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100 dark:divide-gray-800 border-t border-gray-100 dark:border-gray-800">
+                  {/* Bausteine OHNE Ordner anzeigen */}
+                  {fieldTemplates.filter((t) => t.folderId === undefined || t.folderId === null).length > 0 ? (
+                    <>
+                      <div className="sticky top-0 px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
+                        📋 Ohne Ordner
+                      </div>
+                      {fieldTemplates.filter((t) => t.folderId === undefined || t.folderId === null).map((tpl) => (
+                        <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
+                      ))}
+                    </>
+                  ) : (
+                    <div className="px-3 py-4 text-xs text-gray-400 text-center">Keine Bausteine ohne Ordner.</div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* ── Listen-Ansicht ── */
+            <><div className="flex gap-0.5 px-3 pb-1.5">
+            {[
+              { key: 'all' as const, label: 'Alle' },
+              { key: 'private' as const, label: '👤 Eigene' },
+              { key: 'group' as const, label: '👥 Gruppe' },
+            ].map((tab) => {
+              const count = tab.key === 'all' ? fieldTemplates.length
+                : tab.key === 'private' ? fieldTemplates.filter((t) => t.scope !== 'group').length
+                : fieldTemplates.filter((t) => t.scope === 'group').length;
+              if (count === 0 && tab.key !== 'all') return null;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`text-[11px] px-2.5 py-1 rounded-md font-medium transition-colors ${
+                    activeTab === tab.key
+                      ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
           <div className="overflow-y-auto" style={{ maxHeight: '50vh' }}>
             {/* Komplexbausteine */}
             {hasComplex && (
@@ -264,61 +462,40 @@ export default function TemplateSelectorPopover({
                     title={`${ct.name} (${ct.templateIds.length} Bausteine)`}
                   >
                     <span className="text-indigo-500 shrink-0 text-sm">🧩</span>
-                    <span className="truncate text-gray-800 dark:text-gray-200 font-medium">
-                      {ct.name}
-                    </span>
-                    <span className="text-[10px] text-gray-400 shrink-0 ml-auto">
-                      {ct.templateIds.length}
-                    </span>
+                    <span className="truncate text-gray-800 dark:text-gray-200 font-medium">{ct.name}</span>
+                    <span className="text-[10px] text-gray-400 shrink-0 ml-auto">{ct.templateIds.length}</span>
                   </button>
                 ))}
               </div>
             )}
 
-            {/* Gruppierte Bausteine */}
             {groupedTemplates.groups.map(([group, items]) => (
               <div key={group}>
-                <div className="sticky top-0 px-3 py-1.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
-                  {group}
-                </div>
+                <div className="sticky top-0 px-3 py-1.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">{group}</div>
                 {items.map((tpl) => (
-                  <TemplateRow
-                    key={tpl.id}
-                    template={tpl}
-                    isSelected={selectedTemplate?.id === tpl.id && templateMode}
-                    onSelect={handleSelect}
-                  />
+                  <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
                 ))}
               </div>
             ))}
 
-            {/* Ungruppierte Bausteine */}
             {groupedTemplates.ungrouped.length > 0 && (
               <div>
                 {groupedTemplates.groups.length > 0 && (
-                  <div className="sticky top-0 px-3 py-1.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
-                    Weitere
-                  </div>
+                  <div className="sticky top-0 px-3 py-1.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">Weitere</div>
                 )}
                 {groupedTemplates.ungrouped.map((tpl) => (
-                  <TemplateRow
-                    key={tpl.id}
-                    template={tpl}
-                    isSelected={selectedTemplate?.id === tpl.id && templateMode}
-                    onSelect={handleSelect}
-                  />
+                  <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
                 ))}
               </div>
             )}
 
             {!hasTemplates && !hasComplex && (
               <div className="px-3 py-6 text-xs text-gray-400 dark:text-gray-500 text-center">
-                {search
-                  ? 'Keine Bausteine gefunden.'
-                  : 'Keine Bausteine für dieses Feld.'}
+                {search ? 'Keine Bausteine gefunden.' : 'Keine Bausteine für dieses Feld.'}
               </div>
             )}
-          </div>
+          </div></>
+          )}
 
           {/* Action-Footer */}
           <div className="border-t border-gray-100 dark:border-gray-800 px-1.5 py-1.5 flex flex-wrap gap-0.5 bg-gray-50/80 dark:bg-gray-800/40">
@@ -351,6 +528,26 @@ export default function TemplateSelectorPopover({
       )}
     </div>
   );
+}
+
+/**
+ * Baut aus einer flachen Liste von Folder-Objekten eine verschachtelte Baum-Struktur auf.
+ */
+function buildFolderTree(flatList: { id: number; parentId: number | null; name: string; sortOrder: number; children?: any[] }[]): FolderNode[] {
+  const map = new Map<number, FolderNode>();
+  const roots: FolderNode[] = [];
+  for (const item of flatList) {
+    map.set(item.id, { id: item.id, parentId: item.parentId, name: item.name, children: [] });
+  }
+  for (const item of flatList) {
+    const node = map.get(item.id)!;
+    if (item.parentId !== null && map.has(item.parentId)) {
+      map.get(item.parentId)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return roots;
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────

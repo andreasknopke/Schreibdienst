@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAuth } from './AuthProvider';
 import { areWordsPhoneticallySimilar } from '../lib/phoneticMatch';
+import { addDictionaryEntry } from '@/lib/dictionaryApi';
 
 const DICTIONARY_CHANGED_EVENT = 'schreibdienst:dictionary-changed';
 
@@ -41,35 +42,18 @@ export default function ManualCorrectionSuggestion({
     setIsSubmitting(true);
 
     try {
-      const response = await fetch('/api/dictionary', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': getAuthHeader(),
-          ...getDbTokenHeader(),
-        },
-        body: JSON.stringify({
+      const result = await addDictionaryEntry(
+        {
           wrong: originalWord,
           correct: newWord,
           username: targetUsername,
           addToGroup,
-        }),
-      });
+        },
+        { 'Authorization': getAuthHeader(), ...getDbTokenHeader() },
+      );
 
-      const data = await response.json();
-
-      if (response.status === 401) {
-        setError('Sitzung abgelaufen - bitte erneut anmelden');
-        return;
-      }
-
-      if (response.status === 403) {
-        setError('Keine Berechtigung für diese Aktion');
-        return;
-      }
-
-      if (!response.ok || !data.success) {
-        setError(data.error || 'Fehler beim Speichern im Wörterbuch');
+      if (!result.success) {
+        setError(result.error || 'Fehler beim Speichern im Wörterbuch');
         return;
       }
 

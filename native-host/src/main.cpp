@@ -46,7 +46,9 @@ void logLine(const char* fmt, ...) {
 }
 
 constexpr std::uint32_t CLIPBOARD_READY_DELAY_MS = 15;
-constexpr std::uint32_t CLIPBOARD_RESTORE_DELAY_MS = 30;
+constexpr std::uint32_t CLIPBOARD_RESTORE_DELAY_MS = 200;
+constexpr std::uint32_t CLIPBOARD_CONSUMED_POLL_INTERVAL_MS = 20;
+constexpr std::uint32_t CLIPBOARD_CONSUMED_MAX_WAIT_MS = 600;
 constexpr uint16_t WS_PORT = 58765;
 constexpr char WS_MAGIC_GUID[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -2161,8 +2163,30 @@ PasteOutcome pasteClipboardText(const std::wstring& text) {
         return PasteOutcome::ClipboardBlocked;
     }
 
-    // Kurz warten, damit die Ziel-App den Paste-Vorgang abschließen kann
-    std::this_thread::sleep_for(std::chrono::milliseconds(CLIPBOARD_RESTORE_DELAY_MS));
+    // Kurz warten damit die Ziel-App den Paste-Vorgang abschließen kann.
+    // Wichtig: Nicht mit festem Timeout warten, sondern aktiv pollen, ob
+    // die App den Clipboard-Inhalt konsumiert hat. Sonst passiert das:
+    // Target (WPF/GAPIT.EXE) bekommt WM_PASTE → braucht >30ms zum Lesen →
+    // restoreClipboardText überschreibt den Inhalt → App bekommt alten Text.
+    {
+        const auto deadline = std::chrono::steady_clock::now()
+            + std::chrono::milliseconds(CLIPBOARD_CONSUMED_MAX_WAIT_MS);
+        bool consumed = false;
+        while (std::chrono::steady_clock::now() < deadline) {
+            // Clipboard ist konsumiert, wenn es NICHT mehr unseren Text enthält
+            // (entweder leer oder mit anderem Inhalt überschrieben).
+            ClipboardSnapshot current = readClipboardText();
+            consumed = !current.hasText || current.text != text;
+            if (consumed) break;
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(CLIPBOARD_CONSUMED_POLL_INTERVAL_MS));
+        }
+        if (!consumed) {
+            logLine("[INJECT] pasteClipboardText WARNING: clipboard not consumed after %ums – restoring anyway\n",
+                   CLIPBOARD_CONSUMED_MAX_WAIT_MS);
+            fflush(stdout);
+        }
+    }
 
     // 4) Ursprüngliche Zwischenablage wiederherstellen
     if (!restoreClipboardText(snapshot)) {

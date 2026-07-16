@@ -6399,6 +6399,8 @@ export default function HomePage() {
                     setSelectedTemplate(null);
                     setTemplateMode(false);
                   }}
+                  apiFetch={apiFetchWithAuth}
+                  username={username || undefined}
                 />
               </div>
             </div>

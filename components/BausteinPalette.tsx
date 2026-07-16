@@ -316,6 +316,18 @@ export default function BausteinPalette({
               onAdd={onAddBaustein}
             />
           ))}
+          {!hasFolderFilter && (
+            <div className="divide-y divide-gray-100 dark:divide-gray-800 border-t border-gray-100 dark:border-gray-800">
+              {templates.filter((t) => t.folderId === undefined || t.folderId === null).length > 0 && (
+                <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">
+                  📋 Ohne Ordner
+                </div>
+              )}
+              {templates.filter((t) => t.folderId === undefined || t.folderId === null).map((tpl) => (
+                <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} />
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         /* ── Listen-Ansicht (bisherige Ansicht) ── */

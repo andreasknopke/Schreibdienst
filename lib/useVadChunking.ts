@@ -19,7 +19,7 @@ import { useMicrophone } from '@/lib/MicrophoneContext';
 
 // Max. Dauer einer Utterance bevor Auto-Chunk greift (Sekunden)
 const MAX_UTTERANCE_SECONDS = 8;
-const PRE_SPEECH_PAD_FRAMES = 15;
+const PRE_SPEECH_PAD_FRAMES = 30; // ~900ms (30ms/Frame) – schützt das erste Wort
 const WAV_HEADER_BYTES = 44;
 const WAV_BYTES_PER_SECOND = 16000 * 2;
 
@@ -61,7 +61,7 @@ export interface UseVadChunkingReturn {
 
 export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingReturn {
   const { onUtterance, onSpeechStart, onAudioLevel, vadThreshold = 0.42 } = options;
-  const { getStream: getMicStream, prewarmMic } = useMicrophone();
+  const { getStream: getMicStream } = useMicrophone();
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const vadRef = useRef<any>(null);
@@ -69,20 +69,6 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
   const animFrameRef = useRef<number | null>(null);
   const sessionIdRef = useRef(0);
   const stopPromiseRef = useRef<Promise<void> | null>(null);
-
-  // Mikrofon-Prewarm beim ersten Mount: Nordic-USB-Mikrofone (VID=0x1915)
-  // und einige andere Geräte brauchen beim ersten getUserMedia() oft 200-800 ms,
-  // bis tatsächlich Audiodaten fließen. Ohne Prewarm wird das erste gesprochene
-  // Wort unvollständig oder gar nicht transkribiert.
-  const prewarmedRef = useRef(false);
-  useEffect(() => {
-    if (prewarmedRef.current) return;
-    prewarmedRef.current = true;
-    // Verzögert ausführen, damit die UI schon gerendert ist und die
-    // Permission-Abfrage nicht mit dem Seitenaufbau kollidiert.
-    const timer = setTimeout(() => { prewarmMic(); }, 800);
-    return () => clearTimeout(timer);
-  }, [prewarmMic]);
   
   // Ref für vadThreshold — immer aktuell, auch wenn start() schon via useCallback
   // eingefroren wurde. Der Wert wird bei MicVAD.new() gelesen, also beim Start
@@ -129,6 +115,21 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
         stopPromiseRef.current = null;
       });
     }
+
+    // Mikrofon-Stream kurz vor MicVAD-Erstellung vorwärmen. Nordic-USB-Geräte
+    // (VID=0x1915) brauchen beim ersten getUserMedia() oft 200–800 ms bis
+    // Audiodaten fließen. Ohne diesen Prewarm werden die ersten Frames mit
+    // Stille gefüllt → das erste gesprochene Wort fehlt in der Transkription.
+    try {
+      const warmStream = await getMicStream({
+        channelCount: 1,
+        echoCancellation: true,
+        autoGainControl: true,
+        noiseSuppression: true,
+      });
+      await new Promise(r => setTimeout(r, 600));
+      warmStream.getTracks().forEach(t => t.stop());
+    } catch { /* Prewarm ist optional */ }
 
     const sessionId = sessionIdRef.current + 1;
     sessionIdRef.current = sessionId;
@@ -316,6 +317,23 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       await vad.destroy();
       return;
     }
+
+    // Pre-Roll: Nach vad.start() warten, bis der Pre-Speech-Puffer mit
+    // echtem Audio gefüllt ist. Ohne diese Wartezeit enthält der Buffer
+    // beim ersten Sprechbeginn nur Stille (kalte USB-Pipeline) und das
+    // erste Wort geht verloren. Maximal 3s warten, dann trotzdem starten.
+    {
+      const preRollDeadline = Date.now() + 3000;
+      while (preSpeechFramesRef.current.length < PRE_SPEECH_PAD_FRAMES) {
+        if (Date.now() > preRollDeadline) {
+          console.warn(`[VAD] Pre-roll timeout after 3s – ${preSpeechFramesRef.current.length}/${PRE_SPEECH_PAD_FRAMES} frames buffered`);
+          break;
+        }
+        await new Promise(r => setTimeout(r, 50));
+      }
+      console.log(`[VAD] Pre-roll complete: ${preSpeechFramesRef.current.length} frames buffered (${(preSpeechFramesRef.current.length * 30).toFixed(0)}ms audio)`);
+    }
+
     setIsListening(true);
   }, [onUtterance, onSpeechStart, onAudioLevel, getMicStream]);
 

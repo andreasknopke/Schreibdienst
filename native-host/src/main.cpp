@@ -873,10 +873,11 @@ void updateRecordingVisuals(bool active, bool showOverlay) {
 
 void setRecordingState(bool active, const wchar_t* source, bool notify) {
     const bool previous = g_recordingState.exchange(active);
+    if (previous == active) {
+        return;
+    }
 
-    // Optik immer synchron halten – auch wenn previous==active,
-    // denn updateRecordingVisuals() könnte die Optik vorab gesetzt
-    // haben und hier bestätigen wir sie nur.
+    // Optik synchron zum neuen State setzen
     if (active) {
         postRecordingOverlayUpdate(notify);
     } else {
@@ -888,10 +889,6 @@ void setRecordingState(bool active, const wchar_t* source, bool notify) {
         if (ensureTrayIconRegistered()) {
             updateTrayIconAppearanceLocked(active);
         }
-    }
-
-    if (previous == active) {
-        return;
     }
 
     if (notify) {

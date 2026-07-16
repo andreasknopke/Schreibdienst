@@ -55,8 +55,12 @@ export interface UseVadChunkingOptions {
 export interface UseVadChunkingReturn {
   isListening: boolean;
   isSpeaking: boolean;
+  /** Aufnahme starten (erster Aufruf: Stream+Prewarm+MicVAD+Pre-Roll; danach: nur Resume) */
   start: () => Promise<void>;
+  /** Aufnahme pausieren (Stream läuft weiter, kein destroy – schnelles Wieder-Anschalten) */
   stop: () => Promise<void>;
+  /** Kompletter Cleanup: MicVAD.destroy(), Stream stoppen. Nur bei Unmount / Seitenwechsel. */
+  destroy: () => Promise<void>;
 }
 
 export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingReturn {
@@ -69,17 +73,11 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
   const animFrameRef = useRef<number | null>(null);
   const sessionIdRef = useRef(0);
   const stopPromiseRef = useRef<Promise<void> | null>(null);
-  
-  // Ref für vadThreshold — immer aktuell, auch wenn start() schon via useCallback
-  // eingefroren wurde. Der Wert wird bei MicVAD.new() gelesen, also beim Start
-  // der nächsten Aufnahme.
+  const firstStartDoneRef = useRef(false);
+
   const vadThresholdRef = useRef(vadThreshold);
   vadThresholdRef.current = vadThreshold;
-  
-  // Aktualisiert den laufenden MicVAD-FrameProcessor, wenn der Schieberegler
-  // für die Raumlautstärke (vadThreshold) während einer aktiven Aufnahme
-  // verändert wird. Dadurch wirkt sich die Änderung sofort aus, ohne dass
-  // die VAD neugestartet werden muss.
+
   useEffect(() => {
     if (vadRef.current?.frameProcessor?.setOptions) {
       const pos = vadThresholdRef.current;
@@ -91,19 +89,16 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
     }
   }, [vadThreshold]);
 
-  // Auto-Chunk: Sammelt Frames seit Sprechbeginn für forced flush
   const speechFramesRef = useRef<Float32Array[]>([]);
   const preSpeechFramesRef = useRef<Float32Array[]>([]);
   const speechStartTimeRef = useRef<number>(0);
   const isSpeechActiveRef = useRef(false);
   const autoChunkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const utilsRef = useRef<any>(null);
-  // Trackt wieviele Samples bereits per Auto-Chunk gesendet wurden
   const samplesAlreadySentRef = useRef<number>(0);
 
   const start = useCallback(async () => {
     if (stopPromiseRef.current) {
-      // Timeout für ausstehendes Destroy, damit die Record-Taste nicht blockiert
       const DESTROY_TIMEOUT_MS = 5000;
       await Promise.race([
         stopPromiseRef.current,
@@ -116,251 +111,191 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       });
     }
 
-    // Mikrofon-Stream kurz vor MicVAD-Erstellung vorwärmen. Nordic-USB-Geräte
-    // (VID=0x1915) brauchen beim ersten getUserMedia() oft 200–800 ms bis
-    // Audiodaten fließen. Ohne diesen Prewarm werden die ersten Frames mit
-    // Stille gefüllt → das erste gesprochene Wort fehlt in der Transkription.
-    try {
-      const warmStream = await getMicStream({
-        channelCount: 1,
-        echoCancellation: true,
-        autoGainControl: true,
-        noiseSuppression: true,
-      });
-      await new Promise(r => setTimeout(r, 600));
-      warmStream.getTracks().forEach(t => t.stop());
-    } catch { /* Prewarm ist optional */ }
+    const isFirstStart = !firstStartDoneRef.current;
 
-    const sessionId = sessionIdRef.current + 1;
-    sessionIdRef.current = sessionId;
+    // ── Erster Start: MicVAD erstellen, Stream vorwärmen ──────────
+    if (isFirstStart) {
+      firstStartDoneRef.current = true;
 
-    const { MicVAD, utils } = await loadVad();
-    utilsRef.current = utils;
-
-    // Flush-Funktion: Erzwingt Utterance-Abschluss aus gesammelten Frames
-    const flushCollectedFrames = () => {
-      const frames = speechFramesRef.current;
-      if (frames.length === 0) return;
-      
-      // Frames zusammenfügen
-      const totalLength = frames.reduce((sum, f) => sum + f.length, 0);
-      const combined = new Float32Array(totalLength);
-      let offset = 0;
-      for (const frame of frames) {
-        combined.set(frame, offset);
-        offset += frame.length;
-      }
-      speechFramesRef.current = [];
-      
-      // Merken wieviel wir schon gesendet haben (für onSpeechEnd Deduplizierung)
-      samplesAlreadySentRef.current += totalLength;
-      
-      console.log(`[VAD] Auto-chunk: ${(totalLength / 16000).toFixed(1)}s Audio (total sent: ${(samplesAlreadySentRef.current / 16000).toFixed(1)}s)`);
-      const wavBuffer = utils.encodeWAV(combined);
-      const blob = new Blob([wavBuffer], { type: 'audio/wav' });
-      onUtterance(blob);
-    };
-
-    const vad = await MicVAD.new({
-      // Assets liegen in /public/
-      baseAssetPath: '/',
-      onnxWASMBasePath: '/',
-      model: 'v5',
-
-      // Ausgewähltes Mikrofon verwenden
-      getStream: () => getMicStream({
-        channelCount: 1,
-        echoCancellation: true,
-        autoGainControl: true,
-        noiseSuppression: true,
-      }),
-      startOnLoad: false,
-
-      // VAD-Erkennungsschwelle: Höhere Werte = weniger empfindlich.
-      // Bei Raumgeräuschen/Nebengesprächen hilft ein höherer Schwellwert.
-      // Nutzt Ref statt destructured-Prop, damit Slider-Änderungen auch ohne
-      // Neu-Rendern des start-Callbacks wirksam werden.
-      positiveSpeechThreshold: vadThresholdRef.current,
-      negativeSpeechThreshold: Math.max(0.1, vadThresholdRef.current - 0.07),
-      redemptionFrames: 10,       // ~600ms Pause bis zum Commit
-      minSpeechFrames: 4,         // Mind. ~240ms Sprache gegen Fehlzündungen
-      preSpeechPadFrames: 15,     // ~900ms Audio vor Sprechbeginn
-
-      onSpeechStart: () => {
-        if (sessionId !== sessionIdRef.current) return;
-        setIsSpeaking(true);
-        if (sessionId !== sessionIdRef.current) return;
-        setIsSpeaking(true);
-        isSpeechActiveRef.current = true;
-        // Der manuelle Stop-Flush baut Audio aus den lokal gesammelten Frames.
-        // Deshalb müssen wir den Vorlauf vor der Speech-Erkennung selbst mitnehmen,
-        // sonst können Anfangswörter im Stop-Pfad abgeschnitten werden.
-        speechFramesRef.current = preSpeechFramesRef.current.map(frame => new Float32Array(frame));
-        speechStartTimeRef.current = Date.now();
-        samplesAlreadySentRef.current = 0;
-        console.log('[VAD] Speech start detected');
-        onSpeechStart?.();
-        
-        // Auto-Chunk deaktiviert: Schneidet bei schnellem Sprechen mitten im Satz
-        // und erzeugt Duplikate/Fragmente. VAD onSpeechEnd reicht als Trigger.
-      },
-
-      onSpeechEnd: (audio: Float32Array) => {
-        if (sessionId !== sessionIdRef.current) return;
-        setIsSpeaking(false);
-        isSpeechActiveRef.current = false;
-        speechFramesRef.current = [];
-        preSpeechFramesRef.current = [];
-        speechStartTimeRef.current = 0;
-        if (autoChunkTimerRef.current) {
-          clearTimeout(autoChunkTimerRef.current);
-          autoChunkTimerRef.current = null;
-        }
-        
-        // Etwas mehr Nachlauf-Stille hilft, dass Endsilben und das letzte
-        // Wort am Chunk-Ende nicht abgeschnitten werden.
-        const padSamples = Math.round(0.45 * 16000); // 450ms bei 16kHz
-        const padded = new Float32Array(audio.length + padSamples);
-        padded.set(audio, 0);
-        const wavBuffer = utils.encodeWAV(padded);
-        const blob = new Blob([wavBuffer], { type: 'audio/wav' });
-        console.log(`[VAD] Speech end -> utterance ${estimateWavDurationSeconds(blob.size).toFixed(2)}s, ${blob.size} bytes`);
-        onUtterance(blob);
-      },
-
-      onVADMisfire: () => {
-        if (sessionId !== sessionIdRef.current) return;
-        const bufferedSamples = speechFramesRef.current.reduce((sum, frame) => sum + frame.length, 0);
-        const bufferedSeconds = bufferedSamples / 16000;
-        const activeMs = speechStartTimeRef.current > 0 ? Date.now() - speechStartTimeRef.current : 0;
-        const frameCount = speechFramesRef.current.length;
-        setIsSpeaking(false);
-        isSpeechActiveRef.current = false;
-        speechFramesRef.current = [];
-        preSpeechFramesRef.current = [];
-        speechStartTimeRef.current = 0;
-        samplesAlreadySentRef.current = 0;
-        if (autoChunkTimerRef.current) {
-          clearTimeout(autoChunkTimerRef.current);
-          autoChunkTimerRef.current = null;
-        }
-        console.warn(
-          `[VAD] Misfire - speech start discarded after ${activeMs}ms with ${bufferedSeconds.toFixed(2)}s buffered audio across ${frameCount} frames. No utterance will be transcribed.`
-        );
-      },
-
-      onFrameProcessed: (_probs: any, frame: Float32Array) => {
-        if (sessionId !== sessionIdRef.current) return;
-        const frameCopy = new Float32Array(frame);
-
-        preSpeechFramesRef.current.push(frameCopy);
-        if (preSpeechFramesRef.current.length > PRE_SPEECH_PAD_FRAMES) {
-          preSpeechFramesRef.current.shift();
-        }
-
-        // Frames sammeln für Auto-Chunk (nur während Sprechen)
-        if (isSpeechActiveRef.current && speechStartTimeRef.current > 0) {
-          speechFramesRef.current.push(frameCopy);
-        }
-        
-        // Audio-Level aus Analyser lesen (wenn vorhanden)
-        if (analyserRef.current && onAudioLevel) {
-          const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-          analyserRef.current.getByteFrequencyData(dataArray);
-          const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-          onAudioLevel(Math.min(100, (average / 128) * 100));
-        }
-      },
-    });
-
-    console.log(`[VAD] MicVAD created with thresholds: pos=${vadThresholdRef.current.toFixed(2)}, neg=${Math.max(0.1, vadThresholdRef.current - 0.07).toFixed(2)}`);
-
-    vadRef.current = vad;
-
-    if (sessionId !== sessionIdRef.current) {
-      await vad.destroy();
-      return;
-    }
-
-    // Audio-Level-Analyser an den AudioContext der VAD hängen
-    try {
-      const audioCtx = (vad as any)._audioContext as AudioContext | undefined;
-      const source = (vad as any)._mediaStreamAudioSourceNode as MediaStreamAudioSourceNode | undefined;
-      if (audioCtx && source) {
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
-        analyserRef.current = analyser;
-      }
-    } catch {
-      // Nicht kritisch – Audio Level funktioniert halt nicht
-    }
-
-    // Bei der ersten Benutzung kann die Mikrofon-Permission/Stream-Akquise
-    // laenger dauern als MicVAD.new() braucht. In diesem Fall schlaegt
-    // vad.start() mit "MicVAD has null stream, audio context, or processor
-    // adapter" fehl. Ein kurzer Retry gibt dem internen Setup Zeit.
-    let startAttempts = 0;
-    const maxStartAttempts = 3;
-    while (startAttempts < maxStartAttempts) {
+      // Stream vorwärmen: Nordic-USB (VID=0x1915) braucht 200-800ms
       try {
-        await vad.start();
-        break; // Erfolg – Schleife verlassen
-      } catch (err) {
-        startAttempts++;
-        if (startAttempts >= maxStartAttempts) throw err;
-        console.warn(`[VAD] start() attempt ${startAttempts} failed – retrying in 400ms...`);
-        await new Promise(r => setTimeout(r, 400));
+        const warmStream = await getMicStream({
+          channelCount: 1, echoCancellation: true,
+          autoGainControl: true, noiseSuppression: true,
+        });
+        await new Promise(r => setTimeout(r, 600));
+        warmStream.getTracks().forEach(t => t.stop());
+      } catch { /* optional */ }
+
+      const sessionId = sessionIdRef.current + 1;
+      sessionIdRef.current = sessionId;
+
+      const { MicVAD, utils } = await loadVad();
+      utilsRef.current = utils;
+
+      const vad = await MicVAD.new({
+        baseAssetPath: '/',
+        onnxWASMBasePath: '/',
+        model: 'v5',
+        getStream: () => getMicStream({
+          channelCount: 1, echoCancellation: true,
+          autoGainControl: true, noiseSuppression: true,
+        }),
+        startOnLoad: false,
+        positiveSpeechThreshold: vadThresholdRef.current,
+        negativeSpeechThreshold: Math.max(0.1, vadThresholdRef.current - 0.07),
+        redemptionFrames: 10,
+        minSpeechFrames: 4,
+        preSpeechPadFrames: 30,
+
+        onSpeechStart: () => {
+          if (sessionIdRef.current !== sessionId) return;
+          setIsSpeaking(true);
+          isSpeechActiveRef.current = true;
+          speechFramesRef.current = preSpeechFramesRef.current.map(f => new Float32Array(f));
+          speechStartTimeRef.current = Date.now();
+          samplesAlreadySentRef.current = 0;
+          onSpeechStart?.();
+        },
+
+        onSpeechEnd: (audio: Float32Array) => {
+          if (sessionIdRef.current !== sessionId) return;
+          setIsSpeaking(false);
+          isSpeechActiveRef.current = false;
+          speechFramesRef.current = [];
+          preSpeechFramesRef.current = [];
+          speechStartTimeRef.current = 0;
+          if (autoChunkTimerRef.current) {
+            clearTimeout(autoChunkTimerRef.current);
+            autoChunkTimerRef.current = null;
+          }
+          const padSamples = Math.round(0.45 * 16000);
+          const padded = new Float32Array(audio.length + padSamples);
+          padded.set(audio, 0);
+          const wavBuffer = utils.encodeWAV(padded);
+          const blob = new Blob([wavBuffer], { type: 'audio/wav' });
+          console.log(`[VAD] Speech end -> utterance ${estimateWavDurationSeconds(blob.size).toFixed(2)}s, ${blob.size} bytes`);
+          onUtterance(blob);
+        },
+
+        onVADMisfire: () => {
+          if (sessionIdRef.current !== sessionId) return;
+          setIsSpeaking(false);
+          isSpeechActiveRef.current = false;
+          speechFramesRef.current = [];
+          preSpeechFramesRef.current = [];
+          speechStartTimeRef.current = 0;
+          samplesAlreadySentRef.current = 0;
+          if (autoChunkTimerRef.current) { clearTimeout(autoChunkTimerRef.current); autoChunkTimerRef.current = null; }
+          console.warn('[VAD] Misfire - discarded');
+        },
+
+        onFrameProcessed: (_probs: any, frame: Float32Array) => {
+          if (sessionIdRef.current !== sessionId) return;
+          const frameCopy = new Float32Array(frame);
+          preSpeechFramesRef.current.push(frameCopy);
+          if (preSpeechFramesRef.current.length > PRE_SPEECH_PAD_FRAMES) {
+            preSpeechFramesRef.current.shift();
+          }
+          if (isSpeechActiveRef.current && speechStartTimeRef.current > 0) {
+            speechFramesRef.current.push(frameCopy);
+          }
+          if (analyserRef.current && onAudioLevel) {
+            const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+            analyserRef.current.getByteFrequencyData(dataArray);
+            const average = dataArray.reduce((a: number, b: number) => a + b) / dataArray.length;
+            onAudioLevel(Math.min(100, (average / 128) * 100));
+          }
+        },
+      });
+
+      vadRef.current = vad;
+
+      if (sessionIdRef.current !== sessionId) { await vad.destroy(); vadRef.current = null; return; }
+
+      try {
+        const audioCtx = (vad as any)._audioContext as AudioContext | undefined;
+        const source = (vad as any)._mediaStreamAudioSourceNode as MediaStreamAudioSourceNode | undefined;
+        if (audioCtx && source) {
+          const analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 256;
+          source.connect(analyser);
+          analyserRef.current = analyser;
+        }
+      } catch { /* non-critical */ }
+
+      let startAttempts = 0;
+      while (startAttempts < 3) {
+        try { await vad.start(); break; }
+        catch (err) {
+          startAttempts++;
+          if (startAttempts >= 3) throw err;
+          console.warn(`[VAD] start() attempt ${startAttempts} failed – retrying in 400ms...`);
+          await new Promise(r => setTimeout(r, 400));
+        }
       }
-    }
-    if (sessionId !== sessionIdRef.current) {
-      await vad.destroy();
+      if (sessionIdRef.current !== sessionId) { await vad.destroy(); vadRef.current = null; return; }
+
+      // Pre-Roll nur beim ersten Start: warten bis Pre-Speech-Buffer mit
+      // echtem Audio gefüllt ist (kalte USB-Pipeline → erstes Wort sonst weg)
+      {
+        const deadline = Date.now() + 3000;
+        while (preSpeechFramesRef.current.length < PRE_SPEECH_PAD_FRAMES) {
+          if (Date.now() > deadline) {
+            console.warn(`[VAD] Pre-roll timeout – ${preSpeechFramesRef.current.length}/${PRE_SPEECH_PAD_FRAMES} frames`);
+            break;
+          }
+          await new Promise(r => setTimeout(r, 50));
+        }
+        console.log(`[VAD] First-start pre-roll done: ${preSpeechFramesRef.current.length} frames`);
+      }
+      setIsListening(true);
       return;
     }
 
-    // Pre-Roll: Nach vad.start() warten, bis der Pre-Speech-Puffer mit
-    // echtem Audio gefüllt ist. Ohne diese Wartezeit enthält der Buffer
-    // beim ersten Sprechbeginn nur Stille (kalte USB-Pipeline) und das
-    // erste Wort geht verloren. Maximal 3s warten, dann trotzdem starten.
-    {
-      const preRollDeadline = Date.now() + 3000;
-      while (preSpeechFramesRef.current.length < PRE_SPEECH_PAD_FRAMES) {
-        if (Date.now() > preRollDeadline) {
-          console.warn(`[VAD] Pre-roll timeout after 3s – ${preSpeechFramesRef.current.length}/${PRE_SPEECH_PAD_FRAMES} frames buffered`);
-          break;
-        }
-        await new Promise(r => setTimeout(r, 50));
-      }
-      console.log(`[VAD] Pre-roll complete: ${preSpeechFramesRef.current.length} frames buffered (${(preSpeechFramesRef.current.length * 30).toFixed(0)}ms audio)`);
+    // ── Folge-Aufruf: Stream läuft noch (pausiert) → nur Resume ──
+    const currentVad = vadRef.current;
+    if (!currentVad) {
+      console.warn('[VAD] start() called but vadRef is null – re-creating');
+      firstStartDoneRef.current = false;
+      return start();
     }
 
+    const resumeId = sessionIdRef.current + 1;
+    sessionIdRef.current = resumeId;
+
+    try {
+      await currentVad.start();
+    } catch (err: any) {
+      console.error('[VAD] resume failed:', err?.message || err);
+      firstStartDoneRef.current = false;
+      vadRef.current = null;
+      return start();
+    }
+    if (sessionIdRef.current !== resumeId) return;
+
+    // Kurzer Pre-Roll (200ms) für Resume: Stream ist warm, Frames kommen sofort.
+    // Wir warten nur, dass ein paar Frames im Pre-Speech-Buffer sind, damit
+    // bei sofortigem Sprechen der Stop-Flush genug Vorlauf hat.
+    await new Promise(r => setTimeout(r, 200));
     setIsListening(true);
+
+    return;
   }, [onUtterance, onSpeechStart, onAudioLevel, getMicStream]);
 
   const stop = useCallback(() => {
-    if (stopPromiseRef.current) {
-      return stopPromiseRef.current;
-    }
-
     sessionIdRef.current += 1;
 
-    // Auto-Chunk Timer aufräumen
-    if (autoChunkTimerRef.current) {
-      clearTimeout(autoChunkTimerRef.current);
-      autoChunkTimerRef.current = null;
-    }
-    // Letzte gesammelte Frames noch als Utterance senden
+    if (autoChunkTimerRef.current) { clearTimeout(autoChunkTimerRef.current); autoChunkTimerRef.current = null; }
+
+    // Letzte gesammelte Frames als Utterance senden
     if (isSpeechActiveRef.current && speechFramesRef.current.length > 0 && utilsRef.current) {
       const frames = speechFramesRef.current;
       const totalLength = frames.reduce((sum, f) => sum + f.length, 0);
-      if (totalLength > 1600) { // mind. 100ms Audio
+      if (totalLength > 1600) {
         const combined = new Float32Array(totalLength);
         let offset = 0;
-        for (const frame of frames) {
-          combined.set(frame, offset);
-          offset += frame.length;
-        }
-
+        for (const frame of frames) { combined.set(frame, offset); offset += frame.length; }
         const padSamples = Math.round(0.45 * 16000);
         const padded = new Float32Array(combined.length + padSamples);
         padded.set(combined, 0);
@@ -376,39 +311,45 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
     isSpeechActiveRef.current = false;
     setIsListening(false);
     setIsSpeaking(false);
+    samplesAlreadySentRef.current = 0;
 
+    // Nur pausieren – Stream + MicVAD bleiben am Leben für schnelles Resume
     const currentVad = vadRef.current;
-    vadRef.current = null;
-
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-    }
-
-    const stopPromise = (async () => {
+    const pausePromise = (async () => {
       if (currentVad) {
-        // Timeout für destroy(), damit die Aufnahme auch dann sauber endet,
-        // wenn das Silero-Modell/AudioContext hängt (z.B. bei Nordic-Geräten
-        // nach längerer Diktat-Pause).
         await Promise.race([
-          currentVad.destroy(),
-          new Promise<void>((_, reject) =>
-            setTimeout(() => reject(new Error('VAD destroy timeout')), 3000)
-          ),
-        ]).catch(err => {
-          console.warn('[VAD] destroy error/timeout:', err?.message || err);
-        });
+          currentVad.pause(),
+          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('VAD pause timeout')), 3000)),
+        ]).catch(err => { console.warn('[VAD] pause error:', err?.message || err); });
       }
-      analyserRef.current = null;
-    })().finally(() => {
-      if (stopPromiseRef.current === stopPromise) {
-        stopPromiseRef.current = null;
-      }
-    });
+    })().finally(() => { stopPromiseRef.current = null; });
 
-    stopPromiseRef.current = stopPromise;
-    return stopPromise;
+    stopPromiseRef.current = pausePromise;
+    return pausePromise;
   }, [onUtterance]);
 
-  return { isListening, isSpeaking, start, stop };
+  const destroy = useCallback(async () => {
+    sessionIdRef.current += 1;
+    const currentVad = vadRef.current;
+    vadRef.current = null;
+    firstStartDoneRef.current = false;
+    if (currentVad) {
+      await Promise.race([
+        currentVad.destroy(),
+        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('VAD destroy timeout')), 3000)),
+      ]).catch(err => { console.warn('[VAD] destroy error:', err?.message || err); });
+    }
+    analyserRef.current = null;
+    speechFramesRef.current = [];
+    preSpeechFramesRef.current = [];
+    setIsListening(false);
+    setIsSpeaking(false);
+  }, []);
+
+  // Cleanup bei Unmount
+  useEffect(() => {
+    return () => { destroy(); };
+  }, [destroy]);
+
+  return { isListening, isSpeaking, start, stop, destroy };
 }

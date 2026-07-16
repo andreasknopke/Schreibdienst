@@ -1,18 +1,24 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import FolderExplorer, { type FolderNode } from './FolderExplorer';
 
 interface BausteinTemplate {
   id: number;
   name: string;
   content: string;
   scope?: 'private' | 'group';
+  folderId?: number | null;
 }
 
 interface BausteinPaletteProps {
   templates: BausteinTemplate[];
   onAddBaustein: (template: BausteinTemplate) => void;
   onClose: () => void;
+  /** Auth-Headers für API-Aufrufe (Ordner CRUD) */
+  apiFetch?: (url: string, options?: RequestInit) => Promise<Response>;
+  /** Benutzername für Ordner-Erstellung */
+  username?: string;
 }
 
 /** Extrahiert eine Gruppen-Überschrift, z. B. "CCT" aus "CCT – Standard" */
@@ -25,9 +31,115 @@ export default function BausteinPalette({
   templates,
   onAddBaustein,
   onClose,
+  apiFetch,
+  username,
 }: BausteinPaletteProps) {
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'private' | 'group'>('all');
+  const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
+  const [personalFolders, setPersonalFolders] = useState<FolderNode[]>([]);
+  const [groupFolders, setGroupFolders] = useState<{ groupId: number; groupName: string; folders: FolderNode[] }[]>([]);
+  const [view, setView] = useState<'list' | 'tree'>('tree');
+
+  // Ordner-Struktur laden
+  const loadFolders = useCallback(async () => {
+    if (!apiFetch) return;
+    try {
+      const res = await apiFetch('/api/templates/folders', {});
+      const data = await res.json();
+      if (data.success && data.tree) {
+        // Persönliche Ordner als Baum aufbauen
+        const personalRoots = buildFolderTree(data.tree.personal || []);
+        setPersonalFolders(personalRoots);
+
+        // Gruppen-Ordner
+        const groupData = (data.tree.groups || []).map((g: any) => ({
+          groupId: g.groupId,
+          groupName: g.groupName,
+          folders: buildFolderTree(g.folders || []),
+        }));
+        setGroupFolders(groupData);
+      }
+    } catch { /* silent */ }
+  }, [apiFetch]);
+
+  useEffect(() => {
+    if (view === 'tree') loadFolders();
+  }, [view, loadFolders]);
+
+  const handleCreateFolder = useCallback(async (name: string, parentId: number | null) => {
+    if (!apiFetch) return;
+    await apiFetch('/api/templates/folders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, parentId }),
+    });
+    await loadFolders();
+  }, [apiFetch, loadFolders]);
+
+  const handleRenameFolder = useCallback(async (id: number, name: string) => {
+    if (!apiFetch) return;
+    await apiFetch('/api/templates/folders', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, name }),
+    });
+    await loadFolders();
+  }, [apiFetch, loadFolders]);
+
+  const handleDeleteFolder = useCallback(async (id: number) => {
+    if (!apiFetch) return;
+    await apiFetch('/api/templates/folders', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    await loadFolders();
+  }, [apiFetch, loadFolders]);
+
+  // Templates nach ausgewähltem Ordner filtern
+  const filteredTemplatesFromFolder = useMemo(() => {
+    if (selectedFolderId === null) return null; // null = "Alle" → kein Filter
+
+    // Templates aus diesem Ordner und allen Unterordnern
+    const collectSubfolderIds = (folders: FolderNode[], ids: Set<number>) => {
+      for (const f of folders) {
+        ids.add(f.id);
+        collectSubfolderIds(f.children, ids);
+      }
+    };
+
+    // Aus persönlichen Ordnern
+    const relevantIds = new Set<number>();
+    collectSubfolderIds(personalFolders, relevantIds);
+
+    // Aus Gruppen-Ordnern (alle sichtbaren)
+    for (const gf of groupFolders) {
+      collectSubfolderIds(gf.folders, relevantIds);
+    }
+
+    if (!relevantIds.has(selectedFolderId)) return null;
+
+    // Alle Subfolder-Ids sammeln
+    const allSubIds = new Set<number>();
+    const findSubIds = (folders: FolderNode[]) => {
+      for (const f of folders) {
+        if (f.id === selectedFolderId || allSubIds.has(f.id)) {
+          allSubIds.add(f.id);
+          for (const child of f.children) {
+            collectSubfolderIds([child], allSubIds);
+          }
+        }
+        findSubIds(f.children);
+      }
+    };
+    findSubIds(personalFolders);
+    for (const gf of groupFolders) findSubIds(gf.folders);
+
+    return templates.filter((t) => t.folderId !== undefined && allSubIds.has(t.folderId!));
+  }, [selectedFolderId, personalFolders, groupFolders, templates]);
+
+  const hasFolderFilter = selectedFolderId !== null;
 
   const hasGroupTemplates = templates.some((t) => t.scope === 'group');
 
@@ -106,71 +218,198 @@ export default function BausteinPalette({
         />
       </div>
 
-      {/* Scope-Tabs */}
-      <div className="flex gap-0.5 px-3 pb-1.5">
-        <TabButton
-          label="Alle"
-          active={activeTab === 'all'}
-          onClick={() => setActiveTab('all')}
-        />
-        <TabButton
-          label="👤 Eigene"
-          active={activeTab === 'private'}
-          onClick={() => setActiveTab('private')}
-        />
-        {hasGroupTemplates && (
-          <TabButton
-            label="👥 Gruppe"
-            active={activeTab === 'group'}
-            onClick={() => setActiveTab('group')}
-          />
-        )}
+      {/* Ansicht-Umschalter */}
+      <div className="flex items-center gap-1 px-3 pb-1">
+        <button
+          onClick={() => setView('tree')}
+          className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
+            view === 'tree'
+              ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+              : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+          }`}
+        >
+          🗂️ Ordner
+        </button>
+        <button
+          onClick={() => setView('list')}
+          className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
+            view === 'list'
+              ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+              : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+          }`}
+        >
+          📋 Liste
+        </button>
       </div>
 
-      {/* Template-Liste */}
-      <div className="divide-y divide-gray-100 dark:divide-gray-800">
-        {grouped.groups.length === 0 && grouped.ungrouped.length === 0 && (
-          <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">
-            {search
-              ? 'Keine Bausteine gefunden.'
-              : 'Keine Bausteine für dieses Feld.'}
-          </div>
-        )}
-
-        {grouped.groups.map(([group, items]) => (
-          <div key={group}>
-            <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">
-              {group}
-            </div>
-            {items.map((tpl) => (
-              <PaletteRow
-                key={tpl.id}
-                template={tpl}
-                onAdd={onAddBaustein}
+      {view === 'tree' ? (
+        /* ── Ordner-Ansicht ── */
+        <div className="divide-y divide-gray-100 dark:divide-gray-800">
+          {/* Persönliche Ordner */}
+          {personalFolders.length > 0 && (
+            <div>
+              <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 flex items-center gap-1">
+                👤 Meine Ordner
+              </div>
+              <FolderExplorer
+                folders={personalFolders}
+                onSelectFolder={setSelectedFolderId}
+                selectedFolderId={selectedFolderId}
+                onCreateFolder={handleCreateFolder}
+                onRenameFolder={handleRenameFolder}
+                onDeleteFolder={handleDeleteFolder}
               />
-            ))}
-          </div>
-        ))}
+            </div>
+          )}
 
-        {grouped.ungrouped.length > 0 && (
-          <div>
-            {grouped.groups.length > 0 && (
-              <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">
-                Weitere
+          {/* Gruppen-Ordner */}
+          {groupFolders.length > 0 && groupFolders.map((gf) => (
+            <div key={gf.groupId}>
+              <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 flex items-center gap-1">
+                👥 {gf.groupName}
+              </div>
+              <FolderExplorer
+                folders={gf.folders}
+                onSelectFolder={setSelectedFolderId}
+                selectedFolderId={selectedFolderId}
+                onCreateFolder={handleCreateFolder}
+                onRenameFolder={handleRenameFolder}
+                onDeleteFolder={handleDeleteFolder}
+              />
+            </div>
+          ))}
+
+          {/* Leer-Zustand */}
+          {personalFolders.length === 0 && groupFolders.length === 0 && (
+            <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">
+              {apiFetch ? (
+                <button
+                  onClick={() => {
+                    const name = prompt('Ordnername:');
+                    if (name) handleCreateFolder(name, null);
+                  }}
+                  className="text-blue-600 dark:text-blue-400 underline"
+                >
+                  Ersten Ordner anlegen
+                </button>
+              ) : (
+                'Keine Ordner vorhanden.'
+              )}
+            </div>
+          )}
+
+          {/* Templates im ausgewählten Ordner */}
+          {hasFolderFilter && (
+            <div className="px-3 py-2 text-[10px] text-gray-500 dark:text-gray-400">
+              {filteredTemplatesFromFolder === null
+                ? 'Bitte wählen Sie einen Ordner aus.'
+                : filteredTemplatesFromFolder.length === 0
+                ? 'Keine Bausteine in diesem Ordner.'
+                : `${filteredTemplatesFromFolder.length} Baustein(e) in diesem Ordner`
+              }
+            </div>
+          )}
+          {hasFolderFilter && filteredTemplatesFromFolder && filteredTemplatesFromFolder.map((tpl) => (
+            <PaletteRow
+              key={tpl.id}
+              template={tpl}
+              onAdd={onAddBaustein}
+            />
+          ))}
+        </div>
+      ) : (
+        /* ── Listen-Ansicht (bisherige Ansicht) ── */
+        <>
+          {/* Scope-Tabs */}
+          <div className="flex gap-0.5 px-3 pb-1.5">
+            <TabButton
+              label="Alle"
+              active={activeTab === 'all'}
+              onClick={() => setActiveTab('all')}
+            />
+            <TabButton
+              label="👤 Eigene"
+              active={activeTab === 'private'}
+              onClick={() => setActiveTab('private')}
+            />
+            {hasGroupTemplates && (
+              <TabButton
+                label="👥 Gruppe"
+                active={activeTab === 'group'}
+                onClick={() => setActiveTab('group')}
+              />
+            )}
+          </div>
+
+          {/* Template-Liste */}
+          <div className="divide-y divide-gray-100 dark:divide-gray-800">
+            {grouped.groups.length === 0 && grouped.ungrouped.length === 0 && (
+              <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">
+                {search ? 'Keine Bausteine gefunden.' : 'Keine Bausteine für dieses Feld.'}
               </div>
             )}
-            {grouped.ungrouped.map((tpl) => (
-              <PaletteRow
-                key={tpl.id}
-                template={tpl}
-                onAdd={onAddBaustein}
-              />
+
+            {grouped.groups.map(([group, items]) => (
+              <div key={group}>
+                <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">
+                  {group}
+                </div>
+                {items.map((tpl) => (
+                  <PaletteRow
+                    key={tpl.id}
+                    template={tpl}
+                    onAdd={onAddBaustein}
+                  />
+                ))}
+              </div>
             ))}
+
+            {grouped.ungrouped.length > 0 && (
+              <div>
+                {grouped.groups.length > 0 && (
+                  <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">
+                    Weitere
+                  </div>
+                )}
+                {grouped.ungrouped.map((tpl) => (
+                  <PaletteRow
+                    key={tpl.id}
+                    template={tpl}
+                    onAdd={onAddBaustein}
+                  />
+                ))}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
+}
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
+
+/**
+ * Baut aus einer flachen Liste von Folder-Objekten eine verschachtelte Baum-Struktur auf.
+ */
+function buildFolderTree(flatList: { id: number; parentId: number | null; name: string; sortOrder: number; children?: any[] }[]): FolderNode[] {
+  const map = new Map<number, FolderNode>();
+  const roots: FolderNode[] = [];
+
+  for (const item of flatList) {
+    map.set(item.id, { id: item.id, parentId: item.parentId, name: item.name, children: [] });
+  }
+
+  for (const item of flatList) {
+    const node = map.get(item.id)!;
+    if (item.parentId !== null && map.has(item.parentId)) {
+      map.get(item.parentId)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  return roots;
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────

@@ -111,6 +111,7 @@ interface Template {
   formatRanges?: RichTextFormatRange[];
   scope?: 'private' | 'group';
   groupName?: string;
+  folderId?: number | null;
 }
 
 interface PendingTemplateInsertChoice {
@@ -7337,12 +7338,14 @@ export default function HomePage() {
                       .map((id) => availableTemplates.find((t) => t.id === id))
                       .filter((t): t is NonNullable<typeof t> => t != null)
                   : availableTemplates
-              ).map((t) => ({ id: t.id, name: t.name, content: t.content, scope: t.scope }))}
+              ).map((t) => ({ id: t.id, name: t.name, content: t.content, scope: t.scope, folderId: t.folderId }))}
               onAddBaustein={(tpl) => {
                 const full = availableTemplates.find((t) => t.id === tpl.id);
                 if (full) addBausteinAsNewBlock(full);
               }}
               onClose={() => { setShowMultiBausteinMode(false); setComplexTemplateFilterIds(null); }}
+              apiFetch={apiFetchWithAuth}
+              username={username || undefined}
             />
           </div>
         </div>

@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
 
       if (addToGroup) {
         try {
-          const groupIds = await getUserGroupIds(request, username);
+          const groupIds = await getUserGroupIds(request, auth.username);
           let groupInsertFailed = false;
 
           for (const groupId of groupIds) {

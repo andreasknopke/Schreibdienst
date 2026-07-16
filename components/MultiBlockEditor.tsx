@@ -256,7 +256,7 @@ export default function MultiBlockEditor({
         return (
           <div
             key={block.id}
-            className="group rounded-md border border-gray-200 dark:border-gray-700 opacity-35 hover:opacity-50 transition-opacity cursor-pointer"
+            className="group rounded-md border border-gray-300 dark:border-gray-600 opacity-70 hover:opacity-100 transition-opacity cursor-pointer"
             onClick={() => onBlockActivate(block.id)}
             title={`"${block.name}" aktivieren`}
             draggable

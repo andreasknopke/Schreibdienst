@@ -252,11 +252,18 @@ export default function MultiBlockEditor({
           );
         }
 
-        // Inactive block: greyed-out preview with click-to-activate, delete & drag
+        // Inactive block: thin border, whole block clickable + draggable
         return (
           <div
             key={block.id}
-            className="group rounded-md border border-gray-200 dark:border-gray-700 opacity-35 select-none hover:opacity-50 transition-opacity"
+            className="group rounded-md border border-gray-200 dark:border-gray-700 opacity-35 hover:opacity-50 transition-opacity cursor-pointer"
+            onClick={() => onBlockActivate(block.id)}
+            title={`"${block.name}" aktivieren`}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('text/plain', block.id);
+              e.dataTransfer.effectAllowed = 'move';
+            }}
             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
             onDrop={(e) => {
               e.preventDefault();
@@ -271,57 +278,42 @@ export default function MultiBlockEditor({
               onReorderBlocks(ids);
             }}
           >
-            <div
-              className="flex items-center gap-1.5 px-2 py-1 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700 rounded-t-md cursor-grab active:cursor-grabbing"
-              onClick={() => onBlockActivate(block.id)}
-              title={`"${block.name}" aktivieren`}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData('text/plain', block.id);
-                e.dataTransfer.effectAllowed = 'move';
-              }}
-            >
-              <span className="text-xs leading-none">{getBlockIcon(block.type)}</span>
-              <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 truncate flex-1">
-                {block.name}
-              </span>
-              <button
-                onClick={moveUp}
-                disabled={isFirst}
-                className="opacity-0 group-hover:opacity-100 px-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-opacity text-xs leading-none shrink-0 disabled:opacity-0 disabled:pointer-events-none"
-                title="Nach oben verschieben"
-              >
-                ▲
-              </button>
-              <button
-                onClick={moveDown}
-                disabled={isLast}
-                className="opacity-0 group-hover:opacity-100 px-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-opacity text-xs leading-none shrink-0 disabled:opacity-0 disabled:pointer-events-none"
-                title="Nach unten verschieben"
-              >
-                ▼
-              </button>
-              <button
-                onClick={copyBlock}
-                className="px-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-[10px] leading-none shrink-0"
-                title="Blocktext kopieren"
-              >
-                📋
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (window.confirm(`"${block.name}" wirklich löschen?`)) {
-                    onDeleteBlock(block.id);
-                  }
-                }}
-                className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-opacity text-sm leading-none shrink-0"
-                title="Block löschen"
-              >
-                ×
-              </button>
+            <div className="flex items-center justify-between px-2 py-0.5">
+              <div className="flex items-center gap-1 min-w-0">
+                <span className="text-[10px] leading-none shrink-0">{getBlockIcon(block.type)}</span>
+                <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">{block.name}</span>
+              </div>
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button
+                  onClick={(e) => { e.stopPropagation(); moveUp(e); }}
+                  disabled={isFirst}
+                  className="px-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-[10px] leading-none disabled:opacity-30 disabled:pointer-events-none"
+                  title="Nach oben verschieben"
+                >▲</button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); moveDown(e); }}
+                  disabled={isLast}
+                  className="px-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-[10px] leading-none disabled:opacity-30 disabled:pointer-events-none"
+                  title="Nach unten verschieben"
+                >▼</button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); copyBlock(e); }}
+                  className="px-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-[10px] leading-none"
+                  title="Blocktext kopieren"
+                >📋</button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`"${block.name}" wirklich löschen?`)) {
+                      onDeleteBlock(block.id);
+                    }
+                  }}
+                  className="px-0.5 text-gray-400 hover:text-red-500 dark:hover:text-red-400 text-[10px] leading-none"
+                  title="Block löschen"
+                >×</button>
+              </div>
             </div>
-            <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-600 font-mono whitespace-pre-wrap line-clamp-3 pointer-events-none">
+            <div className="px-2 pb-1.5 text-sm text-gray-400 dark:text-gray-600 font-mono whitespace-pre-wrap line-clamp-2 pointer-events-none">
               {block.currentText || '(leer)'}
             </div>
           </div>

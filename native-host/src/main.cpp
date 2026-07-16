@@ -851,9 +851,32 @@ void showRecordingStatusNotification(bool active, const wchar_t* source) {
     logLine("[NOTIFY] recording=%d source=%ls\n", active ? 1 : 0, source);
 }
 
+// Nur Optik (Overlay + Tray-Icon) sofort aktualisieren, ohne
+// g_recordingState anzufassen. Wird von handleHidRecordEvent()
+// für die augenblickliche visuelle Rückmeldung genutzt.
+// g_recordingState wird erst später vom Frontend via
+// recording-status-WebSocket gesetzt – das ist die Source of Truth.
+void updateRecordingVisuals(bool active, bool showOverlay) {
+    if (active) {
+        postRecordingOverlayUpdate(showOverlay);
+    } else {
+        postRecordingOverlayUpdate(false);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_notificationMutex);
+        if (ensureTrayIconRegistered()) {
+            updateTrayIconAppearanceLocked(active);
+        }
+    }
+}
+
 void setRecordingState(bool active, const wchar_t* source, bool notify) {
     const bool previous = g_recordingState.exchange(active);
 
+    // Optik immer synchron halten – auch wenn previous==active,
+    // denn updateRecordingVisuals() könnte die Optik vorab gesetzt
+    // haben und hier bestätigen wir sie nur.
     if (active) {
         postRecordingOverlayUpdate(notify);
     } else {
@@ -1740,15 +1763,18 @@ void handleHidRecordEvent(uint16_t vendorId, uint16_t productId,
     // hid-event broadcastet, lösen aber keine Zustandsänderung aus.
     if (pressed) {
         // Sofortige visuelle Rückmeldung: Overlay und Tray-Icon werden
-        // augenblicklich aktualisiert, ohne auf den WebSocket-Roundtrip
-        // (Host→Frontend→Host) zu warten. Das verhindert die sonst
-        // spürbare 1–2s Verzögerung zwischen Tastendruck und Anzeige.
-        // Der Frontend-eigene Toggle erfolgt parallel via keydown-Event.
-        // Wenn das Frontend später recording-status zurückschickt, ist
-        // setRecordingState() ein No-Op wegen previous==active.
+        // augenblicklich aktualisiert, ABER g_recordingState bleibt
+        // unangetastet. updateRecordingVisuals() setzt nur die Optik.
+        // Die tatsächliche Zustandsänderung erfolgt erst, wenn das
+        // Frontend recording-status per WebSocket zurückschickt.
+        // So kann das Frontend den alten Status nicht mit einem
+        // verzögerten Heartbeat überschreiben (Banner-Flackern!).
         const bool nowRecording = !g_recordingState.load();
         const bool showOverlay = g_frontendTargetMode.load();
-        setRecordingState(nowRecording, L"hid-mic", showOverlay);
+        updateRecordingVisuals(nowRecording, showOverlay);
+        logLine("[NOTIFY] recording=%d source=hid-mic (visuals only)\n",
+               nowRecording ? 1 : 0);
+        fflush(stdout);
 
         dispatchHidActionEvent(deviceName, vendorId, productId, "keydown");
 

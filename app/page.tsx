@@ -2189,6 +2189,33 @@ export default function HomePage() {
           b.id === blockId ? { ...b, currentText: nextText, formatRanges: nextFormats } : b,
         ),
       }));
+      setTemplateUnusedText((data.unusedText || '').trim());
+
+      // Widerspruchsprüfung als separater Schritt
+      setTemplateContradictions([]);
+      if (checkContradictionsRef.current && data.adaptedText) {
+        try {
+          const ccRes = await fetch('/api/templates/check-contradictions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': getAuthHeader(),
+              ...getDbTokenHeader(),
+            },
+            body: JSON.stringify({
+              text: data.adaptedText,
+              username,
+            }),
+          });
+          const ccData = await ccRes.json();
+          if (ccData.success && ccData.contradictions?.length > 0) {
+            setTemplateContradictions(ccData.contradictions);
+          }
+        } catch (err) {
+          console.error('[ContradictionCheck] Error:', err);
+        }
+      }
+
       setError(null);
     } catch (err: any) {
       console.error('[BlockDictation] Error:', err);
@@ -7092,7 +7119,7 @@ export default function HomePage() {
               </div>
           </div>
 
-        {templateUnusedText && (templateMode || activeTemplateContext) && mode === 'befund' && (
+        {templateUnusedText && (templateMode || activeTemplateContext || showMultiBausteinMode) && mode === 'befund' && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
             <label className="mb-1 block text-xs font-medium text-amber-800 dark:text-amber-200">
               Nicht verwendete Textteile
@@ -7107,7 +7134,7 @@ export default function HomePage() {
             </p>
           </div>
         )}
-        {templateContradictions.length > 0 && (templateMode || activeTemplateContext) && mode === 'befund' && (
+        {templateContradictions.length > 0 && (templateMode || activeTemplateContext || showMultiBausteinMode) && mode === 'befund' && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
             <label className="mb-1 block text-xs font-medium text-red-800 dark:text-red-200">
               Medizinische Widersprüche gefunden
@@ -7239,7 +7266,7 @@ export default function HomePage() {
                   onSelectionChange={(editor) => handleRichTextSelectionChange('transcript', editor)}
                   onWordDoubleClick={(info) => handleRichTextWordDoubleClick('transcript', info)}
                 />
-                {templateUnusedText && (templateMode || activeTemplateContext) && (
+                {templateUnusedText && (templateMode || activeTemplateContext || showMultiBausteinMode) && (
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
                     <label className="mb-1 block text-xs font-medium text-amber-800 dark:text-amber-200">
                       Nicht verwendete Textteile
@@ -7254,7 +7281,7 @@ export default function HomePage() {
                     </p>
                   </div>
                 )}
-                {templateContradictions.length > 0 && (templateMode || activeTemplateContext) && (
+                {templateContradictions.length > 0 && (templateMode || activeTemplateContext || showMultiBausteinMode) && (
                   <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
                     <label className="mb-1 block text-xs font-medium text-red-800 dark:text-red-200">
                       Medizinische Widersprüche gefunden

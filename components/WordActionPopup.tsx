@@ -213,9 +213,9 @@ export default function WordActionPopup({
                 className="w-full rounded px-3 py-2 text-left text-sm transition-colors hover:bg-blue-50 dark:hover:bg-blue-950/40"
                 disabled={isSubmitting}
               >
-                <div className="font-medium">✎ Korrektur im Wörterbuch speichern</div>
+                <div className="font-medium">✎ Korrigieren und ins Wörterbuch übernehmen</div>
                 <div className="text-xs text-gray-500">
-                  Korrigierte Schreibweise eingeben und ins Wörterbuch übernehmen
+                  Korrigierte Schreibweise eingeben und ins Wörterbuch speichern
                 </div>
               </button>
             )}

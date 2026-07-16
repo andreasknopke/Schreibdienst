@@ -20,8 +20,10 @@ interface MultiBlockEditorProps {
   showPersistentCaret: boolean;
   caretPosition: { top: number; left: number; height: number; visible: boolean };
   placeholder: string;
-  contradictionMode?: 'genau' | 'einfach' | 'aus' | 'optionen';
-  onContradictionModeChange?: (mode: 'genau' | 'einfach' | 'aus' | 'optionen') => void;
+  contradictionMode?: 'wortgetreu' | 'optionen';
+  onContradictionModeChange?: (mode: 'wortgetreu' | 'optionen') => void;
+  checkContradictions?: boolean;
+  onCheckContradictionsChange?: (checked: boolean) => void;
   onBlockActivate: (blockId: string) => void;
   onDeleteBlock: (blockId: string) => void;
   onReorderBlocks: (blockIds: string[]) => void;
@@ -52,6 +54,8 @@ export default function MultiBlockEditor({
   placeholder,
   contradictionMode,
   onContradictionModeChange,
+  checkContradictions,
+  onCheckContradictionsChange,
   onBlockActivate,
   onDeleteBlock,
   onReorderBlocks,
@@ -203,16 +207,11 @@ export default function MultiBlockEditor({
                       <button
                         type="button"
                         className={`px-1.5 py-0.5 text-[10px] transition-colors ${
-                          contradictionMode !== 'optionen'
+                          (contradictionMode ?? 'wortgetreu') === 'wortgetreu'
                             ? 'bg-emerald-600 text-white'
                             : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
                         }`}
-                        onClick={() => {
-                          // Wechsel zu wortgetreu, behalte Widerspruchs-Einstellung
-                          if (contradictionMode === 'optionen') {
-                            onContradictionModeChange?.('genau');
-                          }
-                        }}
+                        onClick={() => onContradictionModeChange?.('wortgetreu')}
                         title="Diktierten Text möglichst genau übernehmen"
                       >
                         wortgetreu
@@ -233,11 +232,8 @@ export default function MultiBlockEditor({
                     <label className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 cursor-pointer select-none">
                       <input
                         type="checkbox"
-                        checked={contradictionMode === 'genau' || contradictionMode === 'einfach'}
-                        onChange={(e) => {
-                          if (contradictionMode === 'optionen') return;
-                          onContradictionModeChange?.(e.target.checked ? 'genau' : 'aus');
-                        }}
+                        checked={!!checkContradictions}
+                        onChange={(e) => onCheckContradictionsChange?.(e.target.checked)}
                         className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 dark:border-emerald-700"
                       />
                       Widerspruchsprüfung

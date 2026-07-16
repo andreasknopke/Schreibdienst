@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import { addLlmPromptLog, updateLlmPromptLog } from '@/lib/llmPromptLog';
 import { TEMPLATE_ADAPT_BASE } from '@/prompts/templates/adapt-base';
-import { CONTRADICTION_GENAU } from '@/prompts/templates/contradiction-genau';
-import { CONTRADICTION_EINFACH } from '@/prompts/templates/contradiction-einfach';
 import { CONTRADICTION_OPTIONEN } from '@/prompts/templates/contradiction-optionen';
 import { TEMPLATE_NIEMALS } from '@/prompts/templates/template-niemals';
 import { getEffectivePrompt } from '@/lib/promptOverrides';
@@ -284,22 +282,20 @@ export async function POST(req: NextRequest) {
     console.log(`[Template] Template length: ${template.length} chars`);
     console.log(`[Template] FormatRanges: ${(formatRanges ?? []).length} ranges`);
     console.log(`[Template] Changes: "${changes}"`);
-    console.log(`[Template] contradictionMode: ${contradictionMode || 'genau'}`);
+    console.log(`[Template] contradictionMode: ${contradictionMode || 'wortgetreu'}`);
     
     // Get LLM config
     const llmConfig = await getLLMConfig(req);
     console.log(`[Template] Using provider: ${llmConfig.provider}, model: ${llmConfig.model}`);
     
     // System-Prompt aus den konfigurierten Modulen zusammensetzen
-    let contradictionSection: string;
-    let systemPrompt: string;
+    let contradictionSection = '';
+    let systemPrompt = '';
     let isOptionenMode = false;
 
     const effectiveAdaptBase = (await getEffectivePrompt(req, 'templates/adapt-base', TEMPLATE_ADAPT_BASE)).text;
     const effectiveNiemals = (await getEffectivePrompt(req, 'templates/template-niemals', TEMPLATE_NIEMALS)).text;
     const effectiveOptionen = (await getEffectivePrompt(req, 'templates/contradiction-optionen', CONTRADICTION_OPTIONEN)).text;
-    const effectiveEinfach = (await getEffectivePrompt(req, 'templates/contradiction-einfach', CONTRADICTION_EINFACH)).text;
-    const effectiveGenau = (await getEffectivePrompt(req, 'templates/contradiction-genau', CONTRADICTION_GENAU)).text;
 
     if (contradictionMode === 'optionen') {
       isOptionenMode = true;
@@ -316,8 +312,7 @@ AUSGABEFORMAT:
 - KEINE Erklärungen oder Kommentare
 - KEINE Markdown-Codeblöcke oder zusätzlichen Markierungen`;
     } else {
-      contradictionSection = contradictionMode === 'aus' ? '' : contradictionMode === 'einfach' ? effectiveEinfach : effectiveGenau;
-      systemPrompt = `${effectiveAdaptBase}${contradictionSection}${effectiveNiemals}`;
+      systemPrompt = `${effectiveAdaptBase}${effectiveNiemals}`;
     }
     
     // Markdown-Marker aus dem Template entfernen, damit das LLM sie nicht

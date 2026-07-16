@@ -1924,7 +1924,9 @@ export default function HomePage() {
   const [pendingTemplateInsertChoice, setPendingTemplateInsertChoice] = useState<PendingTemplateInsertChoice | null>(null);
   const [activeTemplateContext, setActiveTemplateContext] = useState<Template | null>(null);
   const [autoIntegrateTemplateAudio, setAutoIntegrateTemplateAudio] = useState(false);
-  const [templateContradictionMode, setTemplateContradictionMode] = useState<'genau' | 'einfach' | 'aus' | 'optionen'>('genau');
+  const [templateContradictionMode, setTemplateContradictionMode] = useState<'wortgetreu' | 'optionen'>('wortgetreu');
+  const [checkContradictions, setCheckContradictions] = useState(false);
+  const [templateContradictions, setTemplateContradictions] = useState<{ passage: string; description: string }[]>([]);
   const [showComplexTemplateManager, setShowComplexTemplateManager] = useState(false);
   const [complexTemplates, setComplexTemplates] = useState<Array<{ id: number; name: string; templateIds: number[] }>>([]);
   const apiFetchWithAuth = useCallback(async (url: string, options: RequestInit = {}) => {
@@ -1990,6 +1992,8 @@ export default function HomePage() {
   const pendingTemplateIntegrationRef = useRef(false);
   // Speichert die letzte /api/templates/adapt-Antwort fuer Format-Ranges.
   const adaptDataRef = useRef<Record<string, unknown> | null>(null);
+  const checkContradictionsRef = useRef(checkContradictions);
+  checkContradictionsRef.current = checkContradictions;
   const currentTemplateField: BefundField = mode === 'befund' ? activeField : 'befund';
   const availableTemplates = templates.filter((template) => template.field === currentTemplateField);
 
@@ -2060,8 +2064,34 @@ export default function HomePage() {
         nextText = data.adaptedText;
         adaptDataRef.current = data;
         setTemplateUnusedText((data.unusedText || '').trim());
+
+        // Widerspruchsprüfung als separater Schritt
+        setTemplateContradictions([]);
+        if (checkContradictionsRef.current && data.adaptedText) {
+          try {
+            const ccRes = await fetch('/api/templates/check-contradictions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': getAuthHeader(),
+                ...getDbTokenHeader(),
+              },
+              body: JSON.stringify({
+                text: data.adaptedText,
+                username,
+              }),
+            });
+            const ccData = await ccRes.json();
+            if (ccData.success && ccData.contradictions?.length > 0) {
+              setTemplateContradictions(ccData.contradictions);
+            }
+          } catch (err) {
+            console.error('[ContradictionCheck] Error:', err);
+          }
+        }
       } else {
         setTemplateUnusedText('');
+        setTemplateContradictions([]);
       }
 
       const baseFormats = autoIntegrateTemplateAudioRef.current && currentFieldText
@@ -2092,7 +2122,7 @@ export default function HomePage() {
     } finally {
       setCorrecting(false);
     }
-  }, [cloneRichTextRanges, getFieldRichTextFormats, getTextForBefundField, getAuthHeader, getDbTokenHeader, username, methodik, transcript, beurteilung, setFieldTextWithFormats, templateContradictionMode]);
+  }, [cloneRichTextRanges, getFieldRichTextFormats, getTextForBefundField, getAuthHeader, getDbTokenHeader, username, methodik, transcript, beurteilung, setFieldTextWithFormats, templateContradictionMode, checkContradictions]);
   applyTemplateChangesRef.current = applyTemplateChanges;
 
   /**
@@ -6497,15 +6527,11 @@ export default function HomePage() {
                 <button
                   type="button"
                   className={`px-2 py-0.5 text-[11px] transition-colors ${
-                    templateContradictionMode !== 'optionen'
+                    templateContradictionMode === 'wortgetreu'
                       ? 'bg-emerald-600 text-white'
                       : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
                   }`}
-                  onClick={() => {
-                    if (templateContradictionMode === 'optionen') {
-                      setTemplateContradictionMode('genau');
-                    }
-                  }}
+                  onClick={() => setTemplateContradictionMode('wortgetreu')}
                   title="Diktierten Text möglichst genau übernehmen"
                 >
                   wortgetreu
@@ -6526,11 +6552,8 @@ export default function HomePage() {
               <label className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 cursor-pointer select-none">
                 <input
                   type="checkbox"
-                  checked={templateContradictionMode === 'genau' || templateContradictionMode === 'einfach'}
-                  onChange={(e) => {
-                    if (templateContradictionMode === 'optionen') return;
-                    setTemplateContradictionMode(e.target.checked ? 'genau' : 'aus');
-                  }}
+                  checked={checkContradictions}
+                  onChange={(e) => setCheckContradictions(e.target.checked)}
                   className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 dark:border-emerald-700"
                 />
                 Widerspruchsprüfung
@@ -6744,6 +6767,8 @@ export default function HomePage() {
                     placeholder="Methodik..."
                     contradictionMode={templateContradictionMode}
                     onContradictionModeChange={setTemplateContradictionMode}
+                    checkContradictions={checkContradictions}
+                    onCheckContradictionsChange={setCheckContradictions}
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
                     onDeleteBlock={(blockId) => {
                       const updated = editorBlocksByField.methodik.filter((b) => b.id !== blockId);
@@ -6872,6 +6897,8 @@ export default function HomePage() {
                     placeholder="Befund..."
                     contradictionMode={templateContradictionMode}
                     onContradictionModeChange={setTemplateContradictionMode}
+                    checkContradictions={checkContradictions}
+                    onCheckContradictionsChange={setCheckContradictions}
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
                     onDeleteBlock={(blockId) => {
                       const updated = editorBlocksByField.befund.filter((b) => b.id !== blockId);
@@ -7015,6 +7042,8 @@ export default function HomePage() {
                     placeholder="Zusammenfassung..."
                     contradictionMode={templateContradictionMode}
                     onContradictionModeChange={setTemplateContradictionMode}
+                    checkContradictions={checkContradictions}
+                    onCheckContradictionsChange={setCheckContradictions}
                     onBlockActivate={(blockId) => setActiveBlockId(blockId)}
                     onDeleteBlock={(blockId) => {
                       const updated = editorBlocksByField.beurteilung.filter((b) => b.id !== blockId);
@@ -7075,6 +7104,24 @@ export default function HomePage() {
             />
             <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
               Diese Inhalte konnten nicht sinnvoll in die aktive Baustein-Vorlage eingebaut werden.
+            </p>
+          </div>
+        )}
+        {templateContradictions.length > 0 && (templateMode || activeTemplateContext) && mode === 'befund' && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+            <label className="mb-1 block text-xs font-medium text-red-800 dark:text-red-200">
+              Medizinische Widersprüche gefunden
+            </label>
+            <div className="space-y-2">
+              {templateContradictions.map((c, i) => (
+                <div key={i} className="rounded bg-white/80 p-2 text-sm dark:bg-gray-900/60">
+                  <p className="text-red-800 dark:text-red-200">{c.passage}</p>
+                  <p className="mt-0.5 text-[11px] text-red-600 dark:text-red-400 italic">{c.description}</p>
+                </div>
+              ))}
+            </div>
+            <p className="mt-1 text-[11px] text-red-700 dark:text-red-300">
+              Bitte prüfen und ggf. korrigieren.
             </p>
           </div>
         )}
@@ -7165,6 +7212,8 @@ export default function HomePage() {
                   placeholder="Text erscheint hier..."
                   contradictionMode={templateContradictionMode}
                   onContradictionModeChange={setTemplateContradictionMode}
+                  checkContradictions={checkContradictions}
+                  onCheckContradictionsChange={setCheckContradictions}
                   onBlockActivate={(blockId) => setActiveBlockId(blockId)}
                   onDeleteBlock={(blockId) => {
                     const updated = editorBlocksByField.befund.filter((b) => b.id !== blockId);
@@ -7202,6 +7251,24 @@ export default function HomePage() {
                     />
                     <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
                       Diese Inhalte konnten nicht sinnvoll in die aktive Baustein-Vorlage eingebaut werden.
+                    </p>
+                  </div>
+                )}
+                {templateContradictions.length > 0 && (templateMode || activeTemplateContext) && (
+                  <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+                    <label className="mb-1 block text-xs font-medium text-red-800 dark:text-red-200">
+                      Medizinische Widersprüche gefunden
+                    </label>
+                    <div className="space-y-2">
+                      {templateContradictions.map((c, i) => (
+                        <div key={i} className="rounded bg-white/80 p-2 text-sm dark:bg-gray-900/60">
+                          <p className="text-red-800 dark:text-red-200">{c.passage}</p>
+                          <p className="mt-0.5 text-[11px] text-red-600 dark:text-red-400 italic">{c.description}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-1 text-[11px] text-red-700 dark:text-red-300">
+                      Bitte prüfen und ggf. korrigieren.
                     </p>
                   </div>
                 )}

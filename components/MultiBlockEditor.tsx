@@ -153,15 +153,9 @@ export default function MultiBlockEditor({
                 }}
               >
                 <span className="text-xs leading-none">{getBlockIcon(block.type)}</span>
-                <span className="text-[11px] font-medium text-blue-700 dark:text-blue-300 truncate flex-1">
-                  {block.name}
-                </span>
-                <span className="text-[10px] text-blue-500 dark:text-blue-400 bg-blue-100 dark:bg-blue-800/50 px-1.5 py-0.5 rounded-full">
-                  aktiv
-                </span>
                 {block.type === 'baustein' && (
                   <>
-                    <div className="flex rounded border border-emerald-300 dark:border-emerald-700 overflow-hidden">
+                    <div className="flex rounded border border-emerald-300 dark:border-emerald-700 overflow-hidden shrink-0">
                       <button
                         type="button"
                         className={`px-1 py-0.5 text-[9px] transition-colors ${
@@ -194,10 +188,16 @@ export default function MultiBlockEditor({
                         onChange={(e) => onCheckContradictionsChange?.(e.target.checked)}
                         className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 dark:border-emerald-700 w-2.5 h-2.5"
                       />
-                      Prüfen
+                      Widerspruchsprüfung
                     </label>
                   </>
                 )}
+                <span className="text-[11px] font-medium text-blue-700 dark:text-blue-300 truncate flex-1">
+                  {block.name}
+                </span>
+                <span className="text-[10px] text-blue-500 dark:text-blue-400 bg-blue-100 dark:bg-blue-800/50 px-1.5 py-0.5 rounded-full">
+                  aktiv
+                </span>
                 <button
                   onClick={moveUp}
                   disabled={isFirst}

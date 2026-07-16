@@ -154,6 +154,7 @@ export async function addTemplateWithRequest(
   field: 'methodik' | 'befund' | 'beurteilung' = 'befund',
   formatRanges: RichTextFormatRange[] = [],
   groupIds: boolean | number[] = false,
+  folderId: number | null = null,
 ): Promise<{ success: boolean; error?: string; id?: number }> {
   if (!name?.trim() || !content?.trim()) {
     return { success: false, error: 'Name und Inhalt müssen ausgefüllt sein' };
@@ -176,8 +177,8 @@ export async function addTemplateWithRequest(
     }
     
     const [result] = await pool.execute<any>(
-      'INSERT INTO templates (username, name, content, field, format_ranges) VALUES (?, ?, ?, ?, ?)',
-      [username.toLowerCase(), nameTrimmed, contentTrimmed, field, serializeFormatRanges(contentTrimmed, formatRanges)]
+      'INSERT INTO templates (username, name, content, field, format_ranges, folder_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [username.toLowerCase(), nameTrimmed, contentTrimmed, field, serializeFormatRanges(contentTrimmed, formatRanges), folderId]
     );
     
     console.log('[Templates] Added template for', username, ':', nameTrimmed);
@@ -214,6 +215,7 @@ export async function updateTemplateWithRequest(
   content: string,
   field: 'methodik' | 'befund' | 'beurteilung' = 'befund',
   formatRanges: RichTextFormatRange[] = [],
+  folderId: number | null = null,
 ): Promise<{ success: boolean; error?: string }> {
   if (!name?.trim() || !content?.trim()) {
     return { success: false, error: 'Name und Inhalt müssen ausgefüllt sein' };
@@ -243,8 +245,8 @@ export async function updateTemplateWithRequest(
     }
     
     await pool.execute(
-      'UPDATE templates SET name = ?, content = ?, field = ?, format_ranges = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [name.trim(), content.trim(), field, serializeFormatRanges(content.trim(), formatRanges), id]
+      'UPDATE templates SET name = ?, content = ?, field = ?, format_ranges = ?, folder_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [name.trim(), content.trim(), field, serializeFormatRanges(content.trim(), formatRanges), folderId, id]
     );
     
     console.log('[Templates] Updated template', id, 'for', username);

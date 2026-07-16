@@ -24,9 +24,10 @@ import { parseSpeaKINGXml, readFileAsText, SpeaKINGMetadata } from '@/lib/audio'
 import TemplatesManager from '@/components/TemplatesManager';
 import BausteinPalette from '@/components/BausteinPalette';
 import TemplateSelectorPopover from '@/components/TemplateSelectorPopover';
+import ComplexTemplateManager from '@/components/ComplexTemplateManager';
 import MultiBlockEditor from '@/components/MultiBlockEditor';
 import BracketHighlight from '@/components/BracketHighlight';
-import ComplexTemplateManager from '@/components/ComplexTemplateManager';
+import FolderSelect from '@/components/FolderSelect';
 import { createPortal } from 'react-dom';
 import { HID_MEDIA_CONTROL_EVENT, type HidMediaControlEventDetail } from '@/lib/hidMediaControls';
 import { useVadChunking } from '@/lib/useVadChunking';
@@ -1920,6 +1921,7 @@ export default function HomePage() {
   const [newTemplateName, setNewTemplateName] = useState('');
   const [newTemplateContent, setNewTemplateContent] = useState('');
   const [newTemplateFormats, setNewTemplateFormats] = useState<RichTextFormatRange[]>([]);
+  const [newTemplateFolderId, setNewTemplateFolderId] = useState<number | null>(null);
   const [creatingTemplate, setCreatingTemplate] = useState(false);
   const [templateUnusedText, setTemplateUnusedText] = useState('');
   const [pendingTemplateInsertChoice, setPendingTemplateInsertChoice] = useState<PendingTemplateInsertChoice | null>(null);
@@ -2386,6 +2388,7 @@ export default function HomePage() {
           content: newTemplateContent.trim(),
           formatRanges: normalizeRichTextRanges(newTemplateFormats, newTemplateContent.trim().length),
           field,
+          folderId: newTemplateFolderId,
         }),
       });
       const data = await response.json();
@@ -2395,6 +2398,7 @@ export default function HomePage() {
         setNewTemplateName('');
         setNewTemplateContent('');
         setNewTemplateFormats([]);
+        setNewTemplateFolderId(null);
       } else {
         setError(data.error || 'Fehler beim Anlegen des Bausteins');
       }
@@ -2403,7 +2407,7 @@ export default function HomePage() {
     } finally {
       setCreatingTemplate(false);
     }
-  }, [newTemplateName, newTemplateContent, newTemplateFormats, mode, activeField, getAuthHeader, getDbTokenHeader, fetchTemplates]);
+  }, [newTemplateName, newTemplateContent, newTemplateFormats, newTemplateFolderId, mode, activeField, getAuthHeader, getDbTokenHeader, fetchTemplates]);
 
   // Wörterbuch-Einträge für Echtzeit-Korrektur und Initial Prompt
   interface DictionaryEntry {
@@ -6045,6 +6049,16 @@ export default function HomePage() {
                 onChange={(e) => setNewTemplateName(e.target.value)}
                 autoFocus
               />
+              {username && (
+                <div className="mt-2">
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Ordner</label>
+                  <FolderSelect
+                    value={newTemplateFolderId}
+                    onChange={setNewTemplateFolderId}
+                    apiFetch={apiFetchWithAuth}
+                  />
+                </div>
+              )}
             </div>
             <div id="inline-template-dialog-content-group" className="flex flex-col flex-1 min-h-0">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Inhalt</label>
@@ -6075,6 +6089,7 @@ export default function HomePage() {
                   setNewTemplateName('');
                   setNewTemplateContent('');
                   setNewTemplateFormats([]);
+                  setNewTemplateFolderId(null);
                 }}
               >
                 Abbrechen
@@ -7498,7 +7513,7 @@ export default function HomePage() {
               </button>
             </div>
             <div id="templates-manager-body" className="p-4 overflow-y-auto flex flex-col flex-1 min-h-0">
-              <TemplatesManager mode={templateManagerMode} />
+              <TemplatesManager mode={templateManagerMode} apiFetch={apiFetchWithAuth} />
             </div>
           </div>
         </div>,

@@ -208,6 +208,23 @@ export async function moveFolder(
 }
 
 /**
+ * Verschiebt ein Template in einen Ordner (oder aus einem Ordner entfernen via null).
+ */
+export async function moveTemplateToFolder(
+  request: NextRequest,
+  templateId: number,
+  folderId: number | null,
+  scope: 'private' | 'group' = 'private',
+): Promise<{ success: boolean; error?: string }> {
+  await ensureTemplateFoldersTable(request);
+  const db = await getPoolForRequest(request);
+
+  const table = scope === 'group' ? 'template_group_entries' : 'templates';
+  await db.execute(`UPDATE ${table} SET folder_id = ? WHERE id = ?`, [folderId, templateId]);
+  return { success: true };
+}
+
+/**
  * Löscht einen Ordner (und alle Unterordner via CASCADE).
  */
 export async function deleteFolder(

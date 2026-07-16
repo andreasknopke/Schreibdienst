@@ -6490,31 +6490,51 @@ export default function HomePage() {
               : 'Neue Audio-Transkripte werden normal am Cursor oder am Feldende eingefügt.'}
           </p>
           <div className="mt-2 flex items-center gap-4 flex-wrap">
-            {/* Widersprüche erkennen */}
+            {/* Diktier-Modus */}
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium whitespace-nowrap">Widersprüche:</span>
+              <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium whitespace-nowrap">Diktier-Modus:</span>
               <div className="flex rounded border border-emerald-300 dark:border-emerald-700 overflow-hidden">
-                {(['aus', 'einfach', 'genau', 'optionen'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    className={`px-2 py-0.5 text-[11px] transition-colors ${
-                      templateContradictionMode === mode
-                        ? 'bg-emerald-600 text-white'
-                        : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
-                    }`}
-                    onClick={() => setTemplateContradictionMode(mode)}
-                    title={
-                      mode === 'genau' ? 'Ausführliche Widerspruchsprüfung inkl. Beispiele'
-                      : mode === 'einfach' ? 'Verkürzte Widerspruchsprüfung'
-                      : mode === 'optionen' ? 'Aus [Optionen] im Baustein-Text auswählen'
-                      : 'Keine Widerspruchsprüfung'
+                <button
+                  type="button"
+                  className={`px-2 py-0.5 text-[11px] transition-colors ${
+                    templateContradictionMode !== 'optionen'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
+                  }`}
+                  onClick={() => {
+                    if (templateContradictionMode === 'optionen') {
+                      setTemplateContradictionMode('genau');
                     }
-                  >
-                    {mode === 'aus' ? 'Aus' : mode === 'einfach' ? 'Einfach' : mode === 'genau' ? 'Genau' : 'Optionen'}
-                  </button>
-                ))}
+                  }}
+                  title="Diktierten Text möglichst genau übernehmen"
+                >
+                  wortgetreu
+                </button>
+                <button
+                  type="button"
+                  className={`px-2 py-0.5 text-[11px] transition-colors ${
+                    templateContradictionMode === 'optionen'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
+                  }`}
+                  onClick={() => setTemplateContradictionMode('optionen')}
+                  title="Nur aus [Optionen] im Baustein auswählen"
+                >
+                  optionen-getreu
+                </button>
               </div>
+              <label className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={templateContradictionMode === 'genau' || templateContradictionMode === 'einfach'}
+                  onChange={(e) => {
+                    if (templateContradictionMode === 'optionen') return;
+                    setTemplateContradictionMode(e.target.checked ? 'genau' : 'aus');
+                  }}
+                  className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 dark:border-emerald-700"
+                />
+                Widerspruchsprüfung
+              </label>
             </div>
           </div>
         </div>

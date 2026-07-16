@@ -191,36 +191,57 @@ export default function MultiBlockEditor({
                   ×
                 </button>
               </div>
-              {/* Baustein-Indikator + Widerspruchs-Modus (nur bei Baustein-Blöcken) */}
+              {/* Baustein-Indikator + Diktier-Modus (nur bei Baustein-Blöcken) */}
               {block.type === 'baustein' && (
                 <div className="px-2 py-1.5 bg-emerald-50/70 dark:bg-emerald-900/20 border-b border-blue-100 dark:border-blue-800/50">
                   <p className="text-[11px] text-emerald-700 dark:text-emerald-300 italic leading-tight">
                     Neue Audio-Transkripte werden direkt in diesen Baustein eingearbeitet.
                   </p>
-                  <div className="mt-1 flex items-center gap-2">
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">Widersprüche:</span>
+                  <div className="mt-1 flex items-center gap-3">
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">Diktier-Modus:</span>
                     <div className="flex rounded border border-emerald-300 dark:border-emerald-700 overflow-hidden">
-                      {(['aus', 'einfach', 'genau', 'optionen'] as const).map((mode) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          className={`px-1.5 py-0.5 text-[10px] transition-colors ${
-                            (contradictionMode ?? 'genau') === mode
-                              ? 'bg-emerald-600 text-white'
-                              : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
-                          }`}
-                          onClick={() => onContradictionModeChange?.(mode)}
-                          title={
-                            mode === 'genau' ? 'Ausführliche Widerspruchsprüfung inkl. Beispiele'
-                            : mode === 'einfach' ? 'Verkürzte Widerspruchsprüfung'
-                            : mode === 'optionen' ? 'Aus [Optionen] im Baustein-Text auswählen'
-                            : 'Keine Widerspruchsprüfung'
+                      <button
+                        type="button"
+                        className={`px-1.5 py-0.5 text-[10px] transition-colors ${
+                          contradictionMode !== 'optionen'
+                            ? 'bg-emerald-600 text-white'
+                            : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
+                        }`}
+                        onClick={() => {
+                          // Wechsel zu wortgetreu, behalte Widerspruchs-Einstellung
+                          if (contradictionMode === 'optionen') {
+                            onContradictionModeChange?.('genau');
                           }
-                        >
-                          {mode === 'aus' ? 'Aus' : mode === 'einfach' ? 'Einfach' : mode === 'genau' ? 'Genau' : 'Optionen'}
-                        </button>
-                      ))}
+                        }}
+                        title="Diktierten Text möglichst genau übernehmen"
+                      >
+                        wortgetreu
+                      </button>
+                      <button
+                        type="button"
+                        className={`px-1.5 py-0.5 text-[10px] transition-colors ${
+                          contradictionMode === 'optionen'
+                            ? 'bg-emerald-600 text-white'
+                            : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
+                        }`}
+                        onClick={() => onContradictionModeChange?.('optionen')}
+                        title="Nur aus [Optionen] im Baustein auswählen"
+                      >
+                        optionen-getreu
+                      </button>
                     </div>
+                    <label className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={contradictionMode === 'genau' || contradictionMode === 'einfach'}
+                        onChange={(e) => {
+                          if (contradictionMode === 'optionen') return;
+                          onContradictionModeChange?.(e.target.checked ? 'genau' : 'aus');
+                        }}
+                        className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 dark:border-emerald-700"
+                      />
+                      Widerspruchsprüfung
+                    </label>
                   </div>
                 </div>
               )}

@@ -6668,7 +6668,7 @@ export default function HomePage() {
                       disabled={!methodik && !showMultiBausteinMode}
                       title="Kopieren"
                     >
-                      Kopieren
+                      📋 Kopieren
                     </button>
                     <button 
                       className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
@@ -6795,7 +6795,7 @@ export default function HomePage() {
                       disabled={!transcript && !showMultiBausteinMode}
                       title="Kopieren"
                     >
-                      Kopieren
+                      📋 Kopieren
                     </button>
                     <button 
                       className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
@@ -6939,7 +6939,7 @@ export default function HomePage() {
                       disabled={!beurteilung && !showMultiBausteinMode}
                       title="Kopieren"
                     >
-                      Kopieren
+                      📋 Kopieren
                     </button>
                     <button 
                       className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 
@@ -7082,7 +7082,7 @@ export default function HomePage() {
                   disabled={!transcript && !showMultiBausteinMode}
                   title="Kopieren"
                 >
-                  Kopieren
+                  📋 Kopieren
                 </button>
                 <button 
                   className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" 

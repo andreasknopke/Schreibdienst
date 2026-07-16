@@ -93,8 +93,26 @@ export default function MultiBlockEditor({
 
   return (
     <div className="relative space-y-1">
-      {blocks.map((block) => {
+      {blocks.map((block, index) => {
         const isActive = block.id === activeBlockId;
+        const isFirst = index === 0;
+        const isLast = index === blocks.length - 1;
+
+        const moveUp = (e: React.MouseEvent) => {
+          e.stopPropagation();
+          if (isFirst) return;
+          const ids = blocks.map((b) => b.id);
+          [ids[index - 1], ids[index]] = [ids[index], ids[index - 1]];
+          onReorderBlocks(ids);
+        };
+
+        const moveDown = (e: React.MouseEvent) => {
+          e.stopPropagation();
+          if (isLast) return;
+          const ids = blocks.map((b) => b.id);
+          [ids[index], ids[index + 1]] = [ids[index + 1], ids[index]];
+          onReorderBlocks(ids);
+        };
 
         if (isActive) {
           return (
@@ -130,6 +148,22 @@ export default function MultiBlockEditor({
                 <span className="text-[10px] text-blue-500 dark:text-blue-400 bg-blue-100 dark:bg-blue-800/50 px-1.5 py-0.5 rounded-full">
                   aktiv
                 </span>
+                <button
+                  onClick={moveUp}
+                  disabled={isFirst}
+                  className="opacity-0 group-hover:opacity-100 px-0.5 text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-opacity text-xs leading-none shrink-0 disabled:opacity-0 disabled:pointer-events-none"
+                  title="Nach oben verschieben"
+                >
+                  ▲
+                </button>
+                <button
+                  onClick={moveDown}
+                  disabled={isLast}
+                  className="opacity-0 group-hover:opacity-100 px-0.5 text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-opacity text-xs leading-none shrink-0 disabled:opacity-0 disabled:pointer-events-none"
+                  title="Nach unten verschieben"
+                >
+                  ▼
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -227,6 +261,22 @@ export default function MultiBlockEditor({
               <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 truncate flex-1">
                 {block.name}
               </span>
+              <button
+                onClick={moveUp}
+                disabled={isFirst}
+                className="opacity-0 group-hover:opacity-100 px-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-opacity text-xs leading-none shrink-0 disabled:opacity-0 disabled:pointer-events-none"
+                title="Nach oben verschieben"
+              >
+                ▲
+              </button>
+              <button
+                onClick={moveDown}
+                disabled={isLast}
+                className="opacity-0 group-hover:opacity-100 px-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-opacity text-xs leading-none shrink-0 disabled:opacity-0 disabled:pointer-events-none"
+                title="Nach unten verschieben"
+              >
+                ▼
+              </button>
               <button
                 onClick={(e) => {
                   e.stopPropagation();

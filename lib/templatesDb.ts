@@ -17,6 +17,8 @@ export interface Template {
   groupName?: string;
   /** Username, nur bei scope='private' relevant (für Admin-Ansicht) */
   username?: string;
+  /** Ordner-ID für Ordner-Struktur */
+  folderId?: number | null;
 }
 
 interface DbTemplate {
@@ -78,11 +80,11 @@ export async function getTemplatesWithRequest(request: NextRequest, username: st
   try {
     const pool = await getPoolForRequest(request);
     const [rows] = await pool.query<any[]>(
-      'SELECT id, name, content, field, format_ranges, created_at, updated_at FROM templates WHERE username = ? ORDER BY name ASC',
+      'SELECT id, name, content, field, format_ranges, folder_id, created_at, updated_at FROM templates WHERE username = ? ORDER BY name ASC',
       [username]
     );
     
-    return (rows || []).map((t: DbTemplate) => ({
+    return (rows || []).map((t: any) => ({
       id: t.id,
       name: t.name,
       content: t.content,
@@ -92,6 +94,7 @@ export async function getTemplatesWithRequest(request: NextRequest, username: st
       updatedAt: t.updated_at?.toISOString() || new Date().toISOString(),
       scope: 'private' as const,
       username,
+      folderId: t.folder_id !== null && t.folder_id !== undefined ? Number(t.folder_id) : undefined,
     }));
   } catch (error) {
     console.error('[Templates] Get templates with request error:', error);

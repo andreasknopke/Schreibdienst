@@ -23,6 +23,7 @@ export interface GroupTemplateEntry {
   addedBy: string;
   createdAt: string;
   updatedAt: string;
+  folderId?: number | null;
 }
 
 export interface GroupMember {
@@ -251,6 +252,7 @@ export async function getEntriesForUserTemplateGroupsWithRequest(request: NextRe
       addedBy: row.added_by || '',
       createdAt: row.added_at?.toISOString?.() || new Date().toISOString(),
       updatedAt: row.updated_at?.toISOString?.() || new Date().toISOString(),
+      folderId: row.folder_id !== null && row.folder_id !== undefined ? Number(row.folder_id) : undefined,
     });
   }
   return Array.from(seen.values());

@@ -159,6 +159,45 @@ export default function MultiBlockEditor({
                 <span className="text-[10px] text-blue-500 dark:text-blue-400 bg-blue-100 dark:bg-blue-800/50 px-1.5 py-0.5 rounded-full">
                   aktiv
                 </span>
+                {block.type === 'baustein' && (
+                  <>
+                    <div className="flex rounded border border-emerald-300 dark:border-emerald-700 overflow-hidden">
+                      <button
+                        type="button"
+                        className={`px-1 py-0.5 text-[9px] transition-colors ${
+                          (contradictionMode ?? 'wortgetreu') === 'wortgetreu'
+                            ? 'bg-emerald-600 text-white'
+                            : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
+                        }`}
+                        onClick={() => onContradictionModeChange?.('wortgetreu')}
+                        title="Diktierten Text möglichst genau übernehmen"
+                      >
+                        wortgetreu
+                      </button>
+                      <button
+                        type="button"
+                        className={`px-1 py-0.5 text-[9px] transition-colors ${
+                          contradictionMode === 'optionen'
+                            ? 'bg-emerald-600 text-white'
+                            : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
+                        }`}
+                        onClick={() => onContradictionModeChange?.('optionen')}
+                        title="Nur aus [Optionen] im Baustein auswählen"
+                      >
+                        optionen
+                      </button>
+                    </div>
+                    <label className="flex items-center gap-0.5 text-[9px] text-emerald-600 dark:text-emerald-400 cursor-pointer select-none shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={!!checkContradictions}
+                        onChange={(e) => onCheckContradictionsChange?.(e.target.checked)}
+                        className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 dark:border-emerald-700 w-2.5 h-2.5"
+                      />
+                      Prüfen
+                    </label>
+                  </>
+                )}
                 <button
                   onClick={moveUp}
                   disabled={isFirst}
@@ -195,52 +234,6 @@ export default function MultiBlockEditor({
                   ×
                 </button>
               </div>
-              {/* Baustein-Indikator + Diktier-Modus (nur bei Baustein-Blöcken) */}
-              {block.type === 'baustein' && (
-                <div className="px-2 py-1.5 bg-emerald-50/70 dark:bg-emerald-900/20 border-b border-blue-100 dark:border-blue-800/50">
-                  <p className="text-[11px] text-emerald-700 dark:text-emerald-300 italic leading-tight">
-                    Neue Audio-Transkripte werden direkt in diesen Baustein eingearbeitet.
-                  </p>
-                  <div className="mt-1 flex items-center gap-3">
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">Diktier-Modus:</span>
-                    <div className="flex rounded border border-emerald-300 dark:border-emerald-700 overflow-hidden">
-                      <button
-                        type="button"
-                        className={`px-1.5 py-0.5 text-[10px] transition-colors ${
-                          (contradictionMode ?? 'wortgetreu') === 'wortgetreu'
-                            ? 'bg-emerald-600 text-white'
-                            : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
-                        }`}
-                        onClick={() => onContradictionModeChange?.('wortgetreu')}
-                        title="Diktierten Text möglichst genau übernehmen"
-                      >
-                        wortgetreu
-                      </button>
-                      <button
-                        type="button"
-                        className={`px-1.5 py-0.5 text-[10px] transition-colors ${
-                          contradictionMode === 'optionen'
-                            ? 'bg-emerald-600 text-white'
-                            : 'text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/40'
-                        }`}
-                        onClick={() => onContradictionModeChange?.('optionen')}
-                        title="Nur aus [Optionen] im Baustein auswählen"
-                      >
-                        optionen-getreu
-                      </button>
-                    </div>
-                    <label className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={!!checkContradictions}
-                        onChange={(e) => onCheckContradictionsChange?.(e.target.checked)}
-                        className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 dark:border-emerald-700"
-                      />
-                      Widerspruchsprüfung
-                    </label>
-                  </div>
-                </div>
-              )}
               <RichTextDictationEditor
                 editorRef={editorRef}
                 value={block.currentText}

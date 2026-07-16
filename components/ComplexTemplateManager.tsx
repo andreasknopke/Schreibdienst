@@ -44,7 +44,7 @@ export default function ComplexTemplateManager({
   const [editMode, setEditMode] = useState<'list' | 'edit'>('list');
   const [editId, setEditId] = useState<number | null>(null);
   const [name, setName] = useState('');
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const fetchComplexTemplates = useCallback(async () => {
@@ -68,7 +68,7 @@ export default function ComplexTemplateManager({
       setEditMode('list');
       setEditId(null);
       setName('');
-      setSelectedIds(new Set());
+      setSelectedIds([]);
       setError(null);
     }
   }, [open, fetchComplexTemplates]);
@@ -77,7 +77,7 @@ export default function ComplexTemplateManager({
     setEditMode('edit');
     setEditId(null);
     setName('');
-    setSelectedIds(new Set());
+    setSelectedIds([]);
     setError(null);
   }, []);
 
@@ -85,7 +85,7 @@ export default function ComplexTemplateManager({
     setEditMode('edit');
     setEditId(ct.id);
     setName(ct.name);
-    setSelectedIds(new Set(ct.templateIds));
+    setSelectedIds(ct.templateIds);
     setError(null);
   }, []);
 
@@ -112,14 +112,14 @@ export default function ComplexTemplateManager({
       setError('Name erforderlich');
       return;
     }
-    if (selectedIds.size === 0) {
+    if (selectedIds.length === 0) {
       setError('Mindestens ein Baustein auswählen');
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      const ids = Array.from(selectedIds);
+      const ids = selectedIds;
       let res;
       if (editId) {
         res = await apiFetch('/api/templates/complex', {
@@ -160,9 +160,28 @@ export default function ComplexTemplateManager({
 
   const toggleTemplate = useCallback((id: number) => {
     setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      const idx = prev.indexOf(id);
+      if (idx >= 0) {
+        return prev.filter((i) => i !== id);
+      }
+      return [...prev, id];
+    });
+  }, []);
+
+  const moveSelectedUp = useCallback((index: number) => {
+    if (index <= 0) return;
+    setSelectedIds((prev) => {
+      const next = [...prev];
+      [next[index - 1], next[index]] = [next[index], next[index - 1]];
+      return next;
+    });
+  }, []);
+
+  const moveSelectedDown = useCallback((index: number) => {
+    setSelectedIds((prev) => {
+      if (index >= prev.length - 1) return prev;
+      const next = [...prev];
+      [next[index], next[index + 1]] = [next[index + 1], next[index]];
       return next;
     });
   }, []);
@@ -264,28 +283,77 @@ export default function ComplexTemplateManager({
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-700 dark:text-gray-300 block mb-1">
-                  Enthaltene Bausteine ({selectedIds.size} ausgewählt)
+                  Ausgewählte Bausteine ({selectedIds.length}) — Reihenfolge per ▲▼ anpassen
                 </label>
-                <div className="max-h-48 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-100 dark:divide-gray-800">
+                {/* Sortierbare Liste der ausgewählten Bausteine */}
+                {selectedIds.length > 0 ? (
+                  <div className="border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-100 dark:divide-gray-800 mb-2">
+                    {selectedIds.map((id, index) => {
+                      const tpl = filteredTemplates.find((t) => t.id === id);
+                      return (
+                        <div
+                          key={id}
+                          className="flex items-center gap-1 px-2 py-1.5 text-xs"
+                        >
+                          <span className="text-gray-400 dark:text-gray-500 w-4 shrink-0">{index + 1}.</span>
+                          <span className="flex-1 truncate text-gray-800 dark:text-gray-200">
+                            {tpl?.name || '(unbekannt)'}
+                          </span>
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            <button
+                              onClick={() => moveSelectedUp(index)}
+                              disabled={index === 0}
+                              className="px-1 py-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                              title="Nach oben"
+                            >▲</button>
+                            <button
+                              onClick={() => moveSelectedDown(index)}
+                              disabled={index === selectedIds.length - 1}
+                              className="px-1 py-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                              title="Nach unten"
+                            >▼</button>
+                            <button
+                              onClick={() => toggleTemplate(id)}
+                              className="ml-1 px-1 py-0.5 text-red-400 hover:text-red-600 transition-colors"
+                              title="Entfernen"
+                            >✕</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="px-3 py-3 text-xs text-gray-400 text-center border border-dashed border-gray-300 dark:border-gray-700 rounded-lg mb-2">
+                    Noch keine Bausteine ausgewählt.
+                  </div>
+                )}
+
+                {/* Verfügbare Bausteine zum Hinzufügen */}
+                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 block mb-1">
+                  Verfügbare Bausteine (anklicken zum Hinzufügen)
+                </label>
+                <div className="max-h-36 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-100 dark:divide-gray-800">
                   {filteredTemplates.length === 0 ? (
                     <div className="px-3 py-4 text-xs text-gray-400 text-center">
                       Keine Bausteine für dieses Feld vorhanden.
                     </div>
                   ) : (
-                    filteredTemplates.map((t) => (
-                      <label
-                        key={t.id}
-                        className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 cursor-pointer text-xs"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(t.id)}
-                          onChange={() => toggleTemplate(t.id)}
-                          className="accent-blue-600"
-                        />
-                        <span className="text-gray-800 dark:text-gray-200 truncate">{t.name}</span>
-                      </label>
-                    ))
+                    filteredTemplates
+                      .filter((t) => !selectedIds.includes(t.id))
+                      .map((t) => (
+                        <label
+                          key={t.id}
+                          className="flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer text-xs transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={false}
+                            onChange={() => toggleTemplate(t.id)}
+                            className="accent-blue-600"
+                          />
+                          <span className="text-gray-800 dark:text-gray-200 truncate">{t.name}</span>
+                        </label>
+                      ))
                   )}
                 </div>
               </div>

@@ -74,6 +74,12 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
   const sessionIdRef = useRef(0);
   const stopPromiseRef = useRef<Promise<void> | null>(null);
   const firstStartDoneRef = useRef(false);
+  // isPausedRef steuert die VAD-Frame-Callbacks: wenn true, werden alle
+  // Frames verworfen (Stream läuft im Hintergrund, aber keine Utterances).
+  // Löst das Closure-Problem: die Callbacks werden einmal beim ersten
+  // MicVAD.new registriert und vergleichen gegen diese Ref statt gegen
+  // eine eingefrorene sessionId-Closure.
+  const isPausedRef = useRef(true);
 
   const vadThresholdRef = useRef(vadThreshold);
   vadThresholdRef.current = vadThreshold;
@@ -149,6 +155,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
         preSpeechPadFrames: 30,
 
         onSpeechStart: () => {
+          if (isPausedRef.current) return;
           if (sessionIdRef.current !== sessionId) return;
           setIsSpeaking(true);
           isSpeechActiveRef.current = true;
@@ -159,6 +166,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
         },
 
         onSpeechEnd: (audio: Float32Array) => {
+          if (isPausedRef.current) return;
           if (sessionIdRef.current !== sessionId) return;
           setIsSpeaking(false);
           isSpeechActiveRef.current = false;
@@ -179,6 +187,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
         },
 
         onVADMisfire: () => {
+          if (isPausedRef.current) return;
           if (sessionIdRef.current !== sessionId) return;
           setIsSpeaking(false);
           isSpeechActiveRef.current = false;
@@ -191,6 +200,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
         },
 
         onFrameProcessed: (_probs: any, frame: Float32Array) => {
+          if (isPausedRef.current) return;
           if (sessionIdRef.current !== sessionId) return;
           const frameCopy = new Float32Array(frame);
           preSpeechFramesRef.current.push(frameCopy);
@@ -249,6 +259,7 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
         }
         console.log(`[VAD] First-start pre-roll done: ${preSpeechFramesRef.current.length} frames`);
       }
+      isPausedRef.current = false;
       setIsListening(true);
       return;
     }
@@ -264,26 +275,35 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
     const resumeId = sessionIdRef.current + 1;
     sessionIdRef.current = resumeId;
 
+    // Resume: VAD-Callbacks wieder scharf schalten BEVOR start() aufgerufen wird.
+    // Sonst würden die ersten Frames nach start() noch von isPausedRef=true
+    // abgefangen, und der Pre-Speech-Buffer bliebe leer.
+    isPausedRef.current = false;
+
     try {
       await currentVad.start();
     } catch (err: any) {
       console.error('[VAD] resume failed:', err?.message || err);
+      isPausedRef.current = true;
       firstStartDoneRef.current = false;
       vadRef.current = null;
       return start();
     }
     if (sessionIdRef.current !== resumeId) return;
 
-    // Kurzer Pre-Roll (200ms) für Resume: Stream ist warm, Frames kommen sofort.
-    // Wir warten nur, dass ein paar Frames im Pre-Speech-Buffer sind, damit
-    // bei sofortigem Sprechen der Stop-Flush genug Vorlauf hat.
-    await new Promise(r => setTimeout(r, 200));
+    // Kurzer Pre-Roll (~50ms). Stream ist warm, Frames kommen sofort da
+    // isPausedRef bereits false ist und onFrameProcessed den Buffer füllt.
+    await new Promise(r => setTimeout(r, 50));
     setIsListening(true);
 
     return;
   }, [onUtterance, onSpeechStart, onAudioLevel, getMicStream]);
 
   const stop = useCallback(() => {
+    // VAD-Callbacks sofort stummschalten, damit keine neuen Frames mehr
+    // gesammelt werden. Die bereits gesammelten werden im Stop-Flush unten
+    // noch als Utterance gesendet.
+    isPausedRef.current = true;
     sessionIdRef.current += 1;
 
     if (autoChunkTimerRef.current) { clearTimeout(autoChunkTimerRef.current); autoChunkTimerRef.current = null; }

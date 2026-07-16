@@ -1773,11 +1773,9 @@ void handleRawInputRecordPress(HRAWINPUT hRawInput) {
 
     const RAWINPUT* raw = reinterpret_cast<const RAWINPUT*>(buffer.data());
 
-    // Logge den Header-Typ
-    hidDiagnostic("handleRawInput: dwType=%lu (HID=%d)", raw->header.dwType, RIM_TYPEHID);
-
+    // Kein HID? Ignorieren – aber nicht loggen (würde bei jedem
+    // WM_INPUT eines Nicht-HID-Geräts rauschen).
     if (raw->header.dwType != RIM_TYPEHID) {
-        hidDiagnostic("handleRawInput: Kein HID-Geraet (dwType=%lu) -> ignoriert", raw->header.dwType);
         return;
     }
 
@@ -1788,12 +1786,10 @@ void handleRawInputRecordPress(HRAWINPUT hRawInput) {
 
     if (GetRawInputDeviceInfoW(raw->header.hDevice, RIDI_DEVICEINFO,
                                &deviceInfo, &deviceInfoSize) != sizeof(deviceInfo)) {
-        hidDiagnostic("handleRawInput: GetRawInputDeviceInfoW fehlgeschlagen");
         return;
     }
 
     if (deviceInfo.dwType != RIM_TYPEHID) {
-        hidDiagnostic("handleRawInput: deviceInfo.dwType=%lu (kein HID)", deviceInfo.dwType);
         return;
     }
 
@@ -1802,13 +1798,20 @@ void handleRawInputRecordPress(HRAWINPUT hRawInput) {
     const DWORD usagePage = deviceInfo.hid.usUsagePage;
     const DWORD usage = deviceInfo.hid.usUsage;
 
-    // Logge VID/PID/Usage – wichtig für unbekannte Geraete
-    hidDiagnostic("handleRawInput: VID=0x%04X PID=0x%04X UsagePage=0x%04X Usage=0x%04X",
-                  vendorId, productId, usagePage, usage);
-
+    // Ungenutzte Geräte: Nur beim ersten Mal loggen, dann stillschweigend
+    // ignorieren. Typischerweise sind das Mäuse, Tastaturen oder
+    // Philips-Geräte (VID=0x0600), die per WM_INPUT rauschen.
     if (!isSupportedHidDevice(vendorId, productId)) {
-        hidDiagnostic("handleRawInput: Nicht unterstuetztes Geraet (VID=0x%04X PID=0x%04X) -> ignoriert",
-                      vendorId, productId);
+        static std::set<uint32_t> ignoredDevicesLogged;
+        static std::mutex ignoredMutex;
+        const uint32_t key = (static_cast<uint32_t>(vendorId) << 16) | productId;
+        {
+            std::lock_guard<std::mutex> lock(ignoredMutex);
+            if (ignoredDevicesLogged.insert(key).second) {
+                hidDiagnostic("Unterstuetztes Geraet ignoriert (VID=0x%04X PID=0x%04X UsagePage=0x%04X Usage=0x%04X) – einmalige Meldung",
+                              vendorId, productId, usagePage, usage);
+            }
+        }
         return;
     }
 
@@ -1845,29 +1848,27 @@ void handleRawInputRecordPress(HRAWINPUT hRawInput) {
     const uint8_t* reportData = raw->data.hid.bRawData;
     const DWORD reportSize = raw->data.hid.dwSizeHid;
 
-    // Logge die ersten 10 HID-Report-Bytes als Hex
-    size_t logSize = reportSize;
-    if (logSize > 10) logSize = 10;
-    hidDiagnostic("handleRawInput: HID-Report size=%lu bytes=[%s]",
-                  reportSize, hexDump(reportData, logSize).c_str());
-
     // Record-Taste erkennen – abhaengig von UsagePage
     bool recordPressed = false;
 
     if (usagePage == 0x000C) {
-        // Consumer Controls (standard HID): Usage 0xB2 = Media Record
-        // Der Report enthaelt typischerweise 2 Bytes mit der Usage-ID.
-        // Wenn eines der Bytes 0xB2 ist, ist Record gedrueckt.
-        // Bei 0x0000 ist losgelassen.
-        hidDiagnostic("handleRawInput: Consumer-Control-Report (0x000C:0x0001)");
-
-        // Nordic-Diktiermikrofon: sendet 16-bit Usage 0x00CF statt 0xB2
+        // Consumer Controls (standard HID): Usage 0xB2 = Media Record.
+        // Nordic-Diktiermikrofon: sendet 16-bit Usage 0x00CF statt 0xB2.
         if (isNordicDictationDevice(vendorId, productId)) {
             recordPressed = isNordicDictationRecordPayload(reportData, reportSize);
+            // Nordic-Gerät: nur bei echtem Tastendruck (0x00CF) loggen.
+            // Releases (0x0000) sind reines Rauschen – stillschweigend debouncen.
             if (recordPressed) {
-                hidDiagnostic("handleRawInput: Nordic Record (0x00CF) detected");
+                size_t logSize = reportSize;
+                if (logSize > 10) logSize = 10;
+                hidDiagnostic("handleRawInput: HID-Report size=%lu bytes=[%s] – Nordic Record (0x00CF)",
+                              reportSize, hexDump(reportData, logSize).c_str());
             }
         } else {
+            size_t logSize = reportSize;
+            if (logSize > 10) logSize = 10;
+            hidDiagnostic("handleRawInput: Consumer-Control-Report (0x000C:0x0001) size=%lu bytes=[%s]",
+                          reportSize, hexDump(reportData, logSize).c_str());
             bool anyNonZero = false;
             for (DWORD i = 0; i < reportSize; ++i) {
                 if (reportData[i] == 0xB2) {
@@ -1886,9 +1887,17 @@ void handleRawInputRecordPress(HRAWINPUT hRawInput) {
         // Vendor-definierte Seiten (0xFF00 Grundig, 0xFFA0 Philips):
         // Bekannte Record-Payloads erkennen
         recordPressed = detectRecordPress(vendorId, productId, reportData, reportSize);
+        size_t logSize = reportSize;
+        if (logSize > 10) logSize = 10;
+        hidDiagnostic("handleRawInput: Vendor-Report size=%lu bytes=[%s]",
+                      reportSize, hexDump(reportData, logSize).c_str());
     }
 
-    hidDiagnostic("handleRawInput: recordPressed=%d (vor Debounce)", recordPressed ? 1 : 0);
+    // Nur bei echten Aktionen loggen – stilles Debounce reicht nicht für eine Meldung
+    const bool isNordic = isNordicDictationDevice(vendorId, productId);
+    if (!isNordic || recordPressed) {
+        hidDiagnostic("handleRawInput: recordPressed=%d (vor Debounce)", recordPressed ? 1 : 0);
+    }
 
     // Debounce: nur bei Zustandsänderung reagieren
     HidDeviceState* deviceState = nullptr;
@@ -1898,7 +1907,11 @@ void handleRawInputRecordPress(HRAWINPUT hRawInput) {
     }
 
     if (deviceState && deviceState->recordPressed == recordPressed) {
-        hidDiagnostic("handleRawInput: Debounce – Zustand unveraendert (recordPressed=%d)", recordPressed ? 1 : 0);
+        // Nur loggen, wenn es ein unerwarteter Doppel-Press ist (recordPressed=1).
+        // Releases (recordPressed=0) sind immer der erwartete Folgezustand.
+        if (recordPressed) {
+            hidDiagnostic("handleRawInput: Debounce – Doppel-Press ignoriert");
+        }
         return;
     }
 
@@ -2644,7 +2657,12 @@ void handleClient(SOCKET client) {
         }
 
         if (nr.type == L"hid-status") {
-            hidDiagnostic("hid-status abgefragt (Geraete bekannt: %zu)", g_hidDevices.size());
+            static DWORD lastHidStatusLog = 0;
+            DWORD now = GetTickCount();
+            if (now - lastHidStatusLog > 30000) {
+                lastHidStatusLog = now;
+                hidDiagnostic("hid-status abgefragt (Geraete bekannt: %zu)", g_hidDevices.size());
+            }
             const std::string statusMsg = makeHidStatusResponse();
             sendWsFrame(client, 0x1, statusMsg);
             continue;

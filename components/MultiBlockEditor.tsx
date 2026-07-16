@@ -114,6 +114,13 @@ export default function MultiBlockEditor({
           onReorderBlocks(ids);
         };
 
+        const copyBlock = async (e: React.MouseEvent) => {
+          e.stopPropagation();
+          try {
+            await navigator.clipboard.writeText(block.currentText || block.originalContent);
+          } catch { /* silent */ }
+        };
+
         if (isActive) {
           return (
             <div
@@ -163,6 +170,13 @@ export default function MultiBlockEditor({
                   title="Nach unten verschieben"
                 >
                   ▼
+                </button>
+                <button
+                  onClick={copyBlock}
+                  className="opacity-0 group-hover:opacity-100 px-1 text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-opacity text-[10px] leading-none shrink-0"
+                  title="Blocktext kopieren"
+                >
+                  📋
                 </button>
                 <button
                   onClick={(e) => {
@@ -276,6 +290,13 @@ export default function MultiBlockEditor({
                 title="Nach unten verschieben"
               >
                 ▼
+              </button>
+              <button
+                onClick={copyBlock}
+                className="opacity-0 group-hover:opacity-100 px-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-opacity text-[10px] leading-none shrink-0"
+                title="Blocktext kopieren"
+              >
+                📋
               </button>
               <button
                 onClick={(e) => {

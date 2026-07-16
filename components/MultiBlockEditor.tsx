@@ -173,7 +173,7 @@ export default function MultiBlockEditor({
                 </button>
                 <button
                   onClick={copyBlock}
-                  className="opacity-0 group-hover:opacity-100 px-1 text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 transition-opacity text-[10px] leading-none shrink-0"
+                  className="px-1 text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 text-[10px] leading-none shrink-0"
                   title="Blocktext kopieren"
                 >
                   📋
@@ -293,7 +293,7 @@ export default function MultiBlockEditor({
               </button>
               <button
                 onClick={copyBlock}
-                className="opacity-0 group-hover:opacity-100 px-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-opacity text-[10px] leading-none shrink-0"
+                className="px-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-[10px] leading-none shrink-0"
                 title="Blocktext kopieren"
               >
                 📋

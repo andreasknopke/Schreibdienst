@@ -1362,7 +1362,7 @@ export default function HomePage() {
     correction: WordCorrectionInfo | null;
     field: TextInsertionTarget;
   } | null>(null);
-  const [userGroupId, setUserGroupId] = useState<number | null>(null);
+  const [userGroupId, setUserGroupId] = useState<number | undefined>(undefined);
 
   const syncSelectionState = useCallback((field: TextInsertionTarget, nextSelection: CaretSelection) => {
     textSelectionsRef.current = {

@@ -351,42 +351,62 @@ export default function TemplateSelectorPopover({
           {view === 'tree' ? (
             /* ── Ordner-Ansicht ── */
             <div className="overflow-y-auto" style={{ maxHeight: '50vh' }}>
-              {(personalFolders.length > 0 || groupFolders.length > 0) && (
-                <div className="px-1 pb-1">
-                  {/* "Alle" = kein Filter */}
-                  <div
-                    className={`flex items-center gap-1 px-2 py-1 rounded cursor-pointer text-xs transition-colors ${
-                      selectedFolderId === null
-                        ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
-                        : 'hover:bg-gray-100 dark:hover:bg-gray-800/60 text-gray-600 dark:text-gray-400'
-                    }`}
-                    onClick={() => setSelectedFolderId(null)}
-                  >📁 <span className="font-medium">Alle Bausteine</span></div>
-
-                  <FolderExplorer
-                    folders={personalFolders}
-                    onSelectFolder={setSelectedFolderId}
-                    selectedFolderId={selectedFolderId}
-                    onCreateFolder={handleCreateFolder}
-                    onRenameFolder={handleRenameFolder}
-                    onDeleteFolder={handleDeleteFolder}
-                  />
-                  {groupFolders.map((gf) => (
-                    <div key={gf.groupId} className="mt-2">
-                      <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">👥 {gf.groupName}</div>
-                      <FolderExplorer
-                        folders={gf.folders}
-                        onSelectFolder={setSelectedFolderId}
-                        selectedFolderId={selectedFolderId}
-                        onCreateFolder={handleCreateFolder}
-                        onRenameFolder={handleRenameFolder}
-                        onDeleteFolder={handleDeleteFolder}
-                      />
-                    </div>
-                  ))}
+              <div className="px-1 pb-1">
+                {/* Username als Root für persönliche Bausteine */}
+                <div
+                  className={`flex items-center gap-1 px-2 py-1 rounded cursor-pointer text-xs transition-colors ${
+                    selectedFolderId === null
+                      ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-800/60 text-gray-600 dark:text-gray-400'
+                  }`}
+                  onClick={() => setSelectedFolderId(null)}
+                  title="Alle persönlichen Bausteine anzeigen"
+                >
+                  <span>👤</span>
+                  <span className="font-medium truncate">{_username || 'Eigene'}</span>
+                  <span className="ml-auto text-[10px] text-gray-400">
+                    {fieldTemplates.filter((t) => t.scope !== 'group').length}
+                  </span>
                 </div>
-              )}
-              {/* Templates im Ordner */}
+
+                <FolderExplorer
+                  folders={personalFolders}
+                  onSelectFolder={setSelectedFolderId}
+                  selectedFolderId={selectedFolderId}
+                  onCreateFolder={handleCreateFolder}
+                  onRenameFolder={handleRenameFolder}
+                  onDeleteFolder={handleDeleteFolder}
+                />
+
+                {/* Ohne Ordner (nur wenn kein Ordner-Filter aktiv) */}
+                {selectedFolderId === null && fieldTemplates.filter((t) => t.scope !== 'group' && (t.folderId === undefined || t.folderId === null)).length > 0 && (
+                  <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                    <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                      Ohne Ordner
+                    </div>
+                    {fieldTemplates.filter((t) => t.scope !== 'group' && (t.folderId === undefined || t.folderId === null)).map((tpl) => (
+                      <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
+                    ))}
+                  </div>
+                )}
+
+                {/* Gruppen-Ordner */}
+                {groupFolders.map((gf) => (
+                  <div key={gf.groupId} className="mt-2">
+                    <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">👥 {gf.groupName}</div>
+                    <FolderExplorer
+                      folders={gf.folders}
+                      onSelectFolder={setSelectedFolderId}
+                      selectedFolderId={selectedFolderId}
+                      onCreateFolder={handleCreateFolder}
+                      onRenameFolder={handleRenameFolder}
+                      onDeleteFolder={handleDeleteFolder}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Templates im ausgewählten Ordner */}
               {selectedFolderId !== null ? (
                 <div className="divide-y divide-gray-100 dark:divide-gray-800 border-t border-gray-100 dark:border-gray-800">
                   {folderFilteredTemplates === null ? (
@@ -397,23 +417,7 @@ export default function TemplateSelectorPopover({
                     <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
                   ))}
                 </div>
-              ) : (
-                <div className="divide-y divide-gray-100 dark:divide-gray-800 border-t border-gray-100 dark:border-gray-800">
-                  {/* Bausteine OHNE Ordner anzeigen */}
-                  {fieldTemplates.filter((t) => t.folderId === undefined || t.folderId === null).length > 0 ? (
-                    <>
-                      <div className="sticky top-0 px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
-                        📋 Ohne Ordner
-                      </div>
-                      {fieldTemplates.filter((t) => t.folderId === undefined || t.folderId === null).map((tpl) => (
-                        <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
-                      ))}
-                    </>
-                  ) : (
-                    <div className="px-3 py-4 text-xs text-gray-400 text-center">Keine Bausteine ohne Ordner.</div>
-                  )}
-                </div>
-              )}
+              ) : null}
             </div>
           ) : (
             /* ── Listen-Ansicht ── */

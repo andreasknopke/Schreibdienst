@@ -169,8 +169,6 @@ export default function BausteinPalette({
     return templates.filter((t) => t.folderId !== undefined && allSubIds.has(t.folderId!));
   }, [selectedFolderId, personalFolders, groupFolders, templates]);
 
-  const hasFolderFilter = selectedFolderId !== null;
-
   const hasGroupTemplates = templates.some((t) => t.scope === 'group');
 
   const filteredTemplates = useMemo(() => {
@@ -275,93 +273,62 @@ export default function BausteinPalette({
       {view === 'tree' ? (
         /* ── Ordner-Ansicht ── */
         <div className="divide-y divide-gray-100 dark:divide-gray-800">
-          {/* Persönliche Ordner */}
-          {personalFolders.length > 0 && (
-            <div>
-              <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 flex items-center gap-1">
-                👤 Meine Ordner
-              </div>
-              <FolderExplorer
-                folders={personalFolders}
-                onSelectFolder={setSelectedFolderId}
-                selectedFolderId={selectedFolderId}
-                onCreateFolder={handleCreateFolder}
-                onRenameFolder={handleRenameFolder}
-                onDeleteFolder={handleDeleteFolder}
-              />
-            </div>
-          )}
-
-          {/* Gruppen-Ordner */}
-          {groupFolders.length > 0 && groupFolders.map((gf) => (
-            <div key={gf.groupId}>
-              <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 flex items-center gap-1">
-                👥 {gf.groupName}
-              </div>
-              <FolderExplorer
-                folders={gf.folders}
-                onSelectFolder={setSelectedFolderId}
-                selectedFolderId={selectedFolderId}
-                onCreateFolder={handleCreateFolder}
-                onRenameFolder={handleRenameFolder}
-                onDeleteFolder={handleDeleteFolder}
-              />
-            </div>
-          ))}
-
-          {/* Leer-Zustand */}
-          {personalFolders.length === 0 && groupFolders.length === 0 && (
-            <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">
-              {apiFetch ? (
-                <button
-                  onClick={() => {
-                    const name = prompt('Ordnername:');
-                    if (name) handleCreateFolder(name, null);
-                  }}
-                  className="text-blue-600 dark:text-blue-400 underline"
+              {/* Persönliche Ordner — mit Username als Root */}
+              <div>
+                {/* Username als Root-Eintrag */}
+                <div
+                  className={`flex items-center gap-1 px-2 py-1 rounded cursor-pointer text-xs transition-colors mx-1 mt-0.5 ${
+                    selectedFolderId === null
+                      ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-800/60 text-gray-700 dark:text-gray-300'
+                  }`}
+                  onClick={() => setSelectedFolderId(null)}
+                  title="Alle persönlichen Bausteine anzeigen"
                 >
-                  Ersten Ordner anlegen
-                </button>
-              ) : (
-                'Keine Ordner vorhanden.'
-              )}
-            </div>
-          )}
+                  <span className="shrink-0">👤</span>
+                  <span className="font-medium truncate">{username || 'Eigene'}</span>
+                  <span className="ml-auto text-[10px] text-gray-400">
+                    {templates.filter((t) => t.scope !== 'group').length}
+                  </span>
+                </div>
 
-          {/* Templates im ausgewählten Ordner */}
-          {hasFolderFilter && (
-            <div className="px-3 py-2 text-[10px] text-gray-500 dark:text-gray-400">
-              {filteredTemplatesFromFolder === null
-                ? 'Bitte wählen Sie einen Ordner aus.'
-                : filteredTemplatesFromFolder.length === 0
-                ? 'Keine Bausteine in diesem Ordner.'
-                : `${filteredTemplatesFromFolder.length} Baustein(e) in diesem Ordner`
-              }
-            </div>
-          )}
-          {hasFolderFilter && filteredTemplatesFromFolder && filteredTemplatesFromFolder.map((tpl) => (
-            <PaletteRow
-              key={tpl.id}
-              template={tpl}
-              onAdd={onAddBaustein}
-              folders={flatFolders}
-              onMoveToFolder={handleMoveToFolder}
-            />
-          ))}
-          {!hasFolderFilter && (
-            <div className="divide-y divide-gray-100 dark:divide-gray-800 border-t border-gray-100 dark:border-gray-800">
-              {templates.filter((t) => t.folderId === undefined || t.folderId === null).length > 0 && (
-                <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">
-                  📋 Ohne Ordner
+                {/* Ordner-Struktur darunter */}
+                <FolderExplorer
+                  folders={personalFolders}
+                  onSelectFolder={setSelectedFolderId}
+                  selectedFolderId={selectedFolderId}
+                  onCreateFolder={handleCreateFolder}
+                  onRenameFolder={handleRenameFolder}
+                  onDeleteFolder={handleDeleteFolder}
+                />
+
+                {/* Bausteine ohne Ordner (nur wenn kein Ordner-Filter aktiv) */}
+                {selectedFolderId === null && templates.filter((t) => t.scope !== 'group' && (t.folderId === undefined || t.folderId === null)).length > 0 && (
+                  <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                    <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                      Ohne Ordner
+                    </div>
+                    {templates.filter((t) => t.scope !== 'group' && (t.folderId === undefined || t.folderId === null)).map((tpl) => (
+                      <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} folders={flatFolders} onMoveToFolder={handleMoveToFolder} />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Ausgewählter Ordner: Templates anzeigen */}
+              {selectedFolderId !== null && (
+                <div className="divide-y divide-gray-100 dark:divide-gray-800 border-t border-gray-100 dark:border-gray-800">
+                  {filteredTemplatesFromFolder === null ? (
+                    <div className="px-3 py-4 text-xs text-gray-400 text-center">Bitte Ordner auswählen.</div>
+                  ) : filteredTemplatesFromFolder.length === 0 ? (
+                    <div className="px-3 py-4 text-xs text-gray-400 text-center">Keine Bausteine in diesem Ordner.</div>
+                  ) : filteredTemplatesFromFolder.map((tpl) => (
+                    <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} folders={flatFolders} onMoveToFolder={handleMoveToFolder} />
+                  ))}
                 </div>
               )}
-              {templates.filter((t) => t.folderId === undefined || t.folderId === null).map((tpl) => (
-                <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} folders={flatFolders} onMoveToFolder={handleMoveToFolder} />
-              ))}
             </div>
-          )}
-        </div>
-      ) : (
+          ) : (
         /* ── Listen-Ansicht (bisherige Ansicht) ── */
         <>
           {/* Scope-Tabs */}

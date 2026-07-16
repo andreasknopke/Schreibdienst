@@ -156,7 +156,6 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
 
         onSpeechStart: () => {
           if (isPausedRef.current) return;
-          if (sessionIdRef.current !== sessionId) return;
           setIsSpeaking(true);
           isSpeechActiveRef.current = true;
           speechFramesRef.current = preSpeechFramesRef.current.map(f => new Float32Array(f));
@@ -167,7 +166,6 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
 
         onSpeechEnd: (audio: Float32Array) => {
           if (isPausedRef.current) return;
-          if (sessionIdRef.current !== sessionId) return;
           setIsSpeaking(false);
           isSpeechActiveRef.current = false;
           speechFramesRef.current = [];
@@ -188,7 +186,6 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
 
         onVADMisfire: () => {
           if (isPausedRef.current) return;
-          if (sessionIdRef.current !== sessionId) return;
           setIsSpeaking(false);
           isSpeechActiveRef.current = false;
           speechFramesRef.current = [];
@@ -201,7 +198,6 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
 
         onFrameProcessed: (_probs: any, frame: Float32Array) => {
           if (isPausedRef.current) return;
-          if (sessionIdRef.current !== sessionId) return;
           const frameCopy = new Float32Array(frame);
           preSpeechFramesRef.current.push(frameCopy);
           if (preSpeechFramesRef.current.length > PRE_SPEECH_PAD_FRAMES) {
@@ -246,6 +242,10 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
       }
       if (sessionIdRef.current !== sessionId) { await vad.destroy(); vadRef.current = null; return; }
 
+      // Callbacks scharf schalten BEVOR der Pre-Roll läuft. onFrameProcessed
+      // prüft isPausedRef – ohne dieses Flag sammelt der Pre-Roll 0 Frames.
+      isPausedRef.current = false;
+
       // Pre-Roll nur beim ersten Start: warten bis Pre-Speech-Buffer mit
       // echtem Audio gefüllt ist (kalte USB-Pipeline → erstes Wort sonst weg)
       {
@@ -259,7 +259,6 @@ export function useVadChunking(options: UseVadChunkingOptions): UseVadChunkingRe
         }
         console.log(`[VAD] First-start pre-roll done: ${preSpeechFramesRef.current.length} frames`);
       }
-      isPausedRef.current = false;
       setIsListening(true);
       return;
     }

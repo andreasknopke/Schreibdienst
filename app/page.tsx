@@ -1362,6 +1362,7 @@ export default function HomePage() {
     correction: WordCorrectionInfo | null;
     field: TextInsertionTarget;
   } | null>(null);
+  const [userGroupId, setUserGroupId] = useState<number | null>(null);
 
   const syncSelectionState = useCallback((field: TextInsertionTarget, nextSelection: CaretSelection) => {
     textSelectionsRef.current = {
@@ -1952,6 +1953,25 @@ export default function HomePage() {
       })
       .catch(() => {});
   }, [username, getAuthHeader, getDbTokenHeader]);
+
+  // Benutzer-Gruppe für WordActionPopup (Abteilungswörterbuch-Checkbox)
+  useEffect(() => {
+    if (!username) return;
+    fetch('/api/templates/my-groups', {
+      headers: {
+        'Authorization': getAuthHeader(),
+        ...getDbTokenHeader(),
+      },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.groups?.length > 0) {
+          setUserGroupId(data.groups[0].id);
+        }
+      })
+      .catch(() => {});
+  }, [username, getAuthHeader, getDbTokenHeader]);
+
   const [showTemplatesManager, setShowTemplatesManager] = useState(false);
   const [templateManagerMode, setTemplateManagerMode] = useState<'create' | 'manage'>('create');
   // Refs für den VAD-/Online-Diktatpfad: Die VAD-Callbacks werden beim Start der
@@ -7371,7 +7391,7 @@ export default function HomePage() {
           position={wordPopup.position}
           correction={wordPopup.correction}
           targetUsername={wordPopup.correction?.targetUsername || username || undefined}
-          groupId={wordPopup.correction?.groupId}
+          groupId={wordPopup.correction?.groupId ?? userGroupId}
           onClose={() => {
             const field = wordPopup.field;
             closeWordPopup();

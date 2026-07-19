@@ -11,6 +11,7 @@
  */
 
 import { normalizeAudioForWhisper } from './audioCompression';
+import { getVoxtralLocalModelName } from './configDb';
 
 export interface VoxtralTranscriptionResult {
   text: string;
@@ -28,13 +29,13 @@ export interface VoxtralTranscriptionResult {
 export async function transcribeBufferWithVoxtral(
   audioBuffer: Buffer,
   mimeType: string,
-  options: { temperature?: number; signal?: AbortSignal } = {}
+  options: { temperature?: number; signal?: AbortSignal; useFinetune?: boolean } = {}
 ): Promise<VoxtralTranscriptionResult> {
   const baseUrl = (process.env.VOXTRAL_LOCAL_URL || 'http://localhost:8000').replace(/\/+$/, '');
   if (!process.env.VOXTRAL_LOCAL_URL) {
     throw new Error('VOXTRAL_LOCAL_URL ist nicht konfiguriert');
   }
-  const modelName = process.env.VOXTRAL_LOCAL_MODEL || 'mistralai/Voxtral-Mini-3B-2507';
+  const modelName = getVoxtralLocalModelName(options.useFinetune);
 
   const startTime = Date.now();
 

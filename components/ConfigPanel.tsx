@@ -35,6 +35,7 @@ interface RuntimeConfig {
   doublePrecisionEnabled?: boolean;
   doublePrecisionMode?: 'parallel' | 'sequential';
   voxtralLocalOnlineMode?: 'websocket' | 'chunk';
+  voxtralLocalUseFinetune?: boolean;
 }
 
 interface EnvInfo {
@@ -270,6 +271,22 @@ export default function ConfigPanel() {
               <p className="text-xs text-gray-400 mt-1">
                 VAD-Modus: Silero-VAD erkennt Sprachpausen, jede Utterance wird einzeln transkribiert und gelockt. WebSocket Realtime ist deaktiviert bis Voxtral-Mini-4B-Realtime deployed ist.
               </p>
+
+              <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.voxtralLocalUseFinetune || false}
+                    onChange={(e) => updateConfig({ voxtralLocalUseFinetune: e.target.checked })}
+                    disabled={!isRoot || saving}
+                    className="w-4 h-4 rounded border-gray-300"
+                  />
+                  <span className="text-sm font-medium">Use finetune</span>
+                  <span className="text-xs text-gray-400 ml-1">
+                    (Modell: {config.voxtralLocalUseFinetune ? 'finetune' : 'Standard'})
+                  </span>
+                </label>
+              </div>
             </div>
           )}
         </div>

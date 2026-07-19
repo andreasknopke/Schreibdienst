@@ -15,7 +15,7 @@ import {
   logLLMCorrectionWithRequest,
   logDoublePrecisionCorrectionWithRequest,
 } from '@/lib/correctionLogDb';
-import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath, getEffectiveOfflineService, getEffectiveDoublePrecisionService, RuntimeConfig } from '@/lib/configDb';
+import { getRuntimeConfigWithRequest, getWhisperOfflineModelPath, getEffectiveOfflineService, getEffectiveDoublePrecisionService, getVoxtralLocalModelName, RuntimeConfig } from '@/lib/configDb';
 import { loadDictionaryWithRequest, DictionaryEntry } from '@/lib/dictionaryDb';
 import { getUserSettingsWithRequest } from '@/lib/usersDb';
 import { formatGroupPromptInsertSection, getPromptInsertsForUserGroupsWithRequest } from '@/lib/groupDictionaryDb';
@@ -365,7 +365,8 @@ async function transcribeWithProvider(
   audioBlob: Blob, 
   provider: 'whisperx' | 'elevenlabs' | 'mistral' | 'fast_whisper' | 'voxtral_local',
   initialPrompt?: string,
-  whisperModel?: string
+  whisperModel?: string,
+  voxtralUseFinetune?: boolean
 ): Promise<TranscriptionResult> {
   // fast_whisper is WebSocket-based and only works client-side, fallback to whisperx for batch processing
   const effectiveProvider = provider === 'fast_whisper' ? 'whisperx' : provider;
@@ -381,7 +382,7 @@ async function transcribeWithProvider(
       result = await transcribeWithMistral(audioBlob);
       break;
     case 'voxtral_local':
-      result = await transcribeWithVoxtralLocal(audioBlob);
+      result = await transcribeWithVoxtralLocal(audioBlob, voxtralUseFinetune);
       break;
     case 'whisperx':
     default:
@@ -770,10 +771,11 @@ async function transcribeAudio(
       return { text: fallbackText, segments: primaryResult.segments };
     };
     
+    const voxtralFinetune = runtimeConfig.voxtralLocalUseFinetune;
     if (mode === 'parallel') {
       const [r1, r2] = await Promise.allSettled([
-        transcribeWithProvider(request, audioBlob, provider, initialPrompt, primaryWhisperModel),
-        transcribeWithProvider(request, audioBlob, secondProvider, initialPrompt, dpWhisperModel),
+        transcribeWithProvider(request, audioBlob, provider, initialPrompt, primaryWhisperModel, provider === 'voxtral_local' ? voxtralFinetune : undefined),
+        transcribeWithProvider(request, audioBlob, secondProvider, initialPrompt, dpWhisperModel, secondProvider === 'voxtral_local' ? voxtralFinetune : undefined),
       ]);
 
       if (r1.status === 'fulfilled' && r2.status === 'fulfilled') {
@@ -789,14 +791,14 @@ async function transcribeAudio(
       }
     } else {
       // Sequential execution
-      result1 = await transcribeWithProvider(request, audioBlob, provider, initialPrompt, primaryWhisperModel);
+      result1 = await transcribeWithProvider(request, audioBlob, provider, initialPrompt, primaryWhisperModel, provider === 'voxtral_local' ? voxtralFinetune : undefined);
       
       // Small delay to allow GPU resources to be released
       console.log(`[Worker DoublePrecision] First transcription complete, starting second...`);
       await new Promise(resolve => setTimeout(resolve, 500));
 
       try {
-        result2 = await transcribeWithProvider(request, audioBlob, secondProvider, initialPrompt, dpWhisperModel);
+        result2 = await transcribeWithProvider(request, audioBlob, secondProvider, initialPrompt, dpWhisperModel, secondProvider === 'voxtral_local' ? voxtralFinetune : undefined);
       } catch (error) {
         console.warn(`[Worker DoublePrecision] Secondary transcription failed, falling back to primary: ${error instanceof Error ? error.message : String(error)}`);
         return fallbackToPrimaryTranscription(result1, error);
@@ -920,7 +922,7 @@ async function transcribeAudio(
 
   if (provider === 'voxtral_local') {
     console.log('[Worker] Using Voxtral Local (vLLM) for transcription');
-    return transcribeWithVoxtralLocal(audioBlob);
+    return transcribeWithVoxtralLocal(audioBlob, runtimeConfig.voxtralLocalUseFinetune);
   }
   
   try {
@@ -1442,8 +1444,9 @@ async function transcribeWithMistral(file: Blob): Promise<{ text: string; segmen
  * Transkription mit lokalem Voxtral via vLLM
  * vLLM bietet OpenAI-kompatible /v1/audio/transcriptions API
  */
-async function transcribeWithVoxtralLocal(file: Blob): Promise<{ text: string; segments?: any[] }> {
+async function transcribeWithVoxtralLocal(file: Blob, useFinetune?: boolean): Promise<{ text: string; segments?: any[] }> {
   const baseUrl = (process.env.VOXTRAL_LOCAL_URL || 'http://localhost:8000').replace(/\/+$/, '');
+  const modelName = getVoxtralLocalModelName(useFinetune);
   
   const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
   console.log(`[Worker Voxtral-Local] Starting transcription - Size: ${fileSizeMB}MB, Type: ${file.type}`);
@@ -1473,7 +1476,7 @@ async function transcribeWithVoxtralLocal(file: Blob): Promise<{ text: string; s
   const formData = new FormData();
   const audioFile = new File([audioBuffer], `audio.${fileExt}`, { type: mimeType });
   formData.append('file', audioFile);
-  formData.append('model', process.env.VOXTRAL_LOCAL_MODEL || 'mistralai/Voxtral-Mini-3B-2507');
+  formData.append('model', modelName);
   formData.append('language', 'de');
   formData.append('response_format', 'verbose_json');
   formData.append('temperature', '0.0');

@@ -13,6 +13,7 @@ import {
   computeWer,
   computeWordDiff,
 } from '@/lib/voxtralTranscribe';
+import { getRuntimeConfigWithRequest } from '@/lib/configDb';
 import {
   initOfflineDictationTableWithRequest,
   getDictationByIdWithRequest,
@@ -71,7 +72,8 @@ async function verifySingle(req: NextRequest, target: VerifyTarget): Promise<Ver
   let transcription_error: string | null = null;
   let modelName = '';
   try {
-    const result = await transcribeBufferWithVoxtral(slice, 'audio/wav');
+    const runtimeConfig = await getRuntimeConfigWithRequest(req);
+    const result = await transcribeBufferWithVoxtral(slice, 'audio/wav', { useFinetune: runtimeConfig.voxtralLocalUseFinetune });
     transcription = result.text;
     modelName = result.model;
   } catch (err: any) {

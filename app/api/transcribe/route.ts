@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRuntimeConfigWithRequest, getEffectiveOnlineService } from '@/lib/configDb';
+import { getRuntimeConfigWithRequest, getEffectiveOnlineService, getVoxtralLocalModelName } from '@/lib/configDb';
 import { getEntriesWithRequest, type DictionaryEntry } from '@/lib/dictionaryDb';
 import { normalizeAudioForWhisper } from '@/lib/audioCompression';
 import { countWords, logOnlineUsageEventWithRequest } from '@/lib/onlineUsageDb';
@@ -664,8 +664,9 @@ async function transcribeWithMistral(file: Blob, filename: string) {
  * Server starten: vllm serve mistralai/Voxtral-Mini-3B-2507 --tokenizer-mode mistral --config-format mistral --load-format mistral --dtype half --enforce-eager
  * API ist OpenAI-kompatibel: POST /v1/audio/transcriptions
  */
-async function transcribeWithVoxtralLocal(file: Blob, filename: string, promptContext?: string, dictionaryTerms?: string) {
+async function transcribeWithVoxtralLocal(file: Blob, filename: string, promptContext?: string, dictionaryTerms?: string, useFinetune?: boolean) {
   const baseUrl = (process.env.VOXTRAL_LOCAL_URL || 'http://localhost:8000').replace(/\/+$/, '');
+  const modelName = getVoxtralLocalModelName(useFinetune);
 
   const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
   console.log(`[Voxtral-Local] Starting transcription - File: ${filename}, Size: ${fileSizeMB}MB, Type: ${file.type}`);
@@ -691,7 +692,7 @@ async function transcribeWithVoxtralLocal(file: Blob, filename: string, promptCo
   const audioFile = new File([audioBuffer], 'audio.wav', { type: mimeType });
   formData.append('file', audioFile);
   // Modell muss exakt dem vLLM-Modellnamen entsprechen
-  formData.append('model', process.env.VOXTRAL_LOCAL_MODEL || 'mistralai/Voxtral-Mini-3B-2507');
+  formData.append('model', modelName);
   formData.append('language', 'de');
   // Online-Chunk-Modus: Nur Text benötigt, keine Segmente/Timestamps
   formData.append('response_format', 'json');
@@ -868,7 +869,7 @@ export async function POST(request: NextRequest) {
     } else if (provider === 'voxtral_local') {
       console.log('Using Voxtral Local (vLLM) as primary provider');
       // Wörterbuch als Vokabular-Priming, Prompt-Kontext separat
-      result = await transcribeWithVoxtralLocal(file, filename, promptContext || undefined, initialPrompt);
+      result = await transcribeWithVoxtralLocal(file, filename, promptContext || undefined, initialPrompt, runtimeConfig.voxtralLocalUseFinetune);
     } else if (provider === 'fast_whisper') {
       // Fast Whisper ist ein reiner WebSocket-Server (RealtimeSTT)
       // Für Server-seitige Transkription müssen wir auf WhisperX zurückfallen

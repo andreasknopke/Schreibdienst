@@ -130,6 +130,8 @@ export interface RuntimeConfig {
   doublePrecisionMode?: 'parallel' | 'sequential';
   // Voxtral Local Online-Modus
   voxtralLocalOnlineMode?: 'websocket' | 'chunk';
+  // Voxtral Local Finetune
+  voxtralLocalUseFinetune?: boolean;
 }
 
 /** Resolve the effective online service (new field → legacy fallback) */
@@ -183,6 +185,7 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   doublePrecisionService: 'elevenlabs',
   doublePrecisionMode: 'parallel',
   voxtralLocalOnlineMode: 'chunk',
+  voxtralLocalUseFinetune: false,
 };
 
 // Get runtime config from database
@@ -260,6 +263,9 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
             config.voxtralLocalOnlineMode = row.config_value as 'websocket' | 'chunk';
           }
           break;
+        case 'voxtralLocalUseFinetune':
+          config.voxtralLocalUseFinetune = row.config_value === 'true';
+          break;
       }
     }
     
@@ -279,6 +285,14 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
     console.error('[Config] Get config error:', error);
     return DEFAULT_CONFIG;
   }
+}
+
+/** Get the effective Voxtral local model name based on the finetune toggle. */
+export function getVoxtralLocalModelName(useFinetune?: boolean): string {
+  if (useFinetune) {
+    return 'finetune';
+  }
+  return process.env.VOXTRAL_LOCAL_MODEL || 'mistralai/Voxtral-Mini-3B-2507';
 }
 
 // Save runtime config to database
@@ -378,6 +392,9 @@ export async function getRuntimeConfigWithRequest(request: NextRequest): Promise
           if (['websocket', 'chunk'].includes(row.config_value)) {
             config.voxtralLocalOnlineMode = row.config_value as 'websocket' | 'chunk';
           }
+          break;
+        case 'voxtralLocalUseFinetune':
+          config.voxtralLocalUseFinetune = row.config_value === 'true';
           break;
       }
     }

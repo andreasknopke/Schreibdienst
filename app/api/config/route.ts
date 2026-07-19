@@ -239,6 +239,10 @@ export async function POST(request: NextRequest) {
       newConfig.voxtralLocalOnlineMode = body.voxtralLocalOnlineMode;
     }
     
+    if (typeof body.voxtralLocalUseFinetune === 'boolean') {
+      newConfig.voxtralLocalUseFinetune = body.voxtralLocalUseFinetune;
+    }
+    
     // ---- Unified Service Selections ----
     const validServiceIds = TRANSCRIPTION_SERVICES.map(s => s.id);
     

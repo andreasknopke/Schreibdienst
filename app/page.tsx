@@ -6447,6 +6447,16 @@ export default function HomePage() {
                       await fetchTemplates();
                     } catch { /* silent */ }
                   }}
+                  onShareTemplate={async (tpl) => {
+                    try {
+                      await apiFetchWithAuth('/api/templates', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: tpl.id, action: 'toggle-share' }),
+                      });
+                      await fetchTemplates();
+                    } catch { /* silent */ }
+                  }}
                   onDeleteComplexTemplate={async (id, name) => {
                     try {
                       await apiFetchWithAuth('/api/templates/complex', {

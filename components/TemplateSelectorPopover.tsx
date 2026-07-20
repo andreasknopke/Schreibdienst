@@ -37,6 +37,7 @@ interface TemplateSelectorPopoverProps {
   onExitTemplateMode: () => void;
   onEditTemplate?: (template: Template) => void;
   onDeleteTemplate?: (templateId: number, name: string, scope?: string) => void;
+  onShareTemplate?: (template: Template) => void;
   onDeleteComplexTemplate?: (templateId: number, name: string) => void;
   apiFetch?: (url: string, options?: RequestInit) => Promise<Response>;
   username?: string;
@@ -68,6 +69,7 @@ export default function TemplateSelectorPopover({
   onExitTemplateMode,
   onEditTemplate,
   onDeleteTemplate,
+  onShareTemplate,
   onDeleteComplexTemplate,
   apiFetch,
   username: _username,
@@ -500,7 +502,7 @@ export default function TemplateSelectorPopover({
                           Ohne Ordner
                         </div>
                         {ungroupedPrivateTemplates.map((tpl) => (
-                          <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} />
+                          <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} onShare={onShareTemplate} />
                         ))}
                       </div>
                     )}
@@ -554,7 +556,7 @@ export default function TemplateSelectorPopover({
                   ) : (
                     <>
                       {folderFilteredTemplates?.map((tpl) => (
-                        <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} />
+                        <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} onShare={onShareTemplate} />
                       ))}
                       {folderFilteredComplex?.map((ct) => (
                         <ComplexTemplateRow
@@ -631,7 +633,7 @@ export default function TemplateSelectorPopover({
               <div key={group}>
                 <div className="sticky top-0 px-3 py-1.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">{group}</div>
                 {items.map((tpl) => (
-                  <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} />
+                  <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} onShare={onShareTemplate} />
                 ))}
               </div>
             ))}
@@ -642,7 +644,7 @@ export default function TemplateSelectorPopover({
                   <div className="sticky top-0 px-3 py-1.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">Weitere</div>
                 )}
                 {groupedTemplates.ungrouped.map((tpl) => (
-                  <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} />
+                  <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} onShare={onShareTemplate} />
                 ))}
               </div>
             )}
@@ -711,12 +713,14 @@ function TemplateRow({
   onSelect,
   onEdit,
   onDelete,
+  onShare,
 }: {
   template: Template;
   isSelected: boolean;
   onSelect: (tpl: Template) => void;
   onEdit?: (tpl: Template) => void;
   onDelete?: (id: number, name: string, scope?: string) => void;
+  onShare?: (tpl: Template) => void;
 }) {
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData(
@@ -752,7 +756,7 @@ function TemplateRow({
           Geteilt
         </span>
       )}
-      {/* Inline edit/delete for private templates */}
+      {/* Inline edit/delete/share for private templates */}
       {isPrivate && onEdit && (
         <button
           onClick={(e) => { e.stopPropagation(); onEdit(template); }}
@@ -760,6 +764,19 @@ function TemplateRow({
           title="Bearbeiten"
         >
           ✎
+        </button>
+      )}
+      {isPrivate && onShare && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onShare(template); }}
+          className={`opacity-0 group-hover:opacity-100 text-[11px] px-0.5 transition-opacity shrink-0 ${
+            template.isShared
+              ? 'text-emerald-500 dark:text-emerald-400'
+              : 'text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400'
+          }`}
+          title={template.isShared ? 'Nicht mehr teilen' : 'Mit Gruppe teilen'}
+        >
+          {template.isShared ? '👥' : '👤'}
         </button>
       )}
       {isPrivate && onDelete && (

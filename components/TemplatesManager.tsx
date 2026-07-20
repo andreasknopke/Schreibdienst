@@ -345,42 +345,7 @@ export default function TemplatesManager({ mode = 'create', apiFetch, editTempla
             className="w-full px-3 py-2 text-sm border rounded dark:bg-gray-700 dark:border-gray-600 bg-white h-full min-h-0"
             disabled={adding}
           />
-          {userGroups.length > 0 && (
-            <div className="flex flex-col gap-1.5 flex-shrink-0">
-              <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Mit Gruppe teilen:</span>
-              <span className="text-[10px] text-gray-400 dark:text-gray-500 -mt-1">Andere Benutzer können eine Kopie dieses Bausteins anlegen.</span>
-              <div className="flex flex-wrap gap-2">
-                {userGroups.map((g) => {
-                  const checked = selectedGroupIds.has(g.id);
-                  return (
-                    <label
-                      key={g.id}
-                      className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer transition-colors ${
-                        checked
-                          ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
-                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => {
-                          const next = new Set(selectedGroupIds);
-                          if (next.has(g.id)) next.delete(g.id); else next.add(g.id);
-                          setSelectedGroupIds(next);
-                        }}
-                        className="sr-only"
-                      />
-                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="flex-shrink-0">
-                        <path d="M20 6 9 17l-5-5"/>
-                      </svg>
-                      <span>{g.name}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+
           <button
             type="submit"
             disabled={adding || !name.trim() || !content.trim()}
@@ -455,41 +420,6 @@ export default function TemplatesManager({ mode = 'create', apiFetch, editTempla
                     <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-2 py-1 rounded flex-shrink-0">
                       <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                       <span>Abteilungs-Baustein – Änderung gilt für alle Gruppenmitglieder</span>
-                    </div>
-                  ) : userGroups.length > 0 ? (
-                    <div className="flex flex-col gap-1.5 flex-shrink-0">
-                      <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Mit Gruppe teilen:</span>
-                      <span className="text-[10px] text-gray-400 dark:text-gray-500 -mt-1">Andere Benutzer können eine Kopie dieses Bausteins anlegen.</span>
-                      <div className="flex flex-wrap gap-2">
-                        {userGroups.map((g) => {
-                          const checked = editSelectedGroupIds.has(g.id);
-                          return (
-                            <label
-                              key={g.id}
-                              className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded cursor-pointer transition-colors ${
-                                checked
-                                  ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
-                                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600'
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => {
-                                  const next = new Set(editSelectedGroupIds);
-                                  if (next.has(g.id)) next.delete(g.id); else next.add(g.id);
-                                  setEditSelectedGroupIds(next);
-                                }}
-                                className="sr-only"
-                              />
-                              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="flex-shrink-0">
-                                <path d="M20 6 9 17l-5-5"/>
-                              </svg>
-                              <span>{g.name}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
                     </div>
                   ) : null}
                   <div id="tm-edit-actions" className="flex gap-2 flex-shrink-0">

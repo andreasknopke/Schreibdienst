@@ -221,7 +221,7 @@ export async function DELETE(request: NextRequest) {
   }
 }
 
-// PATCH /api/templates - Template in Ordner verschieben
+// PATCH /api/templates - Template in Ordner verschieben oder teilen
 export async function PATCH(request: NextRequest) {
   try {
     const auth = await getAuthenticatedUser(request);
@@ -230,12 +230,58 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { id, folderId, scope } = body;
+    const { id, folderId, scope, action } = body;
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'ID erforderlich' }, { status: 400 });
     }
 
+    // ── Share-Toggle ──
+    if (action === 'toggle-share') {
+      const pool = await getPoolForRequest(request);
+
+      // Template-Daten laden
+      const [templateRows] = await pool.query<any[]>(
+        'SELECT name, content, field, format_ranges FROM templates WHERE id = ? AND username = ?',
+        [id, auth.username],
+      );
+      if (!templateRows || templateRows.length === 0) {
+        return NextResponse.json({ success: false, error: 'Baustein nicht gefunden' }, { status: 404 });
+      }
+      const tpl = templateRows[0];
+
+      // Prüfen ob bereits geteilt (group entry exists for any of user's groups)
+      const userGroupIds = await getUserTemplateGroupIds(request, auth.username);
+      let isCurrentlyShared = false;
+      if (userGroupIds.length > 0) {
+        const placeholders = userGroupIds.map(() => '?').join(',');
+        const [existing] = await pool.query<any[]>(
+          `SELECT id FROM template_group_entries WHERE name = ? AND group_id IN (${placeholders}) LIMIT 1`,
+          [tpl.name, ...userGroupIds],
+        );
+        isCurrentlyShared = existing && existing.length > 0;
+      }
+
+      if (isCurrentlyShared) {
+        // Unshare: aus allen Gruppen entfernen
+        for (const groupId of userGroupIds) {
+          await removeTemplateGroupEntryWithRequest(request, groupId, tpl.name);
+        }
+      } else {
+        // Share: in alle Gruppen übernehmen
+        for (const groupId of userGroupIds) {
+          await upsertTemplateGroupEntryWithRequest(
+            request, groupId, tpl.name, tpl.content, tpl.field || 'befund',
+            tpl.format_ranges ? JSON.parse(tpl.format_ranges) : [],
+            auth.username,
+          );
+        }
+      }
+
+      return NextResponse.json({ success: true, shared: !isCurrentlyShared });
+    }
+
+    // ── In Ordner verschieben ──
     const result = await moveTemplateToFolder(request, id, folderId ?? null, scope || 'private');
     if (!result.success) {
       return NextResponse.json({ success: false, error: result.error }, { status: 400 });

@@ -19,6 +19,8 @@ export interface Template {
   username?: string;
   /** Ordner-ID für Ordner-Struktur */
   folderId?: number | null;
+  /** Ob dieser private Baustein auch in Gruppen geteilt ist */
+  isShared?: boolean;
 }
 
 interface DbTemplate {
@@ -118,10 +120,23 @@ export async function loadTemplatesForUserWithRequest(
   const templates: Template[] = [];
   const seen = new Set<string>();
 
+  // Set mit Namen, die auch als Gruppen-Eintrag existieren
+  const sharedNames = new Set<string>();
+  const groupNameMap = new Map<string, string>();
+  for (const entry of groupEntries) {
+    const key = entry.name.toLowerCase();
+    sharedNames.add(key);
+    groupNameMap.set(key, entry.groupName ?? '');
+  }
+
   // Private zuerst (sie gewinnen bei Konflikten)
   for (const entry of privateEntries) {
-    seen.add(entry.name.toLowerCase());
-    templates.push(entry);
+    const key = entry.name.toLowerCase();
+    seen.add(key);
+    templates.push({
+      ...entry,
+      isShared: sharedNames.has(key),
+    });
   }
 
   // Gruppen-Templates, die nicht bereits privat existieren
@@ -139,6 +154,7 @@ export async function loadTemplatesForUserWithRequest(
       updatedAt: entry.updatedAt,
       scope: 'group',
       groupName: entry.groupName,
+      isShared: true,
     });
   }
 

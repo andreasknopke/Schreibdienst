@@ -74,11 +74,14 @@ export default function TemplateSelectorPopover({
   const [groupFolders, setGroupFolders] = useState<{ groupId: number; groupName: string; folders: FolderNode[] }[]>([]);
   const popoverRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const [moveVersion, setMoveVersion] = useState(0);
+  // Lokale folderId-Overrides nach Drag&Drop, damit die Ansicht sofort aktualisiert wird
+  const [folderIdOverrides, setFolderIdOverrides] = useState<Record<number, number | null | undefined>>({});
 
   // Schliessen bei Klick ausserhalb
   useEffect(() => {
     if (!open) return;
+    // Overrides beim Öffnen zurücksetzen (templates-Prop ist frisch vom Parent)
+    setFolderIdOverrides({});
     const handler = (e: MouseEvent) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         setOpen(false);
@@ -96,10 +99,18 @@ export default function TemplateSelectorPopover({
     }
   }, [open]);
 
-  // Nach Feld filtern
+  // Nach Feld filtern + lokale folderId-Overrides anwenden
   const fieldTemplates = useMemo(
-    () => templates.filter((t) => t.field === currentField),
-    [templates, currentField],
+    () => templates
+      .filter((t) => t.field === currentField)
+      .map((t) => {
+        const override = folderIdOverrides[t.id];
+        if (override !== undefined) {
+          return { ...t, folderId: override ?? null };
+        }
+        return t;
+      }),
+    [templates, currentField, folderIdOverrides],
   );
 
   // Nach Tab + Search filtern
@@ -217,7 +228,8 @@ export default function TemplateSelectorPopover({
         body: JSON.stringify({ id: templateId, folderId: targetFolderId, scope }),
       });
       if (res.ok) {
-        setMoveVersion((v) => v + 1);
+        // Lokalen Override setzen → Ansicht aktualisiert sich sofort
+        setFolderIdOverrides((prev) => ({ ...prev, [templateId]: targetFolderId }));
         await loadFolders();
       }
     } catch { /* silent */ }

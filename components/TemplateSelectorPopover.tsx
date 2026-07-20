@@ -13,6 +13,7 @@ interface Template {
   groupName?: string;
   folderId?: number | null;
   isShared?: boolean;
+  addedBy?: string;
 }
 
 interface ComplexTemplate {

@@ -712,11 +712,9 @@ export default function TemplateSelectorPopover({
             )}
           </div></>
           )}
-          </>)
-          )}
+          </>)}
 
           {/* Action-Footer */}
-          <div className="border-t border-gray-100 dark:border-gray-800 px-1.5 py-1.5 flex flex-wrap gap-0.5 bg-gray-50/80 dark:bg-gray-800/40">
           <div className="border-t border-gray-100 dark:border-gray-800 px-1.5 py-1.5 flex flex-wrap gap-0.5 bg-gray-50/80 dark:bg-gray-800/40">
             <ActionButton
               icon="➕"

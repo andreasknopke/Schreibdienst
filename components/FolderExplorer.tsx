@@ -28,6 +28,8 @@ interface FolderExplorerProps {
   folderIcon?: string;
   /** Icon für geöffneten Ordner (Standard: 📂) */
   folderOpenIcon?: string;
+  /** Wird aufgerufen wenn ein Baustein per Drag & Drop auf einen Ordner gezogen wird */
+  onDropOnFolder?: (folderId: number, templateId: number, scope: string) => void;
 }
 
 export default function FolderExplorer({
@@ -40,12 +42,14 @@ export default function FolderExplorer({
   renderFolderExtra,
   folderIcon = '📁',
   folderOpenIcon = '📂',
+  onDropOnFolder,
 }: FolderExplorerProps) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [creating, setCreating] = useState<{ parentId: number | null } | null>(null);
   const [newName, setNewName] = useState('');
   const [renaming, setRenaming] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [dragOverFolderId, setDragOverFolderId] = useState<number | null>(null);
 
   const toggle = useCallback((id: number) => {
     setExpanded((prev) => {
@@ -79,15 +83,60 @@ export default function FolderExplorer({
     const isSelected = selectedFolderId === folder.id;
     const hasChildren = folder.children.length > 0;
 
+    const isDragOver = dragOverFolderId === folder.id;
+
+    const handleDragOver = (e: React.DragEvent) => {
+      if (!onDropOnFolder) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+    };
+
+    const handleDragEnter = (e: React.DragEvent) => {
+      if (!onDropOnFolder) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOverFolderId(folder.id);
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+      if (!onDropOnFolder) return;
+      e.stopPropagation();
+      // Nur zurücksetzen wenn wir das Element wirklich verlassen
+      const related = e.relatedTarget as Node | null;
+      if (!e.currentTarget.contains(related)) {
+        setDragOverFolderId(null);
+      }
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+      if (!onDropOnFolder) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOverFolderId(null);
+      const raw = e.dataTransfer.getData('text/x-template');
+      if (!raw) return;
+      try {
+        const { templateId, scope } = JSON.parse(raw);
+        onDropOnFolder(folder.id, templateId, scope);
+      } catch { /* invalid payload */ }
+    };
+
     return (
       <div key={folder.id}>
         <div
           className={`flex items-center gap-1 px-1 py-1 rounded cursor-pointer text-xs transition-colors ${
             isSelected
               ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200'
-              : 'hover:bg-gray-100 dark:hover:bg-gray-800/60 text-gray-700 dark:text-gray-300'
+              : isDragOver
+                ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-400 dark:ring-emerald-600'
+                : 'hover:bg-gray-100 dark:hover:bg-gray-800/60 text-gray-700 dark:text-gray-300'
           }`}
           style={{ paddingLeft: `${depth * 14 + 4}px` }}
+          onDragOver={handleDragOver}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
         >
           {/* Expand/Collapse */}
           <button
@@ -195,7 +244,7 @@ export default function FolderExplorer({
 
   return (
     <div className="select-none">
-      {/* "Alle" = kein Filter */}
+      {/* "Alle" = kein Filter — auch als Drop-Ziel (aus Ordner entfernen) */}
       <div
         className={`flex items-center gap-1 px-1 py-1 rounded cursor-pointer text-xs transition-colors ${
           selectedFolderId === null
@@ -203,6 +252,17 @@ export default function FolderExplorer({
             : 'hover:bg-gray-100 dark:hover:bg-gray-800/60 text-gray-700 dark:text-gray-300'
         }`}
         onClick={() => onSelectFolder(null)}
+        onDragOver={(e) => { if (onDropOnFolder) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
+        onDrop={(e) => {
+          if (!onDropOnFolder) return;
+          e.preventDefault();
+          const raw = e.dataTransfer.getData('text/x-template');
+          if (!raw) return;
+          try {
+            const { templateId, scope } = JSON.parse(raw);
+            onDropOnFolder(-1, templateId, scope);
+          } catch {}
+        }}
       >
         <span className="w-3.5 shrink-0" />
         <span className="shrink-0">📁</span>

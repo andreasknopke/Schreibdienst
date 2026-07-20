@@ -74,6 +74,7 @@ export default function TemplateSelectorPopover({
   const [groupFolders, setGroupFolders] = useState<{ groupId: number; groupName: string; folders: FolderNode[] }[]>([]);
   const popoverRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const [moveVersion, setMoveVersion] = useState(0);
 
   // Schliessen bei Klick ausserhalb
   useEffect(() => {
@@ -203,6 +204,23 @@ export default function TemplateSelectorPopover({
       body: JSON.stringify({ id }),
     });
     await loadFolders();
+  }, [apiFetch, loadFolders]);
+
+  const handleDropOnFolder = useCallback(async (folderId: number, templateId: number, scope: string) => {
+    if (!apiFetch) return;
+    try {
+      // folderId === -1 bedeutet "aus Ordner entfernen" (wieder Root)
+      const targetFolderId = folderId === -1 ? null : folderId;
+      const res = await apiFetch('/api/templates', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: templateId, folderId: targetFolderId, scope }),
+      });
+      if (res.ok) {
+        setMoveVersion((v) => v + 1);
+        await loadFolders();
+      }
+    } catch { /* silent */ }
   }, [apiFetch, loadFolders]);
 
   // Nach Ordner gefilterte Templates
@@ -360,7 +378,19 @@ export default function TemplateSelectorPopover({
                       : 'hover:bg-gray-100 dark:hover:bg-gray-800/60 text-gray-600 dark:text-gray-400'
                   }`}
                   onClick={() => setSelectedFolderId(null)}
-                  title="Alle persönlichen Bausteine anzeigen"
+                  title="Alle persönlichen Bausteine anzeigen — hierher ziehen zum Entfernen aus Ordnern"
+                  onDragOver={(e) => { if (handleDropOnFolder) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
+                  onDrop={(e) => {
+                    if (!handleDropOnFolder) return;
+                    e.preventDefault();
+                    const raw = e.dataTransfer.getData('text/x-template');
+                    if (!raw) return;
+                    try {
+                      const { templateId } = JSON.parse(raw);
+                      // auf persönliche Root = folderId null (aus Ordner entfernen)
+                      handleDropOnFolder(-1, templateId, 'private');
+                    } catch {}
+                  }}
                 >
                   <span>👤</span>
                   <span className="font-medium truncate">{_username || 'Eigene'}</span>
@@ -376,6 +406,7 @@ export default function TemplateSelectorPopover({
                   onCreateFolder={handleCreateFolder}
                   onRenameFolder={handleRenameFolder}
                   onDeleteFolder={handleDeleteFolder}
+                  onDropOnFolder={handleDropOnFolder}
                 />
 
                 {/* Ohne Ordner (nur wenn kein Ordner-Filter aktiv) */}
@@ -401,6 +432,7 @@ export default function TemplateSelectorPopover({
                       onCreateFolder={handleCreateFolder}
                       onRenameFolder={handleRenameFolder}
                       onDeleteFolder={handleDeleteFolder}
+                      onDropOnFolder={handleDropOnFolder}
                     />
                   </div>
                 ))}
@@ -565,13 +597,26 @@ function TemplateRow({
   isSelected: boolean;
   onSelect: (tpl: Template) => void;
 }) {
+  const handleDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData(
+      'text/x-template',
+      JSON.stringify({ templateId: template.id, scope: template.scope ?? 'private' }),
+    );
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
+      draggable
       onClick={() => onSelect(template)}
-      className={`w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 flex items-center gap-2 text-xs transition-colors ${
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(template); }}
+      onDragStart={handleDragStart}
+      className={`w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 flex items-center gap-2 text-xs transition-colors cursor-grab active:cursor-grabbing ${
         isSelected ? 'bg-blue-50 dark:bg-blue-900/20 ring-1 ring-blue-200 dark:ring-blue-800' : ''
       }`}
-      title={`"${template.name}" einfügen`}
+      title={`"${template.name}" einfügen — zum Verschieben in Ordner ziehen`}
     >
       <span className="shrink-0 text-sm">
         {template.scope === 'group' ? '👥' : '📋'}
@@ -584,7 +629,7 @@ function TemplateRow({
           Gruppe
         </span>
       )}
-    </button>
+    </div>
   );
 }
 

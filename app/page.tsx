@@ -2246,16 +2246,31 @@ export default function HomePage() {
     let nextFormats = cloneRichTextRanges(template.formatRanges ?? []);
 
     if (insertMode === 'append' && existingText.trim()) {
-      const separator = existingText.endsWith('\n') ? '\n' : '\n\n';
-      nextText = `${existingText}${separator}${template.content}`;
-      nextFormats = normalizeRichTextRanges([
-        ...cloneRichTextRanges(getFieldRichTextFormats(template.field)),
-        ...cloneRichTextRanges(template.formatRanges ?? []).map((range) => ({
-          ...range,
-          start: range.start + existingText.length + separator.length,
-          end: range.end + existingText.length + separator.length,
-        })),
-      ], nextText.length);
+      // Statt Text zu concatenen: bestehenden Text als Freitext-Block
+      // und den Baustein als separaten Block anlegen (wie im Komplexbrief).
+      const field = template.field;
+      const freitextBlock = createFreitextBlock(
+        field,
+        existingText,
+        cloneRichTextRanges(getFieldRichTextFormats(field)),
+      );
+      const bausteinBlock = createBausteinBlock(
+        field,
+        template.id,
+        template.name,
+        template.content,
+        template.formatRanges ?? [],
+      );
+      setEditorBlocksByField((prev) => ({
+        ...prev,
+        [field]: [freitextBlock, bausteinBlock],
+      }));
+      setActiveBlockId(bausteinBlock.id);
+      setShowMultiBausteinMode(true);
+
+      // Die Feld-State auf den aktiven Baustein-Inhalt setzen
+      nextText = template.content;
+      nextFormats = cloneRichTextRanges(template.formatRanges ?? []);
     }
 
     setFieldTextWithFormats(template.field, nextText, nextFormats);
@@ -2269,7 +2284,7 @@ export default function HomePage() {
     setPendingTemplateInsertChoice(null);
     setSelectedTemplate(null);
     setTemplateMode(false);
-  }, [cloneRichTextRanges, getFieldRichTextFormats, getTextForBefundField, setFieldTextWithFormats, setStoredSelection]);
+  }, [cloneRichTextRanges, createBausteinBlock, createFreitextBlock, getFieldRichTextFormats, getTextForBefundField, setEditorBlocksByField, setActiveBlockId, setShowMultiBausteinMode, setFieldTextWithFormats, setStoredSelection]);
 
   const handleTemplateSelection = useCallback((template: Template | null) => {
     if (!template) {

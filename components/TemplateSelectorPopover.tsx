@@ -35,6 +35,9 @@ interface TemplateSelectorPopoverProps {
   onOpenComplexManager: () => void;
   onLoadComplexTemplate: (templateIds: number[]) => void;
   onExitTemplateMode: () => void;
+  onEditTemplate?: (template: Template) => void;
+  onDeleteTemplate?: (templateId: number, name: string, scope?: string) => void;
+  onDeleteComplexTemplate?: (templateId: number, name: string) => void;
   apiFetch?: (url: string, options?: RequestInit) => Promise<Response>;
   username?: string;
 }
@@ -63,6 +66,9 @@ export default function TemplateSelectorPopover({
   onOpenComplexManager,
   onLoadComplexTemplate,
   onExitTemplateMode,
+  onEditTemplate,
+  onDeleteTemplate,
+  onDeleteComplexTemplate,
   apiFetch,
   username: _username,
 }: TemplateSelectorPopoverProps) {
@@ -494,7 +500,7 @@ export default function TemplateSelectorPopover({
                           Ohne Ordner
                         </div>
                         {ungroupedPrivateTemplates.map((tpl) => (
-                          <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
+                          <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} />
                         ))}
                       </div>
                     )}
@@ -513,6 +519,7 @@ export default function TemplateSelectorPopover({
                               setOpen(false);
                               setSearch('');
                             }}
+                            onDelete={onDeleteComplexTemplate}
                           />
                         ))}
                       </div>
@@ -547,7 +554,7 @@ export default function TemplateSelectorPopover({
                   ) : (
                     <>
                       {folderFilteredTemplates?.map((tpl) => (
-                        <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
+                        <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} />
                       ))}
                       {folderFilteredComplex?.map((ct) => (
                         <ComplexTemplateRow
@@ -558,6 +565,7 @@ export default function TemplateSelectorPopover({
                             setOpen(false);
                             setSearch('');
                           }}
+                          onDelete={onDeleteComplexTemplate}
                         />
                       ))}
                     </>
@@ -623,7 +631,7 @@ export default function TemplateSelectorPopover({
               <div key={group}>
                 <div className="sticky top-0 px-3 py-1.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">{group}</div>
                 {items.map((tpl) => (
-                  <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
+                  <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} />
                 ))}
               </div>
             ))}
@@ -634,7 +642,7 @@ export default function TemplateSelectorPopover({
                   <div className="sticky top-0 px-3 py-1.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">Weitere</div>
                 )}
                 {groupedTemplates.ungrouped.map((tpl) => (
-                  <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
+                  <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} />
                 ))}
               </div>
             )}
@@ -649,11 +657,6 @@ export default function TemplateSelectorPopover({
 
           {/* Action-Footer */}
           <div className="border-t border-gray-100 dark:border-gray-800 px-1.5 py-1.5 flex flex-wrap gap-0.5 bg-gray-50/80 dark:bg-gray-800/40">
-            <ActionButton
-              icon="📂"
-              label="Verwalten"
-              onClick={() => handleAction(() => onManageTemplates('manage'))}
-            />
             <ActionButton
               icon="➕"
               label="Neu"
@@ -706,10 +709,14 @@ function TemplateRow({
   template,
   isSelected,
   onSelect,
+  onEdit,
+  onDelete,
 }: {
   template: Template;
   isSelected: boolean;
   onSelect: (tpl: Template) => void;
+  onEdit?: (tpl: Template) => void;
+  onDelete?: (id: number, name: string, scope?: string) => void;
 }) {
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData(
@@ -719,6 +726,8 @@ function TemplateRow({
     e.dataTransfer.effectAllowed = 'move';
   };
 
+  const isPrivate = template.scope !== 'group';
+
   return (
     <div
       role="button"
@@ -727,7 +736,7 @@ function TemplateRow({
       onClick={() => onSelect(template)}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(template); }}
       onDragStart={handleDragStart}
-      className={`w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 flex items-center gap-2 text-xs transition-colors cursor-grab active:cursor-grabbing ${
+      className={`w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 flex items-center gap-2 text-xs transition-colors cursor-grab active:cursor-grabbing group ${
         isSelected ? 'bg-blue-50 dark:bg-blue-900/20 ring-1 ring-blue-200 dark:ring-blue-800' : ''
       }`}
       title={`"${template.name}" einfügen — zum Verschieben in Ordner ziehen`}
@@ -735,13 +744,37 @@ function TemplateRow({
       <span className="shrink-0 text-sm">
         {template.scope === 'group' ? '👥' : '📋'}
       </span>
-      <span className="truncate text-gray-800 dark:text-gray-200">
+      <span className="truncate text-gray-800 dark:text-gray-200 flex-1">
         {template.name}
       </span>
       {template.scope === 'group' && (
-        <span className="text-[10px] text-amber-500 dark:text-amber-400 shrink-0 ml-auto bg-amber-50 dark:bg-amber-900/20 px-1 py-0.5 rounded">
+        <span className="text-[10px] text-amber-500 dark:text-amber-400 shrink-0 bg-amber-50 dark:bg-amber-900/20 px-1 py-0.5 rounded">
           Geteilt
         </span>
+      )}
+      {/* Inline edit/delete for private templates */}
+      {isPrivate && onEdit && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onEdit(template); }}
+          className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 text-[11px] px-0.5 transition-opacity shrink-0"
+          title="Bearbeiten"
+        >
+          ✎
+        </button>
+      )}
+      {isPrivate && onDelete && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (window.confirm(`"${template.name}" wirklich löschen?`)) {
+              onDelete(template.id, template.name, template.scope);
+            }
+          }}
+          className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 dark:hover:text-red-400 text-[11px] px-0.5 transition-opacity shrink-0"
+          title="Löschen"
+        >
+          ×
+        </button>
       )}
     </div>
   );
@@ -754,9 +787,11 @@ function TemplateRow({
 function ComplexTemplateRow({
   complexTemplate,
   onSelect,
+  onDelete,
 }: {
   complexTemplate: ComplexTemplate;
   onSelect: () => void;
+  onDelete?: (id: number, name: string) => void;
 }) {
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData(
@@ -774,16 +809,30 @@ function ComplexTemplateRow({
       onClick={onSelect}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(); }}
       onDragStart={handleDragStart}
-      className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 flex items-center gap-2 text-xs transition-colors cursor-grab active:cursor-grabbing"
+      className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 flex items-center gap-2 text-xs transition-colors cursor-grab active:cursor-grabbing group"
       title={`"${complexTemplate.name}" öffnen — zum Verschieben in Ordner ziehen`}
     >
       <span className="shrink-0 text-sm text-indigo-500">🧩</span>
-      <span className="truncate text-gray-800 dark:text-gray-200">
+      <span className="truncate text-gray-800 dark:text-gray-200 flex-1">
         {complexTemplate.name}
       </span>
-      <span className="text-[10px] text-gray-400 shrink-0 ml-auto">
+      <span className="text-[10px] text-gray-400 shrink-0">
         {complexTemplate.templateIds.length}
       </span>
+      {onDelete && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (window.confirm(`Komplexbaustein "${complexTemplate.name}" wirklich löschen?`)) {
+              onDelete(complexTemplate.id, complexTemplate.name);
+            }
+          }}
+          className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 dark:hover:text-red-400 text-[11px] px-0.5 transition-opacity shrink-0"
+          title="Löschen"
+        >
+          ×
+        </button>
+      )}
     </div>
   );
 }

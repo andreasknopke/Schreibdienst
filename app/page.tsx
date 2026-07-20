@@ -6431,6 +6431,30 @@ export default function HomePage() {
                   }}
                   apiFetch={apiFetchWithAuth}
                   username={username || undefined}
+                  onEditTemplate={() => {
+                    setTemplateManagerMode('manage');
+                    setShowTemplatesManager(true);
+                  }}
+                  onDeleteTemplate={async (id, name, scope) => {
+                    try {
+                      await apiFetchWithAuth('/api/templates', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id, scope }),
+                      });
+                      await fetchTemplates();
+                    } catch { /* silent */ }
+                  }}
+                  onDeleteComplexTemplate={async (id, name) => {
+                    try {
+                      await apiFetchWithAuth('/api/templates/complex', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id }),
+                      });
+                      await fetchComplexTemplates();
+                    } catch { /* silent */ }
+                  }}
                 />
               </div>
             </div>

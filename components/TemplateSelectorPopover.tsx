@@ -90,6 +90,7 @@ export default function TemplateSelectorPopover({
   // Lokale folderId-Overrides nach Drag&Drop, damit die Ansicht sofort aktualisiert wird
   const [folderIdOverrides, setFolderIdOverrides] = useState<Record<number, number | null | undefined>>({});
   const [complexFolderIdOverrides, setComplexFolderIdOverrides] = useState<Record<number, number | null | undefined>>({});
+  const [showNewMenu, setShowNewMenu] = useState(false);
 
   // Schliessen bei Klick ausserhalb
   useEffect(() => {
@@ -97,6 +98,7 @@ export default function TemplateSelectorPopover({
     // Overrides beim Öffnen zurücksetzen (templates-Prop ist frisch vom Parent)
     setFolderIdOverrides({});
     setComplexFolderIdOverrides({});
+    setShowNewMenu(false);
     const handler = (e: MouseEvent) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         setOpen(false);
@@ -215,6 +217,24 @@ export default function TemplateSelectorPopover({
     setOpen(false);
     setSearch('');
   };
+
+  // Neu-Menü schliessen bei Klick ausserhalb
+  const newMenuRef = useRef<HTMLDivElement>(null);
+  const newMenuBtnRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!showNewMenu) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        newMenuBtnRef.current && !newMenuBtnRef.current.contains(target) &&
+        newMenuRef.current && !newMenuRef.current.contains(target)
+      ) {
+        setShowNewMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showNewMenu]);
 
   // ── Ordner-Struktur ──
   const loadFolders = useCallback(async () => {
@@ -720,11 +740,41 @@ export default function TemplateSelectorPopover({
 
           {/* Action-Footer */}
           <div className="border-t border-gray-100 dark:border-gray-800 px-1.5 py-1.5 flex flex-wrap gap-0.5 bg-gray-50/80 dark:bg-gray-800/40">
-            <ActionButton
-              icon="➕"
-              label="Neu"
-              onClick={() => handleAction(() => onManageTemplates('create'))}
-            />
+            <div className="relative">
+              <button
+                ref={newMenuBtnRef}
+                onClick={() => setShowNewMenu((prev) => !prev)}
+                className={`text-[11px] px-2 py-1 rounded-md transition-colors flex items-center gap-1 ${
+                  showNewMenu
+                    ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                }`}
+              >
+                <span>➕</span>
+                <span>Neu</span>
+              </button>
+              {showNewMenu && (
+                <div
+                  ref={newMenuRef}
+                  className="absolute bottom-full left-0 mb-1 z-20 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-1 flex flex-col gap-0.5 min-w-[140px]"
+                >
+                  <button
+                    onClick={() => handleAction(() => onManageTemplates('create'))}
+                    className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
+                  >
+                    <span>📋</span>
+                    <span>Baustein</span>
+                  </button>
+                  <button
+                    onClick={() => handleAction(onOpenComplexManager)}
+                    className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
+                  >
+                    <span>🧩</span>
+                    <span>Komplexbaustein</span>
+                  </button>
+                </div>
+              )}
+            </div>
             <ActionButton
               icon={showMultiBausteinMode ? '✓' : '⊞'}
               label="Multi"
@@ -733,11 +783,6 @@ export default function TemplateSelectorPopover({
                 setOpen(false);
               }}
               highlight={showMultiBausteinMode}
-            />
-            <ActionButton
-              icon="🧩"
-              label="Komplex"
-              onClick={() => handleAction(onOpenComplexManager)}
             />
           </div>
         </div>

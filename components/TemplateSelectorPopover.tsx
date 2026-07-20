@@ -12,6 +12,7 @@ interface Template {
   scope?: 'private' | 'group';
   groupName?: string;
   folderId?: number | null;
+  isShared?: boolean;
 }
 
 interface ComplexTemplate {

@@ -403,7 +403,7 @@ export default function TemplateSelectorPopover({
             {([
               { key: 'all' as const, label: 'Alle' },
               { key: 'private' as const, label: '👤 Eigene' },
-              { key: 'group' as const, label: '👥 Gruppe' },
+              { key: 'group' as const, label: '👥 Geteilt' },
             ]).map((tab) => {
               // Nur anzeigen wenn es entsprechende Einträge gibt
               if (tab.key === 'group' && !templates.some((t) => t.scope === 'group'))
@@ -571,7 +571,7 @@ export default function TemplateSelectorPopover({
             {[
               { key: 'all' as const, label: 'Alle' },
               { key: 'private' as const, label: '👤 Eigene' },
-              { key: 'group' as const, label: '👥 Gruppe' },
+              { key: 'group' as const, label: '👥 Geteilt' },
             ].map((tab) => {
               const count = tab.key === 'all' ? fieldTemplates.length
                 : tab.key === 'private' ? fieldTemplates.filter((t) => t.scope !== 'group').length
@@ -740,7 +740,7 @@ function TemplateRow({
       </span>
       {template.scope === 'group' && (
         <span className="text-[10px] text-amber-500 dark:text-amber-400 shrink-0 ml-auto bg-amber-50 dark:bg-amber-900/20 px-1 py-0.5 rounded">
-          Gruppe
+          Geteilt
         </span>
       )}
     </div>

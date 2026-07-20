@@ -456,7 +456,7 @@ export default function TemplatesManager({ mode = 'create', apiFetch, editTempla
                       </span>
                       {template.scope === 'group' && (
                         <span className="text-xs px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded" title={template.groupName ? `Gruppe: ${template.groupName}` : 'Abteilungs-Baustein'}>
-                          {template.groupName || 'Geteilt'}
+                          {template.groupName || 'Abteilung'}
                         </span>
                       )}
                     </div>

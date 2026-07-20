@@ -290,7 +290,7 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
 /** Get the effective Voxtral local model name based on the finetune toggle. */
 export function getVoxtralLocalModelName(useFinetune?: boolean): string {
   if (useFinetune) {
-    return 'finetune';
+    return 'finetuned';
   }
   return process.env.VOXTRAL_LOCAL_MODEL || 'mistralai/Voxtral-Mini-3B-2507';
 }

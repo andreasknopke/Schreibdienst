@@ -283,7 +283,7 @@ export default function ConfigPanel() {
                   />
                   <span className="text-sm font-medium">Use finetune</span>
                   <span className="text-xs text-gray-400 ml-1">
-                    (Modell: {config.voxtralLocalUseFinetune ? 'finetune' : 'Standard'})
+                    (Modell: {config.voxtralLocalUseFinetune ? 'finetuned' : 'Standard'})
                   </span>
                 </label>
               </div>

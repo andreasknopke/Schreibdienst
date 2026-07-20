@@ -1979,6 +1979,7 @@ export default function HomePage() {
 
   const [showTemplatesManager, setShowTemplatesManager] = useState(false);
   const [templateManagerMode, setTemplateManagerMode] = useState<'create' | 'manage'>('create');
+  const [pendingEditTemplateId, setPendingEditTemplateId] = useState<number | null>(null);
   // Refs für den VAD-/Online-Diktatpfad: Die VAD-Callbacks werden beim Start der
   // Aufnahme einmal eingefroren, daher muss der aktuelle Baustein-Zustand über Refs
   // gelesen werden, sonst greift der Auto-Einarbeiten-Modus nicht.
@@ -6431,8 +6432,9 @@ export default function HomePage() {
                   }}
                   apiFetch={apiFetchWithAuth}
                   username={username || undefined}
-                  onEditTemplate={() => {
+                  onEditTemplate={(tpl) => {
                     setTemplateManagerMode('manage');
+                    setPendingEditTemplateId(tpl.id);
                     setShowTemplatesManager(true);
                   }}
                   onDeleteTemplate={async (id, name, scope) => {
@@ -7572,7 +7574,12 @@ export default function HomePage() {
               </button>
             </div>
             <div id="templates-manager-body" className="p-4 overflow-y-auto flex flex-col flex-1 min-h-0">
-              <TemplatesManager mode={templateManagerMode} apiFetch={apiFetchWithAuth} />
+              <TemplatesManager
+                mode={templateManagerMode}
+                apiFetch={apiFetchWithAuth}
+                editTemplateId={pendingEditTemplateId}
+                onEditTemplateConsumed={() => setPendingEditTemplateId(null)}
+              />
             </div>
           </div>
         </div>,

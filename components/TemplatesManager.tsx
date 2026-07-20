@@ -22,9 +22,13 @@ interface Template {
 interface TemplatesManagerProps {
   mode?: 'create' | 'manage';
   apiFetch?: (url: string, options?: RequestInit) => Promise<Response>;
+  /** ID eines Templates, das beim Öffnen sofort in den Bearbeiten-Modus wechseln soll */
+  editTemplateId?: number | null;
+  /** Wird aufgerufen nachdem editTemplateId verarbeitet wurde */
+  onEditTemplateConsumed?: () => void;
 }
 
-export default function TemplatesManager({ mode = 'create', apiFetch }: TemplatesManagerProps) {
+export default function TemplatesManager({ mode = 'create', apiFetch, editTemplateId, onEditTemplateConsumed }: TemplatesManagerProps) {
   const { getAuthHeader, getDbTokenHeader } = useAuth();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,6 +75,17 @@ export default function TemplatesManager({ mode = 'create', apiFetch }: Template
       setLoading(false);
     }
   };
+
+  // Wenn editTemplateId gesetzt ist, automatisch in den Bearbeiten-Modus springen
+  useEffect(() => {
+    if (editTemplateId != null && templates.length > 0) {
+      const tpl = templates.find((t) => t.id === editTemplateId);
+      if (tpl) {
+        handleEdit(tpl);
+        onEditTemplateConsumed?.();
+      }
+    }
+  }, [editTemplateId, templates]);
 
   useEffect(() => {
     fetchTemplates();

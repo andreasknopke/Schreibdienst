@@ -473,10 +473,12 @@ export default function TemplateSelectorPopover({
                 <div className="px-3 py-4 text-xs text-gray-400 text-center">Keine geteilten Bausteine.</div>
               )}
               {groupTemplatesFiltered.map(([user, items]) => (
-                <div key={user}>
-                  <div className="sticky top-0 px-3 py-1.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
-                    👤 {user}
+                <div key={user} className="border-t border-gray-100 dark:border-gray-800 first:border-t-0">
+                  <div className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 font-medium">
+                    <span className="shrink-0">📁</span>
+                    <span className="truncate">{user}</span>
                   </div>
+                  <div className="ml-2">
                   {items.map((tpl) => (
                     <SharedTemplateRow
                       key={tpl.id}
@@ -485,6 +487,7 @@ export default function TemplateSelectorPopover({
                       onCopy={onCopyTemplate}
                     />
                   ))}
+                  </div>
                 </div>
               ))}
             </div>
@@ -934,7 +937,7 @@ function SharedTemplateRow({
       className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 flex items-center gap-2 text-xs transition-colors cursor-pointer group"
       title={`"${template.name}" einfügen`}
     >
-      <span className="shrink-0 text-sm">👥</span>
+      <span className="shrink-0 text-sm">�</span>
       <span className="truncate text-gray-800 dark:text-gray-200 flex-1">
         {template.name}
       </span>

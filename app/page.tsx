@@ -7378,6 +7378,8 @@ export default function HomePage() {
               onClose={() => { setShowMultiBausteinMode(false); setComplexTemplateFilterIds(null); }}
               apiFetch={apiFetchWithAuth}
               username={username || undefined}
+              defaultView={complexTemplateFilterIds ? 'list' : 'tree'}
+              preserveOrder={!!complexTemplateFilterIds}
             />
           </div>
         </div>

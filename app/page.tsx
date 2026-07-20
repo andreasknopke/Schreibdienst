@@ -7375,6 +7375,24 @@ export default function HomePage() {
                 const full = availableTemplates.find((t) => t.id === tpl.id);
                 if (full) addBausteinAsNewBlock(full);
               }}
+              onCopyTemplate={async (tpl) => {
+                const full = availableTemplates.find((t) => t.id === tpl.id);
+                if (!full) return;
+                try {
+                  await apiFetchWithAuth('/api/templates', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      name: full.name,
+                      content: full.content,
+                      field: full.field,
+                      formatRanges: full.formatRanges ?? [],
+                      folderId: full.folderId ?? null,
+                    }),
+                  });
+                  await fetchTemplates();
+                } catch { /* silent */ }
+              }}
               onClose={() => { setShowMultiBausteinMode(false); setComplexTemplateFilterIds(null); }}
               apiFetch={apiFetchWithAuth}
               username={username || undefined}

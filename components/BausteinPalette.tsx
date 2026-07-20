@@ -23,6 +23,8 @@ interface BausteinPaletteProps {
   defaultView?: 'list' | 'tree';
   /** Reihenfolge der templates beibehalten (keine alphabetische Gruppierung) */
   preserveOrder?: boolean;
+  /** Wird aufgerufen wenn ein Gruppen-Baustein als Kopie übernommen werden soll */
+  onCopyTemplate?: (template: BausteinTemplate) => void;
 }
 
 /** Extrahiert eine Gruppen-Überschrift, z. B. "CCT" aus "CCT – Standard" */
@@ -39,6 +41,7 @@ export default function BausteinPalette({
   username,
   defaultView = 'list',
   preserveOrder = false,
+  onCopyTemplate,
 }: BausteinPaletteProps) {
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'private' | 'group'>('all');
@@ -315,7 +318,7 @@ export default function BausteinPalette({
                       Ohne Ordner
                     </div>
                     {templates.filter((t) => t.scope !== 'group' && (t.folderId === undefined || t.folderId === null)).map((tpl) => (
-                      <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} folders={flatFolders} onMoveToFolder={handleMoveToFolder} />
+                      <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} folders={flatFolders} onMoveToFolder={handleMoveToFolder} onCopyTemplate={onCopyTemplate} />
                     ))}
                   </div>
                 )}
@@ -329,7 +332,7 @@ export default function BausteinPalette({
                   ) : filteredTemplatesFromFolder.length === 0 ? (
                     <div className="px-3 py-4 text-xs text-gray-400 text-center">Keine Bausteine in diesem Ordner.</div>
                   ) : filteredTemplatesFromFolder.map((tpl) => (
-                    <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} folders={flatFolders} onMoveToFolder={handleMoveToFolder} />
+                    <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} folders={flatFolders} onMoveToFolder={handleMoveToFolder} onCopyTemplate={onCopyTemplate} />
                   ))}
                 </div>
               )}
@@ -351,7 +354,7 @@ export default function BausteinPalette({
             />
             {hasGroupTemplates && (
               <TabButton
-                label="👥 Gruppe"
+                label="👥 Geteilt"
                 active={activeTab === 'group'}
                 onClick={() => setActiveTab('group')}
               />
@@ -375,6 +378,7 @@ export default function BausteinPalette({
                   onAdd={onAddBaustein}
                   folders={flatFolders}
                   onMoveToFolder={handleMoveToFolder}
+                  onCopyTemplate={onCopyTemplate}
                 />
               ))
             ) : (
@@ -391,6 +395,7 @@ export default function BausteinPalette({
                       onAdd={onAddBaustein}
                       folders={flatFolders}
                       onMoveToFolder={handleMoveToFolder}
+                      onCopyTemplate={onCopyTemplate}
                     />
                   ))}
                 </div>
@@ -411,6 +416,7 @@ export default function BausteinPalette({
                     onAdd={onAddBaustein}
                     folders={flatFolders}
                     onMoveToFolder={handleMoveToFolder}
+                    onCopyTemplate={onCopyTemplate}
                   />
                 ))}
               </div>
@@ -477,11 +483,13 @@ function PaletteRow({
   onAdd,
   folders,
   onMoveToFolder,
+  onCopyTemplate,
 }: {
   template: BausteinTemplate;
   onAdd: (t: BausteinTemplate) => void;
   folders?: { id: number; name: string; depth: number }[];
   onMoveToFolder?: (templateId: number, folderId: number | null) => void;
+  onCopyTemplate?: (template: BausteinTemplate) => void;
 }) {
   const [showMove, setShowMove] = useState(false);
 
@@ -502,7 +510,7 @@ function PaletteRow({
             </span>
             {template.scope === 'group' && (
               <span className="text-[9px] text-amber-500 dark:text-amber-400 shrink-0 bg-amber-50 dark:bg-amber-900/20 px-1 py-0.5 rounded">
-                Gruppe
+                Geteilt
               </span>
             )}
             {folders && onMoveToFolder && (
@@ -521,6 +529,15 @@ function PaletteRow({
           </div>
         </div>
       </button>
+      {template.scope === 'group' && onCopyTemplate && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onCopyTemplate(template); }}
+          className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-800/40"
+          title="Kopie in eigenen Bausteinen anlegen"
+        >
+          📋 Kopie
+        </button>
+      )}
       {showMove && folders && onMoveToFolder && (
         <div className="absolute right-2 top-full z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow-lg p-1">
           <select

@@ -332,7 +332,8 @@ export default function TemplatesManager({ mode = 'create', apiFetch }: Template
           />
           {userGroups.length > 0 && (
             <div className="flex flex-col gap-1.5 flex-shrink-0">
-              <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">In Abteilungs-Bausteinpool übernehmen:</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Mit Gruppe teilen:</span>
+              <span className="text-[10px] text-gray-400 dark:text-gray-500 -mt-1">Andere Benutzer können eine Kopie dieses Bausteins anlegen.</span>
               <div className="flex flex-wrap gap-2">
                 {userGroups.map((g) => {
                   const checked = selectedGroupIds.has(g.id);
@@ -442,7 +443,8 @@ export default function TemplatesManager({ mode = 'create', apiFetch }: Template
                     </div>
                   ) : userGroups.length > 0 ? (
                     <div className="flex flex-col gap-1.5 flex-shrink-0">
-                      <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">In Abteilungs-Bausteinpool übernehmen:</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Mit Gruppe teilen:</span>
+                      <span className="text-[10px] text-gray-400 dark:text-gray-500 -mt-1">Andere Benutzer können eine Kopie dieses Bausteins anlegen.</span>
                       <div className="flex flex-wrap gap-2">
                         {userGroups.map((g) => {
                           const checked = editSelectedGroupIds.has(g.id);
@@ -509,7 +511,7 @@ export default function TemplatesManager({ mode = 'create', apiFetch }: Template
                       </span>
                       {template.scope === 'group' && (
                         <span className="text-xs px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded" title={template.groupName ? `Gruppe: ${template.groupName}` : 'Abteilungs-Baustein'}>
-                          {template.groupName || 'Gruppe'}
+                          {template.groupName || 'Geteilt'}
                         </span>
                       )}
                     </div>

@@ -738,9 +738,9 @@ export default function TemplateSelectorPopover({
           )}
           </>)}
 
-          {/* Action-Footer */}
-          <div className="border-t border-gray-100 dark:border-gray-800 px-1.5 py-1.5 flex flex-wrap gap-0.5 bg-gray-50/80 dark:bg-gray-800/40">
-            <div className="relative">
+          {/* Action-Footer – nur noch ➕ Neu */}
+          <div className="border-t border-gray-100 dark:border-gray-800 px-1.5 py-1.5 bg-gray-50/80 dark:bg-gray-800/40">
+            <div className="relative inline-block">
               <button
                 ref={newMenuBtnRef}
                 onClick={() => setShowNewMenu((prev) => !prev)}
@@ -775,15 +775,6 @@ export default function TemplateSelectorPopover({
                 </div>
               )}
             </div>
-            <ActionButton
-              icon={showMultiBausteinMode ? '✓' : '⊞'}
-              label="Multi"
-              onClick={() => {
-                onToggleMultiMode();
-                setOpen(false);
-              }}
-              highlight={showMultiBausteinMode}
-            />
           </div>
         </div>
       )}
@@ -996,31 +987,5 @@ function SharedTemplateRow({
         </button>
       )}
     </div>
-  );
-}
-
-function ActionButton({
-  icon,
-  label,
-  onClick,
-  highlight,
-}: {
-  icon: string;
-  label: string;
-  onClick: () => void;
-  highlight?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`text-[11px] px-2 py-1 rounded-md transition-colors flex items-center gap-1 ${
-        highlight
-          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
-      }`}
-    >
-      <span>{icon}</span>
-      <span>{label}</span>
-    </button>
   );
 }

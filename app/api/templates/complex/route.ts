@@ -8,6 +8,7 @@ import {
   addComplexTemplate,
   updateComplexTemplate,
   deleteComplexTemplate,
+  moveComplexTemplateToFolder,
 } from '@/lib/complexTemplatesDb';
 
 interface AuthResult {
@@ -115,6 +116,32 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ success: false, error: result.error }, { status: 400 });
   } catch (error) {
     console.error('[ComplexTemplates PUT] Error:', error);
+    return NextResponse.json({ success: false, error: 'Ungültige Anfrage' }, { status: 400 });
+  }
+}
+
+// PATCH /api/templates/complex - Complex-Template in Ordner verschieben
+export async function PATCH(request: NextRequest) {
+  try {
+    await ensureComplexTemplatesTable(request);
+    const auth = await getAuthenticatedUser(request);
+    if (!auth) {
+      return NextResponse.json({ error: 'Nicht authentifiziert' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { id, folderId } = body;
+    if (!id) {
+      return NextResponse.json({ error: 'ID erforderlich' }, { status: 400 });
+    }
+
+    const result = await moveComplexTemplateToFolder(request, id, folderId ?? null);
+    if (result.success) {
+      return NextResponse.json({ success: true });
+    }
+    return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+  } catch (error) {
+    console.error('[ComplexTemplates PATCH] Error:', error);
     return NextResponse.json({ success: false, error: 'Ungültige Anfrage' }, { status: 400 });
   }
 }

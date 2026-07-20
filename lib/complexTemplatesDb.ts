@@ -6,6 +6,7 @@ export interface ComplexTemplate {
   name: string;
   field: 'methodik' | 'befund' | 'beurteilung';
   templateIds: number[];
+  folderId: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -16,6 +17,7 @@ interface DbComplexTemplate {
   name: string;
   field: 'methodik' | 'befund' | 'beurteilung';
   template_ids: string;
+  folder_id: number | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -29,17 +31,23 @@ export async function ensureComplexTemplatesTable(request: NextRequest): Promise
       name VARCHAR(255) NOT NULL,
       field VARCHAR(50) NOT NULL DEFAULT 'befund',
       template_ids TEXT NOT NULL,
+      folder_id INT DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
+
+  // folder_id hinzufügen falls Tabelle bereits ohne diese Spalte existiert
+  try {
+    await pool.query(`ALTER TABLE complex_templates ADD COLUMN folder_id INT DEFAULT NULL`);
+  } catch { /* bereits vorhanden */ }
 }
 
 export async function getComplexTemplates(request: NextRequest, username: string): Promise<ComplexTemplate[]> {
   try {
     const pool = await getPoolForRequest(request);
     const [rows] = await pool.query<any[]>(
-      'SELECT id, name, field, template_ids, created_at, updated_at FROM complex_templates WHERE username = ? ORDER BY name ASC',
+      'SELECT id, name, field, template_ids, folder_id, created_at, updated_at FROM complex_templates WHERE username = ? ORDER BY name ASC',
       [username]
     );
     return (rows || []).map((t: DbComplexTemplate) => ({
@@ -47,6 +55,7 @@ export async function getComplexTemplates(request: NextRequest, username: string
       name: t.name,
       field: t.field || 'befund',
       templateIds: parseTemplateIds(t.template_ids),
+      folderId: t.folder_id ?? null,
       createdAt: t.created_at?.toISOString() || new Date().toISOString(),
       updatedAt: t.updated_at?.toISOString() || new Date().toISOString(),
     }));
@@ -124,4 +133,22 @@ function parseTemplateIds(raw: string): number[] {
     // ignore
   }
   return [];
+}
+
+export async function moveComplexTemplateToFolder(
+  request: NextRequest,
+  templateId: number,
+  folderId: number | null,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const pool = await getPoolForRequest(request);
+    await pool.query(
+      'UPDATE complex_templates SET folder_id = ? WHERE id = ?',
+      [folderId, templateId],
+    );
+    return { success: true };
+  } catch (error) {
+    console.error('[ComplexTemplates] Move error:', error);
+    return { success: false, error: 'Fehler beim Verschieben' };
+  }
 }

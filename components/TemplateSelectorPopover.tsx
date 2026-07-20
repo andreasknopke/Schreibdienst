@@ -18,6 +18,7 @@ interface ComplexTemplate {
   id: number;
   name: string;
   templateIds: number[];
+  folderId?: number | null;
 }
 
 interface TemplateSelectorPopoverProps {
@@ -220,15 +221,18 @@ export default function TemplateSelectorPopover({
   const handleDropOnFolder = useCallback(async (folderId: number, templateId: number, scope: string) => {
     if (!apiFetch) return;
     try {
-      // folderId === -1 bedeutet "aus Ordner entfernen" (wieder Root)
       const targetFolderId = folderId === -1 ? null : folderId;
-      const res = await apiFetch('/api/templates', {
+      const isComplex = scope === 'complex';
+      const url = isComplex ? '/api/templates/complex' : '/api/templates';
+      const body = isComplex
+        ? JSON.stringify({ id: templateId, folderId: targetFolderId })
+        : JSON.stringify({ id: templateId, folderId: targetFolderId, scope });
+      const res = await apiFetch(url, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: templateId, folderId: targetFolderId, scope }),
+        body,
       });
       if (res.ok) {
-        // Lokalen Override setzen → Ansicht aktualisiert sich sofort
         setFolderIdOverrides((prev) => ({ ...prev, [templateId]: targetFolderId }));
         await loadFolders();
       }
@@ -262,6 +266,46 @@ export default function TemplateSelectorPopover({
 
     return fieldTemplates.filter((t) => t.folderId !== undefined && allSubIds.has(t.folderId!));
   }, [selectedFolderId, personalFolders, groupFolders, fieldTemplates]);
+
+  // Persönliche Templates ohne Ordner (für "Ohne Ordner"-Sektion)
+  const ungroupedPrivateTemplates = useMemo(
+    () => fieldTemplates.filter((t) => t.scope !== 'group' && (t.folderId === undefined || t.folderId === null)),
+    [fieldTemplates],
+  );
+
+  // Komplexbausteine ohne Ordner
+  const ungroupedComplex = useMemo(
+    () => complexTemplates.filter((ct) => ct.folderId === undefined || ct.folderId === null),
+    [complexTemplates],
+  );
+
+  // Komplexbausteine im aktuell ausgewählten Ordner
+  const folderFilteredComplex = useMemo(() => {
+    if (selectedFolderId === null) return null;
+    const collectSubIds = (folders: FolderNode[], ids: Set<number>) => {
+      for (const f of folders) { ids.add(f.id); collectSubIds(f.children, ids); }
+    };
+    const allIds = new Set<number>();
+    collectSubIds(personalFolders, allIds);
+    for (const gf of groupFolders) collectSubIds(gf.folders, allIds);
+
+    if (!allIds.has(selectedFolderId)) return [];
+
+    const allSubIds = new Set<number>();
+    const findSubIds = (folders: FolderNode[]) => {
+      for (const f of folders) {
+        if (f.id === selectedFolderId || allSubIds.has(f.id)) {
+          allSubIds.add(f.id);
+          for (const c of f.children) collectSubIds([c], allSubIds);
+        }
+        findSubIds(f.children);
+      }
+    };
+    findSubIds(personalFolders);
+    for (const gf of groupFolders) findSubIds(gf.folders);
+
+    return complexTemplates.filter((ct) => ct.folderId !== undefined && ct.folderId !== null && allSubIds.has(ct.folderId!));
+  }, [selectedFolderId, personalFolders, groupFolders, complexTemplates]);
 
   const hasTemplates = filteredTemplates.length > 0;
   const hasComplex = filteredComplex.length > 0 && !search;
@@ -397,9 +441,8 @@ export default function TemplateSelectorPopover({
                     const raw = e.dataTransfer.getData('text/x-template');
                     if (!raw) return;
                     try {
-                      const { templateId } = JSON.parse(raw);
-                      // auf persönliche Root = folderId null (aus Ordner entfernen)
-                      handleDropOnFolder(-1, templateId, 'private');
+                      const { templateId, scope } = JSON.parse(raw);
+                      handleDropOnFolder(-1, templateId, scope ?? 'private');
                     } catch {}
                   }}
                 >
@@ -421,15 +464,38 @@ export default function TemplateSelectorPopover({
                 />
 
                 {/* Ohne Ordner (nur wenn kein Ordner-Filter aktiv) */}
-                {selectedFolderId === null && fieldTemplates.filter((t) => t.scope !== 'group' && (t.folderId === undefined || t.folderId === null)).length > 0 && (
-                  <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
-                    <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                      Ohne Ordner
-                    </div>
-                    {fieldTemplates.filter((t) => t.scope !== 'group' && (t.folderId === undefined || t.folderId === null)).map((tpl) => (
-                      <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
-                    ))}
-                  </div>
+                {selectedFolderId === null && (
+                  <>
+                    {ungroupedPrivateTemplates.length > 0 && (
+                      <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                        <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                          Ohne Ordner
+                        </div>
+                        {ungroupedPrivateTemplates.map((tpl) => (
+                          <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
+                        ))}
+                      </div>
+                    )}
+                    {/* Komplexbausteine ohne Ordner */}
+                    {ungroupedComplex.length > 0 && (
+                      <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                        <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                          🧩 Komplexbausteine
+                        </div>
+                        {ungroupedComplex.map((ct) => (
+                          <ComplexTemplateRow
+                            key={`complex-${ct.id}`}
+                            complexTemplate={ct}
+                            onSelect={() => {
+                              onLoadComplexTemplate(ct.templateIds);
+                              setOpen(false);
+                              setSearch('');
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {/* Gruppen-Ordner */}
@@ -452,13 +518,28 @@ export default function TemplateSelectorPopover({
               {/* Templates im ausgewählten Ordner */}
               {selectedFolderId !== null ? (
                 <div className="divide-y divide-gray-100 dark:divide-gray-800 border-t border-gray-100 dark:border-gray-800">
-                  {folderFilteredTemplates === null ? (
+                  {folderFilteredTemplates === null && folderFilteredComplex === null ? (
                     <div className="px-3 py-4 text-xs text-gray-400 text-center">Bitte Ordner auswählen.</div>
-                  ) : folderFilteredTemplates.length === 0 ? (
+                  ) : (folderFilteredTemplates?.length ?? 0) === 0 && (folderFilteredComplex?.length ?? 0) === 0 ? (
                     <div className="px-3 py-4 text-xs text-gray-400 text-center">Keine Bausteine in diesem Ordner.</div>
-                  ) : folderFilteredTemplates.map((tpl) => (
-                    <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
-                  ))}
+                  ) : (
+                    <>
+                      {folderFilteredTemplates?.map((tpl) => (
+                        <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} />
+                      ))}
+                      {folderFilteredComplex?.map((ct) => (
+                        <ComplexTemplateRow
+                          key={`complex-${ct.id}`}
+                          complexTemplate={ct}
+                          onSelect={() => {
+                            onLoadComplexTemplate(ct.templateIds);
+                            setOpen(false);
+                            setSearch('');
+                          }}
+                        />
+                      ))}
+                    </>
+                  )}
                 </div>
               ) : null}
             </div>
@@ -640,6 +721,47 @@ function TemplateRow({
           Gruppe
         </span>
       )}
+    </div>
+  );
+}
+
+/**
+ * Zeile in der Ordner-Ansicht für einen Komplexbaustein (🧩).
+ * Kann per Drag & Drop in Ordner gezogen werden.
+ */
+function ComplexTemplateRow({
+  complexTemplate,
+  onSelect,
+}: {
+  complexTemplate: ComplexTemplate;
+  onSelect: () => void;
+}) {
+  const handleDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData(
+      'text/x-template',
+      JSON.stringify({ templateId: complexTemplate.id, scope: 'complex' }),
+    );
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      draggable
+      onClick={onSelect}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(); }}
+      onDragStart={handleDragStart}
+      className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 flex items-center gap-2 text-xs transition-colors cursor-grab active:cursor-grabbing"
+      title={`"${complexTemplate.name}" öffnen — zum Verschieben in Ordner ziehen`}
+    >
+      <span className="shrink-0 text-sm text-indigo-500">🧩</span>
+      <span className="truncate text-gray-800 dark:text-gray-200">
+        {complexTemplate.name}
+      </span>
+      <span className="text-[10px] text-gray-400 shrink-0 ml-auto">
+        {complexTemplate.templateIds.length}
+      </span>
     </div>
   );
 }

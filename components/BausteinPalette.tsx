@@ -19,6 +19,10 @@ interface BausteinPaletteProps {
   apiFetch?: (url: string, options?: RequestInit) => Promise<Response>;
   /** Benutzername für Ordner-Erstellung */
   username?: string;
+  /** Startansicht: 'list' (standard für Komplexbausteine) oder 'tree' */
+  defaultView?: 'list' | 'tree';
+  /** Reihenfolge der templates beibehalten (keine alphabetische Gruppierung) */
+  preserveOrder?: boolean;
 }
 
 /** Extrahiert eine Gruppen-Überschrift, z. B. "CCT" aus "CCT – Standard" */
@@ -33,13 +37,15 @@ export default function BausteinPalette({
   onClose,
   apiFetch,
   username,
+  defaultView = 'list',
+  preserveOrder = false,
 }: BausteinPaletteProps) {
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'private' | 'group'>('all');
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
   const [personalFolders, setPersonalFolders] = useState<FolderNode[]>([]);
   const [groupFolders, setGroupFolders] = useState<{ groupId: number; groupName: string; folders: FolderNode[] }[]>([]);
-  const [view, setView] = useState<'list' | 'tree'>('tree');
+  const [view, setView] = useState<'list' | 'tree'>(defaultView);
 
   // Ordner-Struktur laden
   const loadFolders = useCallback(async () => {
@@ -354,30 +360,44 @@ export default function BausteinPalette({
 
           {/* Template-Liste */}
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
-            {grouped.groups.length === 0 && grouped.ungrouped.length === 0 && (
+            {filteredTemplates.length === 0 && (
               <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">
                 {search ? 'Keine Bausteine gefunden.' : 'Keine Bausteine für dieses Feld.'}
               </div>
             )}
 
-            {grouped.groups.map(([group, items]) => (
-              <div key={group}>
-                <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">
-                  {group}
+            {preserveOrder ? (
+              /* Komplexbaustein-Modus: Reihenfolge beibehalten, keine Gruppierung */
+              filteredTemplates.map((tpl) => (
+                <PaletteRow
+                  key={tpl.id}
+                  template={tpl}
+                  onAdd={onAddBaustein}
+                  folders={flatFolders}
+                  onMoveToFolder={handleMoveToFolder}
+                />
+              ))
+            ) : (
+              /* Normaler Modus: alphabetische Gruppierung */
+              grouped.groups.length > 0 && grouped.groups.map(([group, items]) => (
+                <div key={group}>
+                  <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">
+                    {group}
+                  </div>
+                  {items.map((tpl) => (
+                    <PaletteRow
+                      key={tpl.id}
+                      template={tpl}
+                      onAdd={onAddBaustein}
+                      folders={flatFolders}
+                      onMoveToFolder={handleMoveToFolder}
+                    />
+                  ))}
                 </div>
-                {items.map((tpl) => (
-                  <PaletteRow
-                    key={tpl.id}
-                    template={tpl}
-                    onAdd={onAddBaustein}
-                    folders={flatFolders}
-                    onMoveToFolder={handleMoveToFolder}
-                  />
-                ))}
-              </div>
-            ))}
+              ))
+            )}
 
-            {grouped.ungrouped.length > 0 && (
+            {!preserveOrder && grouped.ungrouped.length > 0 && (
               <div>
                 {grouped.groups.length > 0 && (
                   <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">

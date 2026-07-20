@@ -1931,7 +1931,7 @@ export default function HomePage() {
   const [checkContradictions, setCheckContradictions] = useState(false);
   const [templateContradictions, setTemplateContradictions] = useState<{ passage: string; description: string }[]>([]);
   const [showComplexTemplateManager, setShowComplexTemplateManager] = useState(false);
-  const [complexTemplates, setComplexTemplates] = useState<Array<{ id: number; name: string; templateIds: number[] }>>([]);
+  const [complexTemplates, setComplexTemplates] = useState<Array<{ id: number; name: string; templateIds: number[]; folderId?: number | null }>>([]);
   const apiFetchWithAuth = useCallback(async (url: string, options: RequestInit = {}) => {
     return fetch(url, {
       ...options,

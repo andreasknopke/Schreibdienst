@@ -77,12 +77,14 @@ export default function TemplateSelectorPopover({
   const searchRef = useRef<HTMLInputElement>(null);
   // Lokale folderId-Overrides nach Drag&Drop, damit die Ansicht sofort aktualisiert wird
   const [folderIdOverrides, setFolderIdOverrides] = useState<Record<number, number | null | undefined>>({});
+  const [complexFolderIdOverrides, setComplexFolderIdOverrides] = useState<Record<number, number | null | undefined>>({});
 
   // Schliessen bei Klick ausserhalb
   useEffect(() => {
     if (!open) return;
     // Overrides beim Öffnen zurücksetzen (templates-Prop ist frisch vom Parent)
     setFolderIdOverrides({});
+    setComplexFolderIdOverrides({});
     const handler = (e: MouseEvent) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         setOpen(false);
@@ -233,7 +235,11 @@ export default function TemplateSelectorPopover({
         body,
       });
       if (res.ok) {
-        setFolderIdOverrides((prev) => ({ ...prev, [templateId]: targetFolderId }));
+        if (isComplex) {
+          setComplexFolderIdOverrides((prev) => ({ ...prev, [templateId]: targetFolderId }));
+        } else {
+          setFolderIdOverrides((prev) => ({ ...prev, [templateId]: targetFolderId }));
+        }
         await loadFolders();
       }
     } catch { /* silent */ }
@@ -273,13 +279,21 @@ export default function TemplateSelectorPopover({
     [fieldTemplates],
   );
 
-  // Komplexbausteine ohne Ordner
+  // Komplexbausteine ohne Ordner (mit lokalen Overrides)
   const ungroupedComplex = useMemo(
-    () => complexTemplates.filter((ct) => ct.folderId === undefined || ct.folderId === null),
-    [complexTemplates],
+    () => complexTemplates
+      .map((ct) => {
+        const override = complexFolderIdOverrides[ct.id];
+        if (override !== undefined) {
+          return { ...ct, folderId: override ?? null };
+        }
+        return ct;
+      })
+      .filter((ct) => ct.folderId === undefined || ct.folderId === null),
+    [complexTemplates, complexFolderIdOverrides],
   );
 
-  // Komplexbausteine im aktuell ausgewählten Ordner
+  // Komplexbausteine im aktuell ausgewählten Ordner (mit lokalen Overrides)
   const folderFilteredComplex = useMemo(() => {
     if (selectedFolderId === null) return null;
     const collectSubIds = (folders: FolderNode[], ids: Set<number>) => {
@@ -304,8 +318,16 @@ export default function TemplateSelectorPopover({
     findSubIds(personalFolders);
     for (const gf of groupFolders) findSubIds(gf.folders);
 
-    return complexTemplates.filter((ct) => ct.folderId !== undefined && ct.folderId !== null && allSubIds.has(ct.folderId!));
-  }, [selectedFolderId, personalFolders, groupFolders, complexTemplates]);
+    return complexTemplates
+      .map((ct) => {
+        const override = complexFolderIdOverrides[ct.id];
+        if (override !== undefined) {
+          return { ...ct, folderId: override ?? null };
+        }
+        return ct;
+      })
+      .filter((ct) => ct.folderId !== undefined && ct.folderId !== null && allSubIds.has(ct.folderId!));
+  }, [selectedFolderId, personalFolders, groupFolders, complexTemplates, complexFolderIdOverrides]);
 
   const hasTemplates = filteredTemplates.length > 0;
   const hasComplex = filteredComplex.length > 0 && !search;

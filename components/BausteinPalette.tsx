@@ -354,7 +354,7 @@ export default function BausteinPalette({
             />
             {hasGroupTemplates && (
               <TabButton
-                label="👥 Geteilt"
+                label="👥 Abteilung"
                 active={activeTab === 'group'}
                 onClick={() => setActiveTab('group')}
               />
@@ -510,7 +510,7 @@ function PaletteRow({
             </span>
             {template.scope === 'group' && (
               <span className="text-[9px] text-amber-500 dark:text-amber-400 shrink-0 bg-amber-50 dark:bg-amber-900/20 px-1 py-0.5 rounded">
-                Geteilt
+                Abteilung
               </span>
             )}
             {folders && onMoveToFolder && (

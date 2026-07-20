@@ -21,6 +21,8 @@ export interface Template {
   folderId?: number | null;
   /** Ob dieser private Baustein auch in Gruppen geteilt ist */
   isShared?: boolean;
+  /** Username des Erstellers (bei Gruppen-Templates) */
+  addedBy?: string;
 }
 
 interface DbTemplate {
@@ -154,6 +156,7 @@ export async function loadTemplatesForUserWithRequest(
       updatedAt: entry.updatedAt,
       scope: 'group',
       groupName: entry.groupName,
+      addedBy: entry.addedBy,
       isShared: true,
     });
   }

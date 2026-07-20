@@ -39,6 +39,7 @@ interface TemplateSelectorPopoverProps {
   onEditTemplate?: (template: Template) => void;
   onDeleteTemplate?: (templateId: number, name: string, scope?: string) => void;
   onShareTemplate?: (template: Template) => void;
+  onCopyTemplate?: (template: Template) => void;
   onDeleteComplexTemplate?: (templateId: number, name: string) => void;
   apiFetch?: (url: string, options?: RequestInit) => Promise<Response>;
   username?: string;
@@ -71,6 +72,7 @@ export default function TemplateSelectorPopover({
   onEditTemplate,
   onDeleteTemplate,
   onShareTemplate,
+  onCopyTemplate,
   onDeleteComplexTemplate,
   apiFetch,
   username: _username,
@@ -170,6 +172,36 @@ export default function TemplateSelectorPopover({
     const q = search.toLowerCase();
     return complexTemplates.filter((ct) => ct.name.toLowerCase().includes(q));
   }, [complexTemplates, search]);
+
+  // Gruppen-Templates nach addedBy-User gruppiert (für Abteilung-Tab)
+  const groupTemplatesByUser = useMemo(() => {
+    const byUser = new Map<string, Template[]>();
+    for (const t of fieldTemplates) {
+      if (t.scope !== 'group') continue;
+      const user = t.addedBy || 'Unbekannt';
+      if (!byUser.has(user)) byUser.set(user, []);
+      byUser.get(user)!.push(t);
+    }
+    // Sortieren: User alphabetisch, Templates alphabetisch
+    const sorted = Array.from(byUser.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    for (const [, items] of sorted) {
+      items.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return sorted;
+  }, [fieldTemplates]);
+
+  // Filter für Abteilung-Tab + Search
+  const groupTemplatesFiltered = useMemo(() => {
+    if (!search.trim()) return groupTemplatesByUser;
+    const q = search.toLowerCase();
+    return groupTemplatesByUser
+      .map(([user, items]) => [
+        user,
+        items.filter((t) => t.name.toLowerCase().includes(q) || t.content.toLowerCase().includes(q)),
+      ] as [string, Template[]])
+      .filter(([, items]) => items.length > 0);
+  }, [groupTemplatesByUser, search]);
 
   const handleSelect = (tpl: Template) => {
     onSelectTemplate(tpl);
@@ -412,7 +444,7 @@ export default function TemplateSelectorPopover({
             {([
               { key: 'all' as const, label: 'Alle' },
               { key: 'private' as const, label: '👤 Eigene' },
-              { key: 'group' as const, label: '👥 Geteilt' },
+              { key: 'group' as const, label: '👥 Abteilung' },
             ]).map((tab) => {
               // Nur anzeigen wenn es entsprechende Einträge gibt
               if (tab.key === 'group' && !templates.some((t) => t.scope === 'group'))
@@ -433,27 +465,51 @@ export default function TemplateSelectorPopover({
             })}
           </div>
 
-          {/* Ansicht-Umschalter */}
-          <div className="flex items-center gap-1 px-3 pb-1">
-            <button
-              onClick={() => setView('tree')}
-              className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
-                view === 'tree'
-                  ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-                  : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
-              }`}
-            >🗂️ Ordner</button>
-            <button
-              onClick={() => setView('list')}
-              className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
-                view === 'list'
-                  ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-                  : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
-              }`}
-            >📋 Liste</button>
-          </div>
+          {/* ── Abteilung-Tab: geteilte Bausteine nach User ── */}
+          {activeTab === 'group' ? (
+            <div className="overflow-y-auto" style={{ maxHeight: '50vh' }}>
+              {groupTemplatesFiltered.length === 0 && (
+                <div className="px-3 py-4 text-xs text-gray-400 text-center">Keine geteilten Bausteine.</div>
+              )}
+              {groupTemplatesFiltered.map(([user, items]) => (
+                <div key={user}>
+                  <div className="sticky top-0 px-3 py-1.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
+                    👤 {user}
+                  </div>
+                  {items.map((tpl) => (
+                    <SharedTemplateRow
+                      key={tpl.id}
+                      template={tpl}
+                      onSelect={handleSelect}
+                      onCopy={onCopyTemplate}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+            {/* Ansicht-Umschalter (nur für Alle/Eigene) */}
+            <div className="flex items-center gap-1 px-3 pb-1">
+              <button
+                onClick={() => setView('tree')}
+                className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
+                  view === 'tree'
+                    ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                    : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                }`}
+              >🗂️ Ordner</button>
+              <button
+                onClick={() => setView('list')}
+                className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
+                  view === 'list'
+                    ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                    : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                }`}
+              >📋 Liste</button>
+            </div>
 
-          {view === 'tree' ? (
+            {view === 'tree' ? (
             /* ── Ordner-Ansicht ── */
             <div className="overflow-y-auto" style={{ maxHeight: '50vh' }}>
               <div className="px-1 pb-1">
@@ -582,11 +638,10 @@ export default function TemplateSelectorPopover({
             {[
               { key: 'all' as const, label: 'Alle' },
               { key: 'private' as const, label: '👤 Eigene' },
-              { key: 'group' as const, label: '👥 Geteilt' },
             ].map((tab) => {
               const count = tab.key === 'all' ? fieldTemplates.length
                 : tab.key === 'private' ? fieldTemplates.filter((t) => t.scope !== 'group').length
-                : fieldTemplates.filter((t) => t.scope === 'group').length;
+                : 0;
               if (count === 0 && tab.key !== 'all') return null;
               return (
                 <button
@@ -657,8 +712,11 @@ export default function TemplateSelectorPopover({
             )}
           </div></>
           )}
+          </>)
+          )}
 
           {/* Action-Footer */}
+          <div className="border-t border-gray-100 dark:border-gray-800 px-1.5 py-1.5 flex flex-wrap gap-0.5 bg-gray-50/80 dark:bg-gray-800/40">
           <div className="border-t border-gray-100 dark:border-gray-800 px-1.5 py-1.5 flex flex-wrap gap-0.5 bg-gray-50/80 dark:bg-gray-800/40">
             <ActionButton
               icon="➕"
@@ -754,7 +812,7 @@ function TemplateRow({
       </span>
       {template.scope === 'group' && (
         <span className="text-[10px] text-amber-500 dark:text-amber-400 shrink-0 bg-amber-50 dark:bg-amber-900/20 px-1 py-0.5 rounded">
-          Geteilt
+          Abteilung
         </span>
       )}
       {/* Inline edit/delete/share for private templates */}
@@ -849,6 +907,45 @@ function ComplexTemplateRow({
           title="Löschen"
         >
           ×
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Zeile für einen geteilten Baustein in der Abteilung-Ansicht.
+ * Nur einfügen + Kopie-Button (kein Bearbeiten/Löschen/Teilen).
+ */
+function SharedTemplateRow({
+  template,
+  onSelect,
+  onCopy,
+}: {
+  template: Template;
+  onSelect: (tpl: Template) => void;
+  onCopy?: (tpl: Template) => void;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(template)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelect(template); }}
+      className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 flex items-center gap-2 text-xs transition-colors cursor-pointer group"
+      title={`"${template.name}" einfügen`}
+    >
+      <span className="shrink-0 text-sm">👥</span>
+      <span className="truncate text-gray-800 dark:text-gray-200 flex-1">
+        {template.name}
+      </span>
+      {onCopy && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onCopy(template); }}
+          className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-800/40 shrink-0"
+          title="Kopie in eigenen Bausteinen anlegen"
+        >
+          📋 Kopie
         </button>
       )}
     </div>

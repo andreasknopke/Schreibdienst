@@ -6467,6 +6467,22 @@ export default function HomePage() {
                       await fetchComplexTemplates();
                     } catch { /* silent */ }
                   }}
+                  onCopyTemplate={async (tpl) => {
+                    try {
+                      await apiFetchWithAuth('/api/templates', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          name: tpl.name,
+                          content: tpl.content,
+                          field: currentTemplateField,
+                          formatRanges: tpl.formatRanges ?? [],
+                          folderId: null,
+                        }),
+                      });
+                      await fetchTemplates();
+                    } catch { /* silent */ }
+                  }}
                 />
               </div>
             </div>

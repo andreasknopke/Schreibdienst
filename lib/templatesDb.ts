@@ -141,13 +141,13 @@ export async function loadTemplatesForUserWithRequest(
     });
   }
 
-  // Gruppen-Templates, die nicht bereits privat existieren
+  // Gruppen-Templates immer hinzufügen (auch wenn private Kopie existiert)
+  const GROUP_ID_OFFSET = 10000000;
   for (const entry of groupEntries) {
     const key = entry.name.toLowerCase();
-    if (seen.has(key)) continue;
     seen.add(key);
     templates.push({
-      id: entry.id,
+      id: entry.id + GROUP_ID_OFFSET,
       name: entry.name,
       content: entry.content,
       field: entry.field,

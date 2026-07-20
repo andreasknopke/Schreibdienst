@@ -379,9 +379,8 @@ export default function TemplateSelectorPopover({
                   }`}
                   onClick={() => setSelectedFolderId(null)}
                   title="Alle persönlichen Bausteine anzeigen — hierher ziehen zum Entfernen aus Ordnern"
-                  onDragOver={(e) => { if (handleDropOnFolder) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
+                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                   onDrop={(e) => {
-                    if (!handleDropOnFolder) return;
                     e.preventDefault();
                     const raw = e.dataTransfer.getData('text/x-template');
                     if (!raw) return;

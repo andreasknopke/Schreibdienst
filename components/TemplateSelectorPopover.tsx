@@ -845,7 +845,7 @@ function TemplateRow({
       title={`"${template.name}" einfügen — zum Verschieben in Ordner ziehen`}
     >
       <span className="shrink-0 text-sm">
-        {template.scope === 'group' ? '🏢' : '📋'}
+        '📋'
       </span>
       <span className="truncate text-gray-800 dark:text-gray-200 flex-1">
         {template.name}
@@ -875,7 +875,7 @@ function TemplateRow({
           }`}
           title={template.isShared ? 'Nicht mehr teilen' : 'Mit Gruppe teilen'}
         >
-          {template.isShared ? '🏢' : '👤'}
+          {template.isShared ? '📋' : '👤'}
         </button>
       )}
       {isPrivate && onDelete && (

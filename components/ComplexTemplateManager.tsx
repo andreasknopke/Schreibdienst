@@ -86,6 +86,7 @@ export default function ComplexTemplateManager({
     if (defaultCreateMode && !createHandledRef.current) {
       createHandledRef.current = true;
       handleNew();
+      // Einmalig den Flag im Parent zurücksetzen, OHNE Effect neu zu triggern
       onDefaultCreateConsumed?.();
     } else if (!defaultCreateMode) {
       setEditMode('list');
@@ -94,7 +95,10 @@ export default function ComplexTemplateManager({
       setSelectedIds([]);
       setError(null);
     }
-  }, [open, defaultCreateMode]);
+    // Wichtig: defaultCreateMode NICHT in Abhängigkeiten – sonst überschreibt
+    // der Parent-Reset (false) den Create-Mode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const handleEdit = useCallback((ct: ComplexTemplate) => {
     setEditMode('edit');

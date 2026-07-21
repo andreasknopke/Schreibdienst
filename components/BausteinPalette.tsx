@@ -244,7 +244,7 @@ export default function BausteinPalette({
         </button>
       </div>
 
-      {/* Search – auch im Komplexbaustein-Modus */}
+      {/* Search */}
       <div className="px-3 pt-2 pb-1">
         <input
           type="text"
@@ -255,8 +255,13 @@ export default function BausteinPalette({
         />
       </div>
 
-      {preserveOrder ? (
-        /* ── Komplexbaustein-Modus: nur Liste, keine Tabs/Ordner ── */
+      {renderContent()}
+    </div>
+  );
+
+  function renderContent() {
+    if (preserveOrder) {
+      return (
         <div className="divide-y divide-gray-100 dark:divide-gray-800">
           {filteredTemplates.length === 0 && (
             <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">
@@ -274,162 +279,100 @@ export default function BausteinPalette({
             />
           ))}
         </div>
-      ) : (
-        <>
-      {/* Ansicht-Umschalter */}
-      <div className="flex items-center gap-1 px-3 pb-1">
-        <button
-          onClick={() => setView('tree')}
-          className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
-            view === 'tree'
-              ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-              : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
-          }`}
-        >
-          🗂️ Ordner
-        </button>
-        <button
-          onClick={() => setView('list')}
-          className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
-            view === 'list'
-              ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-              : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
-          }`}
-        >
-          📋 Liste
-        </button>
-      </div>
+      );
+    }
+    return (
+      <>
+        <div className="flex items-center gap-1 px-3 pb-1">
+          <button onClick={() => setView('tree')} className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${view === 'tree' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}>🗂️ Ordner</button>
+          <button onClick={() => setView('list')} className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${view === 'list' ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'}`}>📋 Liste</button>
+        </div>
+        {view === 'tree' ? renderTreeView() : renderListView()}
+      </>
+    );
+  }
 
-      {view === 'tree' ? (
-        /* ── Ordner-Ansicht ── */
-        <div className="divide-y divide-gray-100 dark:divide-gray-800">
-              {/* Persönliche Ordner — mit Username als Root */}
-              <div>
-                {/* Username als Root-Eintrag */}
-                <div
-                  className={`flex items-center gap-1 px-2 py-1 rounded cursor-pointer text-xs transition-colors mx-1 mt-0.5 ${
-                    selectedFolderId === null
-                      ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-800/60 text-gray-700 dark:text-gray-300'
-                  }`}
-                  onClick={() => setSelectedFolderId(null)}
-                  title="Alle persönlichen Bausteine anzeigen"
-                >
-                  <span className="shrink-0">👤</span>
-                  <span className="font-medium truncate">{username || 'Eigene'}</span>
-                  <span className="ml-auto text-[10px] text-gray-400">
-                    {templates.filter((t) => t.scope !== 'group').length}
-                  </span>
-                </div>
-
-                {/* Ordner-Struktur darunter */}
-                <FolderExplorer
-                  folders={personalFolders}
-                  onSelectFolder={setSelectedFolderId}
-                  selectedFolderId={selectedFolderId}
-                  onCreateFolder={handleCreateFolder}
-                  onRenameFolder={handleRenameFolder}
-                  onDeleteFolder={handleDeleteFolder}
-                />
-
-                {/* Bausteine ohne Ordner (nur wenn kein Ordner-Filter aktiv) */}
-                {selectedFolderId === null && templates.filter((t) => t.scope !== 'group' && (t.folderId === undefined || t.folderId === null)).length > 0 && (
-                  <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
-                    <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                      Ohne Ordner
-                    </div>
-                    {templates.filter((t) => t.scope !== 'group' && (t.folderId === undefined || t.folderId === null)).map((tpl) => (
-                      <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} folders={flatFolders} onMoveToFolder={handleMoveToFolder} onCopyTemplate={onCopyTemplate} />
-                    ))}
-                  </div>
-                )}
+  function renderTreeView() {
+    return (
+      <div className="divide-y divide-gray-100 dark:divide-gray-800">
+            <div>
+              <div
+                className={`flex items-center gap-1 px-2 py-1 rounded cursor-pointer text-xs transition-colors mx-1 mt-0.5 ${selectedFolderId === null ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200' : 'hover:bg-gray-100 dark:hover:bg-gray-800/60 text-gray-700 dark:text-gray-300'}`}
+                onClick={() => setSelectedFolderId(null)}
+                title="Alle persönlichen Bausteine anzeigen"
+              >
+                <span className="shrink-0">👤</span>
+                <span className="font-medium truncate">{username || 'Eigene'}</span>
+                <span className="ml-auto text-[10px] text-gray-400">{templates.filter((t) => t.scope !== 'group').length}</span>
               </div>
 
-              {/* Ausgewählter Ordner: Templates anzeigen */}
-              {selectedFolderId !== null && (
-                <div className="divide-y divide-gray-100 dark:divide-gray-800 border-t border-gray-100 dark:border-gray-800">
-                  {filteredTemplatesFromFolder === null ? (
-                    <div className="px-3 py-4 text-xs text-gray-400 text-center">Bitte Ordner auswählen.</div>
-                  ) : filteredTemplatesFromFolder.length === 0 ? (
-                    <div className="px-3 py-4 text-xs text-gray-400 text-center">Keine Bausteine in diesem Ordner.</div>
-                  ) : filteredTemplatesFromFolder.map((tpl) => (
+              <FolderExplorer
+                folders={personalFolders}
+                onSelectFolder={setSelectedFolderId}
+                selectedFolderId={selectedFolderId}
+                onCreateFolder={handleCreateFolder}
+                onRenameFolder={handleRenameFolder}
+                onDeleteFolder={handleDeleteFolder}
+              />
+
+              {selectedFolderId === null && templates.filter((t) => t.scope !== 'group' && (t.folderId === undefined || t.folderId === null)).length > 0 && (
+                <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                  <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Ohne Ordner</div>
+                  {templates.filter((t) => t.scope !== 'group' && (t.folderId === undefined || t.folderId === null)).map((tpl) => (
                     <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} folders={flatFolders} onMoveToFolder={handleMoveToFolder} onCopyTemplate={onCopyTemplate} />
                   ))}
                 </div>
               )}
             </div>
-          ) : (
-        /* ── Listen-Ansicht (bisherige Ansicht) ── */
-        <>
-          {/* Scope-Tabs */}
-          <div className="flex gap-0.5 px-3 pb-1.5">
-            <TabButton
-              label="👤 Eigene"
-              active={activeTab === 'private'}
-              onClick={() => setActiveTab('private')}
-            />
-            {hasGroupTemplates && (
-              <TabButton
-                label="🏢 Abteilung"
-                active={activeTab === 'group'}
-                onClick={() => setActiveTab('group')}
-              />
-            )}
-          </div>
 
-          {/* Template-Liste */}
-          <div className="divide-y divide-gray-100 dark:divide-gray-800">
-            {filteredTemplates.length === 0 && (
-              <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">
-                {search ? 'Keine Bausteine gefunden.' : 'Keine Bausteine für dieses Feld.'}
-              </div>
-            )}
-
-            {/* Normaler Modus: alphabetische Gruppierung */}
-            {grouped.groups.length > 0 && grouped.groups.map(([group, items]) => (
-                <div key={group}>
-                  <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">
-                    {group}
-                  </div>
-                  {items.map((tpl) => (
-                    <PaletteRow
-                      key={tpl.id}
-                      template={tpl}
-                      onAdd={onAddBaustein}
-                      folders={flatFolders}
-                      onMoveToFolder={handleMoveToFolder}
-                      onCopyTemplate={onCopyTemplate}
-                    />
-                  ))}
-                </div>
-              ))
-            )}
-
-            {grouped.ungrouped.length > 0 && (
-              <div>
-                {grouped.groups.length > 0 && (
-                  <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">
-                    Weitere
-                  </div>
-                )}
-                {grouped.ungrouped.map((tpl) => (
-                  <PaletteRow
-                    key={tpl.id}
-                    template={tpl}
-                    onAdd={onAddBaustein}
-                    folders={flatFolders}
-                    onMoveToFolder={handleMoveToFolder}
-                    onCopyTemplate={onCopyTemplate}
-                  />
+            {selectedFolderId !== null && (
+              <div className="divide-y divide-gray-100 dark:divide-gray-800 border-t border-gray-100 dark:border-gray-800">
+                {filteredTemplatesFromFolder === null ? (
+                  <div className="px-3 py-4 text-xs text-gray-400 text-center">Bitte Ordner auswählen.</div>
+                ) : filteredTemplatesFromFolder.length === 0 ? (
+                  <div className="px-3 py-4 text-xs text-gray-400 text-center">Keine Bausteine in diesem Ordner.</div>
+                ) : filteredTemplatesFromFolder.map((tpl) => (
+                  <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} folders={flatFolders} onMoveToFolder={handleMoveToFolder} onCopyTemplate={onCopyTemplate} />
                 ))}
               </div>
             )}
           </div>
-        </>
-      )}
-      </>)}
-    </div>
-  );
+    );
+  }
+
+  function renderListView() {
+    return (
+      <>
+        <div className="flex gap-0.5 px-3 pb-1.5">
+          <TabButton label="👤 Eigene" active={activeTab === 'private'} onClick={() => setActiveTab('private')} />
+          {hasGroupTemplates && <TabButton label="🏢 Abteilung" active={activeTab === 'group'} onClick={() => setActiveTab('group')} />}
+        </div>
+        <div className="divide-y divide-gray-100 dark:divide-gray-800">
+          {filteredTemplates.length === 0 && (
+            <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">
+              {search ? 'Keine Bausteine gefunden.' : 'Keine Bausteine für dieses Feld.'}
+            </div>
+          )}
+          {grouped.groups.length > 0 && grouped.groups.map(([group, items]) => (
+            <div key={group}>
+              <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">{group}</div>
+              {items.map((tpl) => (
+                <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} folders={flatFolders} onMoveToFolder={handleMoveToFolder} onCopyTemplate={onCopyTemplate} />
+              ))}
+            </div>
+          ))}
+          {grouped.ungrouped.length > 0 && (
+            <div>
+              {grouped.groups.length > 0 && <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">Weitere</div>}
+              {grouped.ungrouped.map((tpl) => (
+                <PaletteRow key={tpl.id} template={tpl} onAdd={onAddBaustein} folders={flatFolders} onMoveToFolder={handleMoveToFolder} onCopyTemplate={onCopyTemplate} />
+              ))}
+            </div>
+          )}
+        </div>
+      </>
+    );
+  }
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────

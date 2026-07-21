@@ -427,6 +427,7 @@ export default function BausteinPalette({
           </div>
         </>
       )}
+      </>)}
     </div>
   );
 }

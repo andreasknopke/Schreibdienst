@@ -93,9 +93,19 @@ async function callLLM(
 
 // Extrahiert Text aus PDF
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  const pdfParse = (await import('pdf-parse')).default;
-  const data = await pdfParse(buffer);
-  return data.text || '';
+  const { PDFParse } = await import('pdf-parse');
+  const pdf = new PDFParse(buffer);
+  const pages = await pdf.parse();
+  const texts: string[] = [];
+  // Pages ist ein Array, jede page hat ein text-Feld
+  if (Array.isArray(pages)) {
+    for (const page of pages) {
+      if (page.text) texts.push(page.text);
+    }
+  } else if (pages && typeof pages === 'object' && 'text' in pages) {
+    texts.push((pages as any).text);
+  }
+  return texts.join('\n\n') || '';
 }
 
 // Extrahiert Text aus DOCX

@@ -1931,6 +1931,7 @@ export default function HomePage() {
   const [checkContradictions, setCheckContradictions] = useState(false);
   const [templateContradictions, setTemplateContradictions] = useState<{ passage: string; description: string }[]>([]);
   const [showComplexTemplateManager, setShowComplexTemplateManager] = useState(false);
+  const [complexManagerCreateMode, setComplexManagerCreateMode] = useState(false);
   const [complexTemplates, setComplexTemplates] = useState<Array<{ id: number; name: string; templateIds: number[]; folderId?: number | null }>>([]);
   const apiFetchWithAuth = useCallback(async (url: string, options: RequestInit = {}) => {
     return fetch(url, {
@@ -6424,7 +6425,10 @@ export default function HomePage() {
                     setShowMultiBausteinMode((prev) => !prev);
                     setComplexTemplateFilterIds(null);
                   }}
-                  onOpenComplexManager={() => setShowComplexTemplateManager(true)}
+                  onOpenComplexManager={(createMode) => {
+                    setShowComplexTemplateManager(true);
+                    setComplexManagerCreateMode(!!createMode);
+                  }}
                   onLoadComplexTemplate={handleLoadComplexTemplate}
                   onExitTemplateMode={() => {
                     setSelectedTemplate(null);
@@ -7838,12 +7842,14 @@ export default function HomePage() {
       {/* Komplexbaustein-Manager */}
       <ComplexTemplateManager
         open={showComplexTemplateManager}
-        onClose={() => { setShowComplexTemplateManager(false); setError(null); }}
+        onClose={() => { setShowComplexTemplateManager(false); }}
         availableTemplates={templates.map((t) => ({ id: t.id, name: t.name, content: t.content, field: t.field }))}
         currentField={currentTemplateField}
         onChanged={fetchComplexTemplates}
         onLoadComplex={handleLoadComplexTemplate}
         apiFetch={apiFetchWithAuth}
+        defaultCreateMode={complexManagerCreateMode}
+        onDefaultCreateConsumed={() => setComplexManagerCreateMode(false)}
       />
     </div>
   );

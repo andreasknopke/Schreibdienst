@@ -244,7 +244,7 @@ export default function BausteinPalette({
         </button>
       </div>
 
-      {/* Search */}
+      {/* Search – auch im Komplexbaustein-Modus */}
       <div className="px-3 pt-2 pb-1">
         <input
           type="text"
@@ -255,6 +255,27 @@ export default function BausteinPalette({
         />
       </div>
 
+      {preserveOrder ? (
+        /* ── Komplexbaustein-Modus: nur Liste, keine Tabs/Ordner ── */
+        <div className="divide-y divide-gray-100 dark:divide-gray-800">
+          {filteredTemplates.length === 0 && (
+            <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">
+              {search ? 'Keine Bausteine gefunden.' : 'Keine Bausteine in diesem Komplexbaustein.'}
+            </div>
+          )}
+          {filteredTemplates.map((tpl) => (
+            <PaletteRow
+              key={tpl.id}
+              template={tpl}
+              onAdd={onAddBaustein}
+              folders={flatFolders}
+              onMoveToFolder={handleMoveToFolder}
+              onCopyTemplate={onCopyTemplate}
+            />
+          ))}
+        </div>
+      ) : (
+        <>
       {/* Ansicht-Umschalter */}
       <div className="flex items-center gap-1 px-3 pb-1">
         <button
@@ -364,21 +385,8 @@ export default function BausteinPalette({
               </div>
             )}
 
-            {preserveOrder ? (
-              /* Komplexbaustein-Modus: Reihenfolge beibehalten, keine Gruppierung */
-              filteredTemplates.map((tpl) => (
-                <PaletteRow
-                  key={tpl.id}
-                  template={tpl}
-                  onAdd={onAddBaustein}
-                  folders={flatFolders}
-                  onMoveToFolder={handleMoveToFolder}
-                  onCopyTemplate={onCopyTemplate}
-                />
-              ))
-            ) : (
-              /* Normaler Modus: alphabetische Gruppierung */
-              grouped.groups.length > 0 && grouped.groups.map(([group, items]) => (
+            {/* Normaler Modus: alphabetische Gruppierung */}
+            {grouped.groups.length > 0 && grouped.groups.map(([group, items]) => (
                 <div key={group}>
                   <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">
                     {group}
@@ -397,7 +405,7 @@ export default function BausteinPalette({
               ))
             )}
 
-            {!preserveOrder && grouped.ungrouped.length > 0 && (
+            {grouped.ungrouped.length > 0 && (
               <div>
                 {grouped.groups.length > 0 && (
                   <div className="px-3 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-gray-800/50">

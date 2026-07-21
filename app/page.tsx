@@ -6521,6 +6521,7 @@ export default function HomePage() {
                     setPendingEditComplexId(id);
                     setShowComplexTemplateManager(true);
                   }}
+                  onAutoGenerate={() => setShowAutoGenerate(true)}
                 />
               </div>
             </div>

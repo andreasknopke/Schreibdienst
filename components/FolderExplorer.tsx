@@ -244,7 +244,7 @@ export default function FolderExplorer({
 
   return (
     <div className="select-none">
-      {/* "Alle" = kein Filter — auch als Drop-Ziel (aus Ordner entfernen) */}
+      {/* "Ohne Ordner" = kein Filter — auch als Drop-Ziel (aus Ordner entfernen) */}
       <div
         className={`flex items-center gap-1 px-1 py-1 rounded cursor-pointer text-xs transition-colors ${
           selectedFolderId === null
@@ -266,7 +266,7 @@ export default function FolderExplorer({
       >
         <span className="w-3.5 shrink-0" />
         <span className="shrink-0">📁</span>
-        <span className="font-medium">Alle</span>
+        <span className="font-medium">Ohne Ordner</span>
       </div>
 
       {/* Ordner-Baum */}

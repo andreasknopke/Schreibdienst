@@ -44,7 +44,7 @@ export default function BausteinPalette({
   onCopyTemplate,
 }: BausteinPaletteProps) {
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<'all' | 'private' | 'group'>('all');
+  const [activeTab, setActiveTab] = useState<'private' | 'group'>('private');
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
   const [personalFolders, setPersonalFolders] = useState<FolderNode[]>([]);
   const [groupFolders, setGroupFolders] = useState<{ groupId: number; groupName: string; folders: FolderNode[] }[]>([]);
@@ -342,11 +342,6 @@ export default function BausteinPalette({
         <>
           {/* Scope-Tabs */}
           <div className="flex gap-0.5 px-3 pb-1.5">
-            <TabButton
-              label="Alle"
-              active={activeTab === 'all'}
-              onClick={() => setActiveTab('all')}
-            />
             <TabButton
               label="👤 Eigene"
               active={activeTab === 'private'}

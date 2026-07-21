@@ -80,7 +80,7 @@ export default function TemplateSelectorPopover({
 }: TemplateSelectorPopoverProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<'all' | 'private' | 'group'>('all');
+  const [activeTab, setActiveTab] = useState<'private' | 'group'>('private');
   const [view, setView] = useState<'tree' | 'list'>('tree');
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
   const [personalFolders, setPersonalFolders] = useState<FolderNode[]>([]);
@@ -462,10 +462,9 @@ export default function TemplateSelectorPopover({
             />
           </div>
 
-          {/* Scope-Tabs */}
+          {/* Scope-Tabs (nur Eigene + Abteilung) */}
           <div className="flex gap-0.5 px-3 pb-1.5">
             {([
-              { key: 'all' as const, label: 'Alle' },
               { key: 'private' as const, label: '👤 Eigene' },
               { key: 'group' as const, label: '🏢 Abteilung' },
             ]).map((tab) => {
@@ -662,13 +661,11 @@ export default function TemplateSelectorPopover({
             /* ── Listen-Ansicht ── */
             <><div className="flex gap-0.5 px-3 pb-1.5">
             {[
-              { key: 'all' as const, label: 'Alle' },
               { key: 'private' as const, label: '👤 Eigene' },
             ].map((tab) => {
-              const count = tab.key === 'all' ? fieldTemplates.length
-                : tab.key === 'private' ? fieldTemplates.filter((t) => t.scope !== 'group').length
+              const count = tab.key === 'private' ? fieldTemplates.filter((t) => t.scope !== 'group').length
                 : 0;
-              if (count === 0 && tab.key !== 'all') return null;
+              if (count === 0) return null;
               return (
                 <button
                   key={tab.key}

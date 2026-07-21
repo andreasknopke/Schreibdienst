@@ -30,7 +30,10 @@ interface ComplexTemplateManagerProps {
   /** Beim Öffnen direkt in den Erstellen-Modus springen */
   defaultCreateMode?: boolean;
   /** Wird aufgerufen nachdem defaultCreateMode verarbeitet wurde */
+  onDefaultCreateConsumed?: () => void;
+  /** ID eines Komplexbausteins, der beim Öffnen bearbeitet werden soll */
   editComplexId?: number | null;
+  /** Wird aufgerufen nachdem editComplexId verarbeitet wurde */
   onEditComplexConsumed?: () => void;
 }
 

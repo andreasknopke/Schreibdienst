@@ -501,7 +501,7 @@ function PaletteRow({
         title={`"${template.name}" einfügen`}
       >
         <span className="text-sm leading-none mt-0.5 shrink-0">
-          {template.scope === 'group' ? '🏢' : '📋'}
+          '📋'
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">

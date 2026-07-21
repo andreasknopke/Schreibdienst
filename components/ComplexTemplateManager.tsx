@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Spinner from '@/components/Spinner';
 
 interface ComplexTemplate {
@@ -52,6 +52,7 @@ export default function ComplexTemplateManager({
   const [name, setName] = useState('');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const createHandledRef = useRef(false);
 
   const fetchComplexTemplates = useCallback(async () => {
     setLoading(true);
@@ -77,20 +78,23 @@ export default function ComplexTemplateManager({
   }, []);
 
   useEffect(() => {
-    if (open) {
-      fetchComplexTemplates();
-      if (defaultCreateMode) {
-        handleNew();
-        onDefaultCreateConsumed?.();
-      } else {
-        setEditMode('list');
-        setEditId(null);
-        setName('');
-        setSelectedIds([]);
-        setError(null);
-      }
+    if (!open) {
+      createHandledRef.current = false;
+      return;
     }
-  }, [open, fetchComplexTemplates, defaultCreateMode, handleNew, onDefaultCreateConsumed]);
+    fetchComplexTemplates();
+    if (defaultCreateMode && !createHandledRef.current) {
+      createHandledRef.current = true;
+      handleNew();
+      onDefaultCreateConsumed?.();
+    } else if (!defaultCreateMode) {
+      setEditMode('list');
+      setEditId(null);
+      setName('');
+      setSelectedIds([]);
+      setError(null);
+    }
+  }, [open, defaultCreateMode]);
 
   const handleEdit = useCallback((ct: ComplexTemplate) => {
     setEditMode('edit');

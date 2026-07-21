@@ -1983,6 +1983,7 @@ export default function HomePage() {
   const [showTemplatesManager, setShowTemplatesManager] = useState(false);
   const [templateManagerMode, setTemplateManagerMode] = useState<'create' | 'manage'>('create');
   const [pendingEditTemplateId, setPendingEditTemplateId] = useState<number | null>(null);
+  const [pendingEditComplexId, setPendingEditComplexId] = useState<number | null>(null);
   // Refs für den VAD-/Online-Diktatpfad: Die VAD-Callbacks werden beim Start der
   // Aufnahme einmal eingefroren, daher muss der aktuelle Baustein-Zustand über Refs
   // gelesen werden, sonst greift der Auto-Einarbeiten-Modus nicht.
@@ -6494,22 +6495,9 @@ export default function HomePage() {
                       await fetchComplexTemplates();
                     } catch { /* silent */ }
                   }}
-                  onAutoGenerate={() => setShowAutoGenerate(true)}
-                  onCopyTemplate={async (tpl) => {
-                    try {
-                      await apiFetchWithAuth('/api/templates', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          name: tpl.name,
-                          content: tpl.content,
-                          field: currentTemplateField,
-                          formatRanges: tpl.formatRanges ?? [],
-                          folderId: null,
-                        }),
-                      });
-                      await fetchTemplates();
-                    } catch { /* silent */ }
+                  onEditComplexTemplate={(id) => {
+                    setPendingEditComplexId(id);
+                    setShowComplexTemplateManager(true);
                   }}
                 />
               </div>
@@ -7866,7 +7854,7 @@ export default function HomePage() {
       {/* Komplexbaustein-Manager */}
       <ComplexTemplateManager
         open={showComplexTemplateManager}
-        onClose={() => { setShowComplexTemplateManager(false); }}
+        onClose={() => { setShowComplexTemplateManager(false); setPendingEditComplexId(null); }}
         availableTemplates={templates.map((t) => ({ id: t.id, name: t.name, content: t.content, field: t.field }))}
         currentField={currentTemplateField}
         onChanged={fetchComplexTemplates}
@@ -7874,6 +7862,8 @@ export default function HomePage() {
         apiFetch={apiFetchWithAuth}
         defaultCreateMode={complexManagerCreateMode}
         onDefaultCreateConsumed={() => setComplexManagerCreateMode(false)}
+        editComplexId={pendingEditComplexId}
+        onEditComplexConsumed={() => setPendingEditComplexId(null)}
       />
 
       {/* Auto-Generate-Dialog */}

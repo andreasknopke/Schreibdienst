@@ -177,11 +177,13 @@ export default function TemplateSelectorPopover({
   }, [complexTemplates, search]);
 
   // Gruppen-Templates nach addedBy-User gruppiert (für Abteilung-Tab)
+  // Eigene geteilte Bausteine ausblenden (sind schon im Eigene-Tab sichtbar)
   const groupTemplatesByUser = useMemo(() => {
     const byUser = new Map<string, Template[]>();
     for (const t of fieldTemplates) {
       if (t.scope !== 'group') continue;
-      const user = t.addedBy || 'Unbekannt';
+      const user = t.addedBy || '';
+      if (!user || user === _username) continue;
       if (!byUser.has(user)) byUser.set(user, []);
       byUser.get(user)!.push(t);
     }
@@ -465,7 +467,7 @@ export default function TemplateSelectorPopover({
             {([
               { key: 'all' as const, label: 'Alle' },
               { key: 'private' as const, label: '👤 Eigene' },
-              { key: 'group' as const, label: '👥 Abteilung' },
+              { key: 'group' as const, label: '🏢 Abteilung' },
             ]).map((tab) => {
               // Nur anzeigen wenn es entsprechende Einträge gibt
               if (tab.key === 'group' && !templates.some((t) => t.scope === 'group'))
@@ -613,7 +615,7 @@ export default function TemplateSelectorPopover({
                 {/* Gruppen-Ordner */}
                 {groupFolders.map((gf) => (
                   <div key={gf.groupId} className="mt-2">
-                    <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">👥 {gf.groupName}</div>
+                    <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">🏢 {gf.groupName}</div>
                     <FolderExplorer
                       folders={gf.folders}
                       onSelectFolder={setSelectedFolderId}
@@ -843,7 +845,7 @@ function TemplateRow({
       title={`"${template.name}" einfügen — zum Verschieben in Ordner ziehen`}
     >
       <span className="shrink-0 text-sm">
-        {template.scope === 'group' ? '👥' : '📋'}
+        {template.scope === 'group' ? '🏢' : '📋'}
       </span>
       <span className="truncate text-gray-800 dark:text-gray-200 flex-1">
         {template.name}
@@ -873,7 +875,7 @@ function TemplateRow({
           }`}
           title={template.isShared ? 'Nicht mehr teilen' : 'Mit Gruppe teilen'}
         >
-          {template.isShared ? '👥' : '👤'}
+          {template.isShared ? '🏢' : '👤'}
         </button>
       )}
       {isPrivate && onDelete && (
@@ -973,7 +975,7 @@ function SharedTemplateRow({
       className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 flex items-center gap-2 text-xs transition-colors cursor-pointer group"
       title={`"${template.name}" einfügen`}
     >
-      <span className="shrink-0 text-sm">�</span>
+    <span className="shrink-0 text-sm">📝</span>
       <span className="truncate text-gray-800 dark:text-gray-200 flex-1">
         {template.name}
       </span>
@@ -983,7 +985,7 @@ function SharedTemplateRow({
           className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-800/40 shrink-0"
           title="Kopie in eigenen Bausteinen anlegen"
         >
-          📋 Kopie
+          Kopie
         </button>
       )}
     </div>

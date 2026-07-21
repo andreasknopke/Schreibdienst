@@ -93,11 +93,12 @@ async function callLLM(
 
 // Extrahiert Text aus PDF
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  const { PDFParse } = await import('pdf-parse');
+  // pdf-parse v2.x exportiert PDFParse-Klasse (TypeScript-Typen unvollständig)
+  const mod = await import('pdf-parse');
+  const PDFParse = (mod as any).PDFParse || mod;
   const pdf = new PDFParse(buffer);
   const pages = await pdf.parse();
   const texts: string[] = [];
-  // Pages ist ein Array, jede page hat ein text-Feld
   if (Array.isArray(pages)) {
     for (const page of pages) {
       if (page.text) texts.push(page.text);

@@ -582,17 +582,7 @@ export default function TemplateSelectorPopover({
                 {/* Ohne Ordner (nur wenn kein Ordner-Filter aktiv) */}
                 {selectedFolderId === null && (
                   <>
-                    {ungroupedPrivateTemplates.length > 0 && (
-                      <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
-                        <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                          Ohne Ordner
-                        </div>
-                        {ungroupedPrivateTemplates.map((tpl) => (
-                          <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} onShare={onShareTemplate} />
-                        ))}
-                      </div>
-                    )}
-                    {/* Komplexbausteine ohne Ordner */}
+                    {/* Komplexbausteine ohne Ordner (immer zuerst) */}
                     {ungroupedComplex.length > 0 && (
                       <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
                         <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
@@ -610,6 +600,16 @@ export default function TemplateSelectorPopover({
                             onEdit={onEditComplexTemplate}
                             onDelete={onDeleteComplexTemplate}
                           />
+                        ))}
+                      </div>
+                    )}
+                    {ungroupedPrivateTemplates.length > 0 && (
+                      <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                        <div className="px-2 py-0.5 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                          Ohne Ordner
+                        </div>
+                        {ungroupedPrivateTemplates.map((tpl) => (
+                          <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} onShare={onShareTemplate} />
                         ))}
                       </div>
                     )}
@@ -642,9 +642,6 @@ export default function TemplateSelectorPopover({
                     <div className="px-3 py-4 text-xs text-gray-400 text-center">Keine Bausteine in diesem Ordner.</div>
                   ) : (
                     <>
-                      {folderFilteredTemplates?.map((tpl) => (
-                        <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} onShare={onShareTemplate} />
-                      ))}
                       {folderFilteredComplex?.map((ct) => (
                         <ComplexTemplateRow
                           key={`complex-${ct.id}`}
@@ -657,6 +654,9 @@ export default function TemplateSelectorPopover({
                           onEdit={onEditComplexTemplate}
                           onDelete={onDeleteComplexTemplate}
                         />
+                      ))}
+                      {folderFilteredTemplates?.map((tpl) => (
+                        <TemplateRow key={tpl.id} template={tpl} isSelected={selectedTemplate?.id === tpl.id && templateMode} onSelect={handleSelect} onEdit={onEditTemplate} onDelete={onDeleteTemplate} onShare={onShareTemplate} />
                       ))}
                     </>
                   )}

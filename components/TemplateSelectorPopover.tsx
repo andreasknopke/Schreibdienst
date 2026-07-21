@@ -42,6 +42,7 @@ interface TemplateSelectorPopoverProps {
   onShareTemplate?: (template: Template) => void;
   onCopyTemplate?: (template: Template) => void;
   onDeleteComplexTemplate?: (templateId: number, name: string) => void;
+  onEditComplexTemplate?: (templateId: number) => void;
   onAutoGenerate?: () => void;
   apiFetch?: (url: string, options?: RequestInit) => Promise<Response>;
   username?: string;
@@ -76,6 +77,7 @@ export default function TemplateSelectorPopover({
   onShareTemplate,
   onCopyTemplate,
   onDeleteComplexTemplate,
+  onEditComplexTemplate,
   onAutoGenerate,
   apiFetch,
   username: _username,
@@ -605,6 +607,7 @@ export default function TemplateSelectorPopover({
                               setOpen(false);
                               setSearch('');
                             }}
+                            onEdit={onEditComplexTemplate}
                             onDelete={onDeleteComplexTemplate}
                           />
                         ))}
@@ -651,6 +654,7 @@ export default function TemplateSelectorPopover({
                             setOpen(false);
                             setSearch('');
                           }}
+                          onEdit={onEditComplexTemplate}
                           onDelete={onDeleteComplexTemplate}
                         />
                       ))}
@@ -692,21 +696,18 @@ export default function TemplateSelectorPopover({
                   🗂️ Komplexbausteine
                 </div>
                 {filteredComplex.map((ct) => (
-                  <button
-                    key={`complex-${ct.id}`}
-                    onClick={() => {
-                      onLoadComplexTemplate(ct.templateIds);
-                      setOpen(false);
-                      setSearch('');
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60 flex items-center gap-2 text-xs transition-colors"
-                    title={`${ct.name} (${ct.templateIds.length} Bausteine)`}
-                  >
-                    <span className="text-indigo-500 shrink-0 text-sm">🧩</span>
-                    <span className="truncate text-gray-800 dark:text-gray-200 font-medium">{ct.name}</span>
-                    <span className="text-[10px] text-gray-400 shrink-0 ml-auto">{ct.templateIds.length}</span>
-                  </button>
-                ))}
+                    <ComplexTemplateRow
+                      key={`complex-${ct.id}`}
+                      complexTemplate={ct}
+                      onSelect={() => {
+                        onLoadComplexTemplate(ct.templateIds);
+                        setOpen(false);
+                        setSearch('');
+                      }}
+                      onEdit={onEditComplexTemplate}
+                      onDelete={onDeleteComplexTemplate}
+                    />
+                  ))}
               </div>
             )}
 
@@ -919,10 +920,12 @@ function TemplateRow({
 function ComplexTemplateRow({
   complexTemplate,
   onSelect,
+  onEdit,
   onDelete,
 }: {
   complexTemplate: ComplexTemplate;
   onSelect: () => void;
+  onEdit?: (id: number) => void;
   onDelete?: (id: number, name: string) => void;
 }) {
   const handleDragStart = (e: React.DragEvent) => {
@@ -951,6 +954,15 @@ function ComplexTemplateRow({
       <span className="text-[10px] text-gray-400 shrink-0">
         {complexTemplate.templateIds.length}
       </span>
+      {onEdit && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onEdit(complexTemplate.id); }}
+          className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 text-[11px] px-0.5 transition-opacity shrink-0"
+          title="Bearbeiten"
+        >
+          ✎
+        </button>
+      )}
       {onDelete && (
         <button
           onClick={(e) => {

@@ -30,7 +30,8 @@ interface ComplexTemplateManagerProps {
   /** Beim Öffnen direkt in den Erstellen-Modus springen */
   defaultCreateMode?: boolean;
   /** Wird aufgerufen nachdem defaultCreateMode verarbeitet wurde */
-  onDefaultCreateConsumed?: () => void;
+  editComplexId?: number | null;
+  onEditComplexConsumed?: () => void;
 }
 
 export default function ComplexTemplateManager({
@@ -43,6 +44,8 @@ export default function ComplexTemplateManager({
   apiFetch,
   defaultCreateMode = false,
   onDefaultCreateConsumed,
+  editComplexId,
+  onEditComplexConsumed,
 }: ComplexTemplateManagerProps) {
   const [complexTemplates, setComplexTemplates] = useState<ComplexTemplate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -53,6 +56,7 @@ export default function ComplexTemplateManager({
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const createHandledRef = useRef(false);
+  const editHandledRef = useRef(false);
 
   const fetchComplexTemplates = useCallback(async () => {
     setLoading(true);
@@ -69,6 +73,14 @@ export default function ComplexTemplateManager({
     }
   }, []);
 
+  const handleEdit = useCallback((ct: ComplexTemplate) => {
+    setEditMode('edit');
+    setEditId(ct.id);
+    setName(ct.name);
+    setSelectedIds(ct.templateIds);
+    setError(null);
+  }, []);
+
   const handleNew = useCallback(() => {
     setEditMode('edit');
     setEditId(null);
@@ -80,13 +92,13 @@ export default function ComplexTemplateManager({
   useEffect(() => {
     if (!open) {
       createHandledRef.current = false;
+      editHandledRef.current = false;
       return;
     }
     fetchComplexTemplates();
     if (defaultCreateMode && !createHandledRef.current) {
       createHandledRef.current = true;
       handleNew();
-      // Einmalig den Flag im Parent zurücksetzen, OHNE Effect neu zu triggern
       onDefaultCreateConsumed?.();
     } else if (!defaultCreateMode) {
       setEditMode('list');
@@ -95,18 +107,19 @@ export default function ComplexTemplateManager({
       setSelectedIds([]);
       setError(null);
     }
-    // Wichtig: defaultCreateMode NICHT in Abhängigkeiten – sonst überschreibt
-    // der Parent-Reset (false) den Create-Mode.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const handleEdit = useCallback((ct: ComplexTemplate) => {
-    setEditMode('edit');
-    setEditId(ct.id);
-    setName(ct.name);
-    setSelectedIds(ct.templateIds);
-    setError(null);
-  }, []);
+  // Wird ausgelöst nachdem Templates geladen sind und editComplexId gesetzt ist
+  useEffect(() => {
+    if (!open || !editComplexId || editHandledRef.current || complexTemplates.length === 0) return;
+    const ct = complexTemplates.find((t) => t.id === editComplexId);
+    if (ct) {
+      editHandledRef.current = true;
+      handleEdit(ct);
+      onEditComplexConsumed?.();
+    }
+  }, [open, editComplexId, complexTemplates]);
 
   const handleDelete = useCallback(async (id: number) => {
     if (!window.confirm('Wirklich löschen?')) return;

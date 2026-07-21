@@ -34,7 +34,7 @@ interface TemplateSelectorPopoverProps {
   onSelectTemplate: (template: Template | null) => void;
   onManageTemplates: (mode: 'create' | 'manage') => void;
   onToggleMultiMode: () => void;
-  onOpenComplexManager: () => void;
+  onOpenComplexManager: (createMode?: boolean) => void;
   onLoadComplexTemplate: (templateIds: number[]) => void;
   onExitTemplateMode: () => void;
   onEditTemplate?: (template: Template) => void;
@@ -765,7 +765,11 @@ export default function TemplateSelectorPopover({
                     <span>Baustein</span>
                   </button>
                   <button
-                    onClick={() => handleAction(onOpenComplexManager)}
+                    onClick={() => {
+                      onOpenComplexManager(true);
+                      setOpen(false);
+                      setSearch('');
+                    }}
                     className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
                   >
                     <span>🧩</span>

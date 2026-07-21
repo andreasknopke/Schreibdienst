@@ -27,6 +27,10 @@ interface ComplexTemplateManagerProps {
   onLoadComplex: (templateIds: number[]) => void;
   /** Custom fetch function that includes auth headers */
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
+  /** Beim Öffnen direkt in den Erstellen-Modus springen */
+  defaultCreateMode?: boolean;
+  /** Wird aufgerufen nachdem defaultCreateMode verarbeitet wurde */
+  onDefaultCreateConsumed?: () => void;
 }
 
 export default function ComplexTemplateManager({
@@ -37,6 +41,8 @@ export default function ComplexTemplateManager({
   onChanged,
   onLoadComplex,
   apiFetch,
+  defaultCreateMode = false,
+  onDefaultCreateConsumed,
 }: ComplexTemplateManagerProps) {
   const [complexTemplates, setComplexTemplates] = useState<ComplexTemplate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -62,17 +68,6 @@ export default function ComplexTemplateManager({
     }
   }, []);
 
-  useEffect(() => {
-    if (open) {
-      fetchComplexTemplates();
-      setEditMode('list');
-      setEditId(null);
-      setName('');
-      setSelectedIds([]);
-      setError(null);
-    }
-  }, [open, fetchComplexTemplates]);
-
   const handleNew = useCallback(() => {
     setEditMode('edit');
     setEditId(null);
@@ -80,6 +75,22 @@ export default function ComplexTemplateManager({
     setSelectedIds([]);
     setError(null);
   }, []);
+
+  useEffect(() => {
+    if (open) {
+      fetchComplexTemplates();
+      if (defaultCreateMode) {
+        handleNew();
+        onDefaultCreateConsumed?.();
+      } else {
+        setEditMode('list');
+        setEditId(null);
+        setName('');
+        setSelectedIds([]);
+        setError(null);
+      }
+    }
+  }, [open, fetchComplexTemplates, defaultCreateMode, handleNew, onDefaultCreateConsumed]);
 
   const handleEdit = useCallback((ct: ComplexTemplate) => {
     setEditMode('edit');

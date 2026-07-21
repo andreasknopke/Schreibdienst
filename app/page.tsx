@@ -2254,24 +2254,46 @@ export default function HomePage() {
       // Statt Text zu concatenen: bestehenden Text als Freitext-Block
       // und den Baustein als separaten Block anlegen (wie im Komplexbrief).
       const field = template.field;
-      const freitextBlock = createFreitextBlock(
-        field,
-        existingText,
-        cloneRichTextRanges(getFieldRichTextFormats(field)),
-      );
-      const bausteinBlock = createBausteinBlock(
-        field,
-        template.id,
-        template.name,
-        template.content,
-        template.formatRanges ?? [],
-      );
-      setEditorBlocksByField((prev) => ({
-        ...prev,
-        [field]: [freitextBlock, bausteinBlock],
-      }));
-      setActiveBlockId(bausteinBlock.id);
-      setShowMultiBausteinMode(true);
+
+      // Prüfen ob bereits Blöcke existieren (Multi-Block-Modus)
+      const existingBlocks = editorBlocksByFieldRef.current[field];
+
+      if (existingBlocks.length > 0 && showMultiBausteinModeRef.current) {
+        // Bereits im Multi-Block-Modus → nur neuen Baustein anhängen
+        const bausteinBlock = createBausteinBlock(
+          field,
+          template.id,
+          template.name,
+          template.content,
+          template.formatRanges ?? [],
+        );
+        setEditorBlocksByField((prev) => ({
+          ...prev,
+          [field]: [...prev[field], bausteinBlock],
+        }));
+        setActiveBlockId(bausteinBlock.id);
+      } else {
+        // Erster Wechsel in den Multi-Block-Modus:
+        // bestehenden Text als Freitext-Block + neuen Baustein
+        const freitextBlock = createFreitextBlock(
+          field,
+          existingText,
+          cloneRichTextRanges(getFieldRichTextFormats(field)),
+        );
+        const bausteinBlock = createBausteinBlock(
+          field,
+          template.id,
+          template.name,
+          template.content,
+          template.formatRanges ?? [],
+        );
+        setEditorBlocksByField((prev) => ({
+          ...prev,
+          [field]: [freitextBlock, bausteinBlock],
+        }));
+        setActiveBlockId(bausteinBlock.id);
+        setShowMultiBausteinMode(true);
+      }
 
       // Die Feld-State auf den aktiven Baustein-Inhalt setzen
       nextText = template.content;

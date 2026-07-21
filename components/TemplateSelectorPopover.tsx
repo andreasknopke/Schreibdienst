@@ -42,6 +42,7 @@ interface TemplateSelectorPopoverProps {
   onShareTemplate?: (template: Template) => void;
   onCopyTemplate?: (template: Template) => void;
   onDeleteComplexTemplate?: (templateId: number, name: string) => void;
+  onAutoGenerate?: () => void;
   apiFetch?: (url: string, options?: RequestInit) => Promise<Response>;
   username?: string;
 }
@@ -75,6 +76,7 @@ export default function TemplateSelectorPopover({
   onShareTemplate,
   onCopyTemplate,
   onDeleteComplexTemplate,
+  onAutoGenerate,
   apiFetch,
   username: _username,
 }: TemplateSelectorPopoverProps) {
@@ -775,6 +777,19 @@ export default function TemplateSelectorPopover({
                     <span>🧩</span>
                     <span>Komplexbaustein</span>
                   </button>
+                  {onAutoGenerate && (
+                    <button
+                      onClick={() => {
+                        onAutoGenerate();
+                        setOpen(false);
+                        setSearch('');
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
+                    >
+                      <span>🤖</span>
+                      <span>Baustein automatisch erzeugen</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
